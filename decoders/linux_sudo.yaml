@@ -1,0 +1,12 @@
+name: linux_sudo
+log_type: linux_auth
+type: regex
+priority: 20
+enabled: true
+pattern: '(?P<user>\S+)\s*:\s*TTY=(?P<tty>\S+)\s*;\s*PWD=(?P<pwd>\S+)\s*;\s*USER=(?P<run_as>\S+)\s*;\s*COMMAND=(?P<cmd>.+)'
+fields:
+  event.category: process
+  event.action: sudo_command
+  user.name: user
+  process.command_line: cmd
+  process.working_directory: pwd

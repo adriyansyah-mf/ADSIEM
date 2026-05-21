@@ -1,0 +1,13 @@
+title: Access to .env File
+id: rule-access-env-file
+description: HTTP request targeting .env configuration file
+logsource:
+  product: nginx
+detection:
+  selection:
+    url.path|contains: ".env"
+  condition: selection
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1552.001

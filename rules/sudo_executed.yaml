@@ -1,0 +1,13 @@
+title: Sudo Command Executed
+id: rule-sudo-executed
+description: A user executed a command via sudo
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: sudo_command
+  condition: selection
+level: low
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.003

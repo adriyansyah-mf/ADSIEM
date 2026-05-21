@@ -1,0 +1,13 @@
+title: Access to /etc/passwd
+id: rule-access-etc-passwd
+description: HTTP request targeting /etc/passwd (path traversal attempt)
+logsource:
+  product: nginx
+detection:
+  selection:
+    url.path|contains: "etc/passwd"
+  condition: selection
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1552
