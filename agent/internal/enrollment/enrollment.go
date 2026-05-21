@@ -14,7 +14,7 @@ import (
 
 type LogSourcePayload struct {
 	Path    string `json:"path"`
-	Type    string `json:"type"`
+	LogType string `json:"log_type"`
 	Enabled bool   `json:"is_enabled"`
 }
 
@@ -39,7 +39,7 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 
 	sources := make([]LogSourcePayload, len(cfg.Logs))
 	for i, l := range cfg.Logs {
-		sources[i] = LogSourcePayload{Path: l.Path, Type: l.Type, Enabled: true}
+		sources[i] = LogSourcePayload{Path: l.Path, LogType: l.Type, Enabled: true}
 	}
 	h, _ := os.Hostname()
 	payload := EnrollRequest{
