@@ -15,6 +15,7 @@ from worker.seeder import seed_if_empty
 from worker.sigma_engine import SigmaEngine
 from worker.consumer import consume_loop, load_engines, reload_loop
 from worker.webhook_sender import webhook_retry_loop
+from worker.ai_consumer import ai_analysis_loop
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -76,6 +77,7 @@ async def main():
         _consume(),
         reload_loop(state),
         webhook_retry_loop(),
+        ai_analysis_loop(),
     )
 
 if __name__ == "__main__":

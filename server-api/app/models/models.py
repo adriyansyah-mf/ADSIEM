@@ -177,3 +177,32 @@ class WebhookDelivery(Base):
     last_attempted_at = Column(DateTime(timezone=True))
     created_at        = Column(DateTime(timezone=True), default=now_utc)
     updated_at        = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class Case(Base):
+    __tablename__ = "cases"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title         = Column(String(255), nullable=False)
+    description   = Column(Text)
+    severity      = Column(String(20), nullable=False, default="medium")
+    status        = Column(String(30), nullable=False, default="open")  # open/in_review/escalated/resolved/closed
+    alert_id      = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True)
+    assignee_id   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    ai_reasoning  = Column(Text)
+    ioc_data      = Column(JSONB, nullable=False, default=dict)
+    search_intel  = Column(JSONB, nullable=False, default=dict)
+    created_by_ai = Column(Boolean, nullable=False, default=False)
+    escalated_at  = Column(DateTime(timezone=True))
+    group_id      = Column(String(100), nullable=False, default="default")
+    created_at    = Column(DateTime(timezone=True), default=now_utc)
+    updated_at    = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    notes         = relationship("CaseNote", back_populates="case", cascade="all, delete-orphan")
+
+class CaseNote(Base):
+    __tablename__ = "case_notes"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id         = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    author_id       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    content         = Column(Text, nullable=False)
+    is_ai_generated = Column(Boolean, nullable=False, default=False)
+    created_at      = Column(DateTime(timezone=True), default=now_utc)
+    case            = relationship("Case", back_populates="notes")

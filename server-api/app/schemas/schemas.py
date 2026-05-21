@@ -272,6 +272,52 @@ class WebhookOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+# ─── Cases ───────────────────────────────────────────────────────
+
+class CaseNoteOut(BaseModel):
+    id: UUID
+    case_id: UUID
+    author_id: UUID | None
+    content: str
+    is_ai_generated: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class CaseNoteCreate(BaseModel):
+    content: str
+
+class CaseOut(BaseModel):
+    id: UUID
+    title: str
+    description: str | None
+    severity: str
+    status: str
+    alert_id: UUID | None
+    assignee_id: UUID | None
+    ai_reasoning: str | None
+    ioc_data: dict
+    search_intel: dict
+    created_by_ai: bool
+    escalated_at: datetime | None
+    group_id: str
+    created_at: datetime
+    updated_at: datetime
+    notes: list[CaseNoteOut] = []
+    model_config = {"from_attributes": True}
+
+class CaseCreate(BaseModel):
+    title: str
+    description: str | None = None
+    severity: str = "medium"
+    alert_id: UUID | None = None
+
+class CaseUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    severity: str | None = None
+    status: str | None = None
+    assignee_id: UUID | None = None
+
 # ─── Pagination ──────────────────────────────────────────────────
 
 class PaginatedResponse(BaseModel):

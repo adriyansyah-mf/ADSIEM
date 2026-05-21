@@ -56,4 +56,23 @@ async def create_alert(
             ))
 
         await db.commit()
+
+        # After commit, push to AI analysis queue
+        import json as _json
+        try:
+            from worker.redis_client import get_redis as _get_redis
+            from worker.config import AI_ANALYSIS_QUEUE as _AI_QUEUE
+            _redis = await _get_redis()
+            await _redis.rpush(_AI_QUEUE, _json.dumps({
+                "alert_id": str(alert.id),
+                "title": rule_match["title"],
+                "severity": rule_match["level"],
+                "source_ip": source_ip,
+                "hostname": hostname,
+                "decoded_fields": rule_match.get("matched_fields", {}),
+                "group_id": group_id,
+            }))
+        except Exception as _e:
+            pass  # AI analysis is best-effort
+
         return alert.id

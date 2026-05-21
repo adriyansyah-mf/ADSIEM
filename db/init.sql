@@ -190,6 +190,40 @@ CREATE TABLE webhook_deliveries (
 
 CREATE INDEX idx_webhook_deliveries_status ON webhook_deliveries(status);
 
+-- ─── Cases ───────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS cases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    severity VARCHAR(20) NOT NULL DEFAULT 'medium',
+    status VARCHAR(30) NOT NULL DEFAULT 'open',
+    alert_id UUID REFERENCES alerts(id) ON DELETE SET NULL,
+    assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    ai_reasoning TEXT,
+    ioc_data JSONB NOT NULL DEFAULT '{}',
+    search_intel JSONB NOT NULL DEFAULT '{}',
+    created_by_ai BOOLEAN NOT NULL DEFAULT false,
+    escalated_at TIMESTAMPTZ,
+    group_id VARCHAR(100) NOT NULL DEFAULT 'default',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS case_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    content TEXT NOT NULL,
+    is_ai_generated BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cases_group_id ON cases(group_id);
+CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
+CREATE INDEX IF NOT EXISTS idx_cases_created_at ON cases(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_notes_case_id ON case_notes(case_id);
+
 -- ─── Seed Data ───────────────────────────────────────────────────
 
 INSERT INTO roles (name) VALUES
@@ -209,33 +243,35 @@ INSERT INTO permissions (name) VALUES
     ('decoders:delete'),
     ('logs:read'),
     ('alerts:read'),
-    ('alerts:update');
+    ('alerts:update'),
+    ('cases:manage'),
+    ('cases:view');
 
 -- superadmin: all permissions
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p WHERE r.name = 'superadmin';
 
--- admin: agents:manage + rules:* + decoders:* + logs:read + alerts:read + alerts:update
+-- admin: agents:manage + rules:* + decoders:* + logs:read + alerts:read + alerts:update + cases:manage + cases:view
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'admin'
   AND p.name IN (
     'agents:manage','rules:create','rules:update','rules:delete',
     'decoders:create','decoders:update','decoders:delete',
-    'logs:read','alerts:read','alerts:update'
+    'logs:read','alerts:read','alerts:update','cases:manage','cases:view'
   );
 
--- analyst: logs:read + alerts:read + alerts:update
+-- analyst: logs:read + alerts:read + alerts:update + cases:manage + cases:view
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'analyst'
-  AND p.name IN ('logs:read','alerts:read','alerts:update');
+  AND p.name IN ('logs:read','alerts:read','alerts:update','cases:manage','cases:view');
 
--- viewer: logs:read + alerts:read
+-- viewer: logs:read + alerts:read + cases:view
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'viewer'
-  AND p.name IN ('logs:read','alerts:read');
+  AND p.name IN ('logs:read','alerts:read','cases:view');
 
 -- default admin user (password: admin123, argon2id) — CHANGE IN PRODUCTION
 INSERT INTO users (username, email, password_hash, role_id, group_id)

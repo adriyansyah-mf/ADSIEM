@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
+from app.api.routes.cases import router as cases_router
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -33,6 +34,6 @@ app.add_middleware(
 for router in [
     auth.router, users.router, agents.router, ingest.router,
     logs.router, events.router, alerts.router, rules.router,
-    decoders.router, webhooks.router, system.router,
+    decoders.router, webhooks.router, system.router, cases_router,
 ]:
     app.include_router(router)
