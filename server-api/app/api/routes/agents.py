@@ -60,6 +60,18 @@ async def enroll_agent(
     background.add_task(audit_log, db, None, "agent_enrolled", "agent", str(agent.id), {"hostname": body.hostname})
     return EnrollResponse(agent_id=agent.id, agent_token=raw_token)
 
+@router.get("/api/agents/{agent_id}", response_model=AgentOut)
+async def get_agent(
+    agent_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    result = await db.execute(select(Agent).options(selectinload(Agent.log_sources)).where(Agent.id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return AgentOut.model_validate(agent)
+
 @router.put("/api/agents/{agent_id}", response_model=AgentOut)
 async def update_agent(
     agent_id: UUID, body: AgentUpdate,

@@ -10,6 +10,13 @@ export function useAgents(page = 1, pageSize = 25) {
   })
 }
 
+export function useAgent(agentId: string) {
+  return useQuery<Agent>({
+    queryKey: ['agent', agentId],
+    queryFn: () => api.get(`/api/agents/${agentId}`).then(r => r.data),
+  })
+}
+
 export function useLogSources(agentId: string) {
   return useQuery<LogSource[]>({
     queryKey: ['log-sources', agentId],
