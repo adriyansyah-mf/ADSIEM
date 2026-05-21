@@ -15,6 +15,7 @@ import (
 // Retries if file is not found (handles log rotation).
 // Stops when stopCh is closed.
 func Tail(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{}) {
+	var missCount int
 	for {
 		select {
 		case <-stopCh:
@@ -24,10 +25,18 @@ func Tail(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{}) {
 
 		f, err := os.Open(path)
 		if err != nil {
-			slog.Warn("cannot open log file", "path", path, "err", err)
+			// Log once per 5-minute window to avoid spam when file doesn't exist yet.
+			if missCount == 0 {
+				slog.Warn("cannot open log file, will retry silently", "path", path, "err", err)
+			}
+			missCount++
+			if missCount >= 60 { // reset every 5 min (60 × 5s)
+				missCount = 0
+			}
 			time.Sleep(5 * time.Second)
 			continue
 		}
+		missCount = 0
 		if _, err := f.Seek(0, io.SeekEnd); err != nil {
 			f.Close()
 			time.Sleep(time.Second)

@@ -9,6 +9,10 @@ server:
   url: http://your-siem-server:8000
   heartbeat_interval: 30
 
+# Common log paths by distro:
+#   Debian/Ubuntu (with rsyslog): /var/log/auth.log, /var/log/syslog
+#   RHEL/Fedora:                  /var/log/secure, /var/log/messages
+#   Kali / journald-only:         install rsyslog, or use /var/log/dpkg.log to test
 logs:
   - path: /var/log/auth.log
     type: linux_auth

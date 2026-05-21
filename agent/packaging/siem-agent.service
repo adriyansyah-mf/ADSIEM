@@ -18,8 +18,11 @@ TimeoutStopSec=30s
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/siem-agent
+ReadOnlyPaths=/var/log
 ProtectHome=read-only
 PrivateTmp=yes
+# Allow reading protected log files (e.g. /var/log/auth.log owned by adm group)
+SupplementaryGroups=adm
 
 [Install]
 WantedBy=multi-user.target
