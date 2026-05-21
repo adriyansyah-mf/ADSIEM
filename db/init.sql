@@ -29,7 +29,7 @@ CREATE TABLE users (
     username      VARCHAR(100) UNIQUE NOT NULL,
     email         VARCHAR(255) UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    role_id       INTEGER NOT NULL REFERENCES roles(id),
+    role_id       INTEGER NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
     group_id      VARCHAR(100) NOT NULL DEFAULT 'default',
     is_active     BOOLEAN NOT NULL DEFAULT TRUE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -140,6 +140,9 @@ CREATE TABLE alerts (
 CREATE INDEX idx_alerts_status ON alerts(status);
 CREATE INDEX idx_alerts_group_id ON alerts(group_id);
 CREATE INDEX idx_alerts_created_at ON alerts(created_at DESC);
+CREATE INDEX idx_alerts_assignee_id ON alerts(assignee_id);
+CREATE INDEX idx_agents_group_id ON agents(group_id);
+CREATE INDEX idx_rules_group_id ON rules(group_id);
 
 CREATE TABLE alert_notes (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
