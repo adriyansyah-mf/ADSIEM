@@ -2,6 +2,7 @@
 import base64
 import pickle
 import time
+import numpy as np
 import structlog
 from datetime import datetime, timezone
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -158,8 +159,6 @@ async def score_event(redis, decoded: dict, group_id: str) -> None:
 
     if not await _load_models(redis):
         return  # model cold or not yet trained
-
-    import numpy as np
 
     if user and _user_model is not None:
         login  = int(await redis.get(f"ueba:u:{user}:login")  or 0)
