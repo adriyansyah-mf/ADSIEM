@@ -224,6 +224,29 @@ CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status);
 CREATE INDEX IF NOT EXISTS idx_cases_created_at ON cases(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_case_notes_case_id ON case_notes(case_id);
 
+CREATE TABLE IF NOT EXISTS hygiene_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    hostname VARCHAR(255),
+    group_id VARCHAR(100) NOT NULL DEFAULT 'default',
+    os_name VARCHAR(100),
+    os_version VARCHAR(100),
+    kernel VARCHAR(100),
+    arch VARCHAR(20),
+    uptime_seconds BIGINT,
+    cpu_count INT,
+    mem_total_mb BIGINT,
+    mem_used_mb BIGINT,
+    disk_partitions JSONB NOT NULL DEFAULT '[]',
+    open_ports JSONB NOT NULL DEFAULT '[]',
+    users JSONB NOT NULL DEFAULT '[]',
+    hygiene_score INT NOT NULL DEFAULT 100,
+    issues JSONB NOT NULL DEFAULT '[]',
+    collected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hygiene_agent_id ON hygiene_snapshots(agent_id);
+CREATE INDEX IF NOT EXISTS idx_hygiene_collected_at ON hygiene_snapshots(collected_at DESC);
+
 -- ─── Seed Data ───────────────────────────────────────────────────
 
 INSERT INTO roles (name) VALUES
@@ -282,3 +305,80 @@ SELECT
     r.id,
     'default'
 FROM roles r WHERE r.name = 'superadmin';
+
+-- ─── Platform Settings ───────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS platform_settings (
+    key         VARCHAR(100) PRIMARY KEY,
+    value       TEXT,
+    is_secret   BOOLEAN NOT NULL DEFAULT false,
+    description TEXT,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by  UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Default settings (value empty — user must fill in)
+INSERT INTO platform_settings (key, value, is_secret, description) VALUES
+    ('groq_api_key',        '',    true,  'Groq API key for AI SOC analyst (get from console.groq.com)'),
+    ('groq_model',          'llama-3.3-70b-versatile', false, 'Groq model ID'),
+    ('searxng_url',         'http://searxng:8080', false, 'Internal SearXNG URL for threat intel search'),
+    ('ai_analyst_enabled',  'true', false, 'Enable AI SOC L1 analyst for new alerts'),
+    ('virustotal_api_key',  '',    true,  'VirusTotal API key (free tier: 500 req/day) — virustotal.com/gui/my-apikey'),
+    ('abuseipdb_api_key',   '',    true,  'AbuseIPDB API key (free tier: 1000 req/day) — abuseipdb.com/account/api'),
+    ('otx_api_key',         '',    true,  'AlienVault OTX API key (free) — otx.alienvault.com/api'),
+    ('greynoise_api_key',   '',    true,  'GreyNoise API key (optional — community endpoint used if empty)')
+ON CONFLICT (key) DO NOTHING;
+
+-- settings:manage permission
+INSERT INTO permissions (name) VALUES ('settings:manage') ON CONFLICT DO NOTHING;
+
+-- superadmin and admin get settings:manage
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r, permissions p
+WHERE r.name IN ('superadmin', 'admin') AND p.name = 'settings:manage'
+ON CONFLICT DO NOTHING;
+
+-- ─── UEBA ────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS ueba_feature_snapshots (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_type    VARCHAR(20)  NOT NULL,
+    entity_value   VARCHAR(255) NOT NULL,
+    group_id       VARCHAR(100) NOT NULL DEFAULT 'default',
+    features       JSONB        NOT NULL,
+    snapshot_hour  TIMESTAMPTZ  NOT NULL,
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ueba_snap_unique ON ueba_feature_snapshots(entity_type, entity_value, snapshot_hour);
+CREATE INDEX IF NOT EXISTS idx_ueba_snap_lookup ON ueba_feature_snapshots(entity_type, snapshot_hour DESC);
+
+CREATE TABLE IF NOT EXISTS ueba_entity_scores (
+    entity_type     VARCHAR(20)  NOT NULL,
+    entity_value    VARCHAR(255) NOT NULL,
+    group_id        VARCHAR(100) NOT NULL DEFAULT 'default',
+    risk_score      FLOAT        NOT NULL DEFAULT 0,
+    anomaly_count   INTEGER      NOT NULL DEFAULT 0,
+    last_anomaly_at TIMESTAMPTZ,
+    last_seen_at    TIMESTAMPTZ,
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (entity_type, entity_value)
+);
+CREATE INDEX IF NOT EXISTS idx_ueba_scores_risk ON ueba_entity_scores(risk_score DESC);
+
+CREATE TABLE IF NOT EXISTS ueba_anomalies (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_type    VARCHAR(20)  NOT NULL,
+    entity_value   VARCHAR(255) NOT NULL,
+    group_id       VARCHAR(100) NOT NULL DEFAULT 'default',
+    anomaly_score  FLOAT        NOT NULL,
+    risk_score     FLOAT        NOT NULL,
+    features       JSONB        NOT NULL,
+    alert_id       UUID         REFERENCES alerts(id) ON DELETE SET NULL,
+    detected_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ueba_anom_entity ON ueba_anomalies(entity_type, entity_value, detected_at DESC);
+
+INSERT INTO platform_settings (key, value, is_secret, description) VALUES
+    ('ueba_enabled',            'true',  false, 'Enable UEBA ML anomaly detection'),
+    ('ueba_anomaly_threshold',  '-0.1',  false, 'Isolation Forest score threshold (negative = anomalous)')
+ON CONFLICT (key) DO NOTHING;
