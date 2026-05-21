@@ -1,7 +1,7 @@
 # worker/worker/models.py
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, ARRAY
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Float, Integer, String, Text, ARRAY
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase
 
@@ -121,3 +121,36 @@ class CaseNote(Base):
     content         = Column(Text, nullable=False)
     is_ai_generated = Column(Boolean, nullable=False, default=False)
     created_at      = Column(DateTime(timezone=True), default=now_utc)
+
+class UebaFeatureSnapshot(Base):
+    __tablename__ = "ueba_feature_snapshots"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type   = Column(String(20),  nullable=False)
+    entity_value  = Column(String(255), nullable=False)
+    group_id      = Column(String(100), nullable=False, default="default")
+    features      = Column(JSONB,       nullable=False, default=dict)
+    snapshot_hour = Column(DateTime(timezone=True), nullable=False)
+    created_at    = Column(DateTime(timezone=True), default=now_utc)
+
+class UebaEntityScore(Base):
+    __tablename__ = "ueba_entity_scores"
+    entity_type     = Column(String(20),  primary_key=True)
+    entity_value    = Column(String(255), primary_key=True)
+    group_id        = Column(String(100), nullable=False, default="default")
+    risk_score      = Column(Float,       nullable=False, default=0.0)
+    anomaly_count   = Column(Integer,     nullable=False, default=0)
+    last_anomaly_at = Column(DateTime(timezone=True))
+    last_seen_at    = Column(DateTime(timezone=True))
+    updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class UebaAnomaly(Base):
+    __tablename__ = "ueba_anomalies"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type   = Column(String(20),  nullable=False)
+    entity_value  = Column(String(255), nullable=False)
+    group_id      = Column(String(100), nullable=False, default="default")
+    anomaly_score = Column(Float,       nullable=False)
+    risk_score    = Column(Float,       nullable=False)
+    features      = Column(JSONB,       nullable=False, default=dict)
+    alert_id      = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
+    detected_at   = Column(DateTime(timezone=True), default=now_utc)
