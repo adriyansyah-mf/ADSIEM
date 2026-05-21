@@ -17,6 +17,9 @@ import UsersPage from '@/pages/UsersPage'
 import WebhooksPage from '@/pages/WebhooksPage'
 import CasesPage from '@/pages/CasesPage'
 import CaseDetailPage from '@/pages/CaseDetailPage'
+import SettingsPage from '@/pages/SettingsPage'
+import HygienePage from '@/pages/HygienePage'
+import UEBAPage from '@/pages/UEBAPage'
 
 export default function App() {
   const { accessToken, setUser, logout } = useAuthStore()
@@ -45,6 +48,9 @@ export default function App() {
             <Route path="/decoders" element={<DecodersPage />} />
             <Route path="/users" element={<ProtectedRoute minRole="superadmin"><UsersPage /></ProtectedRoute>} />
             <Route path="/webhooks" element={<ProtectedRoute minRole="admin"><WebhooksPage /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute minRole="admin"><SettingsPage /></ProtectedRoute>} />
+            <Route path="/hygiene" element={<HygienePage />} />
+            <Route path="/ueba" element={<UEBAPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -11,9 +11,12 @@ const NAV_ITEMS = [
   { to: '/events', label: 'Events', icon: '🔍', minRole: 'viewer' },
   { to: '/alerts', label: 'Alerts', icon: '🚨', minRole: 'viewer' },
   { to: '/cases', label: 'Cases', icon: '🎫', minRole: 'viewer' },
+  { to: '/hygiene', label: 'Hygiene', icon: '🩺', minRole: 'viewer' },
+  { to: '/ueba', label: 'UEBA', icon: '🧠', minRole: 'viewer' },
   { to: '/rules', label: 'Rules', icon: '📏', minRole: 'viewer' },
   { to: '/decoders', label: 'Decoders', icon: '🔧', minRole: 'viewer' },
   { to: '/users', label: 'Users', icon: '👥', minRole: 'superadmin' },
+  { to: '/settings', label: 'Settings', icon: '⚙️', minRole: 'admin' },
 ]
 
 type OpMode = 'MANUAL' | 'OBSERVER' | 'OPERATOR'
