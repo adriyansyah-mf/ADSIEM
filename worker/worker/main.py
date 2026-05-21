@@ -16,6 +16,7 @@ from worker.sigma_engine import SigmaEngine
 from worker.consumer import consume_loop, load_engines, reload_loop
 from worker.webhook_sender import webhook_retry_loop
 from worker.ai_consumer import ai_analysis_loop
+from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -78,6 +79,8 @@ async def main():
         reload_loop(state),
         webhook_retry_loop(),
         ai_analysis_loop(),
+        ueba_snapshot_loop(),
+        ueba_train_loop(),
     )
 
 if __name__ == "__main__":

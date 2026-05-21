@@ -15,6 +15,7 @@ from worker.models import Event, RawLog
 from worker.redis_client import get_redis
 from worker.sigma_engine import SigmaEngine
 from worker.alert_manager import create_alert
+from worker.ueba.scorer import score_event as ueba_score_event
 
 log = structlog.get_logger()
 CONSUMER_NAME = f"worker-{socket.gethostname()}"
@@ -43,7 +44,8 @@ async def load_engines(db: AsyncSession) -> tuple[DecoderEngine, SigmaEngine]:
 
     result = await db.execute(select(Rule).where(Rule.is_enabled == True))
     rule_yamls = [r.content for r in result.scalars().all()]
-    sig_engine = SigmaEngine()
+    redis = await get_redis()
+    sig_engine = SigmaEngine(redis=redis)
     sig_engine.load_from_yaml_list(rule_yamls)
 
     return dec_engine, sig_engine
@@ -94,7 +96,7 @@ async def process_message(
     events_decoded.inc()
 
     flat_event = {**decoded, "group_id": group_id, "hostname": hostname}
-    rule_matches = sig_engine.evaluate(flat_event)
+    rule_matches = await sig_engine.evaluate(flat_event)
     for match in rule_matches:
         sigma_matches.labels(rule_id=match["id"]).inc()
         alerts_total.labels(severity=match["level"]).inc()
@@ -107,6 +109,13 @@ async def process_message(
             hostname=hostname,
         )
         log.info("alert_generated", title=match["title"], severity=match["level"], source_ip=decoded.get("source.ip"))
+
+    # UEBA scoring — best-effort, never block main pipeline
+    try:
+        _redis = await get_redis()
+        await ueba_score_event(_redis, {**decoded, "hostname": hostname}, group_id)
+    except Exception as _ueba_exc:
+        log.warning("ueba_score_error", error=str(_ueba_exc))
 
 async def consume_loop(dec_engine: DecoderEngine, sig_engine: SigmaEngine) -> None:
     redis = await get_redis()
