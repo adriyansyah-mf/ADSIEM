@@ -237,12 +237,12 @@ SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'viewer'
   AND p.name IN ('logs:read','alerts:read');
 
--- default admin user (password: admin123) — CHANGE IN PRODUCTION
+-- default admin user (password: admin123, argon2id) — CHANGE IN PRODUCTION
 INSERT INTO users (username, email, password_hash, role_id, group_id)
 SELECT
     'admin',
     'admin@siem.local',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6o8HLpuVfe',
+    '$argon2id$v=19$m=65536,t=3,p=4$Pcd47917z5kTQiglRIgxpg$GkRs6NFVHR5v7qWbOwyN6/6afXgLoVBV6nB6Q1XMWv4',
     r.id,
     'default'
 FROM roles r WHERE r.name = 'superadmin';
