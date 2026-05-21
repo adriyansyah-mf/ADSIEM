@@ -349,7 +349,7 @@ CREATE TABLE IF NOT EXISTS ueba_feature_snapshots (
     snapshot_hour  TIMESTAMPTZ  NOT NULL,
     created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ueba_snap_unique ON ueba_feature_snapshots(entity_type, entity_value, snapshot_hour);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ueba_snap_unique ON ueba_feature_snapshots(entity_type, entity_value, group_id, snapshot_hour);
 CREATE INDEX IF NOT EXISTS idx_ueba_snap_lookup ON ueba_feature_snapshots(entity_type, snapshot_hour DESC);
 
 CREATE TABLE IF NOT EXISTS ueba_entity_scores (
@@ -364,6 +364,7 @@ CREATE TABLE IF NOT EXISTS ueba_entity_scores (
     PRIMARY KEY (entity_type, entity_value)
 );
 CREATE INDEX IF NOT EXISTS idx_ueba_scores_risk ON ueba_entity_scores(risk_score DESC);
+CREATE INDEX IF NOT EXISTS idx_ueba_scores_group ON ueba_entity_scores(group_id);
 
 CREATE TABLE IF NOT EXISTS ueba_anomalies (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -377,6 +378,8 @@ CREATE TABLE IF NOT EXISTS ueba_anomalies (
     detected_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ueba_anom_entity ON ueba_anomalies(entity_type, entity_value, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ueba_snap_group ON ueba_feature_snapshots(group_id);
+CREATE INDEX IF NOT EXISTS idx_ueba_anom_group ON ueba_anomalies(group_id);
 
 INSERT INTO platform_settings (key, value, is_secret, description) VALUES
     ('ueba_enabled',            'true',  false, 'Enable UEBA ML anomaly detection'),
