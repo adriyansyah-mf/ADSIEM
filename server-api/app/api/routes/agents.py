@@ -47,18 +47,32 @@ async def enroll_agent(
     if body.enrollment_token != settings.AGENT_ENROLLMENT_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid enrollment token")
     raw_token = generate_agent_token()
-    agent = Agent(
-        name=body.name, hostname=body.hostname,
-        group_id=body.group, version=body.version,
-        token_hash=hash_token(raw_token), status="online",
+    # Upsert: reuse existing agent for same hostname+group to prevent duplicates on re-enrollment
+    result = await db.execute(
+        select(Agent).options(selectinload(Agent.log_sources))
+        .where(Agent.hostname == body.hostname, Agent.group_id == body.group)
+        .order_by(Agent.enrolled_at.desc())
+        .limit(1)
     )
-    db.add(agent)
-    await db.flush()
-    for src in body.log_sources:
-        db.add(AgentLogSource(agent_id=agent.id, path=src.path, log_type=src.log_type, is_enabled=src.is_enabled))
+    agent = result.scalar_one_or_none()
+    if agent:
+        agent.name = body.name or agent.name
+        agent.version = body.version
+        agent.status = "online"
+        agent.token_hash = hash_token(raw_token)
+    else:
+        agent = Agent(
+            name=body.name, hostname=body.hostname,
+            group_id=body.group, version=body.version,
+            token_hash=hash_token(raw_token), status="online",
+        )
+        db.add(agent)
+        await db.flush()
+        for src in body.log_sources:
+            db.add(AgentLogSource(agent_id=agent.id, path=src.path, log_type=src.log_type, is_enabled=src.is_enabled))
     await db.commit()
     background.add_task(audit_log, db, None, "agent_enrolled", "agent", str(agent.id), {"hostname": body.hostname})
-    return EnrollResponse(agent_id=agent.id, agent_token=raw_token)
+    return EnrollResponse(agent_id=str(agent.id), agent_token=raw_token)
 
 @router.get("/api/agents/{agent_id}", response_model=AgentOut)
 async def get_agent(
