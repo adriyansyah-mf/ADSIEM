@@ -17,7 +17,7 @@ TimeoutStopSec=30s
 # Hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/siem-agent
+ReadWritePaths=/var/lib/siem-agent /etc/siem-agent
 ReadOnlyPaths=/var/log
 ProtectHome=read-only
 PrivateTmp=yes
