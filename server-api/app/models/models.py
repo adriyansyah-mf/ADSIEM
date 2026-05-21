@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Boolean, Column, DateTime, ForeignKey, Integer,
+    Boolean, Column, DateTime, Float, ForeignKey, Integer,
     String, Text, ARRAY, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -166,6 +166,15 @@ class WebhookConfig(Base):
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
+class PlatformSetting(Base):
+    __tablename__ = "platform_settings"
+    key         = Column(String(100), primary_key=True)
+    value       = Column(Text)
+    is_secret   = Column(Boolean, nullable=False, default=False)
+    description = Column(Text)
+    updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    updated_by  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
     id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -197,6 +206,27 @@ class Case(Base):
     updated_at    = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     notes         = relationship("CaseNote", back_populates="case", cascade="all, delete-orphan")
 
+class HygieneSnapshot(Base):
+    __tablename__ = "hygiene_snapshots"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id        = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    hostname        = Column(String(255))
+    group_id        = Column(String(100), nullable=False, default="default")
+    os_name         = Column(String(100))
+    os_version      = Column(String(100))
+    kernel          = Column(String(100))
+    arch            = Column(String(20))
+    uptime_seconds  = Column(Integer)
+    cpu_count       = Column(Integer)
+    mem_total_mb    = Column(Integer)
+    mem_used_mb     = Column(Integer)
+    disk_partitions = Column(JSONB, nullable=False, default=list)
+    open_ports      = Column(JSONB, nullable=False, default=list)
+    users           = Column(JSONB, nullable=False, default=list)
+    hygiene_score   = Column(Integer, nullable=False, default=100)
+    issues          = Column(JSONB, nullable=False, default=list)
+    collected_at    = Column(DateTime(timezone=True), default=now_utc)
+
 class CaseNote(Base):
     __tablename__ = "case_notes"
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -206,3 +236,36 @@ class CaseNote(Base):
     is_ai_generated = Column(Boolean, nullable=False, default=False)
     created_at      = Column(DateTime(timezone=True), default=now_utc)
     case            = relationship("Case", back_populates="notes")
+
+class UebaFeatureSnapshot(Base):
+    __tablename__ = "ueba_feature_snapshots"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type   = Column(String(20),  nullable=False)
+    entity_value  = Column(String(255), nullable=False)
+    group_id      = Column(String(100), nullable=False, default="default")
+    features      = Column(JSONB,       nullable=False, default=dict)
+    snapshot_hour = Column(DateTime(timezone=True), nullable=False)
+    created_at    = Column(DateTime(timezone=True), default=now_utc)
+
+class UebaEntityScore(Base):
+    __tablename__ = "ueba_entity_scores"
+    entity_type     = Column(String(20),  primary_key=True)
+    entity_value    = Column(String(255), primary_key=True)
+    group_id        = Column(String(100), nullable=False, default="default")
+    risk_score      = Column(Float,       nullable=False, default=0.0)
+    anomaly_count   = Column(Integer,     nullable=False, default=0)
+    last_anomaly_at = Column(DateTime(timezone=True))
+    last_seen_at    = Column(DateTime(timezone=True))
+    updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class UebaAnomaly(Base):
+    __tablename__ = "ueba_anomalies"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type   = Column(String(20),  nullable=False)
+    entity_value  = Column(String(255), nullable=False)
+    group_id      = Column(String(100), nullable=False, default="default")
+    anomaly_score = Column(Float,       nullable=False)
+    risk_score    = Column(Float,       nullable=False)
+    features      = Column(JSONB,       nullable=False, default=dict)
+    alert_id      = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
+    detected_at   = Column(DateTime(timezone=True), default=now_utc)

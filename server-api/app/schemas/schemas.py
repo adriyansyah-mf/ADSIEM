@@ -325,3 +325,91 @@ class PaginatedResponse(BaseModel):
     page: int
     page_size: int
     items: list[Any]
+
+# ─── Platform Settings ───────────────────────────────────────────
+
+class SettingOut(BaseModel):
+    key: str
+    value: str | None
+    is_secret: bool
+    description: str | None
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+class SettingUpdate(BaseModel):
+    value: str
+
+# ─── IT Hygiene ──────────────────────────────────────────────────
+
+class HygieneSnapshotIn(BaseModel):
+    agent_id: str
+    hostname: str | None = None
+    os_name: str | None = None
+    os_version: str | None = None
+    kernel: str | None = None
+    arch: str | None = None
+    uptime_seconds: int | None = None
+    cpu_count: int | None = None
+    mem_total_mb: int | None = None
+    mem_used_mb: int | None = None
+    disk_partitions: list[dict] = []
+    open_ports: list[dict] = []
+    users: list[dict] = []
+    hygiene_score: int = 100
+    issues: list[dict] = []
+    collected_at: str | None = None
+
+class HygieneSnapshotOut(BaseModel):
+    id: str
+    agent_id: str
+    hostname: str | None
+    group_id: str
+    os_name: str | None
+    os_version: str | None
+    kernel: str | None
+    arch: str | None
+    uptime_seconds: int | None
+    cpu_count: int | None
+    mem_total_mb: int | None
+    mem_used_mb: int | None
+    disk_partitions: list[dict]
+    open_ports: list[dict]
+    users: list[dict]
+    hygiene_score: int
+    issues: list[dict]
+    collected_at: datetime
+    model_config = {"from_attributes": True}
+
+# ─── UEBA ────────────────────────────────────────────────────────
+
+class UebaEntityScoreOut(BaseModel):
+    entity_type: str
+    entity_value: str
+    group_id: str
+    risk_score: float
+    anomaly_count: int
+    last_anomaly_at: datetime | None
+    last_seen_at: datetime | None
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+class UebaAnomalyOut(BaseModel):
+    id: UUID
+    entity_type: str
+    entity_value: str
+    anomaly_score: float
+    risk_score: float
+    features: dict
+    alert_id: UUID | None
+    detected_at: datetime
+    model_config = {"from_attributes": True}
+
+class UebaEntityDetailOut(BaseModel):
+    score: UebaEntityScoreOut
+    anomalies: list[UebaAnomalyOut]
+
+class UebaStatusOut(BaseModel):
+    status: str
+    trained_at: str | None
+    user_snapshot_count: int
+    ip_snapshot_count: int
