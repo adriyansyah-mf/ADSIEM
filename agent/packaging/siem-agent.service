@@ -1,0 +1,25 @@
+[Unit]
+Description=SIEM Platform Agent
+Documentation=https://github.com/siem-platform/agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=siem-agent
+Group=siem-agent
+EnvironmentFile=-/etc/siem-agent/env
+ExecStart=/usr/bin/siem-agent -config /etc/siem-agent/config.yaml
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/siem-agent
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

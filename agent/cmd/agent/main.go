@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -15,12 +16,16 @@ import (
 	"github.com/siem-platform/agent/internal/tailer"
 )
 
-const configPath = "config.yaml"
+// Version is set at build time via -ldflags "-X main.Version=x.y.z"
+var Version = "dev"
 
 func main() {
+	configPath := flag.String("config", "config.yaml", "path to config file")
+	flag.Parse()
+
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
@@ -32,7 +37,7 @@ func main() {
 	}
 
 	if cfg.Agent.Token == "" {
-		if err := enrollment.Enroll(cfg, configPath, enrollToken); err != nil {
+		if err := enrollment.Enroll(cfg, *configPath, enrollToken); err != nil {
 			slog.Error("enrollment failed", "err", err)
 			os.Exit(1)
 		}
@@ -50,7 +55,7 @@ func main() {
 	mgr.Update(initialSources)
 
 	// fsnotify for bootstrap fields only
-	config.Watch(configPath, func(newCfg *config.Config) {
+	config.Watch(*configPath, func(newCfg *config.Config) {
 		cfg.Agent.Name = newCfg.Agent.Name
 		cfg.Agent.Group = newCfg.Agent.Group
 		cfg.Server.URL = newCfg.Server.URL
