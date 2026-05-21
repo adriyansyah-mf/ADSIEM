@@ -1,0 +1,43 @@
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+services:
+
+  postgres:
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  server-api:
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+    environment:
+      LOG_LEVEL: info
+
+  worker:
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+    environment:
+      LOG_LEVEL: info
+
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro

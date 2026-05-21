@@ -1,0 +1,40 @@
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  server-api:
+    environment:
+      LOG_LEVEL: debug
+    volumes:
+      - ./server-api/app:/app/app:ro
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    environment:
+      LOG_LEVEL: debug
+    volumes:
+      - ./worker/worker:/app/worker:ro
+      - ./decoders:/app/decoders:ro
+      - ./rules:/app/rules:ro
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./dashboard/src:/app/src:ro
+    environment:
+      VITE_API_URL: http://server-api:8000
+
+  nginx:
+    ports:
+      - "80:80"
