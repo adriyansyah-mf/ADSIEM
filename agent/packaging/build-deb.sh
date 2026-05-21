@@ -66,9 +66,9 @@ case "$1" in
     fi
     chown -R siem-agent:siem-agent /var/lib/siem-agent
     chmod 750 /var/lib/siem-agent
-    # Protect config (may contain token)
-    chown root:siem-agent /etc/siem-agent/config.yaml
-    chmod 640 /etc/siem-agent/config.yaml
+    # Agent must write token+id back to config after enrollment
+    chown siem-agent:siem-agent /etc/siem-agent/config.yaml
+    chmod 600 /etc/siem-agent/config.yaml
 
     systemctl daemon-reload
     systemctl enable siem-agent.service

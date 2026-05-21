@@ -33,7 +33,7 @@ exit 0
 %post
 chown -R siem-agent:siem-agent /var/lib/siem-agent
 chmod 750 /var/lib/siem-agent
-chown root:siem-agent /etc/siem-agent/config.yaml
+chown siem-agent:siem-agent /etc/siem-agent/config.yaml
 %systemd_post siem-agent.service
 echo "siem-agent installed. Edit /etc/siem-agent/config.yaml then:"
 echo "  sudo systemctl start siem-agent"
@@ -52,7 +52,7 @@ fi
 %files
 %attr(755,root,root) /usr/bin/siem-agent
 %attr(644,root,root) /lib/systemd/system/siem-agent.service
-%config(noreplace) %attr(640,root,siem-agent) /etc/siem-agent/config.yaml
+%config(noreplace) %attr(600,siem-agent,siem-agent) /etc/siem-agent/config.yaml
 %attr(750,siem-agent,siem-agent) /var/lib/siem-agent
 
 %changelog
