@@ -1,0 +1,12 @@
+Package: siem-agent
+Version: 1.0.0
+Architecture: amd64
+Maintainer: SIEM Platform <admin@example.com>
+Depends: systemd
+Section: admin
+Priority: optional
+Homepage: https://github.com/siem-platform/agent
+Description: SIEM Platform log collection agent
+ Lightweight agent that tails log files, encodes entries with
+ exponential-backoff delivery, and ships them to the SIEM server API.
+ Supports automatic enrollment and dynamic log source management.

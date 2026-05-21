@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { EditorState } from '@codemirror/state'
 import { EditorView, basicSetup } from 'codemirror'
 import { yaml } from '@codemirror/lang-yaml'
@@ -12,9 +12,10 @@ interface Props {
   onSave: () => void
   onClose: () => void
   extraAction?: { label: string; onClick: () => void }
+  footer?: ReactNode
 }
 
-export default function YamlEditor({ title, value, onChange, onSave, onClose, extraAction }: Props) {
+export default function YamlEditor({ title, value, onChange, onSave, onClose, extraAction, footer }: Props) {
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
 
@@ -46,6 +47,7 @@ export default function YamlEditor({ title, value, onChange, onSave, onClose, ex
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={18} /></button>
         </div>
         <div ref={editorRef} className="h-96 overflow-auto text-sm" />
+        {footer}
         <div className="flex gap-2 justify-end px-4 py-3 border-t border-border">
           {extraAction && (
             <button onClick={extraAction.onClick}

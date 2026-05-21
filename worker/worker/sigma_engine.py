@@ -1,9 +1,11 @@
 # worker/worker/sigma_engine.py
 import re
 import time
+import uuid as _uuid
 import yaml
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
+
 
 @dataclass
 class RuleDef:
@@ -17,11 +19,14 @@ class RuleDef:
     threshold: dict | None
     suppression: dict | None
 
+
 class SigmaEngine:
-    def __init__(self):
+    def __init__(self, redis=None):
         self._rules: list[RuleDef] = []
-        self._threshold_hits: dict[str, list[float]] = {}
-        self._suppressed: dict[str, float] = {}
+        self._redis = redis
+        # In-memory fallback (single-process only)
+        self._local_hits: dict[str, list[float]] = {}
+        self._local_suppressed: dict[str, float] = {}
 
     def load_from_yaml_list(self, yaml_contents: list[str]) -> None:
         rules = []
@@ -43,46 +48,94 @@ class SigmaEngine:
                 continue
         self._rules = rules
 
-    def evaluate(self, event: dict[str, Any]) -> list[dict]:
+    async def evaluate(self, event: dict[str, Any]) -> list[dict]:
         now = time.time()
         matches = []
         for rule in self._rules:
             if not self._detection_matches(rule.detection, event):
                 continue
+
+            corr_result = None
             if rule.threshold:
-                if not self._check_threshold(rule, event, now):
+                corr_result = await self._check_threshold(rule, event, now)
+                if corr_result is None:
                     continue
+
             if rule.suppression:
-                suppress_key = self._suppression_key(rule, event)
-                if suppress_key in self._suppressed:
-                    if now < self._suppressed[suppress_key]:
-                        continue
-                window = rule.suppression.get("timewindow", 3600)
-                self._suppressed[suppress_key] = now + window
-            matches.append({
+                sup_key = f"sigma:sup:{rule.id}:{event.get('source.ip', '_')}"
+                sup_window = rule.suppression.get("timewindow", 3600)
+                if not await self._acquire_suppression(sup_key, sup_window):
+                    continue
+
+            title = rule.title
+            match: dict[str, Any] = {
                 "id": rule.id,
-                "title": rule.title,
+                "title": title,
                 "level": rule.level,
                 "tags": rule.tags,
                 "mitre_tags": rule.mitre_tags,
-            })
+            }
+            if corr_result:
+                hit_count, group_val = corr_result
+                tw = rule.threshold.get("timewindow", 300)  # type: ignore[union-attr]
+                suffix = f" from {group_val}" if group_val != "_all" else ""
+                match["title"] = f"{title} [{hit_count}x in {tw}s{suffix}]"
+                match["correlation_hit_count"] = hit_count
+                match["correlation_group"] = group_val
+            matches.append(match)
         return matches
 
-    def _check_threshold(self, rule: RuleDef, event: dict, now: float) -> bool:
-        th = rule.threshold
-        count = th.get("count", 1)
-        window = th.get("timewindow", 300)
+    async def _check_threshold(
+        self, rule: RuleDef, event: dict, now: float
+    ) -> tuple[int, str] | None:
+        """Returns (hit_count, group_val) when threshold is crossed, else None."""
+        th = rule.threshold  # type: ignore[union-attr]
+        required = int(th.get("count", 1))
+        window = int(th.get("timewindow", 300))
+        cooldown = int(th.get("cooldown", 0))
         group_by = th.get("group_by")
-        group_val = event.get(group_by, "_all") if group_by else "_all"
-        key = f"{rule.id}:{group_val}"
-        hits = self._threshold_hits.setdefault(key, [])
-        hits.append(now)
-        hits[:] = [t for t in hits if now - t <= window]
-        return len(hits) >= count
+        group_val = str(event.get(group_by, "_all")) if group_by else "_all"
 
-    def _suppression_key(self, rule: RuleDef, event: dict) -> str:
-        src_ip = event.get("source.ip", "unknown")
-        return f"suppress:{rule.id}:{src_ip}"
+        hit_key = f"sigma:th:{rule.id}:{group_val}"
+        cd_key = f"sigma:cd:{rule.id}:{group_val}"
+
+        if self._redis:
+            # Sorted-set sliding window: score = timestamp, member = unique id
+            member = str(_uuid.uuid4())
+            await self._redis.zadd(hit_key, {member: now})
+            await self._redis.zremrangebyscore(hit_key, 0, now - window)
+            await self._redis.expire(hit_key, window + 60)
+            hit_count: int = await self._redis.zcard(hit_key)
+
+            if hit_count < required:
+                return None
+
+            if cooldown > 0:
+                if await self._redis.exists(cd_key):
+                    return None  # still cooling down
+                await self._redis.setex(cd_key, cooldown, "1")
+
+            return (hit_count, group_val)
+        else:
+            hits = self._local_hits.setdefault(hit_key, [])
+            hits.append(now)
+            hits[:] = [t for t in hits if now - t <= window]
+            if len(hits) < required:
+                return None
+            return (len(hits), group_val)
+
+    async def _acquire_suppression(self, key: str, window: int) -> bool:
+        """Returns True (fire) on first call; False while suppressed."""
+        if self._redis:
+            # Atomic SET NX: returns None if key already exists
+            result = await self._redis.set(key, "1", nx=True, ex=window)
+            return result is not None
+        else:
+            now = time.time()
+            if key in self._local_suppressed and now < self._local_suppressed[key]:
+                return False
+            self._local_suppressed[key] = now + window
+            return True
 
     def _detection_matches(self, detection: dict, event: dict) -> bool:
         condition = detection.get("condition", "selection")

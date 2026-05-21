@@ -13,6 +13,7 @@ import (
 	"github.com/siem-platform/agent/internal/config"
 	"github.com/siem-platform/agent/internal/enrollment"
 	"github.com/siem-platform/agent/internal/heartbeat"
+	"github.com/siem-platform/agent/internal/hygiene"
 	"github.com/siem-platform/agent/internal/tailer"
 )
 
@@ -66,6 +67,9 @@ func main() {
 	go heartbeat.Loop(cfg, buf, c, func(sources []heartbeat.LogSource) {
 		mgr.Update(sources)
 	})
+
+	// IT hygiene collection loop
+	hygiene.Start(cfg, c)
 
 	// sender loop
 	go senderLoop(buf, c, cfg)
