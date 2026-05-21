@@ -59,6 +59,16 @@ services:
     networks:
       - siem-net
 
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-searxng-secret}
+    volumes:
+      - ./searxng:/etc/searxng
+    networks:
+      - siem-net
+
   worker:
     build:
       context: ./worker
@@ -72,6 +82,8 @@ services:
       DECODERS_DIR: /app/decoders
       RULES_DIR: /app/rules
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       RELOAD_INTERVAL: ${RELOAD_INTERVAL:-60}
       WEBHOOK_RETRY_INTERVAL: ${WEBHOOK_RETRY_INTERVAL:-30}
       MAX_WEBHOOK_ATTEMPTS: ${MAX_WEBHOOK_ATTEMPTS:-5}
