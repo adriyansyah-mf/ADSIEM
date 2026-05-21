@@ -71,6 +71,7 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 		if err := json.Unmarshal(body, &result); err != nil {
 			return fmt.Errorf("decode enroll response: %w", err)
 		}
+		cfg.Agent.ID = result.AgentID
 		cfg.Agent.Token = result.AgentToken
 		if err := config.Save(configPath, cfg); err != nil {
 			return fmt.Errorf("save config after enroll: %w", err)
