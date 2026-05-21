@@ -37,6 +37,7 @@ async def _load_models(redis) -> bool:
 
     status = await redis.get("ueba:model:status")
     if status != "ready":
+        _model_loaded_at = time.time()  # avoid polling every event when cold
         return False
 
     user_b64 = await redis.get("ueba:model:user")
@@ -104,7 +105,7 @@ async def _handle_score(
         in_cooldown = await redis.exists(cd_key)
         anomaly_count = await _get_anomaly_count(entity_type, entity_value)
 
-        if not in_cooldown and anomaly_count >= MIN_ANOMALY_COUNT:
+        if not in_cooldown and (anomaly_count + 1) >= MIN_ANOMALY_COUNT:
             severity = (
                 "critical" if new_risk >= 80 else
                 "high"     if new_risk >= 60 else
