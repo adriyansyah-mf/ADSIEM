@@ -106,6 +106,34 @@ export interface Webhook {
   created_at: string
 }
 
+export interface CaseNote {
+  id: string
+  case_id: string
+  author_id: string | null
+  content: string
+  is_ai_generated: boolean
+  created_at: string
+}
+
+export interface Case {
+  id: string
+  title: string
+  description: string | null
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
+  status: 'open' | 'in_review' | 'escalated' | 'resolved' | 'closed'
+  alert_id: string | null
+  assignee_id: string | null
+  ai_reasoning: string | null
+  ioc_data: Record<string, unknown>
+  search_intel: { results?: Array<{title: string; url: string; content: string}> }
+  created_by_ai: boolean
+  escalated_at: string | null
+  group_id: string
+  created_at: string
+  updated_at: string
+  notes: CaseNote[]
+}
+
 export interface PaginatedResponse<T> {
   total: number
   page: number
