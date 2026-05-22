@@ -403,3 +403,19 @@ CREATE TABLE IF NOT EXISTS fim_events (
 CREATE INDEX IF NOT EXISTS idx_fim_events_agent    ON fim_events(agent_id);
 CREATE INDEX IF NOT EXISTS idx_fim_events_detected ON fim_events(detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fim_events_path     ON fim_events(path text_pattern_ops);
+
+-- ─── Enrollment Tokens ───────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS enrollment_tokens (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_hash       TEXT NOT NULL UNIQUE,
+    label            VARCHAR(255) NOT NULL DEFAULT '',
+    group_id         VARCHAR(100) NOT NULL DEFAULT 'default',
+    expires_at       TIMESTAMPTZ,
+    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+    used_at          TIMESTAMPTZ,
+    used_by_agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
+    created_by       UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_enrollment_tokens_active ON enrollment_tokens(is_active, expires_at);

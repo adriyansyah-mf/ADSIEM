@@ -571,3 +571,24 @@ class YaraScanRequest(BaseModel):
     path: str
     recursive: bool = False
     rule_ids: list[UUID] | None = None  # None = all enabled rules
+
+# ─── Enrollment Tokens ───────────────────────────────────────────
+
+class EnrollmentTokenCreate(BaseModel):
+    label: str = ""
+    group_id: str = "default"
+    expires_hours: int = 24  # 0 = never expires
+
+class EnrollmentTokenOut(BaseModel):
+    id: UUID
+    label: str
+    group_id: str
+    expires_at: datetime | None
+    is_active: bool
+    used_at: datetime | None
+    used_by_agent_id: UUID | None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class EnrollmentTokenCreated(EnrollmentTokenOut):
+    token: str  # raw value — shown only on creation

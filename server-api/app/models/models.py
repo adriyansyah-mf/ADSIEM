@@ -356,3 +356,16 @@ class YaraRule(Base):
     content     = Column(Text, nullable=False)
     is_enabled  = Column(Boolean, nullable=False, default=True)
     created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+class EnrollmentToken(Base):
+    __tablename__ = "enrollment_tokens"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    token_hash       = Column(Text, nullable=False, unique=True)
+    label            = Column(String(255), nullable=False, default="")
+    group_id         = Column(String(100), nullable=False, default="default")
+    expires_at       = Column(DateTime(timezone=True), nullable=True)
+    is_active        = Column(Boolean, nullable=False, default=True)
+    used_at          = Column(DateTime(timezone=True), nullable=True)
+    used_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
