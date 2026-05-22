@@ -1,0 +1,20 @@
+title: XML External Entity (XXE) Injection Attempt
+id: rule-xxe-injection
+description: Request URL or params contain XML DOCTYPE/ENTITY declarations — XXE injection probe (A03)
+logsource:
+  product: webserver
+detection:
+  doctype_entity:
+    url.path|re: '(?i)<!DOCTYPE[^>]*\[|<!ENTITY[^>]*SYSTEM'
+  xxe_encoded:
+    url.path|contains:
+      - "%3C!DOCTYPE"
+      - "%3C!ENTITY"
+      - "SYSTEM%20"
+      - "SYSTEM+"
+  condition: doctype_entity or xxe_encoded
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a03

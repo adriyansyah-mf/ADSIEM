@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+case "$1" in
+  purge)
+    rm -rf /etc/siem-agent /var/lib/siem-agent
+    if id siem-agent >/dev/null 2>&1; then
+      userdel siem-agent 2>/dev/null || true
+    fi
+    systemctl daemon-reload
+    ;;
+esac

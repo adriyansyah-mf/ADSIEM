@@ -1,0 +1,12 @@
+name: linux_audit_syscall
+log_type: linux_audit
+type: regex
+priority: 20
+enabled: true
+pattern: 'type=SYSCALL.*?syscall=(?P<syscall>\d+).*?uid=(?P<uid>\d+).*?auid=(?P<auid>\d+).*?comm="(?P<cmd>[^"]+)".*?exe="(?P<exe>[^"]+)"'
+fields:
+  event.category: process
+  event.action: syscall
+  process.name: cmd
+  process.executable: exe
+  user.id: uid

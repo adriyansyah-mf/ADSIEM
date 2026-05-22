@@ -1,0 +1,14 @@
+name: linux_iptables
+log_type: linux_iptables
+type: regex
+priority: 10
+enabled: true
+pattern: 'kernel:.*?(?:IPTABLES|UFW|fw|BLOCK|DROP|ACCEPT)[:\s]+.*?SRC=(?P<src_ip>[\d\.]+)\s+DST=(?P<dst_ip>[\d\.]+).*?PROTO=(?P<proto>\S+)(?:.*?SPT=(?P<src_port>\d+))?(?:.*?DPT=(?P<dst_port>\d+))?'
+fields:
+  event.category: network
+  event.action: firewall_event
+  source.ip: src_ip
+  destination.ip: dst_ip
+  network.transport: proto
+  source.port: src_port
+  destination.port: dst_port

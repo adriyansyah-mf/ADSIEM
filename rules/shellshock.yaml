@@ -1,0 +1,17 @@
+title: Shellshock Exploitation Attempt (CVE-2014-6271)
+id: rule-shellshock
+description: HTTP header or URL contains Bash function definition pattern — Shellshock RCE probe (A06)
+logsource:
+  product: webserver
+detection:
+  shellshock_pattern:
+    url.path|re: '\(\s*\)\s*\{'
+  shellshock_ua:
+    user_agent.original|re: '\(\s*\)\s*\{'
+  condition: shellshock_pattern or shellshock_ua
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a06
+  - cve.2014-6271

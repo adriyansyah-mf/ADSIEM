@@ -1,0 +1,20 @@
+title: Spring4Shell Exploitation Attempt (CVE-2022-22965)
+id: rule-spring4shell
+description: HTTP request contains Spring framework class loader manipulation — Spring4Shell RCE probe (A06)
+logsource:
+  product: webserver
+detection:
+  class_loader:
+    url.path|re: '(?i)(?:class\.module\.classLoader|class\.classLoader\.|ClassLoader\.resources)'
+  spring_actuator:
+    url.path|contains:
+      - "/actuator/env"
+      - "/actuator/refresh"
+      - "/actuator/restart"
+  condition: class_loader or spring_actuator
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a06
+  - cve.2022-22965

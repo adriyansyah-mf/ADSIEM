@@ -1,0 +1,12 @@
+name: generic_syslog
+log_type: syslog
+type: regex
+priority: 200
+enabled: true
+pattern: '(?P<month>\w+)\s+(?P<day>\d+)\s+(?P<time>\S+)\s+(?P<host>\S+)\s+(?P<program>\S+?)(?:\[(?P<pid>\d+)\])?\:\s+(?P<message>.+)'
+fields:
+  event.category: system
+  event.action: syslog_message
+  host.hostname: host
+  process.name: program
+  message: message

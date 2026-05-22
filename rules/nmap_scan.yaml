@@ -1,0 +1,17 @@
+title: Network Scanning with Nmap
+id: rule-nmap-scan
+description: Nmap executed on a monitored host — reconnaissance against local or remote targets
+logsource:
+  product: linux
+detection:
+  selection:
+    process.name|contains: "nmap"
+  cmdline:
+    process.command_line|contains: "nmap"
+  condition: selection or cmdline
+suppression:
+  timewindow: 1800
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1046

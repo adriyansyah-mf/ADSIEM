@@ -1,0 +1,25 @@
+title: Cryptocurrency Miner Detected
+id: rule-crypto-miner
+description: Process command line contains cryptocurrency mining indicators (xmrig, stratum protocol, mining pools)
+logsource:
+  product: linux
+detection:
+  miner_binary:
+    process.name|contains:
+      - "xmrig"
+      - "minerd"
+      - "cpuminer"
+      - "ethminer"
+  stratum:
+    process.command_line|contains:
+      - "stratum+tcp://"
+      - "stratum+ssl://"
+      - "pool.supportxmr"
+      - "xmrpool"
+      - "moneropool"
+      - "nanopool.org"
+  condition: miner_binary or stratum
+level: high
+tags:
+  - attack.impact
+  - attack.t1496

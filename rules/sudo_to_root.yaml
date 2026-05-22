@@ -1,0 +1,19 @@
+title: Sudo Privilege Escalation to Root
+id: rule-sudo-to-root
+description: User ran a command as root via sudo — especially suspicious if command is a shell
+logsource:
+  product: linux
+detection:
+  shell_via_sudo:
+    event.action: sudo_command
+    process.command_line|contains:
+      - "/bin/bash"
+      - "/bin/sh"
+      - "/bin/zsh"
+      - "su -"
+      - "su root"
+  condition: shell_via_sudo
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.003

@@ -1,0 +1,16 @@
+title: Suspicious Kernel Module Loaded
+id: rule-kernel-module-suspicious
+description: A kernel module was loaded with insmod — potential rootkit or driver-based persistence
+logsource:
+  product: linux
+detection:
+  insmod:
+    process.command_line|re: 'insmod\s+\S+\.ko'
+  modprobe_unusual:
+    process.command_line|re: 'modprobe\s+(?!.*\b(?:loop|nbd|veth|bridge|overlay|dummy)\b)\S+'
+  condition: insmod or modprobe_unusual
+level: medium
+tags:
+  - attack.persistence
+  - attack.defense_evasion
+  - attack.t1547.006

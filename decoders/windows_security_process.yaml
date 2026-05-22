@@ -1,0 +1,11 @@
+name: windows_security_process_create
+log_type: windows_security
+type: regex
+priority: 30
+enabled: true
+pattern: 'EventID[=:\s]+4688.*?(?:New Process Name|Process Name)[=:\s]+(?P<proc_name>\S+).*?(?:Creator Subject|Subject).*?Account Name[=:\s]+(?P<user>\S+)'
+fields:
+  event.category: process
+  event.action: process_created
+  process.name: proc_name
+  user.name: user

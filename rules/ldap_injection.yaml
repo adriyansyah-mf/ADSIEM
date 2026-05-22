@@ -1,0 +1,16 @@
+title: LDAP Injection Attempt
+id: rule-ldap-injection
+description: URL contains LDAP filter metacharacters — LDAP injection probe targeting directory services (A03)
+logsource:
+  product: webserver
+detection:
+  ldap_filter:
+    url.path|re: '[?&][^=]+=.*?(?:\)\(|\*\)|\(objectClass=\*|\(cn=\*)'
+  ldap_encoded:
+    url.path|re: '(?:%29%28|%2a%29|%28objectClass%3d%2a)'
+  condition: ldap_filter or ldap_encoded
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a03

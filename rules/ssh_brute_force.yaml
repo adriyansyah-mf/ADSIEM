@@ -1,0 +1,19 @@
+title: SSH Brute Force Attack
+id: rule-ssh-brute-force
+description: Multiple failed SSH logins from same source IP
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: login_failed
+  condition: selection
+threshold:
+  count: 5
+  timewindow: 300
+  group_by: source.ip
+suppression:
+  timewindow: 3600
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1110.001

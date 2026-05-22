@@ -1,0 +1,11 @@
+name: windows_security_login_success
+log_type: windows_security
+type: regex
+priority: 20
+enabled: true
+pattern: 'EventID[=:\s]+4624.*?(?:Account\s+Name|Account Name)[=:\s]+(?P<user>\S+).*?(?:Source Network Address|Source IP)[=:\s]+(?P<src_ip>[\d\.]+)'
+fields:
+  event.category: authentication
+  event.action: login_success
+  user.name: user
+  source.ip: src_ip

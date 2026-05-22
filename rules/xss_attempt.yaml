@@ -1,0 +1,20 @@
+title: Cross-Site Scripting (XSS) Attempt
+id: rule-xss-attempt
+description: HTTP request URL contains XSS payload patterns
+logsource:
+  product: webserver
+detection:
+  script_tag:
+    url.path|re: '(?i)<\s*script[^>]*>'
+  event_handler:
+    url.path|re: '(?i)(?:onerror|onload|onclick|onmouseover)\s*='
+  js_proto:
+    url.path|contains:
+      - "javascript:"
+      - "vbscript:"
+      - "data:text/html"
+  condition: script_tag or event_handler or js_proto
+level: medium
+tags:
+  - attack.initial_access
+  - attack.t1190

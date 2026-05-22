@@ -1,0 +1,21 @@
+title: Windows Special Privilege Assigned (EventID 4672)
+id: rule-windows-privilege-use
+description: Admin or special privileges assigned at Windows logon — may indicate compromised admin account
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    event.action: login_success
+    event.category: authentication
+  condition: selection
+threshold:
+  count: 3
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 7200
+level: medium
+tags:
+  - attack.privilege_escalation
+  - attack.t1078.002

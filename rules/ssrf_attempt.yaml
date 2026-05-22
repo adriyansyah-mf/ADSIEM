@@ -1,0 +1,21 @@
+title: Server-Side Request Forgery (SSRF) Attempt
+id: rule-ssrf-attempt
+description: HTTP request contains URL parameters pointing to internal IPs or cloud metadata endpoints — SSRF (A10)
+logsource:
+  product: webserver
+detection:
+  metadata_ip:
+    url.path|contains:
+      - "169.254.169.254"
+      - "metadata.google.internal"
+      - "169.254.170.2"
+  internal_via_param:
+    url.path|re: '(?:[?&][^=]+=)(?:https?://|ftp://|gopher://|dict://|file://)(?:127\.|10\.|172\.1[6-9]\.|172\.2\d\.|172\.3[01]\.|192\.168\.)'
+  proto_abuse:
+    url.path|re: '(?:[?&][^=]+=)(?:file://|gopher://|dict://|ldap://|tftp://)'
+  condition: metadata_ip or internal_via_param or proto_abuse
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a10

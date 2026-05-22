@@ -1,0 +1,19 @@
+title: WordPress Admin Login Probing
+id: rule-wordpress-admin-probe
+description: Repeated requests to WordPress admin login page
+logsource:
+  product: nginx
+detection:
+  selection:
+    url.path|contains: "wp-admin"
+  condition: selection
+threshold:
+  count: 10
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 3600
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1110

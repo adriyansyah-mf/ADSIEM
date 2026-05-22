@@ -1,0 +1,13 @@
+name: nginx_access
+log_type: nginx_access
+type: regex
+priority: 10
+enabled: true
+pattern: '(?P<src_ip>\S+)\s+-\s+-\s+\[.*?\]\s+"(?P<method>\S+)\s+(?P<request>\S+)\s+\S+"\s+(?P<status>\d+)\s+(?P<bytes>\d+)'
+fields:
+  event.category: web
+  event.action: http_request
+  source.ip: src_ip
+  http.request.method: method
+  url.path: request
+  http.response.status_code: status

@@ -1,0 +1,28 @@
+title: Security Scanner User-Agent Detected
+id: rule-scanner-useragent
+description: HTTP request from a known vulnerability scanner or security tool user-agent
+logsource:
+  product: webserver
+detection:
+  selection:
+    user_agent.original|contains:
+      - "Nikto"
+      - "sqlmap"
+      - "Nessus"
+      - "OpenVAS"
+      - "Masscan"
+      - "ZAP"
+      - "w3af"
+      - "acunetix"
+      - "Burp"
+      - "dirbuster"
+      - "gobuster"
+      - "nuclei"
+      - "Havij"
+  condition: selection
+suppression:
+  timewindow: 3600
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1595

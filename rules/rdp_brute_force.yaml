@@ -1,0 +1,23 @@
+title: RDP Brute Force Attack
+id: rule-rdp-brute-force
+description: Multiple failed Windows logon attempts on port 3389 — likely RDP brute force
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    event.action: login_failed
+    event.category: authentication
+  condition: selection
+threshold:
+  count: 8
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 3600
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1110.001
+  - attack.initial_access
+  - attack.t1133

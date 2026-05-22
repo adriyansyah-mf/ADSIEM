@@ -1,0 +1,17 @@
+title: SSH Authorized Keys Modified
+id: rule-ssh-key-addition
+description: authorized_keys file written — attacker may be adding persistent SSH access
+logsource:
+  product: linux
+detection:
+  selection:
+    process.command_line|contains:
+      - "authorized_keys"
+      - ".ssh/authorized"
+  condition: selection
+suppression:
+  timewindow: 600
+level: high
+tags:
+  - attack.persistence
+  - attack.t1098.004

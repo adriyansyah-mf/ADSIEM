@@ -1,0 +1,13 @@
+title: SSH Failed Login
+id: rule-ssh-failed-login
+description: Single failed SSH login attempt detected
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: login_failed
+  condition: selection
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1110

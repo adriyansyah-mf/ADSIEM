@@ -1,0 +1,20 @@
+title: SSH Lateral Movement — Rapid Connections to Multiple Hosts
+id: rule-lateral-movement-ssh
+description: Many successful SSH logins originating from the same internal source — possible lateral movement
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: login_success
+    auth.method: publickey
+  condition: selection
+threshold:
+  count: 5
+  timewindow: 120
+  group_by: source.ip
+suppression:
+  timewindow: 3600
+level: high
+tags:
+  - attack.lateral_movement
+  - attack.t1021.004

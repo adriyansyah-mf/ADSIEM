@@ -1,0 +1,25 @@
+agent:
+  id: agent-demo
+  name: demo-agent
+  group: default
+  token: ""
+  buffer_size: 10000
+
+server:
+  url: http://server-api:8000
+  heartbeat_interval: 30
+
+logs:
+  - path: /host/var/log/auth.log
+    type: linux_auth
+  - path: /host/var/log/syslog
+    type: syslog
+
+fim:
+  enabled: true
+  watch_paths:
+    - /etc
+    - /bin
+    - /sbin
+    - /usr/bin
+    - /usr/sbin

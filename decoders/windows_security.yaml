@@ -1,0 +1,11 @@
+name: windows_security_login_failed
+log_type: windows_security
+type: regex
+priority: 10
+enabled: true
+pattern: 'EventID[=:\s]+4625.*?(?:Account\s+Name|Account Name)[=:\s]+(?P<user>\S+).*?(?:Source Network Address|Source IP)[=:\s]+(?P<src_ip>[\d\.]+)'
+fields:
+  event.category: authentication
+  event.action: login_failed
+  user.name: user
+  source.ip: src_ip

@@ -1,0 +1,16 @@
+title: Nginx Suspicious Path Access
+id: rule-nginx-suspicious-path
+description: HTTP request to commonly exploited path
+logsource:
+  product: nginx
+detection:
+  selection:
+    url.path|contains:
+      - "../"
+      - "..%2F"
+      - "%2e%2e"
+  condition: selection
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1083

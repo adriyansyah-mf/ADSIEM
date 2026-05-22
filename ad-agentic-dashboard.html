@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AD-Agentic Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-base: #050a12;
+    --bg-panel: #080e1a;
+    --bg-card: #0b1524;
+    --bg-hover: #0f1e33;
+    --border: #1a2e4a;
+    --border-bright: #1e3d5c;
+    --accent-cyan: #00d4ff;
+    --accent-green: #00ff88;
+    --accent-orange: #ff6b00;
+    --accent-red: #ff2244;
+    --accent-yellow: #ffd700;
+    --accent-purple: #9b59ff;
+    --text-primary: #c8e0f4;
+    --text-secondary: #6a8fb0;
+    --text-dim: #3a5570;
+    --critical: #ff2244;
+    --high: #ff6b00;
+    --medium: #ffd700;
+    --low: #00ff88;
+    --grid-line: rgba(0, 212, 255, 0.05);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Exo 2', sans-serif;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-size: 11px;
+    overflow-x: hidden;
+    min-height: 100vh;
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg-base); }
+  ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+
+  /* TOPBAR */
+  .topbar {
+    display: grid;
+    grid-template-columns: 260px 1fr 1fr 260px;
+    gap: 1px;
+    background: var(--border);
+    border-bottom: 1px solid var(--border-bright);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .topbar-brand {
+    background: var(--bg-panel);
+    padding: 10px 14px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .brand-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #003366, #006699);
+    border: 1px solid var(--accent-cyan);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    box-shadow: 0 0 12px rgba(0,212,255,0.3);
+    flex-shrink: 0;
+  }
+  .brand-text h1 {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 15px; font-weight: 700;
+    color: var(--accent-cyan);
+    letter-spacing: 1px;
+  }
+  .brand-text p { font-size: 9px; color: var(--text-secondary); letter-spacing: 0.5px; }
+
+  .topbar-health {
+    background: var(--bg-panel);
+    padding: 8px 16px;
+    display: flex; align-items: center; gap: 20px;
+  }
+  .health-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+  .health-val { font-family: 'Rajdhani', sans-serif; font-size: 28px; font-weight: 700; color: var(--accent-green); line-height: 1; }
+  .health-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); animation: pulse 2s infinite; display: inline-block; margin-right: 4px; }
+  .sparkline-mini { height: 24px; width: 80px; }
+
+  .topbar-opmode {
+    background: var(--bg-panel);
+    padding: 8px 16px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .opmode-btn {
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+  }
+  .opmode-btn.active {
+    background: linear-gradient(135deg, #004d00, #006600);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+    box-shadow: 0 0 10px rgba(0,255,136,0.2);
+  }
+  .opmode-sub { font-size: 8px; color: var(--text-dim); margin-top: 2px; }
+
+  .topbar-user {
+    background: var(--bg-panel);
+    padding: 8px 14px;
+    display: flex; align-items: center; gap: 10px;
+    justify-content: flex-end;
+  }
+  .user-avatar {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #1a3a5c, #2a5a8c);
+    border: 1px solid var(--accent-cyan);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .user-name { font-family: 'Rajdhani', sans-serif; font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .user-role { font-size: 9px; color: var(--accent-cyan); }
+  .user-time { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--text-secondary); }
+
+  /* MAIN LAYOUT */
+  .main {
+    display: grid;
+    grid-template-columns: 260px 1fr 260px;
+    gap: 1px;
+    background: var(--border);
+    min-height: calc(100vh - 57px);
+  }
+
+  /* LEFT PANEL */
+  .left-panel { background: var(--bg-panel); display: flex; flex-direction: column; gap: 1px; }
+
+  /* Section headers */
+  .section-header {
+    padding: 6px 12px;
+    background: rgba(0,212,255,0.04);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .section-title {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--accent-cyan);
+  }
+  .section-badge {
+    font-size: 9px; color: var(--text-secondary);
+    border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 3px;
+  }
+
+  /* ML Stats */
+  .ml-block { padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+  .ml-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .ml-name { font-family: 'Rajdhani', sans-serif; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .ml-type { font-size: 9px; color: var(--text-secondary); }
+  .precision-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .precision-circle {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent-cyan) var(--pct), var(--bg-card) 0);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .precision-inner {
+    width: 34px; height: 34px;
+    background: var(--bg-panel);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Rajdhani', sans-serif; font-size: 11px; font-weight: 700; color: var(--accent-cyan);
+  }
+  .stat-rows { flex: 1; }
+  .stat-row { display: flex; justify-content: space-between; padding: 1px 0; }
+  .stat-lbl { color: var(--text-secondary); font-size: 10px; }
+  .stat-val { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--text-primary); }
+
+  /* IOC Table */
+  .ioc-section { padding: 0 12px; border-bottom: 1px solid var(--border); }
+  .ioc-tabs { display: flex; gap: 4px; padding: 6px 0; }
+  .ioc-tab {
+    padding: 2px 8px; border-radius: 3px; font-size: 9px; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--border);
+    color: var(--text-secondary); background: transparent;
+    font-family: 'Exo 2', sans-serif;
+    transition: all 0.2s;
+  }
+  .ioc-tab.active { background: rgba(0,212,255,0.1); border-color: var(--accent-cyan); color: var(--accent-cyan); }
+  .ioc-table { width: 100%; margin-bottom: 8px; }
+  .ioc-table th { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 0; text-align: left; }
+  .ioc-table td { padding: 3px 0; font-family: 'Share Tech Mono', monospace; font-size: 9px; border-bottom: 1px solid rgba(26,46,74,0.5); }
+  .risk-dot { display: inline-block; width: 20px; height: 6px; border-radius: 3px; }
+
+  /* System Logs */
+  .syslog-section { flex: 1; padding: 8px 12px; overflow-y: auto; max-height: 200px; }
+  .log-line { display: flex; gap: 4px; margin-bottom: 3px; font-family: 'Share Tech Mono', monospace; font-size: 9px; line-height: 1.5; }
+  .log-time { color: var(--text-dim); flex-shrink: 0; }
+  .log-tag { padding: 0 4px; border-radius: 2px; font-size: 8px; font-weight: 700; flex-shrink: 0; }
+  .tag-alert { background: rgba(255,34,68,0.2); color: var(--accent-red); }
+  .tag-info { background: rgba(0,212,255,0.1); color: var(--accent-cyan); }
+  .tag-block { background: rgba(255,107,0,0.15); color: var(--accent-orange); }
+  .tag-action { background: rgba(0,255,136,0.1); color: var(--accent-green); }
+  .log-msg { color: var(--text-secondary); }
+
+  /* CENTER PANEL */
+  .center-panel { background: var(--bg-panel); display: flex; flex-direction: column; gap: 1px; }
+
+  /* Attack Map */
+  .map-area {
+    background: var(--bg-card);
+    position: relative;
+    height: 280px;
+    overflow: hidden;
+  }
+  .map-canvas {
+    width: 100%; height: 100%;
+    background:
+      radial-gradient(ellipse at 30% 50%, rgba(0,80,160,0.15) 0%, transparent 60%),
+      radial-gradient(ellipse at 70% 30%, rgba(0,40,100,0.1) 0%, transparent 50%),
+      linear-gradient(180deg, #060d1a 0%, #080f20 100%);
+    position: relative;
+  }
+  .world-map-svg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.15; }
+
+  /* Attack nodes */
+  .atk-node {
+    position: absolute;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+  }
+  .atk-node.high { background: var(--accent-red); box-shadow: 0 0 10px var(--accent-red); animation: nodePulse 1.5s infinite; }
+  .atk-node.med { background: var(--accent-yellow); box-shadow: 0 0 8px var(--accent-yellow); animation: nodePulse 2s infinite; }
+  .atk-node.low { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+  .atk-node.monitor { background: var(--accent-cyan); box-shadow: 0 0 6px var(--accent-cyan); }
+
+  .map-legend {
+    position: absolute; bottom: 10px; left: 12px;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--text-secondary); }
+  .legend-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* Attack lines SVG */
+  .atk-lines { position: absolute; inset: 0; pointer-events: none; }
+
+  /* Triage Feed */
+  .triage-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid var(--border); background: rgba(0,212,255,0.03); }
+  .triage-table-wrap { overflow-y: auto; max-height: 310px; }
+  .triage-table { width: 100%; border-collapse: collapse; }
+  .triage-table th { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; padding: 5px 10px; text-align: left; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-panel); z-index: 1; }
+  .triage-table td { padding: 8px 10px; border-bottom: 1px solid rgba(26,46,74,0.4); vertical-align: top; }
+  .triage-table tr:hover td { background: rgba(0,212,255,0.03); }
+  .alert-name { font-family: 'Rajdhani', sans-serif; font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+  .alert-src { font-size: 9px; color: var(--text-secondary); }
+  .risk-badge {
+    display: inline-flex; flex-direction: column; align-items: center;
+    width: 44px; height: 44px; border-radius: 6px; justify-content: center;
+    font-family: 'Rajdhani', sans-serif; font-size: 20px; font-weight: 700;
+    border: 1px solid;
+  }
+  .risk-badge.critical { background: rgba(255,34,68,0.15); border-color: var(--critical); color: var(--critical); box-shadow: 0 0 12px rgba(255,34,68,0.2); }
+  .risk-badge.high { background: rgba(255,107,0,0.15); border-color: var(--high); color: var(--high); }
+  .risk-badge.medium { background: rgba(255,215,0,0.1); border-color: var(--medium); color: var(--medium); }
+  .risk-label { font-size: 7px; font-weight: 600; margin-top: -4px; letter-spacing: 0.5px; }
+  .ai-reason { font-size: 9px; color: var(--text-secondary); line-height: 1.5; max-width: 200px; }
+  .action-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 4px;
+    font-size: 9px; font-weight: 600;
+    border: 1px solid; white-space: nowrap;
+    font-family: 'Rajdhani', sans-serif;
+  }
+  .action-badge.isolated { background: rgba(0,255,136,0.1); border-color: var(--accent-green); color: var(--accent-green); }
+  .action-badge.blocked { background: rgba(255,107,0,0.1); border-color: var(--accent-orange); color: var(--accent-orange); }
+  .action-badge.pending { background: rgba(255,215,0,0.1); border-color: var(--accent-yellow); color: var(--accent-yellow); }
+  .action-badge.monitored { background: rgba(0,212,255,0.1); border-color: var(--accent-cyan); color: var(--accent-cyan); }
+  .action-sub { font-size: 8px; color: var(--text-dim); margin-top: 3px; }
+
+  /* Bottom center row */
+  .bottom-center { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; background: var(--border); }
+  .bottom-cell { background: var(--bg-panel); padding: 10px 12px; }
+
+  /* Incident logs */
+  .incident-item { display: flex; gap: 8px; padding: 5px 0; border-bottom: 1px solid rgba(26,46,74,0.3); align-items: flex-start; }
+  .incident-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+  .incident-text { font-size: 9px; color: var(--text-secondary); line-height: 1.5; }
+  .incident-time { font-family: 'Share Tech Mono', monospace; font-size: 8px; color: var(--text-dim); }
+
+  /* AI Reasoning */
+  .ai-box {
+    background: rgba(0,212,255,0.04);
+    border: 1px solid rgba(0,212,255,0.1);
+    border-radius: 4px; padding: 8px;
+    margin-bottom: 8px;
+    font-size: 9px; color: var(--text-secondary); line-height: 1.6;
+  }
+  .ai-indicators { margin-top: 8px; }
+  .ai-ind-item { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 3px; font-size: 9px; color: var(--text-secondary); }
+  .ai-ind-item::before { content: '•'; color: var(--accent-orange); flex-shrink: 0; }
+  .confidence-bar-wrap { margin-top: 8px; }
+  .confidence-label { display: flex; justify-content: space-between; margin-bottom: 3px; font-size: 9px; color: var(--text-secondary); }
+  .confidence-bar { height: 4px; background: var(--bg-card); border-radius: 2px; overflow: hidden; }
+  .confidence-fill { height: 100%; background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green)); border-radius: 2px; animation: fillBar 1s ease; }
+
+  /* Ticket */
+  .ticket-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .ticket-id { font-family: 'Rajdhani', sans-serif; font-size: 14px; font-weight: 700; color: var(--text-primary); }
+  .ticket-crit { padding: 2px 8px; background: rgba(255,34,68,0.15); border: 1px solid var(--critical); color: var(--critical); border-radius: 3px; font-size: 9px; font-weight: 700; }
+  .ticket-row { display: flex; gap: 4px; margin-bottom: 3px; font-size: 9px; }
+  .ticket-key { color: var(--text-dim); width: 60px; flex-shrink: 0; }
+  .ticket-val { color: var(--text-secondary); }
+  .evidence-item { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 9px; color: var(--text-secondary); }
+  .ev-check { width: 12px; height: 12px; border-radius: 2px; background: rgba(0,255,136,0.15); border: 1px solid var(--accent-green); display: flex; align-items: center; justify-content: center; font-size: 8px; color: var(--accent-green); flex-shrink: 0; }
+
+  /* RIGHT PANEL */
+  .right-panel { background: var(--bg-panel); display: flex; flex-direction: column; gap: 1px; }
+
+  /* VirusTotal */
+  .vt-search {
+    display: flex; gap: 6px; padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .vt-input {
+    flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 8px;
+    color: var(--text-secondary); font-size: 10px; font-family: 'Exo 2', sans-serif;
+    outline: none;
+  }
+  .vt-input:focus { border-color: var(--accent-cyan); }
+  .vt-btn { width: 24px; height: 24px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-secondary); }
+
+  .vt-result { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .vt-file-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .vt-icon { width: 28px; height: 28px; background: rgba(255,34,68,0.1); border: 1px solid var(--critical); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .vt-filename { font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--text-primary); }
+  .vt-hash { font-size: 8px; color: var(--text-dim); }
+  .vt-ratio { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .vt-score { font-family: 'Rajdhani', sans-serif; font-size: 28px; font-weight: 700; color: var(--critical); }
+  .vt-score-den { font-size: 12px; color: var(--text-secondary); }
+  .malicious-badge { background: var(--critical); color: white; padding: 2px 10px; border-radius: 3px; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+  .vt-meta { font-size: 9px; color: var(--text-secondary); }
+  .vt-meta-row { display: flex; justify-content: space-between; padding: 2px 0; }
+  .vt-meta-val { color: var(--text-primary); font-family: 'Share Tech Mono', monospace; font-size: 9px; }
+
+  /* SearchXNG */
+  .intel-item { padding: 7px 12px; border-bottom: 1px solid rgba(26,46,74,0.4); display: flex; gap: 8px; align-items: flex-start; }
+  .intel-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; margin-top: 1px; }
+  .intel-icon.red { background: rgba(255,34,68,0.15); border: 1px solid var(--critical); }
+  .intel-icon.green { background: rgba(0,255,136,0.15); border: 1px solid var(--accent-green); }
+  .intel-title { font-family: 'Rajdhani', sans-serif; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .intel-src { font-size: 9px; color: var(--text-secondary); }
+  .intel-new { background: var(--accent-cyan); color: var(--bg-base); padding: 1px 5px; border-radius: 2px; font-size: 8px; font-weight: 700; }
+
+  /* Performance Metrics */
+  .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); }
+  .metric-cell { background: var(--bg-panel); padding: 8px 12px; }
+  .metric-label { font-size: 9px; color: var(--text-secondary); margin-bottom: 2px; }
+  .metric-val { font-family: 'Rajdhani', sans-serif; font-size: 20px; font-weight: 700; color: var(--accent-cyan); }
+  .metric-delta { font-size: 9px; }
+  .metric-delta.down { color: var(--accent-green); }
+  .metric-delta.up { color: var(--accent-orange); }
+
+  /* AI Feedback */
+  .feedback-item { display: flex; gap: 8px; padding: 6px 12px; border-bottom: 1px solid rgba(26,46,74,0.3); }
+  .feedback-icon { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; flex-shrink: 0; margin-top: 1px; }
+  .feedback-icon.policy { background: rgba(0,255,136,0.15); border: 1px solid var(--accent-green); color: var(--accent-green); }
+  .feedback-icon.ioc { background: rgba(0,212,255,0.15); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); }
+  .feedback-icon.model { background: rgba(155,89,255,0.15); border: 1px solid var(--accent-purple); color: var(--accent-purple); }
+  .feedback-text { font-size: 9px; color: var(--text-secondary); line-height: 1.5; }
+  .feedback-title { font-family: 'Rajdhani', sans-serif; font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 1px; }
+  .feedback-time { font-family: 'Share Tech Mono', monospace; font-size: 8px; color: var(--text-dim); }
+
+  .view-link { color: var(--accent-cyan); font-size: 9px; text-decoration: none; display: inline-flex; align-items: center; gap: 3px; margin: 4px 12px; }
+  .view-link:hover { color: var(--accent-green); }
+
+  /* Operational status bar */
+  .op-status {
+    display: flex; align-items: center; gap: 6px; padding: 3px 10px;
+    background: rgba(0,255,136,0.05); border-bottom: 1px solid rgba(0,255,136,0.1);
+    font-size: 9px; color: var(--accent-green);
+  }
+
+  /* Animated elements */
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity: 0.4; } }
+  @keyframes nodePulse {
+    0% { box-shadow: 0 0 4px currentColor; }
+    50% { box-shadow: 0 0 16px currentColor, 0 0 30px currentColor; }
+    100% { box-shadow: 0 0 4px currentColor; }
+  }
+  @keyframes lineFlow {
+    0% { stroke-dashoffset: 100; }
+    100% { stroke-dashoffset: 0; }
+  }
+  @keyframes fillBar { from { width: 0; } }
+  @keyframes blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+  @keyframes scan {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(260px); }
+  }
+
+  .scan-line {
+    position: absolute; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0,212,255,0.4), transparent);
+    animation: scan 3s linear infinite;
+    pointer-events: none;
+  }
+
+  .cursor-blink { animation: blink 1s infinite; }
+
+  /* Attack SVG lines */
+  .atk-line { stroke-dasharray: 8 4; animation: lineFlow 1.5s linear infinite; stroke-width: 1; fill: none; opacity: 0.6; }
+
+  /* Bottom links */
+  .bottom-link { font-size: 9px; color: var(--accent-cyan); text-decoration: none; display: flex; align-items: center; gap: 3px; margin-top: 6px; }
+
+  /* SIRPNexus btn */
+  .sirp-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(0,212,255,0.08); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); border-radius: 4px; font-size: 9px; font-family: 'Rajdhani', sans-serif; font-weight: 600; text-decoration: none; margin-top: 6px; cursor: pointer; }
+  .attach-btn { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: rgba(155,89,255,0.08); border: 1px solid var(--accent-purple); color: var(--accent-purple); border-radius: 4px; font-size: 9px; font-family: 'Rajdhani', sans-serif; font-weight: 600; cursor: pointer; }
+
+  /* Separator */
+  .sep { height: 1px; background: var(--border); }
+
+  .all-sys {
+    display: flex; align-items: center; gap: 5px;
+    font-family: 'Rajdhani', sans-serif; font-size: 11px; font-weight: 600; color: var(--accent-green);
+  }
+
+  /* Map controls */
+  .map-controls { position: absolute; top: 10px; left: 10px; display: flex; flex-direction: column; gap: 2px; }
+  .map-ctrl-btn { width: 22px; height: 22px; background: rgba(8,14,26,0.9); border: 1px solid var(--border); border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--text-secondary); cursor: pointer; }
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <!-- Brand -->
+  <div class="topbar-brand">
+    <div class="brand-icon">🛡️</div>
+    <div class="brand-text">
+      <h1>AD-AGENTIC DASHBOARD</h1>
+      <p>Autonomous Defense + Agentic AI Command Center</p>
+    </div>
+  </div>
+
+  <!-- System Health -->
+  <div class="topbar-health">
+    <div>
+      <div class="health-label"><span class="health-dot"></span>SYSTEM HEALTH</div>
+      <div style="display:flex;align-items:baseline;gap:6px;">
+        <span class="health-val">128</span>
+        <span style="font-size:10px;color:var(--text-secondary);">Agents Active</span>
+      </div>
+    </div>
+    <div style="margin-left:10px;">
+      <div class="health-label">Offline</div>
+      <div class="health-val" style="color:var(--text-dim);">0</div>
+    </div>
+    <svg class="sparkline-mini" viewBox="0 0 80 24">
+      <polyline points="0,18 10,14 20,16 30,10 40,12 50,6 60,8 70,4 80,6" fill="none" stroke="var(--accent-green)" stroke-width="1.5" opacity="0.8"/>
+    </svg>
+    <div class="all-sys">✓ All Systems Operational</div>
+  </div>
+
+  <!-- Operation Mode -->
+  <div class="topbar-opmode">
+    <div style="margin-right:6px;">
+      <div class="health-label">OPERATION MODE</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="opmode-btn">MANUAL</div>
+      <div class="opmode-sub">AI hanya memberi<br>notifikasi</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="opmode-btn">Observer</div>
+      <div class="opmode-sub">AI memberi<br>rekomendasi</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="opmode-btn active">OPERATOR</div>
+      <div class="opmode-sub">AI menjalankan tindakan<br>otomatis</div>
+    </div>
+  </div>
+
+  <!-- User -->
+  <div class="topbar-user">
+    <div style="text-align:right;">
+      <div class="user-name">Sertu Yusuf</div>
+      <div class="user-role">Cyber Operator</div>
+      <div class="user-time" id="clock">14:05:32 WIB</div>
+      <div class="user-time">21 Mei 2025</div>
+    </div>
+    <div class="user-avatar">🎖️</div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+    <!-- Threat Hunting Header -->
+    <div class="section-header">
+      <span class="section-title">🔍 Threat Hunting &amp; Telemetry</span>
+    </div>
+
+    <!-- ML Detection Stats Header -->
+    <div class="section-header" style="background:transparent;">
+      <span class="section-title" style="color:var(--text-secondary);font-size:10px;">ML DETECTION STATS</span>
+      <span class="section-badge">Last 24 Hours</span>
+    </div>
+
+    <!-- Isolation Forest -->
+    <div class="ml-block">
+      <div class="ml-header">
+        <div>
+          <div class="ml-name">⚡ Isolation Forest</div>
+          <div class="ml-type">Anomaly Detection</div>
+        </div>
+        <svg width="60" height="20" viewBox="0 0 60 20">
+          <polyline points="0,14 8,10 16,12 24,6 32,9 40,4 48,7 56,3 60,5" fill="none" stroke="var(--accent-cyan)" stroke-width="1.2" opacity="0.7"/>
+        </svg>
+      </div>
+      <div class="precision-row">
+        <div class="precision-circle" style="--pct: 345.6deg;">
+          <div class="precision-inner">96%</div>
+        </div>
+        <div class="stat-rows">
+          <div class="stat-row"><span class="stat-lbl">Detections</span><span class="stat-val" style="color:var(--accent-cyan);">1,248</span></div>
+          <div class="stat-row"><span class="stat-lbl">True Positives</span><span class="stat-val" style="color:var(--accent-green);">1,198</span></div>
+          <div class="stat-row"><span class="stat-lbl">False Positives</span><span class="stat-val" style="color:var(--accent-orange);">50</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LSTM Neural Network -->
+    <div class="ml-block">
+      <div class="ml-header">
+        <div>
+          <div class="ml-name">🧠 LSTM Neural Network</div>
+          <div class="ml-type">Sequence Analysis</div>
+        </div>
+        <svg width="60" height="20" viewBox="0 0 60 20">
+          <polyline points="0,16 8,12 16,14 24,8 32,10 40,5 48,8 56,3" fill="none" stroke="var(--accent-green)" stroke-width="1.2" opacity="0.7"/>
+        </svg>
+      </div>
+      <div class="precision-row">
+        <div class="precision-circle" style="background: conic-gradient(var(--accent-green) 334.8deg, var(--bg-card) 0);">
+          <div class="precision-inner" style="color:var(--accent-green);">93%</div>
+        </div>
+        <div class="stat-rows">
+          <div class="stat-row"><span class="stat-lbl">Detections</span><span class="stat-val" style="color:var(--accent-cyan);">872</span></div>
+          <div class="stat-row"><span class="stat-lbl">True Positives</span><span class="stat-val" style="color:var(--accent-green);">811</span></div>
+          <div class="stat-row"><span class="stat-lbl">False Positives</span><span class="stat-val" style="color:var(--accent-orange);">61</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOP IOCs -->
+    <div class="section-header">
+      <span class="section-title" style="color:var(--text-secondary);font-size:10px;">TOP IOCs (Enriched)</span>
+    </div>
+    <div class="ioc-section">
+      <div class="ioc-tabs">
+        <button class="ioc-tab active">IP Addresses</button>
+        <button class="ioc-tab">Domains</button>
+        <button class="ioc-tab">Hashes</button>
+      </div>
+      <table class="ioc-table">
+        <thead>
+          <tr><th>Indicator</th><th>Count</th><th>Risk</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color:var(--text-primary);">185.220.101.15</td>
+            <td style="color:var(--text-secondary);">452</td>
+            <td><span class="risk-dot" style="background:var(--critical);"></span> <span style="color:var(--critical);">96</span></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-primary);">103.97.142.11</td>
+            <td style="color:var(--text-secondary);">389</td>
+            <td><span class="risk-dot" style="background:var(--critical);"></span> <span style="color:var(--critical);">95</span></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-primary);">45.129.120.33</td>
+            <td style="color:var(--text-secondary);">312</td>
+            <td><span class="risk-dot" style="background:var(--high);"></span> <span style="color:var(--high);">90</span></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-primary);">192.168.10.45</td>
+            <td style="color:var(--text-secondary);">276</td>
+            <td><span class="risk-dot" style="background:var(--high);"></span> <span style="color:var(--high);">85</span></td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-primary);">167.99.23.10</td>
+            <td style="color:var(--text-secondary);">198</td>
+            <td><span class="risk-dot" style="background:var(--medium);"></span> <span style="color:var(--medium);">80</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- System Logs -->
+    <div class="section-header">
+      <span class="section-title" style="color:var(--text-secondary);font-size:10px;">SYSTEM LOGS (Real-time)</span>
+    </div>
+    <div class="syslog-section" id="syslog">
+      <div class="log-line"><span class="log-time">14:05:28</span><span class="log-tag tag-alert">[ALERT]</span><span class="log-msg">Suspicious PowerShell Activity detected</span></div>
+      <div class="log-line"><span class="log-time">14:05:22</span><span class="log-tag tag-info">[INFO]</span><span class="log-msg">Threat Intel feed updated (VirusTotal)</span></div>
+      <div class="log-line"><span class="log-time">14:05:18</span><span class="log-tag tag-block">[BLOCK]</span><span class="log-msg">IP 185.220.101.15 blocked by Sentinel</span></div>
+      <div class="log-line"><span class="log-time">14:05:14</span><span class="log-tag tag-alert">[ALERT]</span><span class="log-msg">Lateral Movement pattern detected</span></div>
+      <div class="log-line"><span class="log-time">14:05:10</span><span class="log-tag tag-info">[INFO]</span><span class="log-msg">YARA Rule match: Possible Cobalt Strike</span></div>
+      <div class="log-line"><span class="log-time">14:05:07</span><span class="log-tag tag-action">[ACTION]</span><span class="log-msg">Endpoint PC-102 isolated</span></div>
+      <div class="log-line"><span class="log-time">14:05:02</span><span class="log-tag tag-alert">[ALERT]</span><span class="log-msg">High entropy connection to 103.97.142.11</span></div>
+      <div class="log-line"><span class="log-time">14:05:00</span><span class="log-tag tag-info">[INFO]</span><span class="log-msg">Agent PC-087 heartbeat OK</span></div>
+      <div class="log-line"><span class="log-time">14:04:59</span><span class="log-tag tag-alert">[ALERT]</span><span class="log-msg">Possible Ransomware behavior detected</span></div>
+      <div class="log-line"><span class="log-time">14:04:44</span><span class="log-tag tag-info">[INFO]</span><span class="log-msg">New IOC enriched: evilupdate.exe (hash)</span></div>
+    </div>
+    <a class="view-link" href="#">📋 View Full Logs ↗</a>
+  </div>
+
+  <!-- CENTER PANEL -->
+  <div class="center-panel">
+    <!-- Header -->
+    <div class="section-header">
+      <span class="section-title">⚡ Active Security Intelligence</span>
+    </div>
+
+    <!-- Split: Map + Triage -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border);">
+
+      <!-- Live Attack Map -->
+      <div style="background:var(--bg-panel);">
+        <div class="section-header">
+          <span class="section-title" style="font-size:10px;color:var(--text-secondary);">🌐 Live Attack Map</span>
+        </div>
+        <div class="map-area">
+          <div class="map-canvas">
+            <div class="scan-line"></div>
+            <!-- World map SVG placeholder -->
+            <svg class="world-map-svg" viewBox="0 0 900 500" xmlns="http://www.w3.org/2000/svg">
+              <!-- Simple continent outlines -->
+              <path d="M120,140 L200,120 L280,130 L300,160 L270,180 L220,190 L180,200 L140,190 L110,170 Z" fill="rgba(0,180,255,0.3)" stroke="rgba(0,212,255,0.5)" stroke-width="0.5"/>
+              <path d="M310,100 L420,90 L500,110 L520,150 L510,200 L490,230 L460,240 L430,220 L390,210 L350,190 L310,160 Z" fill="rgba(0,180,255,0.25)" stroke="rgba(0,212,255,0.4)" stroke-width="0.5"/>
+              <path d="M350,250 L380,240 L400,260 L410,300 L400,340 L370,370 L340,360 L320,330 L330,290 Z" fill="rgba(0,180,255,0.2)" stroke="rgba(0,212,255,0.3)" stroke-width="0.5"/>
+              <path d="M530,120 L650,100 L720,130 L740,180 L730,220 L700,250 L640,270 L580,260 L540,220 L520,170 Z" fill="rgba(0,180,255,0.3)" stroke="rgba(0,212,255,0.5)" stroke-width="0.5"/>
+              <path d="M560,280 L650,270 L700,300 L720,350 L700,400 L650,430 L580,420 L540,380 L530,330 Z" fill="rgba(0,180,255,0.2)" stroke="rgba(0,212,255,0.3)" stroke-width="0.5"/>
+              <path d="M730,150 L800,140 L840,170 L830,220 L790,240 L750,230 L720,200 Z" fill="rgba(0,180,255,0.2)" stroke="rgba(0,212,255,0.3)" stroke-width="0.5"/>
+            </svg>
+
+            <!-- Attack lines -->
+            <svg class="atk-lines" viewBox="0 0 900 280">
+              <path class="atk-line" d="M620,120 Q400,60 180,155" stroke="var(--accent-red)"/>
+              <path class="atk-line" d="M540,95 Q370,80 200,140" stroke="var(--accent-red)" style="animation-delay:0.5s"/>
+              <path class="atk-line" d="M660,170 Q480,130 310,155" stroke="var(--accent-orange)" style="animation-delay:1s"/>
+              <path class="atk-line" d="M720,140 Q550,100 420,130" stroke="var(--accent-yellow)" style="animation-delay:0.3s"/>
+              <path class="atk-line" d="M580,200 Q450,160 330,180" stroke="var(--accent-cyan)" style="animation-delay:0.8s"/>
+            </svg>
+
+            <!-- Attack nodes -->
+            <div class="atk-node high" style="left:20%;top:55%;"></div>
+            <div class="atk-node high" style="left:68%;top:42%;"></div>
+            <div class="atk-node med" style="left:57%;top:32%;"></div>
+            <div class="atk-node med" style="left:79%;top:50%;"></div>
+            <div class="atk-node low" style="left:43%;top:60%;"></div>
+            <div class="atk-node monitor" style="left:35%;top:45%;"></div>
+            <div class="atk-node monitor" style="left:50%;top:38%;"></div>
+            <div class="atk-node high" style="left:60%;top:68%;"></div>
+
+            <!-- Map controls -->
+            <div class="map-controls">
+              <div class="map-ctrl-btn">+</div>
+              <div class="map-ctrl-btn">−</div>
+              <div class="map-ctrl-btn">⊡</div>
+            </div>
+
+            <!-- Legend -->
+            <div class="map-legend">
+              <div class="legend-item"><div class="legend-dot" style="background:var(--critical);box-shadow:0 0 6px var(--critical)"></div>High Risk</div>
+              <div class="legend-item"><div class="legend-dot" style="background:var(--medium);box-shadow:0 0 6px var(--medium)"></div>Medium Risk</div>
+              <div class="legend-item"><div class="legend-dot" style="background:var(--accent-green);box-shadow:0 0 6px var(--accent-green)"></div>Low Risk</div>
+              <div class="legend-item"><div class="legend-dot" style="background:var(--accent-cyan);box-shadow:0 0 6px var(--accent-cyan)"></div>Monitored Node</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agentic Triage Feed -->
+      <div style="background:var(--bg-panel);">
+        <div class="triage-header">
+          <span class="section-title" style="font-size:10px;color:var(--text-secondary);">🤖 Agentic Triage Feed</span>
+          <span class="section-badge">All Alerts ▾</span>
+        </div>
+        <div class="triage-table-wrap">
+          <table class="triage-table">
+            <thead>
+              <tr>
+                <th>TIME</th>
+                <th>ALERT</th>
+                <th>RISK</th>
+                <th>AI REASONING</th>
+                <th>STATUS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-dim);white-space:nowrap;">14:05:18</td>
+                <td>
+                  <div class="alert-name" style="color:var(--critical);">Potential Ransomware Detected</div>
+                  <div class="alert-src">Endpoint: PC-102 · User: staf.ujungan</div>
+                </td>
+                <td><div class="risk-badge critical"><span>94</span><span class="risk-label">CRITICAL</span></div></td>
+                <td><div class="ai-reason">Terdeteksi pola enkripsi file massal (.locked extension) dan komunikasi dengan C2 server yang dikenal. Sinkron dengan threat intel terbaru.</div></td>
+                <td>
+                  <div class="action-badge isolated">✓ Auto-Isolated</div>
+                  <div class="action-sub">Host Isolated<br>14:05:20</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-dim);white-space:nowrap;">14:04:59</td>
+                <td>
+                  <div class="alert-name" style="color:var(--high);">Lateral Movement Activity</div>
+                  <div class="alert-src">Source: PC-087 · User: administrator</div>
+                </td>
+                <td><div class="risk-badge high"><span>88</span><span class="risk-label">HIGH</span></div></td>
+                <td><div class="ai-reason">Terdeteksi penggunaan kredensial yang sama di multiple endpoint dalam waktu singkat. Pola sesuai teknik MITRE T1021.</div></td>
+                <td>
+                  <div class="action-badge blocked">🚦 Traffic Blocked</div>
+                  <div class="action-sub">SMB Blocked<br>14:09:01</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-dim);white-space:nowrap;">14:04:45</td>
+                <td>
+                  <div class="alert-name" style="color:var(--high);">Suspicious PowerShell Activity</div>
+                  <div class="alert-src">Endpoint: PC-075 · User: staf.it</div>
+                </td>
+                <td><div class="risk-badge high"><span>76</span><span class="risk-label">HIGH</span></div></td>
+                <td><div class="ai-reason">PowerShell menjalankan perintah encoded yang sering digunakan untuk download payload. IOC cocok dengan threat intel.</div></td>
+                <td>
+                  <div class="action-badge pending">⏳ Awaiting Approval</div>
+                  <div class="action-sub">Needs Review<br>Review Now</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-dim);white-space:nowrap;">14:04:02</td>
+                <td>
+                  <div class="alert-name" style="color:var(--medium);">Data Exfiltration Attempt</div>
+                  <div class="alert-src">Source: 192.168.10.45 · User: unknown</div>
+                </td>
+                <td><div class="risk-badge medium"><span>65</span><span class="risk-label">MEDIUM</span></div></td>
+                <td><div class="ai-reason">Volume upload tidak biasa ke external IP. Pola sesuai data exfiltration. Ukuran data melebihi baseline normal.</div></td>
+                <td>
+                  <div class="action-badge monitored">👁 Monitored</div>
+                  <div class="action-sub">Monitoring<br>Ongoing</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--text-dim);white-space:nowrap;">14:03:21</td>
+                <td>
+                  <div class="alert-name" style="color:var(--medium);">Malware Download Detected</div>
+                  <div class="alert-src">Endpoint: PC-099 · User: staf.umum</div>
+                </td>
+                <td><div class="risk-badge medium"><span>62</span><span class="risk-label">MEDIUM</span></div></td>
+                <td><div class="ai-reason">Terdeteksi download executable dari domain baru yang belum dikenal. VirusTotal: 5/71 engines flagged as malicious.</div></td>
+                <td>
+                  <div class="action-badge isolated">🛡 Blocked</div>
+                  <div class="action-sub">Download Blocked<br>14:03:22</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Row: 3 cells -->
+    <div class="bottom-center">
+
+      <!-- Incident Logs -->
+      <div class="bottom-cell">
+        <div class="section-title" style="margin-bottom:8px;">📋 Incident Logs (Timeline)</div>
+        <div class="incident-item">
+          <div class="incident-dot" style="background:var(--critical);box-shadow:0 0 6px var(--critical);"></div>
+          <div>
+            <div class="incident-text">Attempted Exfiltration blocked from PC-102</div>
+            <div class="incident-time">14:05:28</div>
+          </div>
+        </div>
+        <div class="incident-item">
+          <div class="incident-dot" style="background:var(--critical);"></div>
+          <div>
+            <div class="incident-text">Ransomware behavior detected on PC-102</div>
+            <div class="incident-time">14:05:18</div>
+          </div>
+        </div>
+        <div class="incident-item">
+          <div class="incident-dot" style="background:var(--accent-orange);"></div>
+          <div>
+            <div class="incident-text">Endpoint PC-102 isolated from network</div>
+            <div class="incident-time">14:05:07</div>
+          </div>
+        </div>
+        <div class="incident-item">
+          <div class="incident-dot" style="background:var(--accent-orange);"></div>
+          <div>
+            <div class="incident-text">Lateral Movement detected from PC-087</div>
+            <div class="incident-time">14:04:59</div>
+          </div>
+        </div>
+        <div class="incident-item">
+          <div class="incident-dot" style="background:var(--accent-yellow);"></div>
+          <div>
+            <div class="incident-text">Suspicious PowerShell on PC-075</div>
+            <div class="incident-time">14:04:45</div>
+          </div>
+        </div>
+        <a class="bottom-link" href="#">📄 View All Incidents ↗</a>
+      </div>
+
+      <!-- AI Reasoning -->
+      <div class="bottom-cell">
+        <div class="section-title" style="margin-bottom:8px;">🧠 AI Reasoning &amp; Analysis</div>
+        <div class="ai-box">
+          "Analisis menunjukkan upaya enkripsi file massal pada endpoint PC-102. Pola behavior cocok dengan Ransomware LockBit yang telah dianalisis. Segera lakukan investigasi forensik dan pemulihan dan backup."
+        </div>
+        <div class="ai-indicators">
+          <div style="font-size:9px;color:var(--text-secondary);margin-bottom:4px;font-weight:600;">Key Indicators:</div>
+          <div class="ai-ind-item">File entropy meningkat drastis (+320%)</div>
+          <div class="ai-ind-item">Ekstensi .locked terdeteksi pada 127 file</div>
+          <div class="ai-ind-item">Komunikasi C2 server 185.220.101.15</div>
+          <div class="ai-ind-item">YARA match: LockBit v4.0</div>
+        </div>
+        <div class="confidence-bar-wrap">
+          <div class="confidence-label"><span>Confidence</span><span style="color:var(--accent-green);font-weight:700;">94%</span></div>
+          <div class="confidence-bar"><div class="confidence-fill" style="width:94%;"></div></div>
+        </div>
+      </div>
+
+      <!-- Ticket Summary -->
+      <div class="bottom-cell">
+        <div class="section-title" style="margin-bottom:8px;">🎫 Ticket Summary (SIRPNexus)</div>
+        <div class="ticket-header">
+          <span class="ticket-id">Ticket #8821</span>
+          <span class="ticket-crit">CRITICAL</span>
+        </div>
+        <div class="ticket-row"><span class="ticket-key">Title:</span><span class="ticket-val">Potential Ransomware - LockBit</span></div>
+        <div class="ticket-row"><span class="ticket-key">Status:</span><span class="ticket-val" style="color:var(--accent-orange);">Open</span></div>
+        <div class="ticket-row"><span class="ticket-key">Priority:</span><span class="ticket-val" style="color:var(--critical);">Critical</span></div>
+        <div class="ticket-row"><span class="ticket-key">Created:</span><span class="ticket-val">21 Mei 2025  14:05:20 WIB</span></div>
+        <div class="ticket-row"><span class="ticket-key">Assigned:</span><span class="ticket-val">Cyber Team - Kodim 0301</span></div>
+        <div style="margin:6px 0 3px;font-size:9px;color:var(--text-secondary);font-weight:600;">Evidence Collected</div>
+        <div class="evidence-item"><div class="ev-check">✓</div>Memory Dump</div>
+        <div class="evidence-item"><div class="ev-check">✓</div>Network Capture (PCAP)</div>
+        <div class="evidence-item"><div class="ev-check">✓</div>Malware Sample</div>
+        <div class="evidence-item"><div class="ev-check">✓</div>System Logs</div>
+        <div class="evidence-item"><div class="ev-check">✓</div>Registry Changes</div>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+          <span class="sirp-btn">🔗 View in SIRPNexus ↗</span>
+          <span class="attach-btn">📎 Attach Forensic Report</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <!-- Threat Intel Panel -->
+    <div class="section-header">
+      <span class="section-title">🔒 Threat Intel Panel</span>
+    </div>
+
+    <!-- VirusTotal Lookup -->
+    <div class="section-header" style="background:transparent;">
+      <span class="section-title" style="color:var(--text-secondary);font-size:10px;">VIRUSTOTAL LOOKUP</span>
+    </div>
+    <div class="vt-search">
+      <input class="vt-input" type="text" placeholder="IP, Domain, Hash...">
+      <div class="vt-btn">🔍</div>
+    </div>
+    <div class="vt-result">
+      <div class="vt-file-row">
+        <div class="vt-icon">⚠️</div>
+        <div>
+          <div class="vt-filename">evilupdate.exe</div>
+          <div class="vt-hash">a3f6e8c...d2b4 (SHA256)</div>
+        </div>
+      </div>
+      <div class="vt-ratio">
+        <div>
+          <span class="vt-score">51</span><span class="vt-score-den">/71</span>
+        </div>
+        <div>
+          <div class="malicious-badge">MALICIOUS</div>
+          <div style="font-size:9px;color:var(--text-secondary);margin-top:3px;">Detection Ratio</div>
+        </div>
+      </div>
+      <div class="vt-meta">
+        <div class="vt-meta-row"><span>First Seen</span><span class="vt-meta-val">2025-05-20  10:16:31 UTC</span></div>
+        <div class="vt-meta-row"><span>Last Seen</span><span class="vt-meta-val">2025-05-21  13:56:02 UTC</span></div>
+      </div>
+      <a class="view-link" href="#">📄 View Full Report ↗</a>
+    </div>
+
+    <!-- SearchXNG Threat Intel -->
+    <div class="section-header">
+      <span class="section-title" style="color:var(--text-secondary);font-size:10px;">SEARCHXNG THREAT INTEL</span>
+    </div>
+    <div class="intel-item">
+      <div class="intel-icon red">🔴</div>
+      <div style="flex:1;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div class="intel-title">New Variant Detected</div>
+          <div class="intel-new">NEW</div>
+        </div>
+        <div class="intel-src">LockBit Black - v4.0</div>
+        <div class="intel-src">Source: Dark Web Monitoring · Confidence: High</div>
+      </div>
+    </div>
+    <div class="intel-item">
+      <div class="intel-icon green">🟢</div>
+      <div>
+        <div class="intel-title">CVE-2025-33073</div>
+        <div class="intel-src">Actively Exploited</div>
+        <div class="intel-src">Source: NVD + Threat Feeds · Confidence: High</div>
+      </div>
+    </div>
+    <a class="view-link" href="#">🔍 View All Intelligence ↗</a>
+
+    <!-- Performance Metrics -->
+    <div class="section-header">
+      <span class="section-title" style="color:var(--text-secondary);font-size:10px;">PERFORMANCE METRICS</span>
+      <span class="section-badge">Last 24 Hours</span>
+    </div>
+    <div class="metrics-grid">
+      <div class="metric-cell">
+        <div class="metric-label">MTTD — Mean Time To Detect</div>
+        <div class="metric-val">12s</div>
+        <div class="metric-delta down">↓ −35%</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">MTTR — Mean Time To Respond</div>
+        <div class="metric-val">45s</div>
+        <div class="metric-delta down">↓ −28%</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">Alerts Processed</div>
+        <div class="metric-val">1,248</div>
+        <div class="metric-delta up">↑ +18%</div>
+      </div>
+      <div class="metric-cell">
+        <div class="metric-label">Automated Actions</div>
+        <div class="metric-val">312</div>
+        <div class="metric-delta up">↑ +22%</div>
+      </div>
+    </div>
+    <div style="padding:8px 12px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:9px;color:var(--text-secondary);">
+        <span>AI Accuracy</span><span style="color:var(--accent-green);font-weight:700;">94.2% ↑+2.1%</span>
+      </div>
+      <div class="confidence-bar"><div class="confidence-fill" style="width:94.2%;"></div></div>
+    </div>
+
+    <!-- AI Learning Feedback -->
+    <div class="section-header">
+      <span class="section-title" style="color:var(--text-secondary);font-size:10px;">AI LEARNING FEEDBACK</span>
+    </div>
+    <div class="feedback-item">
+      <div class="feedback-icon policy">✓</div>
+      <div>
+        <div class="feedback-title">Policy Updated</div>
+        <div class="feedback-text">False Positive terdeteksi pada Rule ID #102 (SMB Scan). Sensitivitas ambang batas diturunkan dari 0.75 ke 0.62.</div>
+        <div class="feedback-time">14:02:55</div>
+      </div>
+    </div>
+    <div class="feedback-item">
+      <div class="feedback-icon ioc">+</div>
+      <div>
+        <div class="feedback-title">New IOC Added</div>
+        <div class="feedback-text">IOC baru ditambahkan: 185.220.101.15 (C2 Server LockBit v4.0)</div>
+        <div class="feedback-time">14:02:33</div>
+      </div>
+    </div>
+    <div class="feedback-item">
+      <div class="feedback-icon model">⟳</div>
+      <div>
+        <div class="feedback-title">Model Retrained</div>
+        <div class="feedback-text">Model Isolation Forest diretrain dengan data baru. Akurasi meningkat +2.1%</div>
+        <div class="feedback-time">13:58:12</div>
+      </div>
+    </div>
+    <a class="view-link" href="#">📊 View Learning History ↗</a>
+  </div>
+
+</div>
+
+<script>
+  // Live clock
+  function updateClock() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2,'0');
+    const m = String(now.getMinutes()).padStart(2,'0');
+    const s = String(now.getSeconds()).padStart(2,'0');
+    document.getElementById('clock').textContent = `${h}:${m}:${s} WIB`;
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // IOC tab switching
+  document.querySelectorAll('.ioc-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.ioc-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+    });
+  });
+
+  // Simulate live log entries
+  const logMessages = [
+    ['ALERT', 'New connection attempt from 185.220.101.15'],
+    ['INFO', 'Threat feed sync completed'],
+    ['BLOCK', 'Outbound SMB blocked on PC-087'],
+    ['ACTION', 'Alert escalated to Cyber Team'],
+    ['INFO', 'YARA scan completed on 48 endpoints'],
+    ['ALERT', 'Unusual DNS query from PC-045'],
+    ['INFO', 'Agent PC-099 heartbeat OK'],
+    ['BLOCK', 'C2 communication blocked: 45.129.120.33'],
+  ];
+
+  let logIdx = 0;
+  setInterval(() => {
+    const syslog = document.getElementById('syslog');
+    const [type, msg] = logMessages[logIdx % logMessages.length];
+    logIdx++;
+    const now = new Date();
+    const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    const tagClass = {ALERT:'tag-alert',INFO:'tag-info',BLOCK:'tag-block',ACTION:'tag-action'}[type];
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.style.opacity = '0';
+    div.style.transition = 'opacity 0.3s';
+    div.innerHTML = `<span class="log-time">${ts}</span><span class="log-tag ${tagClass}">[${type}]</span><span class="log-msg">${msg}</span>`;
+    syslog.insertBefore(div, syslog.firstChild);
+    setTimeout(() => div.style.opacity = '1', 10);
+    if (syslog.children.length > 15) syslog.removeChild(syslog.lastChild);
+  }, 3500);
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+title: Dangerous HTTP Method Used
+id: rule-http-dangerous-methods
+description: HTTP TRACE, CONNECT, or arbitrary PUT/DELETE used — may indicate misconfiguration or attack probe (A05)
+logsource:
+  product: webserver
+detection:
+  trace_connect:
+    event.category: web
+    http.request.method:
+      - TRACE
+      - CONNECT
+      - TRACK
+  put_delete_sensitive:
+    http.request.method:
+      - PUT
+      - DELETE
+      - PATCH
+    url.path|re: '(?i)^/(?:etc|var|usr|bin|boot|proc|sys|root|home)'
+  condition: trace_connect or put_delete_sensitive
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1595
+  - owasp.a05

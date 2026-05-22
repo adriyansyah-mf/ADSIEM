@@ -1,0 +1,11 @@
+name: linux_audit_execve
+log_type: linux_audit
+type: regex
+priority: 10
+enabled: true
+pattern: 'type=EXECVE.*?a0="(?P<cmd>[^"]+)"(?:.*?a1="(?P<arg1>[^"]+)")?(?:.*?a2="(?P<arg2>[^"]+)")?'
+fields:
+  event.category: process
+  event.action: process_created
+  process.name: cmd
+  process.args: arg1

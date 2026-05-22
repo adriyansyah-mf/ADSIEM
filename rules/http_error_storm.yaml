@@ -1,0 +1,20 @@
+title: HTTP 4xx Error Storm (Directory Scanning)
+id: rule-http-error-storm
+description: High rate of HTTP 4xx errors from a single IP — likely directory/file enumeration
+logsource:
+  product: webserver
+detection:
+  selection:
+    event.category: web
+    http.response.status_code|startswith: "4"
+  condition: selection
+threshold:
+  count: 30
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1595.003

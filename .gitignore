@@ -11,3 +11,7 @@ node_modules/
 .env
 .superpowers/
 data/
+ad-agentic-dashboard.html
+.codex
+prompt.md
+claude.md

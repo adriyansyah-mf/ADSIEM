@@ -1,0 +1,18 @@
+title: OS Command Injection via HTTP Request
+id: rule-os-command-injection-web
+description: URL parameters contain OS command injection metacharacters — shell command execution via web input (A03)
+logsource:
+  product: webserver
+detection:
+  shell_metachar:
+    url.path|re: '[?&][^=]+=.*?(?:;|\||`|\$\()\s*(?:id|whoami|uname|cat\s|ls\s|curl\s|wget\s|bash|sh\s|python|perl|nc\s)'
+  cmd_sep:
+    url.path|re: '(?:%7C|%3B|%60|\|\|)\s*(?:id|whoami|cat|ls|bash|sh|uname)'
+  condition: shell_metachar or cmd_sep
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - attack.execution
+  - attack.t1059
+  - owasp.a03

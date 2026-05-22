@@ -1,0 +1,286 @@
+import { useState } from 'react'
+import { useUebaEntities, useUebaEntityDetail, useUebaStatus } from '@/hooks/useUeba'
+import type { UebaEntityScore, UebaAnomaly } from '@/types'
+
+function riskColor(score: number) {
+  if (score >= 80) return 'var(--accent-red)'
+  if (score >= 60) return '#ff6b35'
+  if (score >= 40) return 'var(--accent-yellow)'
+  return 'var(--accent-green)'
+}
+
+function RiskBar({ score }: { score: number }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ flex: 1, height: '4px', background: 'var(--bg-base)', borderRadius: '2px', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${score}%`, background: riskColor(score), borderRadius: '2px', transition: 'width 0.3s' }} />
+      </div>
+      <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: riskColor(score), minWidth: '28px', textAlign: 'right' }}>
+        {score.toFixed(0)}
+      </span>
+    </div>
+  )
+}
+
+function EntityRow({ entity, selected, onClick }: { entity: UebaEntityScore; selected: boolean; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'grid', gridTemplateColumns: '1fr auto',
+        alignItems: 'center', gap: '10px',
+        padding: '8px 12px',
+        background: selected ? 'rgba(0,212,255,0.08)' : 'transparent',
+        borderLeft: `2px solid ${selected ? 'var(--accent-cyan)' : 'transparent'}`,
+        cursor: 'pointer',
+        transition: 'background 0.15s',
+      }}
+    >
+      <div>
+        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-primary)' }}>
+          {entity.entity_value}
+        </div>
+        {entity.anomaly_count > 0 && (
+          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
+            {entity.anomaly_count} anomal{entity.anomaly_count === 1 ? 'y' : 'ies'}
+          </div>
+        )}
+      </div>
+      <div style={{ width: '80px' }}>
+        <RiskBar score={entity.risk_score} />
+      </div>
+    </div>
+  )
+}
+
+function FeatureTable({ features }: { features: Record<string, number> }) {
+  const WARN_THRESHOLDS: Record<string, number> = {
+    failed_ratio: 0.5,
+    unique_ips: 3,
+    unique_users: 5,
+    sudo_count: 3,
+    new_ip_seen: 0.5,
+  }
+  return (
+    <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+      <tbody>
+        {Object.entries(features).map(([k, v]) => {
+          const warn = WARN_THRESHOLDS[k] !== undefined && v >= WARN_THRESHOLDS[k]
+          return (
+            <tr key={k}>
+              <td style={{ color: 'var(--text-muted)', padding: '2px 8px 2px 0', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px' }}>{k}</td>
+              <td style={{ color: warn ? 'var(--accent-yellow)' : 'var(--text-primary)', padding: '2px 0', fontFamily: 'Share Tech Mono, monospace' }}>
+                {typeof v === 'number' ? v.toFixed(2) : v}
+                {warn && <span style={{ marginLeft: '4px', color: 'var(--accent-yellow)' }}>&#9888;</span>}
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  )
+}
+
+function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
+  if (anomalies.length === 0) return <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>No anomalies recorded</div>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '160px', overflow: 'auto' }}>
+      {anomalies.map((a) => (
+        <div key={a.id} style={{
+          padding: '4px 8px', borderRadius: '3px',
+          background: 'var(--bg-base)',
+          border: `1px solid ${riskColor(a.risk_score)}44`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <div>
+            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: riskColor(a.risk_score) }}>
+              risk {a.risk_score.toFixed(0)}
+            </span>
+            <span style={{ marginLeft: '8px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+              score {a.anomaly_score.toFixed(3)}
+            </span>
+          </div>
+          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
+            {new Date(a.detected_at).toLocaleString()}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DetailPanel({ entityType, entityValue, onClose }: { entityType: string; entityValue: string; onClose: () => void }) {
+  const { data, isLoading } = useUebaEntityDetail(entityType, entityValue)
+
+  return (
+    <div style={{
+      width: '360px', flexShrink: 0,
+      background: 'var(--bg-panel)', border: '1px solid var(--border)',
+      borderRadius: '6px', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{
+        padding: '10px 14px', borderBottom: '1px solid var(--border)',
+        background: 'var(--bg-base)', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <div>
+          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '14px', color: 'var(--accent-cyan)' }}>
+            {entityValue}
+          </div>
+          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+            {entityType.toUpperCase()} ENTITY
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '16px', cursor: 'pointer' }}>&#10005;</button>
+      </div>
+
+      {isLoading ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+          LOADING...
+        </div>
+      ) : data ? (
+        <div style={{ flex: 1, overflow: 'auto', padding: '14px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+              RISK SCORE
+            </div>
+            <RiskBar score={data.score.risk_score} />
+            <div style={{ marginTop: '4px', fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
+              {data.score.anomaly_count} total anomalies &middot;
+              last seen {data.score.last_seen_at ? new Date(data.score.last_seen_at).toLocaleString() : '&mdash;'}
+            </div>
+          </div>
+
+          {data.anomalies.length > 0 && (
+            <div>
+              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+                LAST ANOMALY FEATURES
+              </div>
+              <FeatureTable features={data.anomalies[0].features} />
+            </div>
+          )}
+
+          <div>
+            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+              ANOMALY TIMELINE ({data.anomalies.length})
+            </div>
+            <AnomalyTimeline anomalies={data.anomalies} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+export default function UEBAPage() {
+  const [tab, setTab] = useState<'user' | 'ip'>('user')
+  const [selected, setSelected] = useState<{ type: string; value: string } | null>(null)
+  const { data: entities = [], isLoading } = useUebaEntities(tab)
+  const { data: status } = useUebaStatus()
+
+  const highRisk = entities.filter(e => e.risk_score >= 60).length
+  const statusReady = status?.status === 'ready'
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h1 style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '20px', color: 'var(--accent-cyan)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>
+            UEBA
+          </h1>
+          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+            User &amp; Entity Behavior Analytics &middot; Isolation Forest
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div style={{
+            padding: '4px 10px', borderRadius: '3px',
+            border: `1px solid ${statusReady ? 'var(--accent-green)' : 'var(--accent-yellow)'}`,
+            background: statusReady ? 'rgba(0,255,136,0.08)' : 'rgba(255,214,0,0.08)',
+          }}>
+            <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1px', color: statusReady ? 'var(--accent-green)' : 'var(--accent-yellow)' }}>
+              {statusReady ? '● MODEL READY' : '● COLLECTING DATA'}
+            </span>
+            {status?.trained_at && (
+              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', marginLeft: '6px' }}>
+                trained {new Date(status.trained_at).toLocaleTimeString()}
+              </span>
+            )}
+          </div>
+          {[
+            { label: 'HIGH RISK', value: highRisk, color: highRisk > 0 ? 'var(--accent-red)' : 'var(--text-primary)' },
+            { label: 'USER SNAPS', value: status?.user_snapshot_count ?? 0, color: 'var(--text-primary)' },
+            { label: 'IP SNAPS', value: status?.ip_snapshot_count ?? 0, color: 'var(--text-primary)' },
+          ].map(({ label, value, color }) => (
+            <div key={label} style={{ textAlign: 'center' }}>
+              <div style={{ fontFamily: 'Share Tech Mono, monospace', fontWeight: 700, fontSize: '18px', color, lineHeight: 1 }}>{value}</div>
+              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '1px', marginTop: '2px' }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {!statusReady && (
+        <div style={{
+          padding: '10px 14px', borderRadius: '4px',
+          border: '1px solid rgba(255,214,0,0.3)', background: 'rgba(255,214,0,0.05)',
+          fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-yellow)',
+        }}>
+          &#9889; UEBA is collecting baseline data. Model trains automatically once 50 hourly snapshots are available
+          (&#8776; 50 hours). Currently: {(status?.user_snapshot_count ?? 0) + (status?.ip_snapshot_count ?? 0)} snapshots collected.
+        </div>
+      )}
+
+      <div style={{ flex: 1, display: 'flex', gap: '12px', overflow: 'hidden' }}>
+        <div style={{ flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
+            {(['user', 'ip'] as const).map(t => (
+              <button
+                key={t}
+                onClick={() => { setTab(t); setSelected(null) }}
+                style={{
+                  flex: 1, padding: '8px', border: 'none',
+                  background: tab === t ? 'rgba(0,212,255,0.08)' : 'transparent',
+                  borderBottom: `2px solid ${tab === t ? 'var(--accent-cyan)' : 'transparent'}`,
+                  color: tab === t ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                  fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px',
+                  letterSpacing: '1px', cursor: 'pointer',
+                }}
+              >
+                {t.toUpperCase()}S
+              </button>
+            ))}
+          </div>
+
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            {isLoading ? (
+              <div style={{ padding: '20px', textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+                LOADING...
+              </div>
+            ) : entities.length === 0 ? (
+              <div style={{ padding: '20px', textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+                NO {tab.toUpperCase()} ENTITIES YET
+              </div>
+            ) : (
+              entities.map(e => (
+                <EntityRow
+                  key={e.entity_value}
+                  entity={e}
+                  selected={selected?.value === e.entity_value && selected?.type === e.entity_type}
+                  onClick={() => setSelected({ type: e.entity_type, value: e.entity_value })}
+                />
+              ))
+            )}
+          </div>
+        </div>
+
+        {selected && (
+          <DetailPanel
+            entityType={selected.type}
+            entityValue={selected.value}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </div>
+    </div>
+  )
+}

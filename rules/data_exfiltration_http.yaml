@@ -1,0 +1,17 @@
+title: Potential Data Exfiltration via HTTP POST
+id: rule-data-exfil-http
+description: Large HTTP POST request that may indicate data being exfiltrated to an external server
+logsource:
+  product: webserver
+detection:
+  large_post:
+    event.action: http_request
+    http.request.method: POST
+    http.response.bytes|re: '^[5-9]\d{5,}|^[1-9]\d{6,}'
+  condition: large_post
+suppression:
+  timewindow: 3600
+level: medium
+tags:
+  - attack.exfiltration
+  - attack.t1048

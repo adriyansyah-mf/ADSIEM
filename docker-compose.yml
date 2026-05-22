@@ -1,0 +1,170 @@
+name: siem-platform
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-soc_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-soc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-soc}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-soc} -d ${POSTGRES_DB:-soc_platform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - siem-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - siem-net
+
+  package-builder:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile.packages
+    volumes:
+      - agent_packages:/output
+    restart: "no"
+    networks:
+      - siem-net
+
+  server-api:
+    build:
+      context: ./server-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://soc:soc@postgres:5432/soc_platform}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-bootstrap-token}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
+    volumes:
+      - agent_packages:/app/packages:ro
+    depends_on:
+      package-builder:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:8000/health').raise_for_status()\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    networks:
+      - siem-net
+
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-searxng-secret}
+    volumes:
+      - ./searxng:/etc/searxng
+    networks:
+      - siem-net
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://soc:soc@postgres:5432/soc_platform}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
+      REDIS_CONSUMER_GROUP: ${REDIS_CONSUMER_GROUP:-siem-workers}
+      DECODERS_DIR: /app/decoders
+      RULES_DIR: /app/rules
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+      RELOAD_INTERVAL: ${RELOAD_INTERVAL:-60}
+      WEBHOOK_RETRY_INTERVAL: ${WEBHOOK_RETRY_INTERVAL:-30}
+      MAX_WEBHOOK_ATTEMPTS: ${MAX_WEBHOOK_ATTEMPTS:-5}
+    volumes:
+      - ./decoders:/app/decoders:ro
+      - ./rules:/app/rules:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      server-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - siem-net
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+    restart: unless-stopped
+    depends_on:
+      - server-api
+    networks:
+      - siem-net
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - server-api
+      - dashboard
+    networks:
+      - siem-net
+
+  agent-demo:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-bootstrap-token}
+    volumes:
+      - /var/log:/host/var/log:ro
+    depends_on:
+      server-api:
+        condition: service_healthy
+    networks:
+      - siem-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  agent_packages:
+
+networks:
+  siem-net:
+    driver: bridge

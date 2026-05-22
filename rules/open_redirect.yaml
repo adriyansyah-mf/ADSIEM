@@ -1,0 +1,16 @@
+title: Open Redirect Attempt
+id: rule-open-redirect
+description: URL redirect parameter points to external domain — open redirect for phishing/token theft (A01)
+logsource:
+  product: webserver
+detection:
+  redirect_param:
+    url.path|re: '[?&](?:url|redirect|return|returnUrl|return_url|next|goto|target|dest|destination|ref|redir|forward|link|continue|back|location|to)=(?:https?|ftp|//)(?://)(?!(?:[^/]*\.)?(?:localhost|127\.0\.0\.1))'
+  double_slash:
+    url.path|re: '[?&][^=]+=(?://|%2f%2f)[^/]'
+  condition: redirect_param or double_slash
+level: medium
+tags:
+  - attack.initial_access
+  - attack.t1566
+  - owasp.a01
