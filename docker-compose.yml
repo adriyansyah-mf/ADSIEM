@@ -33,6 +33,16 @@ services:
     networks:
       - siem-net
 
+  package-builder:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile.packages
+    volumes:
+      - agent_packages:/output
+    restart: "no"
+    networks:
+      - siem-net
+
   server-api:
     build:
       context: ./server-api
@@ -46,8 +56,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
     volumes:
-      - ./agent/dist/packages:/app/packages:ro
+      - agent_packages:/app/packages:ro
     depends_on:
+      package-builder:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -151,6 +163,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  agent_packages:
 
 networks:
   siem-net:
