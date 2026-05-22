@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.database import engine, Base
+import app.models.models  # noqa: F401 — ensure all models are registered before create_all
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
 from app.api.routes.cases import router as cases_router
 from app.api.routes.settings import router as settings_router
@@ -28,6 +30,8 @@ structlog.configure(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     yield
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
