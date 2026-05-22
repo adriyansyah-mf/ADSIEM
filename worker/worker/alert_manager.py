@@ -76,3 +76,45 @@ async def create_alert(
             pass  # AI analysis is best-effort
 
         return alert.id
+
+
+async def dispatch_case_webhooks(
+    case_id: str,
+    title: str,
+    severity: str,
+    description: str,
+    group_id: str,
+    alert_id: uuid.UUID | None,
+) -> None:
+    """Queue webhook deliveries for an AI-created case."""
+    if not alert_id:
+        return
+    from worker.models import WebhookConfig, WebhookDelivery
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(WebhookConfig).where(
+                WebhookConfig.is_enabled == True,
+                (WebhookConfig.group_id == None) | (WebhookConfig.group_id == group_id)
+            )
+        )
+        webhooks = result.scalars().all()
+        if not webhooks:
+            return
+        payload = {
+            "event": "case_created",
+            "case_id": case_id,
+            "title": title,
+            "severity": severity,
+            "description": description[:500] if description else "",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "alert_id": str(alert_id),
+        }
+        for webhook in webhooks:
+            db.add(WebhookDelivery(
+                alert_id=alert_id,
+                webhook_config_id=webhook.id,
+                payload=payload,
+                status="pending",
+                attempts=0,
+            ))
+        await db.commit()

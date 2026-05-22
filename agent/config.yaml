@@ -14,3 +14,12 @@ logs:
     type: linux_auth
   - path: /host/var/log/syslog
     type: syslog
+
+fim:
+  enabled: true
+  watch_paths:
+    - /etc
+    - /bin
+    - /sbin
+    - /usr/bin
+    - /usr/sbin

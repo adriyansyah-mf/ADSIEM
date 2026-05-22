@@ -1,0 +1,12 @@
+name: windows_sysmon_network
+log_type: windows_sysmon
+type: regex
+priority: 20
+enabled: true
+pattern: 'EventID[=:\s]+3.*?Image[=:\s]+(?P<image>[^\r\n|]+).*?DestinationIp[=:\s]+(?P<dst_ip>[\d\.]+).*?DestinationPort[=:\s]+(?P<dst_port>\d+)'
+fields:
+  event.category: network
+  event.action: network_connection
+  process.name: image
+  destination.ip: dst_ip
+  destination.port: dst_port

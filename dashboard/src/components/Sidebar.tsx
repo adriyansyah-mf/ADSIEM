@@ -2,7 +2,8 @@ import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import {
   LayoutDashboard, Shield, FileText, Activity, Bell,
-  BookOpen, Code, Users, Webhook, LogOut, Sun, Moon
+  BookOpen, Code, Users, Webhook, LogOut, Sun, Moon,
+  ShieldAlert
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -14,6 +15,7 @@ const nav = [
   { to: '/alerts', label: 'Alerts', icon: Bell, minRole: 'viewer' },
   { to: '/rules', label: 'Rules', icon: BookOpen, minRole: 'viewer' },
   { to: '/decoders', label: 'Decoders', icon: Code, minRole: 'viewer' },
+  { to: '/fim', label: 'FIM', icon: ShieldAlert, minRole: 'viewer' },
   { to: '/webhooks', label: 'Webhooks', icon: Webhook, minRole: 'admin' },
   { to: '/users', label: 'Users', icon: Users, minRole: 'superadmin' },
 ]

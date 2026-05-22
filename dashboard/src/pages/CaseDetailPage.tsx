@@ -131,7 +131,7 @@ export default function CaseDetailPage() {
     )
   }
 
-  const iocEntries = Object.entries(caseData.ioc_data ?? {}).filter(([, v]) => v != null && v !== '')
+  const iocEntries = Object.entries(caseData.ioc_data ?? {}).filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && (v as unknown[]).length === 0))
   const searchResults = caseData.search_intel?.results ?? []
   const sortedNotes = [...(caseData.notes ?? [])].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -252,7 +252,18 @@ export default function CaseDetailPage() {
                       {key.replace(/_/g, ' ')}
                     </div>
                     <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>
-                      {String(val)}
+                      {Array.isArray(val)
+                        ? (val as unknown[]).map((item, i) =>
+                            typeof item === 'object' && item !== null
+                              ? <div key={i} style={{ marginBottom: '2px' }}>
+                                  {Object.entries(item as Record<string, unknown>).map(([k, v]) => `${k}: ${v}`).join(' | ')}
+                                </div>
+                              : <div key={i}>{String(item)}</div>
+                          )
+                        : typeof val === 'object' && val !== null
+                          ? JSON.stringify(val)
+                          : String(val)
+                      }
                     </div>
                   </div>
                 ))}

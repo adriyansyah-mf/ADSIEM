@@ -39,12 +39,57 @@ async def _process_pending_deliveries() -> None:
                 continue
         await _deliver(delivery, config)
 
+_SEVERITY_COLORS = {
+    "critical": 0xE74C3C,
+    "high":     0xE67E22,
+    "medium":   0xF1C40F,
+    "low":      0x3498DB,
+    "info":     0x95A5A6,
+}
+
+def _discord_payload(payload: dict) -> dict:
+    severity = payload.get("severity", "medium").lower()
+    color = _SEVERITY_COLORS.get(severity, 0x95A5A6)
+    event = payload.get("event", "alert")
+
+    if event == "case_created":
+        title = f"New AI Case: {payload.get('title', 'Unknown')}"
+        desc = payload.get("description", "") or ""
+        fields = [
+            {"name": "Severity", "value": severity.upper(), "inline": True},
+            {"name": "Case ID", "value": payload.get("case_id", "")[:8] + "...", "inline": True},
+        ]
+    else:
+        title = f"Alert: {payload.get('title', 'Unknown')}"
+        desc = ""
+        fields = [
+            {"name": "Severity", "value": severity.upper(), "inline": True},
+        ]
+        if payload.get("source_ip"):
+            fields.append({"name": "Source IP", "value": payload["source_ip"], "inline": True})
+        if payload.get("hostname"):
+            fields.append({"name": "Hostname", "value": payload["hostname"], "inline": True})
+
+    return {
+        "embeds": [{
+            "title": title,
+            "description": desc[:2000] if desc else None,
+            "color": color,
+            "fields": fields,
+            "timestamp": payload.get("timestamp"),
+            "footer": {"text": "SIEM Platform"},
+        }]
+    }
+
+
 async def _deliver(delivery: WebhookDelivery, config: WebhookConfig) -> None:
     async with AsyncSessionLocal() as db:
         now = datetime.now(timezone.utc)
         try:
+            is_discord = "discord.com/api/webhooks" in config.url
+            post_payload = _discord_payload(delivery.payload) if is_discord else delivery.payload
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(config.url, json=delivery.payload)
+                resp = await client.post(config.url, json=post_payload)
                 resp.raise_for_status()
             status = "delivered"
             log.info("webhook_delivered", delivery_id=str(delivery.id), url=config.url)

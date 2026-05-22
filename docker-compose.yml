@@ -45,6 +45,8 @@ services:
       AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-bootstrap-token}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
+    volumes:
+      - ./agent/dist/packages:/app/packages:ro
     depends_on:
       postgres:
         condition: service_healthy

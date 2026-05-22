@@ -1,0 +1,18 @@
+title: Server-Side Template Injection (SSTI) Attempt
+id: rule-ssti-injection
+description: URL contains template expression syntax — Jinja2, Twig, Freemarker, Thymeleaf SSTI probe (A03)
+logsource:
+  product: webserver
+detection:
+  jinja_twig:
+    url.path|re: '\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}'
+  expression_lang:
+    url.path|re: '\$\{[\s\S]{1,50}\}|#\{[\s\S]{1,50}\}'
+  math_probe:
+    url.path|re: '\{\{[^\}]*\*[^\}]*\}\}|\{\{[^\}]*\+[^\}]*\}\}'
+  condition: jinja_twig or expression_lang or math_probe
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a03

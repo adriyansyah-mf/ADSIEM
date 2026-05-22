@@ -1,0 +1,22 @@
+title: NoSQL Injection Attempt
+id: rule-nosql-injection
+description: URL contains MongoDB/NoSQL operator syntax — NoSQL injection probe (A03)
+logsource:
+  product: webserver
+detection:
+  mongo_operators:
+    url.path|contains:
+      - "$where"
+      - "$gt"
+      - "$lt"
+      - "$ne"
+      - "$regex"
+      - "$elemMatch"
+  json_operators:
+    url.path|re: '\["\$(?:where|gt|lt|ne|gte|lte|in|nin|regex|exists|type)\"\]'
+  condition: mongo_operators or json_operators
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a03

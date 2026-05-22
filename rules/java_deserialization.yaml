@@ -1,0 +1,23 @@
+title: Java Deserialization Attack Attempt
+id: rule-java-deserialization
+description: Request URL or UA contains Java serialization magic bytes or ysoserial payload markers (A08)
+logsource:
+  product: webserver
+detection:
+  magic_bytes:
+    url.path|contains:
+      - "%ac%ed%00%05"
+      - "rO0AB"
+      - "yv66vg"
+  ysoserial_class:
+    url.path|re: '(?:CommonsCollections|Spring|Hibernate|BeanUtils|Groovy|Jython|ClojureUtils|JavassistWeld|JBossInterceptors)'
+  deserialization_ua:
+    user_agent.original|contains:
+      - "CommonsCollections"
+      - "ysoserial"
+  condition: magic_bytes or ysoserial_class or deserialization_ua
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a08

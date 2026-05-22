@@ -26,7 +26,7 @@ func Start(cfg *config.Config, c *client.Client) {
 				if err := c.PostWithRetry("/api/hygiene", report, 3); err != nil {
 					slog.Warn("hygiene send failed", "err", err)
 				} else {
-					slog.Info("hygiene reported", "score", report.Score, "issues", len(report.Issues))
+					slog.Info("hygiene reported", "score", report.Score, "issues", len(report.Issues), "packages", len(report.Packages))
 				}
 			}
 			time.Sleep(5 * time.Minute)

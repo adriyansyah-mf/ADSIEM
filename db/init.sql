@@ -46,6 +46,7 @@ CREATE TABLE agents (
     token_hash    TEXT NOT NULL,
     version       VARCHAR(50),
     status        VARCHAR(20) NOT NULL DEFAULT 'offline',
+    is_isolated   BOOLEAN NOT NULL DEFAULT FALSE,
     last_seen_at  TIMESTAMPTZ,
     enrolled_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -242,6 +243,7 @@ CREATE TABLE IF NOT EXISTS hygiene_snapshots (
     users JSONB NOT NULL DEFAULT '[]',
     hygiene_score INT NOT NULL DEFAULT 100,
     issues JSONB NOT NULL DEFAULT '[]',
+    packages JSONB NOT NULL DEFAULT '[]',
     collected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_hygiene_agent_id ON hygiene_snapshots(agent_id);
@@ -385,3 +387,19 @@ INSERT INTO platform_settings (key, value, is_secret, description) VALUES
     ('ueba_enabled',            'true',  false, 'Enable UEBA ML anomaly detection'),
     ('ueba_anomaly_threshold',  '-0.1',  false, 'Isolation Forest score threshold (negative = anomalous)')
 ON CONFLICT (key) DO NOTHING;
+
+-- ─── FIM ─────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS fim_events (
+    id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id    UUID         NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    group_id    VARCHAR(64)  NOT NULL DEFAULT 'default',
+    path        TEXT         NOT NULL,
+    event_type  VARCHAR(16)  NOT NULL,
+    sha256      VARCHAR(64),
+    size_bytes  BIGINT,
+    detected_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fim_events_agent    ON fim_events(agent_id);
+CREATE INDEX IF NOT EXISTS idx_fim_events_detected ON fim_events(detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fim_events_path     ON fim_events(path text_pattern_ops);

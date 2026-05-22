@@ -1,0 +1,19 @@
+title: Python/Perl Reverse Shell
+id: rule-python-shell
+description: Python or Perl used to spawn an interactive shell — common post-exploitation technique
+logsource:
+  product: linux
+detection:
+  python_socket:
+    process.command_line|contains:
+      - "import socket"
+      - "socket.socket"
+      - "pty.spawn"
+  perl_shell:
+    process.command_line|re: 'perl\s+.*(?:socket|exec|system|fork)'
+  condition: python_socket or perl_shell
+level: critical
+tags:
+  - attack.execution
+  - attack.t1059.006
+  - attack.command_and_control

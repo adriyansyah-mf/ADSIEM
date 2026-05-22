@@ -1,0 +1,22 @@
+title: CRLF / HTTP Header Injection Attempt
+id: rule-crlf-injection
+description: URL contains CR/LF characters — header injection or HTTP response splitting probe (A03)
+logsource:
+  product: webserver
+detection:
+  raw_crlf:
+    url.path|contains:
+      - "%0d%0a"
+      - "%0D%0A"
+      - "%0a%0d"
+      - "\r\n"
+      - "%0aSet-Cookie"
+      - "%0dSet-Cookie"
+  response_split:
+    url.path|re: '(?i)%0[aAdD](?:content-type|location|set-cookie|www-authenticate)'
+  condition: raw_crlf or response_split
+level: medium
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a03

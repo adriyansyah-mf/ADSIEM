@@ -87,6 +87,7 @@ class AgentOut(BaseModel):
     group_id: str
     version: str | None
     status: str
+    is_isolated: bool = False
     last_seen_at: datetime | None
     enrolled_at: datetime
     log_sources: list[LogSourceOut] = []
@@ -98,9 +99,16 @@ class HeartbeatRequest(BaseModel):
     version: str | None = None
     buffer_dropped: int = 0
 
+class AgentTaskDef(BaseModel):
+    id: UUID
+    task_type: str
+    params: dict = {}
+
 class HeartbeatResponse(BaseModel):
     config_hash: str
     log_sources: list[LogSourceOut]
+    fim_paths: list[str] = []
+    tasks: list[AgentTaskDef] = []
 
 # ─── Ingest ──────────────────────────────────────────────────────
 
@@ -352,11 +360,12 @@ class HygieneSnapshotIn(BaseModel):
     cpu_count: int | None = None
     mem_total_mb: int | None = None
     mem_used_mb: int | None = None
-    disk_partitions: list[dict] = []
-    open_ports: list[dict] = []
-    users: list[dict] = []
+    disk_partitions: list[dict] | None = []
+    open_ports: list[dict] | None = []
+    users: list[dict] | None = []
     hygiene_score: int = 100
-    issues: list[dict] = []
+    issues: list[dict] | None = []
+    packages: list[dict] | None = []
     collected_at: str | None = None
 
 class HygieneSnapshotOut(BaseModel):
@@ -377,6 +386,7 @@ class HygieneSnapshotOut(BaseModel):
     users: list[dict]
     hygiene_score: int
     issues: list[dict]
+    packages: list[dict]
     collected_at: datetime
     model_config = {"from_attributes": True}
 
@@ -413,3 +423,151 @@ class UebaStatusOut(BaseModel):
     trained_at: str | None
     user_snapshot_count: int
     ip_snapshot_count: int
+
+# ─── Threat Hunts ────────────────────────────────────────────────
+
+class ThreatHuntCreate(BaseModel):
+    ioc_type: str   # ip, hostname, user, hash
+    ioc_value: str
+    alert_id: UUID | None = None  # if triggered from alert, auto-extract IoC
+
+class ThreatHuntOut(BaseModel):
+    id: UUID
+    ioc_type: str
+    ioc_value: str
+    status: str
+    group_id: str
+    alert_count: int
+    event_count: int
+    fim_count: int
+    risk_level: str | None
+    timeline: list[Any] | None
+    analysis: str | None
+    related_alert_ids: list[str] | None
+    created_at: datetime
+    completed_at: datetime | None
+    model_config = {"from_attributes": True}
+
+# ─── FIM ─────────────────────────────────────────────────────────
+
+class FimWatchPathOut(BaseModel):
+    id: UUID
+    path: str
+    is_enabled: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class FimWatchPathCreate(BaseModel):
+    path: str
+
+class FimEventItem(BaseModel):
+    path: str
+    event_type: str
+    sha256: str | None = None
+    size_bytes: int | None = None
+    detected_at: str | None = None
+
+class FimEventIn(BaseModel):
+    agent_id: str
+    events: list[FimEventItem]
+
+class FimEventOut(BaseModel):
+    id: UUID
+    agent_id: UUID
+    group_id: str
+    path: str
+    event_type: str
+    sha256: str | None
+    size_bytes: int | None
+    detected_at: datetime
+    model_config = {"from_attributes": True}
+
+# ─── Agent Tasks ─────────────────────────────────────────────────
+
+class AgentTaskCreate(BaseModel):
+    agent_id: UUID | None = None
+    task_type: str
+    params: dict = {}
+
+class AgentTaskOut(BaseModel):
+    id: UUID
+    agent_id: UUID | None
+    fleet_hunt_id: UUID | None
+    task_type: str
+    params: dict
+    status: str
+    result: Any | None
+    error: str | None
+    created_at: datetime
+    completed_at: datetime | None
+    model_config = {"from_attributes": True}
+
+class AgentTaskResultIn(BaseModel):
+    status: str  # done | failed
+    result: Any | None = None
+    error: str | None = None
+
+# ─── Fleet Hunt ──────────────────────────────────────────────────
+
+class FleetHuntCreate(BaseModel):
+    name: str
+    description: str | None = None
+    task_type: str
+    params: dict = {}
+    agent_ids: list[UUID] | None = None  # None = all online agents
+
+class FleetHuntOut(BaseModel):
+    id: UUID
+    name: str
+    description: str | None
+    task_type: str
+    params: dict
+    status: str
+    total_agents: int
+    completed_agents: int
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+# ─── Artifacts ───────────────────────────────────────────────────
+
+class ArtifactCreate(BaseModel):
+    name: str
+    description: str | None = None
+    task_type: str
+    default_params: dict = {}
+
+class ArtifactOut(BaseModel):
+    id: UUID
+    name: str
+    description: str | None
+    task_type: str
+    default_params: dict
+    is_enabled: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class ArtifactRunRequest(BaseModel):
+    agent_ids: list[UUID] | None = None  # None = fleet
+    params: dict | None = None  # override default_params
+
+# ─── YARA Rules ──────────────────────────────────────────────────
+
+class YaraRuleCreate(BaseModel):
+    name: str
+    description: str | None = None
+    content: str
+
+class YaraRuleOut(BaseModel):
+    id: UUID
+    name: str
+    description: str | None
+    content: str
+    is_enabled: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class YaraScanRequest(BaseModel):
+    agent_id: UUID
+    path: str
+    recursive: bool = False
+    rule_ids: list[UUID] | None = None  # None = all enabled rules

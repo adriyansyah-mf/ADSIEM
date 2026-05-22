@@ -17,6 +17,12 @@ type LogSource struct {
 	IsEnabled bool   `json:"is_enabled"`
 }
 
+type AgentTask struct {
+	ID       string         `json:"id"`
+	TaskType string         `json:"task_type"`
+	Params   map[string]any `json:"params"`
+}
+
 type HeartbeatRequest struct {
 	AgentID       string `json:"agent_id"`
 	Status        string `json:"status"`
@@ -27,15 +33,18 @@ type HeartbeatRequest struct {
 type HeartbeatResponse struct {
 	ConfigHash string      `json:"config_hash"`
 	LogSources []LogSource `json:"log_sources"`
+	FimPaths   []string    `json:"fim_paths"`
+	Tasks      []AgentTask `json:"tasks"`
 }
 
-// Loop sends heartbeats every interval seconds.
-// On config hash change it calls onSourcesChanged with the new sources.
+// Loop sends heartbeats every interval.
+// Calls onConfig when config hash changes, calls onTasks for every heartbeat with tasks.
 func Loop(
 	cfg *config.Config,
 	buf *buffer.Buffer,
 	c *client.Client,
-	onSourcesChanged func([]LogSource),
+	onConfig func(HeartbeatResponse),
+	onTasks func([]AgentTask),
 ) {
 	lastHash := ""
 	interval := time.Duration(cfg.Server.HeartbeatInterval) * time.Second
@@ -61,9 +70,13 @@ func Loop(
 			var hbResp HeartbeatResponse
 			if err := json.Unmarshal(body, &hbResp); err == nil {
 				if hbResp.ConfigHash != lastHash {
-					slog.Info("log sources updated", "hash", hbResp.ConfigHash)
+					slog.Info("config updated", "hash", hbResp.ConfigHash)
 					lastHash = hbResp.ConfigHash
-					onSourcesChanged(hbResp.LogSources)
+					onConfig(hbResp)
+				}
+				if len(hbResp.Tasks) > 0 {
+					slog.Info("tasks received", "count", len(hbResp.Tasks))
+					onTasks(hbResp.Tasks)
 				}
 			}
 		} else {

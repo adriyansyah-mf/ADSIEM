@@ -1,0 +1,16 @@
+title: Direct Root SSH Login
+id: rule-ssh-root-login
+description: Successful SSH login directly as root — should be disabled in most environments
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: login_success
+    user.name: root
+  condition: selection
+suppression:
+  timewindow: 3600
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1078

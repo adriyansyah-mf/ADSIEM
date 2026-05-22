@@ -1,0 +1,20 @@
+title: Private Key or Certificate File Accessed
+id: rule-privkey-access
+description: Process reading a private key file — potential credential theft
+logsource:
+  product: linux
+detection:
+  key_file:
+    process.command_line|re: '(?:cat|cp|scp|openssl|curl|wget|python|perl)\s+.*?\.(pem|key|pfx|p12|crt)'
+  id_rsa:
+    process.command_line|contains:
+      - "id_rsa"
+      - "id_ecdsa"
+      - "id_ed25519"
+  condition: key_file or id_rsa
+suppression:
+  timewindow: 600
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1552.004

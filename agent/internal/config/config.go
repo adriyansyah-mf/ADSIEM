@@ -25,10 +25,16 @@ type ServerConfig struct {
 	HeartbeatInterval int    `yaml:"heartbeat_interval"`
 }
 
+type FimConfig struct {
+	Enabled    bool     `yaml:"enabled"`
+	WatchPaths []string `yaml:"watch_paths"`
+}
+
 type Config struct {
 	Agent  AgentConfig  `yaml:"agent"`
 	Server ServerConfig `yaml:"server"`
 	Logs   []LogSource  `yaml:"logs"`
+	FIM    FimConfig    `yaml:"fim"`
 }
 
 func Load(path string) (*Config, error) {

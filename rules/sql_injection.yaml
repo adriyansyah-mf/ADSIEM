@@ -1,0 +1,22 @@
+title: SQL Injection Attempt
+id: rule-sql-injection
+description: HTTP request URL contains SQL injection keywords
+logsource:
+  product: webserver
+detection:
+  union_select:
+    url.path|re: '(?i)(?:union[\s\+]+(?:all[\s\+]+)?select|select[\s\+]+.+[\s\+]+from|insert[\s\+]+into|drop[\s\+]+table|exec(?:ute)?[\s\+]*\()'
+  error_based:
+    url.path|contains:
+      - "sleep("
+      - "benchmark("
+      - "extractvalue("
+      - "updatexml("
+      - "1=1--"
+      - "'or'"
+      - "' or '"
+  condition: union_select or error_based
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190

@@ -1,0 +1,22 @@
+title: System Log Clearing
+id: rule-log-clearing
+description: Attempt to clear system logs or shell history — anti-forensics / defense evasion
+logsource:
+  product: linux
+detection:
+  rm_logs:
+    process.command_line|re: 'rm\s+.*(?:/var/log|/var/log/\S+\.log)'
+  truncate_logs:
+    process.command_line|re: '(?:truncate|>\s*/var/log|>\s*/dev/null\s+</var/log)'
+  history_clear:
+    process.command_line|contains:
+      - "history -c"
+      - "history -w /dev/null"
+      - "unset HISTFILE"
+      - "HISTSIZE=0"
+  condition: rm_logs or truncate_logs or history_clear
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1070.002
+  - attack.t1070.003

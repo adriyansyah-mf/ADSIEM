@@ -1,0 +1,13 @@
+name: ssh_accepted
+log_type: linux_auth
+type: regex
+priority: 5
+enabled: true
+pattern: 'Accepted (?P<method>\S+) for (?P<user>\S+) from (?P<src_ip>\S+) port (?P<port>\d+)'
+fields:
+  event.category: authentication
+  event.action: login_success
+  user.name: user
+  source.ip: src_ip
+  source.port: port
+  auth.method: method

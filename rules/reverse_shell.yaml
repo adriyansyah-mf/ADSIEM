@@ -1,0 +1,17 @@
+title: Reverse Shell Attempt
+id: rule-reverse-shell
+description: Command line contains reverse shell indicators — bash /dev/tcp, netcat listener, or similar
+logsource:
+  product: linux
+detection:
+  bash_tcp:
+    process.command_line|contains: "/dev/tcp/"
+  netcat_exec:
+    process.command_line|re: 'nc\s+.*-[el]'
+  condition: bash_tcp or netcat_exec
+level: critical
+tags:
+  - attack.execution
+  - attack.t1059.004
+  - attack.command_and_control
+  - attack.t1105

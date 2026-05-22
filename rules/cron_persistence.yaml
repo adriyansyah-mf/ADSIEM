@@ -1,0 +1,20 @@
+title: Crontab Persistence via Command Line
+id: rule-cron-persistence
+description: Crontab modified via command line or cron.d written — common persistence technique
+logsource:
+  product: linux
+detection:
+  crontab_write:
+    process.command_line|re: 'crontab\s+.*-[el]'
+  cron_d_write:
+    process.command_line|contains:
+      - "/etc/cron.d/"
+      - "/etc/crontab"
+      - "/var/spool/cron"
+  condition: crontab_write or cron_d_write
+suppression:
+  timewindow: 300
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1053.003

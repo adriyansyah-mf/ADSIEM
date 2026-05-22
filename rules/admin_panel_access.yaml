@@ -1,0 +1,23 @@
+title: Admin Panel or Management Interface Access
+id: rule-admin-panel-access
+description: Request to common admin panel paths — forced browsing or unauthorized access attempt (A01/A05)
+logsource:
+  product: webserver
+detection:
+  admin_paths:
+    url.path|re: '(?i)^/(?:admin|administrator|phpmyadmin|pma|cpanel|whm|plesk|webmin|panel|manager|console|dashboard/admin|wp-admin|joomla-admin|typo3|siteadmin|manage)'
+  cloud_metadata:
+    url.path|re: '(?i)^/(?:actuator(?:/|$)|_cat/|_nodes/|_cluster/|\.well-known/acme-challenge|admin/config|rails/info)'
+  condition: admin_paths or cloud_metadata
+threshold:
+  count: 3
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1083
+  - owasp.a01
+  - owasp.a05

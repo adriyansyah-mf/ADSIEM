@@ -1,0 +1,11 @@
+name: linux_cron
+log_type: linux_auth
+type: regex
+priority: 25
+enabled: true
+pattern: 'CRON\[.*?\].*?\((?P<user>[^)]+)\)\s+CMD\s+\((?P<cmd>.+)\)'
+fields:
+  event.category: process
+  event.action: cron_execution
+  user.name: user
+  process.command_line: cmd

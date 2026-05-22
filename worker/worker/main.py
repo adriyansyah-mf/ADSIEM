@@ -17,6 +17,7 @@ from worker.consumer import consume_loop, load_engines, reload_loop
 from worker.webhook_sender import webhook_retry_loop
 from worker.ai_consumer import ai_analysis_loop
 from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop
+from worker.hunter import hunt_loop
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -81,6 +82,7 @@ async def main():
         ai_analysis_loop(),
         ueba_snapshot_loop(),
         ueba_train_loop(),
+        hunt_loop(),
     )
 
 if __name__ == "__main__":

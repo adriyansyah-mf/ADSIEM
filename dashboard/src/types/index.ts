@@ -8,6 +8,12 @@ export interface User {
   created_at: string
 }
 
+export interface AgentPackage {
+  filename: string
+  type: 'deb' | 'rpm'
+  size_bytes: number
+}
+
 export interface Agent {
   id: string
   name: string
@@ -15,6 +21,7 @@ export interface Agent {
   group_id: string
   version: string | null
   status: 'online' | 'offline'
+  is_isolated: boolean
   last_seen_at: string | null
   enrolled_at: string
   log_sources: LogSource[]
@@ -140,6 +147,31 @@ export interface HygieneIssue {
   message: string
 }
 
+export interface InstalledPackage {
+  name: string
+  version: string
+  source: string
+}
+
+export interface PackageVuln {
+  id: string
+  summary: string
+  severity: string
+}
+
+export interface VulnerablePackage {
+  package: InstalledPackage
+  vulns: PackageVuln[]
+  vuln_count: number
+}
+
+export interface HygieneVulnReport {
+  agent_id: string
+  package_count: number
+  vulnerable_count: number
+  vulnerable: VulnerablePackage[]
+}
+
 export interface DiskPartition {
   mount: string
   total_mb: number
@@ -177,6 +209,7 @@ export interface HygieneSnapshot {
   users: LocalUser[]
   hygiene_score: number
   issues: HygieneIssue[]
+  packages: InstalledPackage[]
   collected_at: string
 }
 
@@ -233,4 +266,89 @@ export interface UebaStatus {
   trained_at: string | null
   user_snapshot_count: number
   ip_snapshot_count: number
+}
+
+export interface ThreatHunt {
+  id: string
+  ioc_type: 'ip' | 'hostname' | 'user' | 'hash'
+  ioc_value: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+  group_id: string
+  alert_count: number
+  event_count: number
+  fim_count: number
+  risk_level: 'critical' | 'high' | 'medium' | 'low' | 'unknown' | null
+  timeline: Array<{
+    time: string; type: 'alert' | 'event'
+    severity?: string; title?: string
+    category?: string; action?: string
+    source_ip?: string; hostname?: string; user?: string
+    id: string
+  }> | null
+  analysis: string | null
+  related_alert_ids: string[] | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface FimWatchPath {
+  id: string
+  path: string
+  is_enabled: boolean
+  created_at: string
+}
+
+export interface FimEvent {
+  id: string
+  agent_id: string
+  group_id: string
+  path: string
+  event_type: 'CREATE' | 'MODIFY' | 'DELETE' | 'RENAME'
+  sha256: string | null
+  size_bytes: number | null
+  detected_at: string
+}
+
+export interface AgentTask {
+  id: string
+  agent_id: string | null
+  fleet_hunt_id: string | null
+  task_type: string
+  params: Record<string, unknown>
+  status: 'pending' | 'dispatched' | 'running' | 'done' | 'failed'
+  result: unknown | null
+  error: string | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface FleetHunt {
+  id: string
+  name: string
+  description: string | null
+  task_type: string
+  params: Record<string, unknown>
+  status: string
+  total_agents: number
+  completed_agents: number
+  created_at: string
+}
+
+export interface Artifact {
+  id: string
+  name: string
+  description: string | null
+  task_type: string
+  default_params: Record<string, unknown>
+  is_enabled: boolean
+  created_at: string
+}
+
+export interface YaraRule {
+  id: string
+  name: string
+  description: string | null
+  content: string
+  is_enabled: boolean
+  created_at: string
 }

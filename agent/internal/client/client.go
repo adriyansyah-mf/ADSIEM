@@ -28,7 +28,11 @@ func (c *Client) Post(path string, payload any) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
-	req, err := http.NewRequest("POST", c.BaseURL+path, bytes.NewReader(body))
+	return c.PostRaw(path, bytes.NewReader(body))
+}
+
+func (c *Client) PostRaw(path string, body *bytes.Reader) (*http.Response, error) {
+	req, err := http.NewRequest("POST", c.BaseURL+path, body)
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}

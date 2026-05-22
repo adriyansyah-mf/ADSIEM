@@ -1,0 +1,21 @@
+title: System Startup Script Modified
+id: rule-startup-modification
+description: rc.local, init.d, or systemd unit file modified — persistence mechanism
+logsource:
+  product: linux
+detection:
+  rc_local:
+    process.command_line|contains:
+      - "/etc/rc.local"
+      - "/etc/rc.d/"
+  init_d:
+    process.command_line|re: '(?:cp|mv|curl|wget|install)\s+.*?/etc/init\.d/'
+  systemd:
+    process.command_line|re: '(?:cp|mv|curl|wget|install)\s+.*?/(?:etc|lib|usr/lib)/systemd/system/\S+\.service'
+  condition: rc_local or init_d or systemd
+suppression:
+  timewindow: 300
+level: high
+tags:
+  - attack.persistence
+  - attack.t1543.002

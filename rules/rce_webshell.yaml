@@ -1,0 +1,19 @@
+title: Web Shell / Remote Code Execution Attempt
+id: rule-rce-webshell
+description: HTTP request targets webshell-like paths or includes system command parameters
+logsource:
+  product: webserver
+detection:
+  shell_path:
+    url.path|re: '(?i)(?:cmd\.php|shell\.php|c99\.php|r57\.php|webshell|eval\.php|backdoor)'
+  cmd_params:
+    url.path|re: '(?i)[?&](?:cmd|exec|command|execute|system|shell|passthru|eval)='
+  php_func:
+    url.path|re: '(?i)(?:passthru|shell_exec|system|exec|popen|proc_open|eval)\s*\('
+  condition: shell_path or cmd_params or php_func
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - attack.persistence
+  - attack.t1505.003

@@ -1,0 +1,11 @@
+name: linux_useradd
+log_type: linux_auth
+type: regex
+priority: 15
+enabled: true
+pattern: 'useradd\[.*?\]:.*?new user: name=(?P<user>[^,]+),.*?uid=(?P<uid>\d+)'
+fields:
+  event.category: iam
+  event.action: user_created
+  user.name: user
+  user.id: uid

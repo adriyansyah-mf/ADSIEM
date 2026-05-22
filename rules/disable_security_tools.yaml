@@ -1,0 +1,17 @@
+title: Security Tool Disabled
+id: rule-disable-security-tools
+description: SELinux disabled or security service stopped — attacker removing defensive controls
+logsource:
+  product: linux
+detection:
+  selinux_off:
+    process.command_line|contains:
+      - "setenforce 0"
+      - "setenforce Permissive"
+  disable_fw:
+    process.command_line|re: 'systemctl\s+(?:stop|disable)\s+(?:ufw|firewalld|iptables|fail2ban|apparmor|auditd|aide)'
+  condition: selinux_off or disable_fw
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

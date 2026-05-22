@@ -1,0 +1,15 @@
+title: /etc/shadow File Access
+id: rule-shadow-file-access
+description: Process accessed /etc/shadow — credential harvesting attempt
+logsource:
+  product: linux
+detection:
+  via_web:
+    url.path|contains: "etc/shadow"
+  via_cmd:
+    process.command_line|contains: "/etc/shadow"
+  condition: via_web or via_cmd
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.008

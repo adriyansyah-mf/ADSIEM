@@ -25,21 +25,28 @@ type Issue struct {
 	Message  string `json:"message"`
 }
 
+type InstalledPackage struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Source  string `json:"source"` // dpkg, apk, rpm
+}
+
 type Report struct {
-	AgentID     string          `json:"agent_id"`
-	Hostname    string          `json:"hostname"`
-	OSName      string          `json:"os_name"`
-	OSVersion   string          `json:"os_version"`
-	Kernel      string          `json:"kernel"`
-	Arch        string          `json:"arch"`
-	UptimeSecs  int64           `json:"uptime_seconds"`
-	CPUCount    int             `json:"cpu_count"`
-	MemTotalMB  int64           `json:"mem_total_mb"`
-	MemUsedMB   int64           `json:"mem_used_mb"`
-	Disk        []DiskPartition `json:"disk_partitions"`
-	OpenPorts   []OpenPort      `json:"open_ports"`
-	Users       []LocalUser     `json:"users"`
-	Score       int             `json:"hygiene_score"`
-	Issues      []Issue         `json:"issues"`
-	CollectedAt string          `json:"collected_at"`
+	AgentID     string             `json:"agent_id"`
+	Hostname    string             `json:"hostname"`
+	OSName      string             `json:"os_name"`
+	OSVersion   string             `json:"os_version"`
+	Kernel      string             `json:"kernel"`
+	Arch        string             `json:"arch"`
+	UptimeSecs  int64              `json:"uptime_seconds"`
+	CPUCount    int                `json:"cpu_count"`
+	MemTotalMB  int64              `json:"mem_total_mb"`
+	MemUsedMB   int64              `json:"mem_used_mb"`
+	Disk        []DiskPartition    `json:"disk_partitions"`
+	OpenPorts   []OpenPort         `json:"open_ports"`
+	Users       []LocalUser        `json:"users"`
+	Packages    []InstalledPackage `json:"packages"`
+	Score       int                `json:"hygiene_score"`
+	Issues      []Issue            `json:"issues"`
+	CollectedAt string             `json:"collected_at"`
 }

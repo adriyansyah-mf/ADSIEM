@@ -5,6 +5,7 @@ import structlog
 from worker.database import AsyncSessionLocal
 from worker.models import Case, CaseNote
 from worker.groq_client import analyze_alert_with_groq
+from worker.alert_manager import dispatch_case_webhooks
 from worker.settings_cache import get_setting
 from worker.ti.config import TIConfig
 from worker.ti.aggregator import EnrichmentAggregator
@@ -152,3 +153,15 @@ async def analyze_and_maybe_create_case(
         db.add(note)
         await db.commit()
         log.info("case_created_by_ai", case_id=str(case.id), title=case.title)
+
+    try:
+        await dispatch_case_webhooks(
+            case_id=str(case.id),
+            title=case.title,
+            severity=case.severity,
+            description=reasoning[:500] if reasoning else "",
+            group_id=group_id,
+            alert_id=alert_uuid,
+        )
+    except Exception as _e:
+        log.warning("case_webhook_dispatch_failed", error=str(_e))

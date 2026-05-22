@@ -25,6 +25,7 @@ func Collect(agentID, hostname string) (*Report, error) {
 	collectDisk(r)
 	collectPorts(r)
 	collectUsers(r)
+	collectPackages(r)
 	score(r)
 
 	return r, nil
@@ -227,6 +228,92 @@ func collectUsers(r *Report) {
 		uid, _ := strconv.Atoi(parts[2])
 		r.Users = append(r.Users, LocalUser{Name: parts[0], Shell: shell, UID: uid})
 	}
+}
+
+func collectPackages(r *Report) {
+	if pkgs := parseDpkg("/var/lib/dpkg/status"); len(pkgs) > 0 {
+		r.Packages = pkgs
+		return
+	}
+	if pkgs := parseApk("/lib/apk/db/installed"); len(pkgs) > 0 {
+		r.Packages = pkgs
+		return
+	}
+}
+
+func parseDpkg(path string) []InstalledPackage {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var pkgs []InstalledPackage
+	var name, version, status string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" {
+			// only include installed packages
+			if name != "" && version != "" && strings.Contains(status, "installed") {
+				pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "dpkg"})
+			}
+			name, version, status = "", "", ""
+			continue
+		}
+		if k, v, ok := strings.Cut(line, ": "); ok {
+			switch k {
+			case "Package":
+				name = v
+			case "Version":
+				version = v
+			case "Status":
+				status = v
+			}
+		}
+	}
+	if name != "" && version != "" && strings.Contains(status, "installed") {
+		pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "dpkg"})
+	}
+	if len(pkgs) > 1000 {
+		pkgs = pkgs[:1000]
+	}
+	return pkgs
+}
+
+func parseApk(path string) []InstalledPackage {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var pkgs []InstalledPackage
+	var name, version string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" {
+			if name != "" && version != "" {
+				pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "apk"})
+			}
+			name, version = "", ""
+			continue
+		}
+		if strings.HasPrefix(line, "P:") {
+			name = line[2:]
+		} else if strings.HasPrefix(line, "V:") {
+			version = line[2:]
+		}
+	}
+	if name != "" && version != "" {
+		pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "apk"})
+	}
+	if len(pkgs) > 1000 {
+		pkgs = pkgs[:1000]
+	}
+	return pkgs
 }
 
 var riskyPorts = map[int]string{

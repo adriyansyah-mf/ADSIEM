@@ -1,0 +1,16 @@
+name: apache_access
+log_type: apache_access
+type: regex
+priority: 10
+enabled: true
+pattern: '(?P<src_ip>\S+)\s+-\s+(?P<user>\S+)\s+\[.*?\]\s+"(?P<method>\S+)\s+(?P<request>[^"]+?)\s+HTTP/[^"]+"\s+(?P<status>\d+)\s+(?P<bytes>\d+)(?:\s+"[^"]*"\s+"(?P<ua>[^"]*)")?'
+fields:
+  event.category: web
+  event.action: http_request
+  source.ip: src_ip
+  user.name: user
+  http.request.method: method
+  url.path: request
+  http.response.status_code: status
+  http.response.bytes: bytes
+  user_agent.original: ua

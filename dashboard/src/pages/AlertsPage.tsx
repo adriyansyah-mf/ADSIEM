@@ -1,11 +1,40 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import DataTable from '@/components/DataTable'
 import SeverityBadge from '@/components/SeverityBadge'
 import StatusBadge from '@/components/StatusBadge'
 import AlertDetailModal from '@/components/AlertDetailModal'
 import { useAlerts } from '@/hooks/useAlerts'
+import { useStartHunt } from '@/hooks/useHunts'
 import { format } from 'date-fns'
+import { Crosshair } from 'lucide-react'
 import type { Alert } from '@/types'
+
+function HuntButton({ alert }: { alert: Alert }) {
+  const navigate = useNavigate()
+  const startHunt = useStartHunt()
+  const ioc = alert.source_ip || alert.hostname
+  const iocType = alert.source_ip ? 'ip' : 'hostname'
+  if (!ioc) return null
+
+  return (
+    <button
+      onClick={e => {
+        e.stopPropagation()
+        startHunt.mutate(
+          { ioc_type: iocType, ioc_value: ioc },
+          { onSuccess: () => navigate('/hunts') }
+        )
+      }}
+      disabled={startHunt.isPending}
+      title={`Hunt ${iocType}: ${ioc}`}
+      className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-border hover:border-primary hover:text-primary transition-colors disabled:opacity-50"
+    >
+      <Crosshair size={10} />
+      Hunt
+    </button>
+  )
+}
 
 export default function AlertsPage() {
   const [page, setPage] = useState(1)
@@ -20,6 +49,7 @@ export default function AlertsPage() {
     { key: 'source_ip', header: 'Source IP', render: (r: Alert) => r.source_ip ?? '—' },
     { key: 'hostname', header: 'Hostname', render: (r: Alert) => r.hostname ?? '—' },
     { key: 'time', header: 'Time', render: (r: Alert) => format(new Date(r.created_at), 'yyyy-MM-dd HH:mm:ss') },
+    { key: 'hunt', header: '', render: (r: Alert) => <HuntButton alert={r} /> },
   ]
 
   return (

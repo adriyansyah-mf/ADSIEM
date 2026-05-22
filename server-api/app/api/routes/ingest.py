@@ -13,8 +13,8 @@ from app.core.database import get_db
 from app.core.deps import get_agent
 from app.core.redis_client import get_redis
 from app.core.security import hash_token
-from app.models.models import Agent, AgentLogSource
-from app.schemas.schemas import HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
+from app.models.models import Agent, AgentLogSource, AgentTask, FimWatchPath
+from app.schemas.schemas import AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
 from app.services.ingest import enqueue_log
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
@@ -52,10 +52,33 @@ async def heartbeat(
         select(AgentLogSource).where(AgentLogSource.agent_id == agent.id)
     )
     sources = result.scalars().all()
+
+    fim_result = await db.execute(
+        select(FimWatchPath).where(FimWatchPath.is_enabled == True).order_by(FimWatchPath.path)
+    )
+    fim_paths = [p.path for p in fim_result.scalars().all()]
+
+    # fetch pending tasks for this agent and mark them dispatched
+    task_result = await db.execute(
+        select(AgentTask).where(AgentTask.agent_id == agent.id, AgentTask.status == "pending")
+    )
+    pending_tasks = task_result.scalars().all()
+    task_ids = [t.id for t in pending_tasks]
+    if task_ids:
+        from sqlalchemy import update as _update
+        await db.execute(
+            _update(AgentTask).where(AgentTask.id.in_(task_ids)).values(status="dispatched")
+        )
+        await db.commit()
+
     sources_data = [{"path": s.path, "log_type": s.log_type, "is_enabled": s.is_enabled} for s in sources]
-    config_hash = hashlib.sha256(json.dumps(sources_data, sort_keys=True).encode()).hexdigest()
+    config_hash = hashlib.sha256(
+        json.dumps({"sources": sources_data, "fim_paths": fim_paths}, sort_keys=True).encode()
+    ).hexdigest()
 
     return HeartbeatResponse(
         config_hash=config_hash,
         log_sources=[LogSourceOut.model_validate(s) for s in sources],
+        fim_paths=fim_paths,
+        tasks=[AgentTaskDef(id=t.id, task_type=t.task_type, params=t.params or {}) for t in pending_tasks],
     )

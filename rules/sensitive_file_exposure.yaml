@@ -1,0 +1,31 @@
+title: Sensitive File / Configuration Exposure
+id: rule-sensitive-file-exposure
+description: Request targeting version control, backup, or config files that should never be publicly accessible (A05)
+logsource:
+  product: webserver
+detection:
+  vcs_exposure:
+    url.path|contains:
+      - "/.git/"
+      - "/.svn/"
+      - "/.hg/"
+      - "/.bzr/"
+      - "/.gitignore"
+      - "/.gitconfig"
+  backup_files:
+    url.path|re: '(?i)\.(bak|backup|old|orig|save|swp|tmp|~)(?:[?#]|$)'
+  info_files:
+    url.path|re: '(?i)(?:phpinfo\.php|info\.php|test\.php|admin\.php\.bak|web\.config\.bak|/composer\.json|/package\.json|/yarn\.lock|/Gemfile|/\.env\..*)'
+  ds_store:
+    url.path|contains:
+      - "/.DS_Store"
+      - "/Thumbs.db"
+      - "/WEB-INF/web.xml"
+      - "/server-status"
+      - "/server-info"
+  condition: vcs_exposure or backup_files or info_files or ds_store
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1083
+  - owasp.a05

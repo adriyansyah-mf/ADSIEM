@@ -20,6 +20,11 @@ import CaseDetailPage from '@/pages/CaseDetailPage'
 import SettingsPage from '@/pages/SettingsPage'
 import HygienePage from '@/pages/HygienePage'
 import UEBAPage from '@/pages/UEBAPage'
+import FimPage from '@/pages/FimPage'
+import HuntsPage from '@/pages/HuntsPage'
+import LiveResponsePage from '@/pages/LiveResponsePage'
+import ArtifactsPage from '@/pages/ArtifactsPage'
+import YaraPage from '@/pages/YaraPage'
 
 export default function App() {
   const { accessToken, setUser, logout } = useAuthStore()
@@ -51,6 +56,11 @@ export default function App() {
             <Route path="/settings" element={<ProtectedRoute minRole="admin"><SettingsPage /></ProtectedRoute>} />
             <Route path="/hygiene" element={<HygienePage />} />
             <Route path="/ueba" element={<UEBAPage />} />
+            <Route path="/fim" element={<FimPage />} />
+            <Route path="/hunts" element={<HuntsPage />} />
+            <Route path="/live-response" element={<LiveResponsePage />} />
+            <Route path="/artifacts" element={<ArtifactsPage />} />
+            <Route path="/yara" element={<YaraPage />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

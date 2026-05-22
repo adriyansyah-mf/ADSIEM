@@ -1,0 +1,17 @@
+title: Download and Execute Payload
+id: rule-download-execute
+description: Command pipes curl or wget output directly into a shell — common malware delivery technique
+logsource:
+  product: linux
+detection:
+  curl_pipe:
+    process.command_line|re: 'curl\s+.+\s*\|\s*(?:bash|sh|python|perl|ruby)'
+  wget_pipe:
+    process.command_line|re: 'wget\s+.+\s*-O\s*-\s*\|\s*(?:bash|sh|python|perl)'
+  condition: curl_pipe or wget_pipe
+level: critical
+tags:
+  - attack.execution
+  - attack.t1059
+  - attack.defense_evasion
+  - attack.t1027

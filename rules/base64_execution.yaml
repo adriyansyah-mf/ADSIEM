@@ -1,0 +1,17 @@
+title: Base64 Encoded Command Execution
+id: rule-base64-execution
+description: Base64-encoded payload decoded and piped to a shell interpreter — obfuscation technique
+logsource:
+  product: linux
+detection:
+  selection:
+    process.command_line|re: 'base64\s+(-d|--decode)\s*\|?\s*(?:bash|sh|python|perl|eval)'
+  b64_eval:
+    process.command_line|re: 'echo\s+[A-Za-z0-9+/=]{20,}\s*\|\s*base64'
+  condition: selection or b64_eval
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1027
+  - attack.execution
+  - attack.t1059

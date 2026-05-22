@@ -12,8 +12,10 @@ import (
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
 	"github.com/siem-platform/agent/internal/enrollment"
+	"github.com/siem-platform/agent/internal/fim"
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
+	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/tailer"
 )
 
@@ -63,13 +65,31 @@ func main() {
 		c.BaseURL = newCfg.Server.URL
 	})
 
-	// heartbeat loop
-	go heartbeat.Loop(cfg, buf, c, func(sources []heartbeat.LogSource) {
-		mgr.Update(sources)
-	})
-
 	// IT hygiene collection loop
 	hygiene.Start(cfg, c)
+
+	// File Integrity Monitoring
+	fimWatcher := fim.Start(cfg, c)
+
+	// Task runner for live response / Velociraptor-style artifacts
+	taskRunner := task.NewRunner(cfg, c)
+
+	// heartbeat loop — drives log source + FIM path updates + task dispatch
+	go heartbeat.Loop(cfg, buf, c,
+		func(resp heartbeat.HeartbeatResponse) {
+			mgr.Update(resp.LogSources)
+			fimWatcher.UpdatePaths(resp.FimPaths)
+		},
+		func(tasks []heartbeat.AgentTask) {
+			for _, t := range tasks {
+				taskRunner.Dispatch(task.TaskDef{
+					ID:       t.ID,
+					TaskType: t.TaskType,
+					Params:   t.Params,
+				})
+			}
+		},
+	)
 
 	// sender loop
 	go senderLoop(buf, c, cfg)

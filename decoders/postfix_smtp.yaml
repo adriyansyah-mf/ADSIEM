@@ -1,0 +1,13 @@
+name: postfix_smtp
+log_type: postfix
+type: regex
+priority: 10
+enabled: true
+pattern: 'postfix/smtp.*?from=<(?P<from>[^>]*)>.*?to=<(?P<to>[^>]*)>.*?relay=(?P<relay>\S+).*?status=(?P<status>\S+)'
+fields:
+  event.category: email
+  event.action: smtp_delivery
+  email.from: from
+  email.to: to
+  destination.address: relay
+  smtp.status: status

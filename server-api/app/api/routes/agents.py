@@ -1,8 +1,11 @@
 # server-api/app/api/routes/agents.py
 import hashlib
+import os
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +14,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_scoped_group
 from app.core.security import generate_agent_token, hash_token
-from app.models.models import Agent, AgentLogSource, User
+from app.models.models import Agent, AgentLogSource, AgentTask, User
 from app.schemas.schemas import (
     AgentOut, AgentUpdate, EnrollRequest, EnrollResponse,
     LogSourceIn, LogSourceOut, PaginatedResponse
@@ -20,6 +23,54 @@ from app.services.audit import audit_log
 
 router = APIRouter(tags=["agents"])
 Perm = require_permission("agents:manage")
+
+PACKAGES_DIR = Path(os.environ.get("PACKAGES_DIR", "/app/packages"))
+
+_MEDIA_TYPES = {
+    ".deb": "application/vnd.debian.binary-package",
+    ".rpm": "application/x-rpm",
+}
+
+def _list_packages() -> list[dict]:
+    if not PACKAGES_DIR.exists():
+        return []
+    pkgs = []
+    for f in sorted(PACKAGES_DIR.iterdir()):
+        if f.suffix not in _MEDIA_TYPES:
+            continue
+        stat = f.stat()
+        pkg_type = "deb" if f.suffix == ".deb" else "rpm"
+        pkgs.append({
+            "filename": f.name,
+            "type": pkg_type,
+            "size_bytes": stat.st_size,
+        })
+    return pkgs
+
+
+@router.get("/api/agents/packages")
+async def list_packages(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    return _list_packages()
+
+
+@router.get("/api/agents/packages/{filename}")
+async def download_package(
+    filename: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    # Prevent path traversal
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = PACKAGES_DIR / filename
+    if not path.exists() or path.suffix not in _MEDIA_TYPES:
+        raise HTTPException(status_code=404, detail="Package not found")
+    return FileResponse(
+        path=str(path),
+        media_type=_MEDIA_TYPES[path.suffix],
+        filename=filename,
+    )
 
 @router.get("/api/agents", response_model=PaginatedResponse)
 async def list_agents(
@@ -180,3 +231,39 @@ async def delete_log_source(
     await db.delete(src)
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "log_source_deleted", "agent_log_source", str(source_id))
+
+
+@router.post("/api/agents/{agent_id}/isolate", response_model=AgentOut)
+async def isolate_agent(
+    agent_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+):
+    agent = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if agent.status != "online":
+        raise HTTPException(400, "Agent is not online")
+    agent.is_isolated = True
+    task = AgentTask(agent_id=agent_id, task_type="isolate_host", params={}, created_by=current_user.id)
+    db.add(task)
+    await db.commit()
+    await db.refresh(agent)
+    return agent
+
+
+@router.delete("/api/agents/{agent_id}/isolate", response_model=AgentOut)
+async def unisolate_agent(
+    agent_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+):
+    agent = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    agent.is_isolated = False
+    task = AgentTask(agent_id=agent_id, task_type="unisolate_host", params={}, created_by=current_user.id)
+    db.add(task)
+    await db.commit()
+    await db.refresh(agent)
+    return agent

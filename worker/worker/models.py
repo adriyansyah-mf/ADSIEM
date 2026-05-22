@@ -154,3 +154,21 @@ class UebaAnomaly(Base):
     features      = Column(JSONB,       nullable=False, default=dict)
     alert_id      = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
     detected_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class ThreatHunt(Base):
+    __tablename__ = "threat_hunts"
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ioc_type          = Column(String(20),  nullable=False)
+    ioc_value         = Column(Text,        nullable=False)
+    status            = Column(String(20),  nullable=False, default="pending")
+    group_id          = Column(String(64),  nullable=False, default="default")
+    alert_count       = Column(Integer,     nullable=False, default=0)
+    event_count       = Column(Integer,     nullable=False, default=0)
+    fim_count         = Column(Integer,     nullable=False, default=0)
+    risk_level        = Column(String(20))
+    timeline          = Column(JSONB)
+    analysis          = Column(Text)
+    related_alert_ids = Column(JSONB)
+    created_by        = Column(UUID(as_uuid=True))
+    created_at        = Column(DateTime(timezone=True), default=now_utc)
+    completed_at      = Column(DateTime(timezone=True))

@@ -1,0 +1,10 @@
+name: pam_session_open
+log_type: linux_auth
+type: regex
+priority: 30
+enabled: true
+pattern: 'pam_unix\(.*?\):\s+session opened for user (?P<user>\S+) by (?P<by>[^(]+)'
+fields:
+  event.category: authentication
+  event.action: session_opened
+  user.name: user

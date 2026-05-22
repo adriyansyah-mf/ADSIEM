@@ -1,0 +1,16 @@
+title: Log4Shell Exploitation Attempt (CVE-2021-44228)
+id: rule-log4shell
+description: HTTP request contains JNDI lookup string — Log4Shell RCE exploitation attempt
+logsource:
+  product: webserver
+detection:
+  jndi_lookup:
+    url.path|re: '(?i)\$\{jndi\s*:'
+  jndi_obfuscated:
+    url.path|re: '(?i)\$\{[^\}]*j[^\}]*n[^\}]*d[^\}]*i[^\}]*:'
+  condition: jndi_lookup or jndi_obfuscated
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - cve.2021-44228

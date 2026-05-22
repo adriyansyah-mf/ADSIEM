@@ -1,0 +1,13 @@
+title: New Local User Account Created
+id: rule-new-user-created
+description: A new local user was created on the system via useradd — may indicate persistence
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: user_created
+  condition: selection
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1136.001

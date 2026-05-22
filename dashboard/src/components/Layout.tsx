@@ -3,29 +3,78 @@ import { Link, Outlet, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import {
+  LayoutDashboard, FileText, Activity, Bell, FolderOpen,
+  Brain, HeartPulse, Lock, ScanLine, Crosshair,
+  Terminal, Package, Server, BookOpen, Wrench,
+  Users, Settings, PanelLeftClose, PanelLeftOpen,
+  type LucideIcon,
+} from 'lucide-react'
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: '⚡', minRole: 'viewer' },
-  { to: '/agents', label: 'Agents', icon: '🖥', minRole: 'viewer' },
-  { to: '/logs', label: 'Logs', icon: '📋', minRole: 'viewer' },
-  { to: '/events', label: 'Events', icon: '🔍', minRole: 'viewer' },
-  { to: '/alerts', label: 'Alerts', icon: '🚨', minRole: 'viewer' },
-  { to: '/cases', label: 'Cases', icon: '🎫', minRole: 'viewer' },
-  { to: '/hygiene', label: 'Hygiene', icon: '🩺', minRole: 'viewer' },
-  { to: '/ueba', label: 'UEBA', icon: '🧠', minRole: 'viewer' },
-  { to: '/rules', label: 'Rules', icon: '📏', minRole: 'viewer' },
-  { to: '/decoders', label: 'Decoders', icon: '🔧', minRole: 'viewer' },
-  { to: '/users', label: 'Users', icon: '👥', minRole: 'superadmin' },
-  { to: '/settings', label: 'Settings', icon: '⚙️', minRole: 'admin' },
+interface NavItem {
+  to: string
+  label: string
+  icon: LucideIcon
+  minRole?: string
+}
+
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: 'Monitor',
+    items: [
+      { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { to: '/logs', label: 'Logs', icon: FileText },
+      { to: '/events', label: 'Events', icon: Activity },
+      { to: '/alerts', label: 'Alerts', icon: Bell },
+      { to: '/cases', label: 'Cases', icon: FolderOpen },
+    ],
+  },
+  {
+    label: 'Analytics',
+    items: [
+      { to: '/ueba', label: 'UEBA', icon: Brain },
+      { to: '/hygiene', label: 'Hygiene', icon: HeartPulse },
+      { to: '/fim', label: 'FIM', icon: Lock },
+      { to: '/yara', label: 'YARA', icon: ScanLine },
+      { to: '/hunts', label: 'Threat Hunt', icon: Crosshair },
+    ],
+  },
+  {
+    label: 'Response',
+    items: [
+      { to: '/live-response', label: 'Live Response', icon: Terminal },
+      { to: '/artifacts', label: 'Artifacts', icon: Package },
+    ],
+  },
+  {
+    label: 'Configuration',
+    items: [
+      { to: '/agents', label: 'Agents', icon: Server },
+      { to: '/rules', label: 'Rules', icon: BookOpen },
+      { to: '/decoders', label: 'Decoders', icon: Wrench },
+    ],
+  },
+]
+
+const ADMIN_ITEMS: NavItem[] = [
+  { to: '/users', label: 'Users', icon: Users, minRole: 'superadmin' },
+  { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
 ]
 
 type OpMode = 'MANUAL' | 'OBSERVER' | 'OPERATOR'
+
+const MODE_COLOR: Record<OpMode, string> = {
+  MANUAL:   '#f59e0b',
+  OBSERVER: '#38bdf8',
+  OPERATOR: '#34d399',
+}
 
 export default function Layout() {
   const { pathname } = useLocation()
   const { user, logout, hasRole } = useAuthStore()
   const [opMode, setOpMode] = useState<OpMode>('OBSERVER')
   const [clock, setClock] = useState(new Date())
+  const [collapsed, setCollapsed] = useState(false)
 
   const { data: agentsData } = useQuery({
     queryKey: ['agents-health'],
@@ -38,165 +87,301 @@ export default function Layout() {
     return () => clearInterval(t)
   }, [])
 
-  const agents = agentsData?.items ?? []
-  const onlineCount = agents.filter((a: { status: string }) => a.status === 'online').length
+  const onlineCount = (agentsData?.items ?? []).filter((a: { status: string }) => a.status === 'online').length
   const totalCount = agentsData?.total ?? 0
 
-  const modeColors: Record<OpMode, string> = {
-    MANUAL: 'var(--accent-yellow)',
-    OBSERVER: 'var(--accent-cyan)',
-    OPERATOR: 'var(--accent-green)',
-  }
+  const isActive = (to: string) => to === '/' ? pathname === '/' : pathname.startsWith(to)
+
+  const allItems = [...NAV_GROUPS.flatMap(g => g.items), ...ADMIN_ITEMS]
+  const currentLabel = allItems.find(i => isActive(i.to))?.label ?? 'SIEM'
+
+  const sidebarW = collapsed ? 56 : 216
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', background: 'var(--bg-base)' }}>
-      {/* Top Navigation Bar */}
-      <header style={{
-        height: '50px',
-        flexShrink: 0,
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#0d0f14' }}>
+
+      {/* ── Sidebar ── */}
+      <aside style={{
+        width: sidebarW,
+        minWidth: sidebarW,
         display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '0 16px',
-        background: 'var(--bg-panel)',
-        borderBottom: '1px solid var(--border)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
+        flexDirection: 'column',
+        background: '#111318',
+        borderRight: '1px solid #1e2028',
+        transition: 'width 0.2s ease, min-width 0.2s ease',
+        overflow: 'hidden',
       }}>
-        {/* Brand */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginRight: '8px', flexShrink: 0 }}>
-          <span style={{ fontSize: '18px' }}>🛡</span>
-          <span style={{
-            fontFamily: 'Rajdhani, sans-serif',
-            fontWeight: 700,
-            fontSize: '15px',
-            color: 'var(--accent-cyan)',
-            letterSpacing: '2px',
-            textTransform: 'uppercase',
-            whiteSpace: 'nowrap',
-          }}>AD-AGENTIC SIEM</span>
-        </div>
 
-        <div style={{ width: '1px', height: '30px', background: 'var(--border)', flexShrink: 0 }} />
-
-        {/* Nav tabs */}
-        <nav style={{ display: 'flex', alignItems: 'center', gap: '2px', flex: 1, overflow: 'hidden' }}>
-          {NAV_ITEMS.filter(item => hasRole(item.minRole)).map(item => {
-            const isActive = item.to === '/' ? pathname === '/' : pathname.startsWith(item.to)
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                title={item.label}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  padding: '4px 10px',
-                  borderRadius: '4px',
-                  fontSize: '12px',
-                  fontFamily: 'Rajdhani, sans-serif',
-                  fontWeight: 600,
-                  letterSpacing: '0.5px',
-                  textDecoration: 'none',
-                  whiteSpace: 'nowrap',
-                  color: isActive ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                  background: isActive ? 'rgba(0,212,255,0.1)' : 'transparent',
-                  borderBottom: isActive ? '2px solid var(--accent-cyan)' : '2px solid transparent',
-                  transition: 'all 0.15s',
-                }}
-              >
-                <span style={{ fontSize: '14px' }}>{item.icon}</span>
-                <span>{item.label.toUpperCase()}</span>
-              </Link>
-            )
-          })}
-        </nav>
-
-        <div style={{ width: '1px', height: '30px', background: 'var(--border)', flexShrink: 0 }} />
-
-        {/* System health */}
+        {/* Logo */}
         <div style={{
+          height: 52,
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
+          gap: 10,
+          padding: '0 16px',
+          borderBottom: '1px solid #1e2028',
           flexShrink: 0,
-          fontFamily: 'Share Tech Mono, monospace',
-          fontSize: '11px',
-          color: onlineCount > 0 ? 'var(--accent-green)' : 'var(--text-secondary)',
         }}>
-          <span style={{
-            width: '6px', height: '6px', borderRadius: '50%',
-            background: onlineCount > 0 ? 'var(--accent-green)' : 'var(--text-muted)',
-            boxShadow: onlineCount > 0 ? '0 0 6px var(--accent-green)' : 'none',
-          }} />
-          <span>{onlineCount}/{totalCount} AGENTS</span>
+          <div style={{
+            width: 28, height: 28, borderRadius: 6,
+            background: 'linear-gradient(135deg, #1d4ed8, #7c3aed)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </div>
+          {!collapsed && (
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.02em', lineHeight: 1.1 }}>
+                SIEM Platform
+              </div>
+              <div style={{ fontSize: 10, color: '#64748b', letterSpacing: '0.04em' }}>
+                Security Operations
+              </div>
+            </div>
+          )}
         </div>
 
-        <div style={{ width: '1px', height: '30px', background: 'var(--border)', flexShrink: 0 }} />
+        {/* Nav */}
+        <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={group.label} style={{ marginBottom: 4 }}>
+              {!collapsed && (
+                <div style={{
+                  padding: gi === 0 ? '8px 16px 4px' : '12px 16px 4px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: '0.08em',
+                  color: '#3f4558',
+                  textTransform: 'uppercase',
+                }}>
+                  {group.label}
+                </div>
+              )}
+              {collapsed && gi > 0 && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
+              {group.items.map(item => {
+                const active = isActive(item.to)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    title={collapsed ? item.label : undefined}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: collapsed ? '8px 0' : '7px 16px',
+                      justifyContent: collapsed ? 'center' : 'flex-start',
+                      textDecoration: 'none',
+                      background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
+                      borderLeft: active ? '2px solid #3b82f6' : '2px solid transparent',
+                      color: active ? '#93c5fd' : '#64748b',
+                      transition: 'color 0.12s, background 0.12s',
+                    }}
+                  >
+                    <Icon size={15} strokeWidth={active ? 2 : 1.75} style={{ flexShrink: 0 }} />
+                    {!collapsed && (
+                      <span style={{
+                        fontSize: 13,
+                        fontWeight: active ? 500 : 400,
+                        color: active ? '#e2e8f0' : '#94a3b8',
+                        whiteSpace: 'nowrap',
+                        letterSpacing: '0.01em',
+                      }}>
+                        {item.label}
+                      </span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          ))}
 
-        {/* Op Mode buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-          {(['MANUAL', 'OBSERVER', 'OPERATOR'] as OpMode[]).map(mode => (
+          {/* Admin */}
+          {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {!collapsed && (
+                <div style={{
+                  padding: '12px 16px 4px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: '0.08em',
+                  color: '#3f4558',
+                  textTransform: 'uppercase',
+                }}>
+                  Administration
+                </div>
+              )}
+              {collapsed && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
+              {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).map(item => {
+                const active = isActive(item.to)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    title={collapsed ? item.label : undefined}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: collapsed ? '8px 0' : '7px 16px',
+                      justifyContent: collapsed ? 'center' : 'flex-start',
+                      textDecoration: 'none',
+                      background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
+                      borderLeft: active ? '2px solid #3b82f6' : '2px solid transparent',
+                      color: active ? '#93c5fd' : '#64748b',
+                      transition: 'color 0.12s, background 0.12s',
+                    }}
+                  >
+                    <Icon size={15} strokeWidth={active ? 2 : 1.75} style={{ flexShrink: 0 }} />
+                    {!collapsed && (
+                      <span style={{
+                        fontSize: 13,
+                        fontWeight: active ? 500 : 400,
+                        color: active ? '#e2e8f0' : '#94a3b8',
+                        whiteSpace: 'nowrap',
+                        letterSpacing: '0.01em',
+                      }}>
+                        {item.label}
+                      </span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </nav>
+
+        {/* Bottom: agent count + collapse */}
+        <div style={{ borderTop: '1px solid #1e2028', flexShrink: 0 }}>
+          {!collapsed ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 16px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: onlineCount > 0 ? '#34d399' : '#374151',
+                  boxShadow: onlineCount > 0 ? '0 0 5px #34d399' : 'none',
+                  flexShrink: 0,
+                }} />
+                <span style={{ fontSize: 12, color: '#64748b' }}>
+                  <span style={{ color: onlineCount > 0 ? '#34d399' : '#64748b', fontWeight: 500 }}>{onlineCount}</span>
+                  <span> / {totalCount} agents</span>
+                </span>
+              </div>
+              <button
+                onClick={() => setCollapsed(true)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#3f4558', display: 'flex', padding: 2 }}
+                title="Collapse"
+              >
+                <PanelLeftClose size={14} />
+              </button>
+            </div>
+          ) : (
             <button
-              key={mode}
-              onClick={() => setOpMode(mode)}
+              onClick={() => setCollapsed(false)}
+              title="Expand"
               style={{
-                padding: '3px 8px',
-                borderRadius: '3px',
-                border: `1px solid ${opMode === mode ? modeColors[mode] : 'var(--border)'}`,
-                background: opMode === mode ? `${modeColors[mode]}22` : 'transparent',
-                color: opMode === mode ? modeColors[mode] : 'var(--text-muted)',
-                fontFamily: 'Rajdhani, sans-serif',
-                fontWeight: 700,
-                fontSize: '10px',
-                letterSpacing: '1px',
-                cursor: 'pointer',
-                transition: 'all 0.15s',
+                width: '100%', background: 'none', border: 'none',
+                cursor: 'pointer', color: '#3f4558',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '10px 0',
               }}
             >
-              {mode}
+              <PanelLeftOpen size={14} />
             </button>
-          ))}
+          )}
         </div>
+      </aside>
 
-        <div style={{ width: '1px', height: '30px', background: 'var(--border)', flexShrink: 0 }} />
+      {/* ── Right side ── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
-        {/* User info + clock */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.2 }}>
-              {user?.username ?? '—'}
-            </div>
-            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-secondary)', lineHeight: 1.2 }}>
-              {clock.toLocaleTimeString('en-US', { hour12: false })}
-            </div>
+        {/* Topbar */}
+        <header style={{
+          height: 52,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          padding: '0 20px',
+          background: '#111318',
+          borderBottom: '1px solid #1e2028',
+        }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', flex: 1, letterSpacing: '0.01em' }}>
+            {currentLabel}
+          </span>
+
+          {/* Op mode */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 1, background: '#0d0f14', borderRadius: 6, padding: 2 }}>
+            {(['MANUAL', 'OBSERVER', 'OPERATOR'] as OpMode[]).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setOpMode(mode)}
+                style={{
+                  padding: '3px 10px',
+                  borderRadius: 4,
+                  border: 'none',
+                  background: opMode === mode ? '#1e2028' : 'transparent',
+                  color: opMode === mode ? MODE_COLOR[mode] : '#475569',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  cursor: 'pointer',
+                  transition: 'all 0.12s',
+                }}
+              >
+                {mode}
+              </button>
+            ))}
           </div>
-          <button
-            onClick={logout}
-            style={{
-              padding: '4px 8px',
-              borderRadius: '3px',
-              border: '1px solid var(--border)',
-              background: 'transparent',
-              color: 'var(--accent-red)',
-              fontFamily: 'Rajdhani, sans-serif',
-              fontWeight: 700,
-              fontSize: '10px',
-              letterSpacing: '1px',
-              cursor: 'pointer',
-            }}
-          >
-            EXIT
-          </button>
-        </div>
-      </header>
 
-      {/* Main content */}
-      <main style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
-        <Outlet />
-      </main>
+          <div style={{ width: 1, height: 24, background: '#1e2028' }} />
+
+          {/* User */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 13, fontWeight: 500, color: '#cbd5e1', lineHeight: 1.2 }}>
+                {user?.username ?? '—'}
+              </div>
+              <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+                {clock.toLocaleTimeString('en-US', { hour12: false })}
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              style={{
+                padding: '5px 12px',
+                borderRadius: 5,
+                border: '1px solid #1e2028',
+                background: 'transparent',
+                color: '#64748b',
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'border-color 0.12s, color 0.12s',
+              }}
+              onMouseEnter={e => { (e.target as HTMLElement).style.color = '#ef4444'; (e.target as HTMLElement).style.borderColor = '#7f1d1d' }}
+              onMouseLeave={e => { (e.target as HTMLElement).style.color = '#64748b'; (e.target as HTMLElement).style.borderColor = '#1e2028' }}
+            >
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        {/* Content */}
+        <main style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

@@ -1,0 +1,12 @@
+name: windows_sysmon_process
+log_type: windows_sysmon
+type: regex
+priority: 10
+enabled: true
+pattern: 'EventID[=:\s]+1.*?Image[=:\s]+(?P<image>[^\r\n|]+).*?CommandLine[=:\s]+(?P<cmdline>[^\r\n|]+).*?User[=:\s]+(?P<user>[^\r\n|]+)'
+fields:
+  event.category: process
+  event.action: process_created
+  process.name: image
+  process.command_line: cmdline
+  user.name: user

@@ -1,0 +1,12 @@
+name: linux_su
+log_type: linux_auth
+type: regex
+priority: 18
+enabled: true
+pattern: 'su(?:\[.*?\])?:.*?(?P<result>Successful|FAILED).*?su.*?for (?P<target>\S+) by (?P<user>\S+)'
+fields:
+  event.category: authentication
+  event.action: su_command
+  user.name: user
+  user.target: target
+  su.result: result

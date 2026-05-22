@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Boolean, Column, DateTime, Float, ForeignKey, Integer,
+    BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer,
     String, Text, ARRAY, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -56,6 +56,7 @@ class Agent(Base):
     token_hash   = Column(Text, nullable=False)
     version      = Column(String(50))
     status       = Column(String(20), nullable=False, default="offline")
+    is_isolated  = Column(Boolean, nullable=False, default=False)
     last_seen_at = Column(DateTime(timezone=True))
     enrolled_at  = Column(DateTime(timezone=True), default=now_utc)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
@@ -225,6 +226,7 @@ class HygieneSnapshot(Base):
     users           = Column(JSONB, nullable=False, default=list)
     hygiene_score   = Column(Integer, nullable=False, default=100)
     issues          = Column(JSONB, nullable=False, default=list)
+    packages        = Column(JSONB, nullable=False, default=list)
     collected_at    = Column(DateTime(timezone=True), default=now_utc)
 
 class CaseNote(Base):
@@ -269,3 +271,88 @@ class UebaAnomaly(Base):
     features      = Column(JSONB,       nullable=False, default=dict)
     alert_id      = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
     detected_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class ThreatHunt(Base):
+    __tablename__ = "threat_hunts"
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ioc_type          = Column(String(20),  nullable=False)
+    ioc_value         = Column(Text,        nullable=False)
+    status            = Column(String(20),  nullable=False, default="pending")
+    group_id          = Column(String(64),  nullable=False, default="default")
+    alert_count       = Column(Integer,     nullable=False, default=0)
+    event_count       = Column(Integer,     nullable=False, default=0)
+    fim_count         = Column(Integer,     nullable=False, default=0)
+    risk_level        = Column(String(20))
+    timeline          = Column(JSONB)
+    analysis          = Column(Text)
+    related_alert_ids = Column(JSONB)
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at        = Column(DateTime(timezone=True), default=now_utc)
+    completed_at      = Column(DateTime(timezone=True))
+
+class FimWatchPath(Base):
+    __tablename__ = "fim_watch_paths"
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    path       = Column(Text, nullable=False, unique=True)
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+class FimEvent(Base):
+    __tablename__ = "fim_events"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id    = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    group_id    = Column(String(64), nullable=False, default="default")
+    path        = Column(Text, nullable=False)
+    event_type  = Column(String(16), nullable=False)
+    sha256      = Column(String(64), nullable=True)
+    size_bytes  = Column(BigInteger, nullable=True)
+    detected_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+class FleetHunt(Base):
+    __tablename__ = "fleet_hunts"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name             = Column(String(255), nullable=False)
+    description      = Column(Text)
+    task_type        = Column(String(50), nullable=False)
+    params           = Column(JSONB, nullable=False, default=dict)
+    status           = Column(String(20), nullable=False, default="running")
+    total_agents     = Column(Integer, nullable=False, default=0)
+    completed_agents = Column(Integer, nullable=False, default=0)
+    created_by       = Column(UUID(as_uuid=True))
+    created_at       = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    tasks            = relationship("AgentTask", back_populates="fleet_hunt")
+
+class AgentTask(Base):
+    __tablename__ = "agent_tasks"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id      = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=True)
+    fleet_hunt_id = Column(UUID(as_uuid=True), ForeignKey("fleet_hunts.id", ondelete="CASCADE"), nullable=True)
+    task_type     = Column(String(50), nullable=False)
+    params        = Column(JSONB, nullable=False, default=dict)
+    status        = Column(String(20), nullable=False, default="pending")
+    result        = Column(JSONB)
+    error         = Column(Text)
+    created_by    = Column(UUID(as_uuid=True))
+    created_at    = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    completed_at  = Column(DateTime(timezone=True))
+    fleet_hunt    = relationship("FleetHunt", back_populates="tasks")
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name           = Column(String(255), unique=True, nullable=False)
+    description    = Column(Text)
+    task_type      = Column(String(50), nullable=False)
+    default_params = Column(JSONB, nullable=False, default=dict)
+    is_enabled     = Column(Boolean, nullable=False, default=True)
+    created_at     = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+class YaraRule(Base):
+    __tablename__ = "yara_rules"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(255), unique=True, nullable=False)
+    description = Column(Text)
+    content     = Column(Text, nullable=False)
+    is_enabled  = Column(Boolean, nullable=False, default=True)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
