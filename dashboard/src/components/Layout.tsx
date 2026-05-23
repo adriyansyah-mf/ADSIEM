@@ -6,7 +6,7 @@ import { api } from '@/api/client'
 import {
   LayoutDashboard, FileText, Activity, Bell, FolderOpen,
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
-  Terminal, Package, Server, BookOpen, Wrench,
+  Terminal, Package, Server, BookOpen, Wrench, Webhook,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
   type LucideIcon,
 } from 'lucide-react'
@@ -52,6 +52,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/agents', label: 'Agents', icon: Server },
       { to: '/rules', label: 'Rules', icon: BookOpen },
       { to: '/decoders', label: 'Decoders', icon: Wrench },
+      { to: '/webhooks', label: 'Webhooks', icon: Webhook, minRole: 'admin' },
     ],
   },
 ]
