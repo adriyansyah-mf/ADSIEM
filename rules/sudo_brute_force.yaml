@@ -1,0 +1,19 @@
+title: Sudo Authentication Brute Force
+id: rule-sudo-brute-force
+description: Multiple failed sudo authentication attempts — possible privilege escalation attempt
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: sudo_failed
+  condition: selection
+threshold:
+  count: 3
+  timewindow: 120
+  group_by: user.name
+suppression:
+  timewindow: 1800
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.003

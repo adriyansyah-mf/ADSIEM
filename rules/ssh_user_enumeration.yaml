@@ -1,0 +1,20 @@
+title: SSH User Enumeration
+id: rule-ssh-user-enumeration
+description: High rate of "Invalid user" attempts from same IP — attacker enumerating valid usernames
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: login_failed
+    user.name|re: '^(?!root$|admin$).+'
+  condition: selection
+threshold:
+  count: 10
+  timewindow: 120
+  group_by: source.ip
+suppression:
+  timewindow: 3600
+level: high
+tags:
+  - attack.reconnaissance
+  - attack.t1589.003

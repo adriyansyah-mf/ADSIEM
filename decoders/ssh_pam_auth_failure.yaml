@@ -1,0 +1,11 @@
+name: ssh_pam_auth_failure
+log_type: linux_auth
+type: regex
+priority: 15
+enabled: true
+pattern: 'pam_unix\(sshd:auth\):.*authentication failure;.*rhost=(?P<src_ip>\S+)(?:\s+user=(?P<user>\S+))?'
+fields:
+  event.category: authentication
+  event.action: login_failed
+  source.ip: src_ip
+  user.name: user

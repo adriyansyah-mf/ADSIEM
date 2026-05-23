@@ -1,0 +1,10 @@
+name: sudo_failed
+log_type: linux_auth
+type: regex
+priority: 15
+enabled: true
+pattern: 'pam_unix\(sudo:auth\):.*authentication failure;.*user=(?P<user>\S+)'
+fields:
+  event.category: privilege_escalation
+  event.action: sudo_failed
+  user.name: user

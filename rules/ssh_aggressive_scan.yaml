@@ -1,0 +1,20 @@
+title: SSH Aggressive Scanner
+id: rule-ssh-aggressive-scan
+description: Very high rate of SSH authentication failures — automated scanner or aggressive brute force tool
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: login_failed
+  condition: selection
+threshold:
+  count: 30
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: critical
+tags:
+  - attack.credential_access
+  - attack.reconnaissance
+  - attack.t1110
