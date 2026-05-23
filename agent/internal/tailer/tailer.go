@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/siem-platform/agent/internal/buffer"
@@ -43,7 +44,7 @@ func Tail(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{}) {
 			continue
 		}
 		slog.Info("tailing", "path", path, "type", logType)
-		scanner := bufio.NewScanner(f)
+		reader := bufio.NewReader(f)
 		for {
 			select {
 			case <-stopCh:
@@ -51,17 +52,20 @@ func Tail(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{}) {
 				return
 			default:
 			}
-			if scanner.Scan() {
-				line := scanner.Text()
+			line, err := reader.ReadString('\n')
+			if len(line) > 0 {
+				line = strings.TrimRight(line, "\r\n")
 				if line != "" {
 					buf.Push(encode(logType, line))
 				}
-			} else {
-				if scanner.Err() != nil {
-					slog.Error("scanner error", "path", path, "err", scanner.Err())
-					break
-				}
+			}
+			if err == io.EOF {
 				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			if err != nil {
+				slog.Error("tailer read error", "path", path, "err", err)
+				break
 			}
 		}
 		f.Close()
