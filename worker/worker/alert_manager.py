@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from worker.database import AsyncSessionLocal
 from worker.redis_client import get_redis
 from worker.config import AI_ANALYSIS_QUEUE
+from worker.ai_queue import mark_queued
 
 log = structlog.get_logger()
 
@@ -70,6 +71,7 @@ async def create_alert(
     # Push to AI analysis queue outside the db session
     try:
         redis = await get_redis()
+        await mark_queued(redis, str(alert_id))
         await redis.rpush(AI_ANALYSIS_QUEUE, json.dumps({
             "alert_id": str(alert_id),
             "title": rule_match["title"],
