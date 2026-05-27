@@ -57,7 +57,47 @@ siem:ueba:investigate queue (new ueba_ai_loop)
 
 ## 1. ML Layer
 
-### 1a. New entity type: hostname
+### 1a. TI reputation as ML feature (feedback loop)
+
+TI results influence ML scoring directly — not just AI context.
+
+**TI reputation cache in Redis:**
+Key: `ti:cache:{ip}` → JSON `{"score": 0.0–1.0, "sources": ["virustotal", "abuseipdb"], "cached_at": "..."}` with 24h TTL.
+
+Score mapping:
+- `0.0` = clean or unknown (no cache hit)
+- `0.5` = suspicious (AbuseIPDB confidence 25–75, or 1–4 VT detections)
+- `0.8` = malicious (AbuseIPDB confidence > 75, or ≥ 5 VT detections)
+- `1.0` = confirmed IOC (OTX pulse hit OR GreyNoise malicious)
+
+**Virtuous cycle:**
+1. IP appears → ML scores with `ti_reputation = 0.0` (cache miss = neutral)
+2. Anomaly detected → AI investigator does TI lookup → writes result to `ti:cache:{ip}`
+3. Same IP appears again → ML reads cache → `ti_reputation = 0.8` → risk score higher → more likely to pass ML gate → more thorough investigation
+
+**`ti_reputation` added to feature keys:**
+- `IP_FEATURE_KEYS`: append `"ti_reputation"`
+- `HOST_FEATURE_KEYS`: append `"ti_reputation"` (host's most malicious source IP in last window)
+
+**In `build_ip_vector_dict()`:**
+```python
+ti_raw = await redis.get(f"ti:cache:{ip}")
+ti_reputation = json.loads(ti_raw).get("score", 0.0) if ti_raw else 0.0
+```
+
+**In AI investigator (`investigator.py`)** — after TI lookups, write cache:
+```python
+score = _compute_ti_score(ti_results)  # maps VT/ABIPDB/OTX/GN results → 0.0–1.0
+await redis.setex(f"ti:cache:{ip}", 86400, json.dumps({
+    "score": score, "sources": list(ti_results.keys()), "cached_at": now.isoformat()
+}))
+```
+
+This means TI reputation feeds back into ML on the next event from that IP — no additional API calls needed.
+
+---
+
+### 1b. New entity type: hostname
 
 Track host-level behavior alongside user and IP.
 
