@@ -114,7 +114,6 @@ class HeartbeatResponse(BaseModel):
 
 class LogIngestRequest(BaseModel):
     agent_id: UUID
-    agent_token: str
     log_type: str
     raw_message: str
     received_at: datetime

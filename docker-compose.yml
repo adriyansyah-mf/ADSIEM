@@ -79,7 +79,8 @@ services:
     environment:
       SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-searxng-secret}
     volumes:
-      - ./searxng:/etc/searxng
+      - ./searxng:/etc/searxng:rw
+      - searxng_data:/usr/local/searxng
     networks:
       - siem-net
 
@@ -164,6 +165,7 @@ volumes:
   postgres_data:
   redis_data:
   agent_packages:
+  searxng_data:
 
 networks:
   siem-net:
