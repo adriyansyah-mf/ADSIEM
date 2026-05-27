@@ -633,3 +633,15 @@ class CorrelationRuleOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+# ─── Audit Logs ──────────────────────────────────────────────────
+
+class AuditLogOut(BaseModel):
+    id: UUID
+    actor_id: UUID | None
+    action: str
+    resource_type: str | None
+    resource_id: str | None
+    detail: dict[str, Any]
+    created_at: datetime
+    model_config = {"from_attributes": True}

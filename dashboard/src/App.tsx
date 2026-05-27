@@ -26,6 +26,7 @@ import LiveResponsePage from '@/pages/LiveResponsePage'
 import ArtifactsPage from '@/pages/ArtifactsPage'
 import YaraPage from '@/pages/YaraPage'
 import CorrelationPage from '@/pages/CorrelationPage'
+import AuditLogsPage from '@/pages/AuditLogsPage'
 
 export default function App() {
   const { accessToken, setUser, logout } = useAuthStore()
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/artifacts" element={<ArtifactsPage />} />
             <Route path="/yara" element={<YaraPage />} />
             <Route path="/correlation" element={<CorrelationPage />} />
+            <Route path="/audit-logs" element={<ProtectedRoute minRole="admin"><AuditLogsPage /></ProtectedRoute>} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
