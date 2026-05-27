@@ -7,8 +7,18 @@ import AlertDetailModal from '@/components/AlertDetailModal'
 import { useAlerts } from '@/hooks/useAlerts'
 import { useStartHunt } from '@/hooks/useHunts'
 import { format } from 'date-fns'
-import { Crosshair } from 'lucide-react'
+import { Crosshair, Download } from 'lucide-react'
 import type { Alert } from '@/types'
+
+async function downloadFile(url: string, filename: string) {
+  const res = await import('@/api/client').then(m => m.api.get(url, { responseType: 'blob' }))
+  const href = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(href)
+}
 
 function HuntButton({ alert }: { alert: Alert }) {
   const navigate = useNavigate()
@@ -56,14 +66,24 @@ export default function AlertsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold">Alerts</h1>
-        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
-          className="px-3 py-1.5 rounded border border-border bg-background text-sm">
-          <option value="">All statuses</option>
-          <option value="new">New</option>
-          <option value="in_progress">In Progress</option>
-          <option value="resolved">Resolved</option>
-          <option value="false_positive">False Positive</option>
-        </select>
+        <div className="flex items-center gap-2">
+          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+            className="px-3 py-1.5 rounded border border-border bg-background text-sm">
+            <option value="">All statuses</option>
+            <option value="new">New</option>
+            <option value="in_progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="false_positive">False Positive</option>
+          </select>
+          <button onClick={() => downloadFile('/api/export/alerts/csv', 'alerts.csv')}
+            className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
+            <Download size={13} /> CSV
+          </button>
+          <button onClick={() => downloadFile('/api/export/alerts/pdf', 'alerts.pdf')}
+            className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
+            <Download size={13} /> PDF
+          </button>
+        </div>
       </div>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}

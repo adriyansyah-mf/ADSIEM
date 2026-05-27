@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
+import { Download } from 'lucide-react'
 import { useCases, useUpdateCase, useEscalateCase } from '@/hooks/useCases'
 import { useAuthStore } from '@/stores/auth'
 import type { Case } from '@/types'
@@ -214,6 +215,16 @@ function ActionBtn({ label, onClick, color, loading }: { label: string; onClick:
   )
 }
 
+async function downloadFile(url: string, filename: string) {
+  const res = await import('@/api/client').then(m => m.api.get(url, { responseType: 'blob' }))
+  const href = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(href)
+}
+
 export default function CasesPage() {
   const [activeTab, setActiveTab] = useState('All')
   const [page] = useState(1)
@@ -256,6 +267,10 @@ export default function CasesPage() {
             </span>
           </div>
         </div>
+        <button onClick={() => downloadFile('/api/export/cases/csv', 'cases.csv')}
+          className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
+          <Download size={13} /> CSV
+        </button>
       </div>
 
       {/* Filter tabs */}

@@ -19,6 +19,7 @@ from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.correlation import router as correlation_router
 from app.api.routes.audit_logs import router as audit_logs_router
+from app.api.routes.export import router as export_router
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -104,5 +105,6 @@ for router in [
     decoders.router, webhooks.router, system.router, cases_router, settings_router, hygiene_router, ueba_router, fim_router, hunts_router,
     tasks_router, fleet_router, artifacts_router, yara_router,
     enrollment_tokens_router, correlation_router, audit_logs_router,
+    export_router,
 ]:
     app.include_router(router)
