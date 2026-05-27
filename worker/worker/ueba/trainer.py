@@ -201,7 +201,7 @@ async def train_models(redis) -> None:
                 continue
 
             X = np.array([vector_from_dict(r.features, keys) for r in rows], dtype=float)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             if_model  = IsolationForest(n_estimators=100, contamination=0.05, random_state=42, n_jobs=-1)
             lof_model = LocalOutlierFactor(n_neighbors=20, contamination=0.05, novelty=True)
