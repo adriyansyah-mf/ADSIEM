@@ -217,6 +217,151 @@ Regex patterns untuk mengurai log menjadi field ECS (Elastic Common Schema).
 
 ---
 
+## Agentic AI
+
+Platform ini memiliki tiga lapisan kecerdasan AI yang berjalan secara otonom tanpa intervensi manual.
+
+---
+
+### AI SOC L1 Analyst (Auto-triage)
+
+**File:** `worker/worker/ai_analyst.py`, `worker/worker/ai_consumer.py`, `worker/worker/groq_client.py`
+
+Setiap alert yang dibuat oleh Sigma engine secara otomatis dikirim ke antrian AI (`siem:ai_analysis` Redis list). Worker `ai_analysis_loop` mengonsumsi antrian ini dan menjalankan pipeline berikut:
+
+```
+Alert masuk ke antrian Redis
+  → TI Enrichment (7 provider paralel)
+  → Heuristic MITRE mapping dari teks alert
+  → Severity escalation otomatis berdasarkan TI risk score
+  → LLM (Groq / LLaMA-3.3-70B) analisis sebagai SOC L1
+  → Keputusan: buat case atau abaikan
+  → Jika case dibuat: simpan reasoning + TI summary + IOC
+  → Dispatch webhook notifikasi case baru
+```
+
+**Keputusan AI:**
+- `should_create_case: true/false` — apakah alert perlu eskalasi ke L2
+- `reasoning` — analisis 2-3 kalimat dalam Bahasa Indonesia
+- `confidence` — skor keyakinan 0.0–1.0
+- `ioc_summary` — source IP, threat type, MITRE technique
+
+**Eskalasi severity otomatis:**
+- TI risk ≥ 0.75 → severity naik 2 level (misal `medium` → `critical`)
+- TI risk ≥ 0.45 → severity naik 1 level
+- Severity akhir disimpan di case
+
+**Case yang dibuat AI:**
+- Diberi prefix `[AI]` di judul
+- `created_by_ai = true`
+- Berisi reasoning LLM, extracted IOCs, TI bullets, MITRE techniques, SearXNG search intel
+- Note pertama di-generate otomatis oleh AI
+
+---
+
+### Threat Intelligence Enrichment (Multi-provider)
+
+**File:** `worker/worker/ti/`
+
+Berjalan paralel saat setiap alert dianalisis. Mengekstrak IOC dari teks alert, lalu query semua provider secara concurrent.
+
+**7 Provider TI:**
+
+| Provider | Data yang didapat |
+|----------|-------------------|
+| **AbuseIPDB** | Confidence score abuse, kategori, total reports |
+| **VirusTotal** | Deteksi malicious (IP/domain/hash/URL), vendor count |
+| **OTX AlienVault** | Pulses threat intel, reputasi |
+| **GreyNoise** | Apakah IP adalah scanner/noise atau targeted |
+| **URLhaus** | Apakah URL/domain diketahui sebagai malware host |
+| **GeoIP** | Negara asal IP, ASN, organisasi |
+| **Whois** | Registrar, usia domain, registrant |
+
+**IOC Extractor:** Parse otomatis IPv4, domain, URL, MD5/SHA1/SHA256 hash dari teks bebas.
+
+**Output:** `EnrichmentSummary` berisi:
+- `overall_risk` — skor 0.0–1.0 gabungan semua provider
+- `provider_bullets` — daftar temuan per provider
+- `triage_hints` — saran triage berdasarkan data TI
+- `iocs` — list IOC yang diekstrak beserta tipenya
+
+**SearXNG:** Jika provider TI tidak punya data, enrichment dilengkapi dengan web search melalui SearXNG instance sendiri (tidak bergantung Google/Bing).
+
+---
+
+### Threat Hunting Agent (IoC Hunter)
+
+**File:** `worker/worker/hunter.py`
+
+Analisis retrospektif berbasis IoC. SOC analyst submit IoC dari dashboard → worker membangun timeline historis → LLM menganalisis pola serangan.
+
+**Alur:**
+```
+Analyst submit IoC (IP / domain / hash / user)
+  → Query seluruh Alert + Event historis yang mengandung IoC tersebut
+  → Query FIM events (untuk hash IoC)
+  → Build timeline kronologis
+  → LLM (Groq) analisis timeline sebagai threat hunter
+  → Output disimpan ke DB, tampil di halaman Hunts
+```
+
+**Output analisis AI:**
+```json
+{
+  "risk_level": "critical|high|medium|low",
+  "attack_narrative": "Deskripsi narasi serangan dalam Bahasa Indonesia",
+  "mitre_techniques": ["T1190", "T1059", "T1486"],
+  "campaign_assessment": "isolated|likely_campaign|confirmed_campaign",
+  "kill_chain_phase": "initial_access|execution|lateral_movement|...",
+  "recommended_actions": ["Blokir IP X", "Isolasi host Y", ...],
+  "confidence": 0.87
+}
+```
+
+**IoC types yang didukung:** IP address, domain, file hash (MD5/SHA1/SHA256), username.
+
+---
+
+### MITRE ATT&CK Mapping
+
+**File:** `worker/worker/ti/mitre.py`
+
+Heuristic keyword-to-technique mapper yang berjalan pada setiap alert tanpa API call:
+
+| Keyword | Teknik |
+|---------|--------|
+| failed password, brute force | T1110 — Brute Force |
+| powershell, encodedcommand | T1059.001 — PowerShell |
+| base64 | T1027 — Obfuscated Files |
+| web shell | T1505.003 — Web Shell |
+| mimikatz | T1003 — OS Credential Dumping |
+| kerberoast | T1558.003 — Kerberoasting |
+| sql injection | T1190 — Exploit Public-Facing Application |
+| ransomware | T1486 — Data Encrypted for Impact |
+| exfiltrat | T1041 — Exfiltration Over C2 |
+| nmap, port scan | T1046 — Network Service Discovery |
+
+Hasil digunakan sebagai hint tambahan untuk LLM dan disimpan di field `ioc_data.mitre_techniques` pada case.
+
+---
+
+### Konfigurasi AI
+
+Semua setting AI bisa diubah live dari dashboard (Settings) tanpa restart:
+
+| Setting | Default | Keterangan |
+|---------|---------|------------|
+| `ai_analyst_enabled` | `true` | Toggle seluruh pipeline AI |
+| `groq_api_key` | env var | API key Groq |
+| `groq_model` | `llama-3.3-70b-versatile` | Model LLM yang dipakai |
+| `virustotal_api_key` | — | VirusTotal API key |
+| `abuseipdb_api_key` | — | AbuseIPDB API key |
+| `otx_api_key` | — | OTX AlienVault API key |
+| `greynoise_api_key` | — | GreyNoise API key |
+| `searxng_url` | `http://searxng:8080` | URL SearXNG instance |
+
+---
+
 ## Stack Teknologi
 
 | Layer | Teknologi |
@@ -229,7 +374,10 @@ Regex patterns untuk mengurai log menjadi field ECS (Elastic Common Schema).
 | Queue | Redis 7 (Stream) |
 | Proxy | Nginx |
 | Search | SearXNG |
-| AI | Groq API |
+| AI (LLM) | Groq API, LLaMA-3.3-70B-Versatile |
+| AI (Search) | SearXNG (self-hosted) |
+| AI (TI) | AbuseIPDB, VirusTotal, OTX, GreyNoise, URLhaus, GeoIP, Whois |
+| ML (UEBA) | scikit-learn Isolation Forest |
 | Packaging | Docker Compose, .deb, .rpm |
 
 ---
@@ -267,7 +415,10 @@ ABUSEIPDB_API_KEY=...
 6. Server enqueue ke Redis Stream "siem:logs"
 7. Worker consume → DecoderEngine parse regex → Event tersimpan ke DB
 8. SigmaEngine evaluate → match rule → Alert dibuat → Webhook dikirim
-9. UEBA scorer update risk score entity (user/IP)
-10. SOC analyst lihat alert di dashboard, buka case, investigasi dengan AI analyst
-11. Live response: kirim task ke agent (artifact collection, YARA scan)
+9. Alert otomatis masuk antrian AI (Redis list)
+10. AI analyst: TI enrichment 7 provider paralel + LLM triage → buat case jika perlu eskalasi
+11. UEBA scorer update risk score entity (user/IP) via Isolation Forest
+12. SOC analyst lihat alert/case di dashboard, lihat AI reasoning dan TI summary
+13. Analyst submit IoC ke Threat Hunting → AI bangun timeline historis + analisis narasi serangan
+14. Live response: kirim task ke agent (artifact collection, YARA scan, isolasi jaringan)
 ```
