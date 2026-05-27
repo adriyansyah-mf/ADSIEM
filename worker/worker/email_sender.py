@@ -4,7 +4,7 @@ Sends HTML email alerts via SMTP.
 Reads SMTP config from platform_settings (cached 60s).
 Silently skips if smtp_enabled != "true" or smtp_host is empty.
 """
-import ssl
+import html
 import structlog
 from datetime import datetime, timezone
 from worker.settings_cache import get_setting
@@ -58,7 +58,11 @@ async def send_alert_email(
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
-    smtp_port = int(await get_setting("smtp_port", "587"))
+    try:
+        smtp_port = int(await get_setting("smtp_port", "587"))
+    except ValueError:
+        log.warning("smtp_port_invalid", value=await get_setting("smtp_port", "587"))
+        smtp_port = 587
     smtp_user = await get_setting("smtp_user", "")
     smtp_pass = await get_setting("smtp_password", "")
     smtp_from = await get_setting("smtp_from", smtp_user)
@@ -66,7 +70,9 @@ async def send_alert_email(
     min_severity = await get_setting("smtp_min_severity", "high")
 
     _severity_order = ["info", "low", "medium", "high", "critical"]
-    if _severity_order.index(severity) < _severity_order.index(min_severity):
+    sev_idx = _severity_order.index(severity) if severity in _severity_order else -1
+    min_idx = _severity_order.index(min_severity) if min_severity in _severity_order else 0
+    if sev_idx < min_idx:
         return
 
     recipients = [r.strip() for r in smtp_to_raw.split(",") if r.strip()]
@@ -75,16 +81,16 @@ async def send_alert_email(
 
     color = _SEVERITY_COLORS.get(severity, "#95A5A6")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    html = _HTML_TEMPLATE.format(
-        title=title, severity=severity.upper(), color=color,
-        source_ip=source_ip or "—", hostname=hostname or "—", timestamp=ts,
+    html_body = _HTML_TEMPLATE.format(
+        title=html.escape(title), severity=severity.upper(), color=color,
+        source_ip=html.escape(source_ip or "—"), hostname=html.escape(hostname or "—"), timestamp=ts,
     )
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"[SIEM] {severity.upper()}: {title}"
     msg["From"] = smtp_from
     msg["To"] = ", ".join(recipients)
-    msg.attach(MIMEText(html, "html"))
+    msg.attach(MIMEText(html_body, "html"))
 
     try:
         use_tls = smtp_port == 465
