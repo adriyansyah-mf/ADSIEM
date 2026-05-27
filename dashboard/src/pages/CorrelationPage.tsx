@@ -127,7 +127,7 @@ export default function CorrelationPage() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => create.mutate(form)}
+              onClick={() => { if (!form.title?.trim()) return; create.mutate(form); }}
               disabled={create.isPending}
               className="px-4 py-1.5 bg-primary text-primary-foreground rounded text-sm hover:opacity-90 disabled:opacity-50"
             >

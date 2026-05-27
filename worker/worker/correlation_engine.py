@@ -70,9 +70,9 @@ async def check_correlation(
         count = await redis.zcard(key)
         if count >= rule.min_count:
             dedup_key = f"corr_fired:{rule.id}:{match_value}"
-            if await redis.exists(dedup_key):
+            fired = await redis.set(dedup_key, "1", nx=True, ex=rule.timewindow)
+            if fired is None:
                 continue
-            await redis.setex(dedup_key, rule.timewindow, "1")
 
             title = (
                 rule.output_title
@@ -81,14 +81,18 @@ async def check_correlation(
             )
             log.info("correlation_triggered", rule_id=str(rule.id), match_value=match_value, count=count)
 
-            async with AsyncSessionLocal() as db:
-                corr_alert = Alert(
-                    title=title,
-                    severity=rule.output_severity,
-                    status="new",
-                    group_id=group_id,
-                    source_ip=source_ip if rule.match_field == "source_ip" else None,
-                    hostname=hostname if rule.match_field == "hostname" else None,
-                )
-                db.add(corr_alert)
-                await db.commit()
+            try:
+                async with AsyncSessionLocal() as db:
+                    corr_alert = Alert(
+                        title=title,
+                        severity=rule.output_severity,
+                        status="new",
+                        group_id=group_id,
+                        source_ip=source_ip if rule.match_field == "source_ip" else None,
+                        hostname=hostname if rule.match_field == "hostname" else None,
+                    )
+                    db.add(corr_alert)
+                    await db.commit()
+            except Exception as db_exc:
+                log.error("correlation_alert_db_failed", rule_id=str(rule.id), error=str(db_exc))
+                await redis.delete(dedup_key)

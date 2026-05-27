@@ -46,7 +46,7 @@ async def update_rule(
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(404, "Rule not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(rule, field, value)
     await db.commit()
     await db.refresh(rule)

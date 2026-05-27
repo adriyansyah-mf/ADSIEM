@@ -1,7 +1,7 @@
 # server-api/app/schemas/schemas.py
 from __future__ import annotations
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 
@@ -597,7 +597,7 @@ class EnrollmentTokenCreated(EnrollmentTokenOut):
 class CorrelationRuleCreate(BaseModel):
     title: str
     description: str | None = None
-    match_field: str = "source_ip"
+    match_field: Literal["source_ip", "hostname", "group_id"] = "source_ip"
     min_count: int = 5
     timewindow: int = 300
     severity_filter: str | None = None
@@ -609,7 +609,7 @@ class CorrelationRuleCreate(BaseModel):
 class CorrelationRuleUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
-    match_field: str | None = None
+    match_field: Literal["source_ip", "hostname", "group_id"] | None = None
     min_count: int | None = None
     timewindow: int | None = None
     severity_filter: str | None = None
