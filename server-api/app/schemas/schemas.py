@@ -58,7 +58,7 @@ class LogSourceIn(BaseModel):
     is_enabled: bool = True
 
 class EnrollRequest(BaseModel):
-    enrollment_token: str
+    enrollment_token: str = ""
     hostname: str
     version: str
     group: str = "default"

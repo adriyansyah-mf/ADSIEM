@@ -70,7 +70,7 @@ function TokenBadge({ token }: { token: EnrollmentToken }) {
   )
 }
 
-function TokensModal({ onClose, onUseToken }: { onClose: () => void; onUseToken: (t: CreatedToken) => void }) {
+function TokensModal({ onClose, onUseToken }: { onClose: () => void; onUseToken: () => void }) {
   const qc = useQueryClient()
   const [label, setLabel] = useState('')
   const [groupId, setGroupId] = useState('default')
@@ -84,10 +84,10 @@ function TokensModal({ onClose, onUseToken }: { onClose: () => void; onUseToken:
 
   const create = useMutation({
     mutationFn: () => api.post('/api/enrollment-tokens', { label, group_id: groupId, expires_hours: expiresHours }).then(r => r.data as CreatedToken),
-    onSuccess: (data) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['enrollment-tokens'] })
       setCreating(false)
-      onUseToken(data)
+      onUseToken()
     },
   })
 
@@ -187,39 +187,25 @@ function TokensModal({ onClose, onUseToken }: { onClose: () => void; onUseToken:
   )
 }
 
-function InstallModal({ initialToken, onClose }: { initialToken?: CreatedToken; onClose: () => void }) {
+function InstallModal({ onClose }: { onClose: () => void }) {
   const { data: packages = [] } = useQuery<AgentPackage[]>({
     queryKey: ['agent-packages'],
     queryFn: () => api.get('/api/agents/packages').then(r => r.data),
   })
   const [tab, setTab] = useState<'deb' | 'rpm'>('deb')
-  const [generatedToken, setGeneratedToken] = useState<CreatedToken | undefined>(initialToken)
-  const [label, setLabel] = useState('')
-  const [groupId, setGroupId] = useState('default')
-  const qc = useQueryClient()
-
-  const generate = useMutation({
-    mutationFn: () => api.post('/api/enrollment-tokens', { label, group_id: groupId, expires_hours: 24 }).then(r => r.data as CreatedToken),
-    onSuccess: (data) => {
-      setGeneratedToken(data)
-      qc.invalidateQueries({ queryKey: ['enrollment-tokens'] })
-    },
-  })
 
   const pkg = packages.find(p => p.type === tab)
   const serverUrl = window.location.origin
-  const enrollToken = generatedToken?.token ?? ''
 
-  const cmds = pkg && generatedToken
+  const cmds = pkg
     ? `# 1. Download
 wget ${serverUrl}/api/agents/packages/${pkg.filename}
 
 # 2. Install
 sudo ${tab === 'deb' ? `dpkg -i ${pkg.filename}` : `rpm -i ${pkg.filename}`}
 
-# 3. Configure
+# 3. Set server URL
 sudo sed -i 's|REPLACE_WITH_SERVER_URL|${serverUrl}|' /etc/siem-agent/config.yaml
-sudo sed -i 's|REPLACE_WITH_ENROLLMENT_TOKEN|${enrollToken}|' /etc/siem-agent/config.yaml
 
 # 4. Enable & start
 sudo systemctl enable --now siem-agent`
@@ -227,7 +213,7 @@ sudo systemctl enable --now siem-agent`
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.65)' }} onClick={onClose}>
-      <div style={{ width: '100%', maxWidth: '660px', background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+      <div style={{ width: '100%', maxWidth: '620px', background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border)', background: 'var(--bg-base)' }}>
           <div>
             <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '15px', color: 'var(--accent-cyan)', letterSpacing: '1px' }}>INSTALL AGENT</div>
@@ -237,91 +223,55 @@ sudo systemctl enable --now siem-agent`
         </div>
 
         <div style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* Token generation */}
-          {!generatedToken ? (
-            <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '6px', padding: '14px 16px' }}>
-              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '10px' }}>STEP 1 — GENERATE ENROLLMENT TOKEN</div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
-                {[
-                  { lbl: 'LABEL (OPTIONAL)', val: label, set: setLabel, ph: 'e.g. web-server-01' },
-                  { lbl: 'GROUP', val: groupId, set: setGroupId, ph: 'default' },
-                ].map(({ lbl, val, set, ph }) => (
-                  <div key={lbl}>
-                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>{lbl}</div>
-                    <input value={val} onChange={e => set(e.target.value)} placeholder={ph} style={{ width: '100%', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: '4px', padding: '7px 10px', color: 'var(--text-primary)', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', boxSizing: 'border-box' }} />
-                  </div>
-                ))}
-              </div>
-              <button onClick={() => generate.mutate()} disabled={generate.isPending} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', borderRadius: '4px', border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.1)', color: 'var(--accent-cyan)', cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '0.5px' }}>
-                {generate.isPending ? <RefreshCw size={13} className="animate-spin" /> : <Key size={13} />} GENERATE TOKEN
-              </button>
+          {/* Package selector */}
+          <div>
+            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '10px' }}>STEP 1 — PACKAGE FORMAT</div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              {(['deb', 'rpm'] as const).map(t => {
+                const p = packages.find(x => x.type === t)
+                const active = tab === t
+                return (
+                  <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: '10px 14px', borderRadius: '6px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent-cyan)' : 'var(--border)'}`, background: active ? 'rgba(0,212,255,0.08)' : 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '13px', color: active ? 'var(--accent-cyan)' : 'var(--text-primary)', letterSpacing: '0.5px' }}>.{t.toUpperCase()}</div>
+                      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>{t === 'deb' ? 'Debian / Ubuntu' : 'RHEL / CentOS / Rocky'}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      {p ? (
+                        <>
+                          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>{fmt(p.size_bytes)}</div>
+                          <a href={`/api/agents/packages/${p.filename}`} download onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px', padding: '3px 8px', borderRadius: '3px', border: `1px solid ${active ? 'var(--accent-cyan)' : 'var(--border)'}`, background: 'transparent', color: active ? 'var(--accent-cyan)' : 'var(--text-muted)', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', letterSpacing: '1px', textDecoration: 'none' }}>
+                            <Download size={10} /> DOWNLOAD
+                          </a>
+                        </>
+                      ) : (
+                        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>not available</div>
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
             </div>
-          ) : (
-            <div style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '6px', padding: '12px 16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: '#4ade80' }}>ENROLLMENT TOKEN — COPY NOW, SHOWN ONCE</div>
-                <CopyButton text={generatedToken.token} />
+          </div>
+
+          {/* Install commands */}
+          {cmds && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)' }}>STEP 2 — INSTALL COMMANDS</div>
+                <CopyButton text={cmds} />
               </div>
-              <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: '#4ade80', wordBreak: 'break-all' }}>{generatedToken.token}</div>
-              {generatedToken.expires_at && (
-                <div style={{ marginTop: '6px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'rgba(34,197,94,0.6)' }}>
-                  Expires: {format(new Date(generatedToken.expires_at), 'MMM d, HH:mm')}
-                </div>
-              )}
+              <pre style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '5px', padding: '12px 14px', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-primary)', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6, margin: 0 }}>
+                {cmds}
+              </pre>
             </div>
           )}
 
-          {generatedToken && (
-            <>
-              {/* Package type selector */}
-              <div>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '10px' }}>STEP 2 — PACKAGE FORMAT</div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  {(['deb', 'rpm'] as const).map(t => {
-                    const p = packages.find(x => x.type === t)
-                    const active = tab === t
-                    return (
-                      <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: '10px 14px', borderRadius: '6px', cursor: 'pointer', border: `1px solid ${active ? 'var(--accent-cyan)' : 'var(--border)'}`, background: active ? 'rgba(0,212,255,0.08)' : 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ textAlign: 'left' }}>
-                          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '13px', color: active ? 'var(--accent-cyan)' : 'var(--text-primary)', letterSpacing: '0.5px' }}>.{t.toUpperCase()}</div>
-                          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>{t === 'deb' ? 'Debian / Ubuntu' : 'RHEL / CentOS / Rocky'}</div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          {p ? (
-                            <>
-                              <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>{fmt(p.size_bytes)}</div>
-                              <a href={`/api/agents/packages/${p.filename}`} download onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '4px', padding: '3px 8px', borderRadius: '3px', border: `1px solid ${active ? 'var(--accent-cyan)' : 'var(--border)'}`, background: 'transparent', color: active ? 'var(--accent-cyan)' : 'var(--text-muted)', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', letterSpacing: '1px', textDecoration: 'none' }}>
-                                <Download size={10} /> DOWNLOAD
-                              </a>
-                            </>
-                          ) : (
-                            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>not available</div>
-                          )}
-                        </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* Install commands */}
-              {cmds && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)' }}>STEP 3 — INSTALL COMMANDS</div>
-                    <CopyButton text={cmds} />
-                  </div>
-                  <pre style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '5px', padding: '12px 14px', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-primary)', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6, margin: 0 }}>
-                    {cmds}
-                  </pre>
-                </div>
-              )}
-
-              <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', padding: '8px 10px', background: 'rgba(0,212,255,0.04)', border: '1px solid rgba(0,212,255,0.15)', borderRadius: '4px' }}>
-                Config: <span style={{ color: 'var(--text-primary)' }}>/etc/siem-agent/config.yaml</span>
-                &nbsp;&middot;&nbsp;
-                Logs: <span style={{ color: 'var(--text-primary)' }}>journalctl -u siem-agent -f</span>
-              </div>
+          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', padding: '8px 10px', background: 'rgba(0,212,255,0.04)', border: '1px solid rgba(0,212,255,0.15)', borderRadius: '4px' }}>
+            Config: <span style={{ color: 'var(--text-primary)' }}>/etc/siem-agent/config.yaml</span>
+            &nbsp;&middot;&nbsp;
+            Logs: <span style={{ color: 'var(--text-primary)' }}>journalctl -u siem-agent -f</span>
+          </div>
             </>
           )}
         </div>
@@ -334,7 +284,6 @@ export default function AgentsPage() {
   const [page, setPage] = useState(1)
   const [showInstall, setShowInstall] = useState(false)
   const [showTokens, setShowTokens] = useState(false)
-  const [installWithToken, setInstallWithToken] = useState<CreatedToken | undefined>()
   const { data, isLoading } = useAgents(page)
   const { hasRole } = useAuthStore()
   const navigate = useNavigate()
@@ -436,7 +385,7 @@ export default function AgentsPage() {
             </button>
           )}
           <button
-            onClick={() => { setInstallWithToken(undefined); setShowInstall(true) }}
+            onClick={() => setShowInstall(true)}
             className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm"
           >
             <Plus size={14} /> Install Agent
@@ -461,14 +410,13 @@ export default function AgentsPage() {
       {showTokens && (
         <TokensModal
           onClose={() => setShowTokens(false)}
-          onUseToken={(t) => { setShowTokens(false); setInstallWithToken(t); setShowInstall(true) }}
+          onUseToken={() => { setShowTokens(false) }}
         />
       )}
 
       {showInstall && (
         <InstallModal
-          initialToken={installWithToken}
-          onClose={() => { setShowInstall(false); setInstallWithToken(undefined) }}
+          onClose={() => setShowInstall(false)}
         />
       )}
     </div>

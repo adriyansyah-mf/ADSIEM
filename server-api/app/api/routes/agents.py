@@ -120,15 +120,17 @@ async def enroll_agent(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    # Validate enrollment token: DB-issued tokens take priority, fall back to env var
+    # Validate enrollment token: DB-issued tokens take priority, then static env token.
+    # If no token provided, open enrollment is allowed (group comes from request).
     db_token = None
-    token_result = await db.execute(
-        select(EnrollmentToken).where(
-            EnrollmentToken.token_hash == hash_token(body.enrollment_token),
-            EnrollmentToken.is_active == True,
+    if body.enrollment_token:
+        token_result = await db.execute(
+            select(EnrollmentToken).where(
+                EnrollmentToken.token_hash == hash_token(body.enrollment_token),
+                EnrollmentToken.is_active == True,
+            )
         )
-    )
-    db_token = token_result.scalar_one_or_none()
+        db_token = token_result.scalar_one_or_none()
 
     if db_token:
         if db_token.expires_at and db_token.expires_at < now_utc():
@@ -136,7 +138,7 @@ async def enroll_agent(
             await db.commit()
             raise HTTPException(status_code=401, detail="Enrollment token has expired")
         effective_group = db_token.group_id
-    elif body.enrollment_token == settings.AGENT_ENROLLMENT_TOKEN:
+    elif not body.enrollment_token or body.enrollment_token == settings.AGENT_ENROLLMENT_TOKEN:
         effective_group = body.group
     else:
         raise HTTPException(status_code=401, detail="Invalid enrollment token")

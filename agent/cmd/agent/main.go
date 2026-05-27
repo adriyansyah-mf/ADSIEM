@@ -36,10 +36,7 @@ func main() {
 		if enrollToken == "" {
 			enrollToken = cfg.Agent.EnrollmentToken
 		}
-		if enrollToken == "" {
-			slog.Error("enrollment token required: set enrollment_token in config.yaml or AGENT_ENROLLMENT_TOKEN env var")
-			os.Exit(1)
-		}
+		// enrollToken may be empty — server supports open enrollment
 		if err := enrollment.Enroll(cfg, *configPath, enrollToken); err != nil {
 			slog.Error("enrollment failed", "err", err)
 			os.Exit(1)

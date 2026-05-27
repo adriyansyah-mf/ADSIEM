@@ -38,7 +38,6 @@ if [ ! -f /etc/siem-agent/config.yaml ]; then
 agent:
   name: "my-agent"
   group: "default"
-  enrollment_token: "REPLACE_WITH_ENROLLMENT_TOKEN"
 
 server:
   url: "http://REPLACE_WITH_SERVER_URL"
@@ -124,7 +123,6 @@ if [ ! -f /etc/siem-agent/config.yaml ]; then
 agent:
   name: "my-agent"
   group: "default"
-  enrollment_token: "REPLACE_WITH_ENROLLMENT_TOKEN"
 server:
   url: "http://REPLACE_WITH_SERVER_URL"
   heartbeat_interval: 30
