@@ -18,6 +18,12 @@ router = APIRouter(prefix="/api/export", tags=["export"])
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 
+def _safe_csv(v: str) -> str:
+    if v and v[0] in ('=', '+', '-', '@', '\t', '\r'):
+        return "'" + v
+    return v
+
+
 # ── Alerts CSV ───────────────────────────────────────────────────
 
 @router.get("/alerts/csv")
@@ -44,8 +50,8 @@ async def export_alerts_csv(
     writer.writerow(["id", "title", "severity", "status", "source_ip", "hostname", "group_id", "created_at"])
     for a in alerts:
         writer.writerow([
-            str(a.id), a.title, a.severity, a.status,
-            a.source_ip or "", a.hostname or "", a.group_id,
+            str(a.id), _safe_csv(a.title), a.severity, a.status,
+            a.source_ip or "", _safe_csv(a.hostname or ""), a.group_id,
             a.created_at.isoformat() if a.created_at else "",
         ])
     output.seek(0)
@@ -164,7 +170,7 @@ async def export_cases_csv(
     writer.writerow(["id", "title", "severity", "status", "created_by_ai", "group_id", "created_at"])
     for c in cases:
         writer.writerow([
-            str(c.id), c.title, c.severity, c.status,
+            str(c.id), _safe_csv(c.title), c.severity, c.status,
             str(c.created_by_ai), c.group_id,
             c.created_at.isoformat() if c.created_at else "",
         ])

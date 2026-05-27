@@ -11,13 +11,19 @@ import { Crosshair, Download } from 'lucide-react'
 import type { Alert } from '@/types'
 
 async function downloadFile(url: string, filename: string) {
-  const res = await import('@/api/client').then(m => m.api.get(url, { responseType: 'blob' }))
-  const href = URL.createObjectURL(res.data)
-  const a = document.createElement('a')
-  a.href = href
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(href)
+  let href: string | null = null
+  try {
+    const res = await import('@/api/client').then(m => m.api.get(url, { responseType: 'blob' }))
+    href = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = href
+    a.download = filename
+    a.click()
+  } catch {
+    alert('Export failed. Please try again.')
+  } finally {
+    if (href) URL.revokeObjectURL(href)
+  }
 }
 
 function HuntButton({ alert }: { alert: Alert }) {
