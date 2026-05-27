@@ -28,10 +28,33 @@ structlog.configure(
     ],
 )
 
+_DEFAULT_SETTINGS = [
+    ("groq_api_key",       "",                          True,  "Groq API key for AI analyst (console.groq.com)"),
+    ("groq_model",         "llama-3.3-70b-versatile",   False, "Groq model ID"),
+    ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
+    ("searxng_url",        "http://searxng:8080",        False, "Internal URL of SearXNG instance used for threat intel search"),
+    ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),
+    ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
+    ("otx_api_key",        "",                          True,  "AlienVault OTX API key — free (otx.alienvault.com)"),
+    ("greynoise_api_key",  "",                          True,  "GreyNoise API key — optional, community endpoint used if empty"),
+]
+
+async def _seed_settings() -> None:
+    from sqlalchemy import select
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import PlatformSetting
+    async with AsyncSessionLocal() as db:
+        for key, default, is_secret, description in _DEFAULT_SETTINGS:
+            existing = await db.get(PlatformSetting, key)
+            if existing is None:
+                db.add(PlatformSetting(key=key, value=default, is_secret=is_secret, description=description))
+        await db.commit()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _seed_settings()
     yield
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
