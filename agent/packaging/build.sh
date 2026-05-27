@@ -146,10 +146,15 @@ fi
 # ── Windows ───────────────────────────────────────────────────────
 echo ""
 echo "Building Windows binary..."
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
-    -ldflags="-s -w -X main.Version=${VERSION}" \
-    -o "$OUTPUT/siem-agent-${VERSION}-windows-amd64.exe" \
-    /src/cmd/agent/ 2>/dev/null || echo "Windows cross-compile skipped (not in build context)"
+if [ -d /src/cmd/agent ]; then
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+        -ldflags="-s -w -X main.Version=${VERSION}" \
+        -o "$OUTPUT/siem-agent-${VERSION}-windows-amd64.exe" \
+        /src/cmd/agent/
+    echo "✓ Created: $OUTPUT/siem-agent-${VERSION}-windows-amd64.exe"
+else
+    echo "Windows cross-compile skipped (source not in build context)"
+fi
 
 echo ""
 echo "Packages ready:"

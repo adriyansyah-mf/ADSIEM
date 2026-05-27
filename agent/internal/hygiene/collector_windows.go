@@ -8,6 +8,7 @@ import (
 )
 
 func Collect(agentID, hostname string) (*Report, error) {
+	// Stub: hygiene collection not implemented on Windows.
 	r := &Report{
 		AgentID:     agentID,
 		Hostname:    hostname,
@@ -15,7 +16,7 @@ func Collect(agentID, hostname string) (*Report, error) {
 		OSName:      "Windows",
 		CollectedAt: time.Now().UTC().Format(time.RFC3339),
 		CPUCount:    runtime.NumCPU(),
-		Score:       100,
+		Score:       0,
 	}
 	return r, nil
 }

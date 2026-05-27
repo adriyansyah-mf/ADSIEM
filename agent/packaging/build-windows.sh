@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="${VERSION:-1.1.0}"
+VERSION="${VERSION:-1.0.0}"
 OUTPUT="${OUTPUT:-/output}"
 mkdir -p "$OUTPUT"
 
