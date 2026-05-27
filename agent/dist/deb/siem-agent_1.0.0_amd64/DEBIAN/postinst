@@ -15,7 +15,13 @@ case "$1" in
 
     systemctl daemon-reload
     systemctl enable siem-agent.service
-    echo "siem-agent installed. Edit /etc/siem-agent/config.yaml then:"
+    echo ""
+    echo "=== siem-agent installed ==="
+    echo "Edit /etc/siem-agent/config.yaml:"
+    echo "  1. Set server.url to your SIEM server address"
+    echo "  2. Set agent.enrollment_token to your one-time enrollment token"
+    echo "Then start the agent:"
     echo "  sudo systemctl start siem-agent"
+    echo ""
     ;;
 esac

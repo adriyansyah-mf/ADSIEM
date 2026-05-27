@@ -13,11 +13,12 @@ type LogSource struct {
 }
 
 type AgentConfig struct {
-	ID         string `yaml:"id"`
-	Name       string `yaml:"name"`
-	Group      string `yaml:"group"`
-	Token      string `yaml:"token"`
-	BufferSize int    `yaml:"buffer_size"`
+	ID              string `yaml:"id"`
+	Name            string `yaml:"name"`
+	Group           string `yaml:"group"`
+	Token           string `yaml:"token"`
+	EnrollmentToken string `yaml:"enrollment_token,omitempty"`
+	BufferSize      int    `yaml:"buffer_size"`
 }
 
 type ServerConfig struct {
@@ -60,5 +61,5 @@ func Save(path string, cfg *Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }

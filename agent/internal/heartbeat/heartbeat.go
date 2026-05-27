@@ -9,6 +9,7 @@ import (
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
+	"github.com/siem-platform/agent/internal/version"
 )
 
 type LogSource struct {
@@ -54,7 +55,7 @@ func Loop(
 		payload := HeartbeatRequest{
 			AgentID:       cfg.Agent.ID,
 			Status:        "online",
-			Version:       "1.0.0",
+			Version:       version.Version,
 			BufferDropped: dropped,
 		}
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
@@ -79,6 +80,8 @@ func Loop(
 					onTasks(hbResp.Tasks)
 				}
 			}
+		} else if resp.StatusCode == 401 {
+			slog.Error("heartbeat rejected: agent token invalid or agent not found — check config token or re-enroll", "status", 401)
 		} else {
 			slog.Warn("heartbeat non-200", "status", resp.StatusCode)
 		}

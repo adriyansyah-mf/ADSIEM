@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$(dirname "$SCRIPT_DIR")"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.1.0}"
 ARCH="${ARCH:-$(dpkg --print-architecture 2>/dev/null || echo amd64)}"
 
 # Map dpkg arch to GOARCH
@@ -21,7 +21,7 @@ STAGE="${AGENT_DIR}/dist/deb/${PKG}"
 echo "==> Building binary (GOOS=linux GOARCH=${GOARCH})"
 cd "$AGENT_DIR"
 CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build \
-  -ldflags="-s -w -X main.Version=${VERSION}" \
+  -ldflags="-s -w -X github.com/siem-platform/agent/internal/version.Version=${VERSION}" \
   -o "dist/siem-agent-${GOARCH}" \
   ./cmd/agent/
 

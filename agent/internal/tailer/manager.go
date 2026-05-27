@@ -37,16 +37,17 @@ func (m *Manager) Update(sources []heartbeat.LogSource) {
 		}
 	}
 
-	// Stop removed sources
+	// Stop removed sources or sources whose log_type changed
 	for path, active := range m.sources {
-		if _, ok := wanted[path]; !ok {
+		s, ok := wanted[path]
+		if !ok || s.LogType != active.logType {
 			slog.Info("stopping tailer", "path", path)
 			close(active.stopCh)
 			delete(m.sources, path)
 		}
 	}
 
-	// Start new sources
+	// Start new or restarted sources
 	for path, s := range wanted {
 		if _, exists := m.sources[path]; !exists {
 			slog.Info("starting tailer", "path", path, "type", s.LogType)

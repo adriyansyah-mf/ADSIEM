@@ -19,9 +19,6 @@ import (
 	"github.com/siem-platform/agent/internal/tailer"
 )
 
-// Version is set at build time via -ldflags "-X main.Version=x.y.z"
-var Version = "dev"
-
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()
@@ -34,12 +31,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	enrollToken := os.Getenv("AGENT_ENROLLMENT_TOKEN")
-	if enrollToken == "" {
-		enrollToken = "bootstrap-token"
-	}
-
 	if cfg.Agent.Token == "" {
+		enrollToken := os.Getenv("AGENT_ENROLLMENT_TOKEN")
+		if enrollToken == "" {
+			enrollToken = cfg.Agent.EnrollmentToken
+		}
+		if enrollToken == "" {
+			slog.Error("enrollment token required: set enrollment_token in config.yaml or AGENT_ENROLLMENT_TOKEN env var")
+			os.Exit(1)
+		}
 		if err := enrollment.Enroll(cfg, *configPath, enrollToken); err != nil {
 			slog.Error("enrollment failed", "err", err)
 			os.Exit(1)
@@ -115,7 +115,6 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 		logType, rawMessage := tailer.Decode(entry)
 		payload := map[string]interface{}{
 			"agent_id":    cfg.Agent.ID,
-			"agent_token": cfg.Agent.Token,
 			"log_type":    logType,
 			"raw_message": rawMessage,
 			"received_at": time.Now().UTC().Format(time.RFC3339Nano),
@@ -149,7 +148,6 @@ func flushBuffer(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 		logType, rawMessage := tailer.Decode(entry)
 		payload := map[string]interface{}{
 			"agent_id":    cfg.Agent.ID,
-			"agent_token": cfg.Agent.Token,
 			"log_type":    logType,
 			"raw_message": rawMessage,
 			"received_at": time.Now().UTC().Format(time.RFC3339Nano),

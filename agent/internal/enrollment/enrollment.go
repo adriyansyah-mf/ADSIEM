@@ -10,6 +10,7 @@ import (
 
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
+	"github.com/siem-platform/agent/internal/version"
 )
 
 type LogSourcePayload struct {
@@ -45,7 +46,7 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 	payload := EnrollRequest{
 		EnrollmentToken: enrollToken,
 		Hostname:        h,
-		Version:         "1.0.0",
+		Version:         version.Version,
 		Group:           cfg.Agent.Group,
 		Name:            cfg.Agent.Name,
 		LogSources:      sources,
@@ -73,6 +74,7 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 		}
 		cfg.Agent.ID = result.AgentID
 		cfg.Agent.Token = result.AgentToken
+		cfg.Agent.EnrollmentToken = "" // clear after use
 		if err := config.Save(configPath, cfg); err != nil {
 			return fmt.Errorf("save config after enroll: %w", err)
 		}
