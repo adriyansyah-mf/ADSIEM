@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { UebaEntityScore, UebaEntityDetail, UebaStatus } from '@/types'
+import type { UebaEntityScore, UebaEntityDetail, UebaStatus, UebaRiskPoint } from '@/types'
 
-export function useUebaEntities(entityType: 'user' | 'ip' | 'all' = 'all', minRisk = 0) {
+export function useUebaEntities(entityType: 'user' | 'ip' | 'host' | 'all' = 'all', minRisk = 0) {
   return useQuery<UebaEntityScore[]>({
     queryKey: ['ueba', 'entities', entityType, minRisk],
     queryFn: () =>
@@ -27,5 +27,15 @@ export function useUebaStatus() {
     queryKey: ['ueba', 'status'],
     queryFn: () => api.get('/api/ueba/status').then(r => r.data),
     refetchInterval: 60_000,
+  })
+}
+
+export function useUebaRiskHistory(entityType: string, entityValue: string, days = 7) {
+  return useQuery<UebaRiskPoint[]>({
+    queryKey: ['ueba', 'history', entityType, entityValue, days],
+    queryFn: () =>
+      api.get(`/api/ueba/entity/${entityType}/${encodeURIComponent(entityValue)}/history`, { params: { days } })
+        .then(r => r.data),
+    enabled: !!entityType && !!entityValue,
   })
 }

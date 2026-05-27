@@ -235,7 +235,7 @@ export const ROLE_HIERARCHY: Record<Role, number> = {
 }
 
 export interface UebaEntityScore {
-  entity_type: 'user' | 'ip'
+  entity_type: 'user' | 'ip' | 'host'
   entity_value: string
   group_id: string
   risk_score: number
@@ -243,6 +243,7 @@ export interface UebaEntityScore {
   last_anomaly_at: string | null
   last_seen_at: string | null
   updated_at: string
+  feature_profile: Record<string, { mean: number; std: number }>
 }
 
 export interface UebaAnomaly {
@@ -253,6 +254,10 @@ export interface UebaAnomaly {
   risk_score: number
   features: Record<string, number>
   alert_id: string | null
+  mitre_techniques: Array<{ id: string; name: string }>
+  ai_narrative: string | null
+  ai_action: string | null
+  case_id: string | null
   detected_at: string
 }
 
@@ -266,6 +271,12 @@ export interface UebaStatus {
   trained_at: string | null
   user_snapshot_count: number
   ip_snapshot_count: number
+  host_snapshot_count: number
+}
+
+export interface UebaRiskPoint {
+  snapshot_hour: string
+  risk_score: number
 }
 
 export interface ThreatHunt {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useUebaEntities, useUebaEntityDetail, useUebaStatus } from '@/hooks/useUeba'
-import type { UebaEntityScore, UebaAnomaly } from '@/types'
+import { useUebaEntities, useUebaEntityDetail, useUebaStatus, useUebaRiskHistory } from '@/hooks/useUeba'
+import type { UebaEntityScore, UebaAnomaly, UebaRiskPoint } from '@/types'
 
 function riskColor(score: number) {
   if (score >= 80) return 'var(--accent-red)'
@@ -18,6 +18,38 @@ function RiskBar({ score }: { score: number }) {
       <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: riskColor(score), minWidth: '28px', textAlign: 'right' }}>
         {score.toFixed(0)}
       </span>
+    </div>
+  )
+}
+
+function RiskSparkline({ data }: { data: UebaRiskPoint[] }) {
+  if (data.length < 2) {
+    return (
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+        Not enough data for trend
+      </div>
+    )
+  }
+  const W = 280, H = 40
+  const scores = data.map(d => d.risk_score)
+  const min = Math.min(...scores)
+  const max = Math.max(...scores) || 1
+  const pts = data.map((d, i) => {
+    const x = (i / (data.length - 1)) * W
+    const y = H - ((d.risk_score - min) / (max - min || 1)) * H
+    return `${x},${y}`
+  }).join(' ')
+  const lastScore = scores[scores.length - 1]
+  const color = lastScore >= 80 ? '#ef4444' : lastScore >= 60 ? '#ff6b35' : lastScore >= 40 ? '#ffd600' : '#00ff88'
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <span style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '1px' }}>7-DAY RISK TREND</span>
+        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color }}>{lastScore.toFixed(0)}/100</span>
+      </div>
+      <svg width={W} height={H} style={{ width: '100%' }}>
+        <polyline points={pts} fill="none" stroke={color} strokeWidth={2} />
+      </svg>
     </div>
   )
 }
@@ -90,19 +122,58 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
           padding: '4px 8px', borderRadius: '3px',
           background: 'var(--bg-base)',
           border: `1px solid ${riskColor(a.risk_score)}44`,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          <div>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: riskColor(a.risk_score) }}>
-              risk {a.risk_score.toFixed(0)}
-            </span>
-            <span style={{ marginLeft: '8px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
-              score {a.anomaly_score.toFixed(3)}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: riskColor(a.risk_score) }}>
+                risk {a.risk_score.toFixed(0)}
+              </span>
+              <span style={{ marginLeft: '8px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+                score {a.anomaly_score.toFixed(3)}
+              </span>
+            </div>
+            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
+              {new Date(a.detected_at).toLocaleString()}
             </span>
           </div>
-          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
-            {new Date(a.detected_at).toLocaleString()}
-          </span>
+          {/* MITRE badges */}
+          {a.mitre_techniques && a.mitre_techniques.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '3px' }}>
+              {a.mitre_techniques.map(t => (
+                <span key={t.id} title={t.name} style={{
+                  fontFamily: 'Share Tech Mono, monospace', fontSize: '9px',
+                  padding: '1px 5px', borderRadius: '2px',
+                  background: 'rgba(255,107,53,0.2)', color: '#ff6b35',
+                }}>
+                  {t.id}
+                </span>
+              ))}
+              {a.ai_action && (
+                <span style={{
+                  fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px',
+                  padding: '1px 5px', borderRadius: '2px', letterSpacing: '0.5px',
+                  background: a.ai_action === 'escalate' ? 'rgba(239,68,68,0.2)'
+                    : a.ai_action === 'dismiss' ? 'rgba(100,100,100,0.2)'
+                    : 'rgba(255,214,0,0.2)',
+                  color: a.ai_action === 'escalate' ? '#ef4444'
+                    : a.ai_action === 'dismiss' ? 'var(--text-muted)'
+                    : '#ffd600',
+                }}>
+                  {a.ai_action.toUpperCase()}
+                </span>
+              )}
+            </div>
+          )}
+          {a.ai_narrative && (
+            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px', lineHeight: 1.4, fontStyle: 'italic' }}>
+              {a.ai_narrative}
+            </div>
+          )}
+          {a.ai_action === 'escalate' && a.case_id && (
+            <a href={`/cases/${a.case_id}`} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', marginTop: '2px', display: 'block' }}>
+              View Case →
+            </a>
+          )}
         </div>
       ))}
     </div>
@@ -111,6 +182,7 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
 
 function DetailPanel({ entityType, entityValue, onClose }: { entityType: string; entityValue: string; onClose: () => void }) {
   const { data, isLoading } = useUebaEntityDetail(entityType, entityValue)
+  const { data: history = [] } = useUebaRiskHistory(entityType, entityValue)
 
   return (
     <div style={{
@@ -139,6 +211,9 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
         </div>
       ) : data ? (
         <div style={{ flex: 1, overflow: 'auto', padding: '14px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <RiskSparkline data={history} />
+          </div>
           <div>
             <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
               RISK SCORE
@@ -172,9 +247,9 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
 }
 
 export default function UEBAPage() {
-  const [tab, setTab] = useState<'user' | 'ip'>('user')
+  const [tab, setTab] = useState<'user' | 'ip' | 'host'>('user')
   const [selected, setSelected] = useState<{ type: string; value: string } | null>(null)
-  const { data: entities = [], isLoading } = useUebaEntities(tab)
+  const { data: entities = [], isLoading } = useUebaEntities(tab, 0)
   const { data: status } = useUebaStatus()
 
   const highRisk = entities.filter(e => e.risk_score >= 60).length
@@ -210,6 +285,7 @@ export default function UEBAPage() {
             { label: 'HIGH RISK', value: highRisk, color: highRisk > 0 ? 'var(--accent-red)' : 'var(--text-primary)' },
             { label: 'USER SNAPS', value: status?.user_snapshot_count ?? 0, color: 'var(--text-primary)' },
             { label: 'IP SNAPS', value: status?.ip_snapshot_count ?? 0, color: 'var(--text-primary)' },
+            { label: 'HOST SNAPS', value: status?.host_snapshot_count ?? 0, color: 'var(--text-primary)' },
           ].map(({ label, value, color }) => (
             <div key={label} style={{ textAlign: 'center' }}>
               <div style={{ fontFamily: 'Share Tech Mono, monospace', fontWeight: 700, fontSize: '18px', color, lineHeight: 1 }}>{value}</div>
@@ -233,7 +309,7 @@ export default function UEBAPage() {
       <div style={{ flex: 1, display: 'flex', gap: '12px', overflow: 'hidden' }}>
         <div style={{ flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
-            {(['user', 'ip'] as const).map(t => (
+            {(['user', 'ip', 'host'] as const).map(t => (
               <button
                 key={t}
                 onClick={() => { setTab(t); setSelected(null) }}
