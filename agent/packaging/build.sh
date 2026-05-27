@@ -40,7 +40,7 @@ agent:
   group: "default"
 
 server:
-  url: "http://REPLACE_WITH_SERVER_URL"
+  url: "REPLACE_WITH_SERVER_URL"
   heartbeat_interval: 30
 
 logs: []
@@ -124,7 +124,7 @@ agent:
   name: "my-agent"
   group: "default"
 server:
-  url: "http://REPLACE_WITH_SERVER_URL"
+  url: "REPLACE_WITH_SERVER_URL"
   heartbeat_interval: 30
 logs: []
 CONF
