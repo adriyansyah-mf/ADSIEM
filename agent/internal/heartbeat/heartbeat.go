@@ -79,6 +79,8 @@ func Loop(
 					onTasks(hbResp.Tasks)
 				}
 			}
+		} else if resp.StatusCode == 401 {
+			slog.Error("heartbeat rejected: agent token invalid or agent not found — check config token or re-enroll", "status", 401)
 		} else {
 			slog.Warn("heartbeat non-200", "status", resp.StatusCode)
 		}

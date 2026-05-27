@@ -1,8 +1,9 @@
 agent:
   id: ""
-  name: ""        # set to hostname if blank at runtime
+  name: ""              # set to hostname if blank at runtime
   group: default
-  token: ""       # populated automatically after enrollment
+  token: ""             # populated automatically after enrollment — do not edit
+  enrollment_token: ""  # paste your one-time enrollment token here, cleared after first start
   buffer_size: 10000
 
 server:

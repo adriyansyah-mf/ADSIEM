@@ -73,6 +73,7 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 		}
 		cfg.Agent.ID = result.AgentID
 		cfg.Agent.Token = result.AgentToken
+		cfg.Agent.EnrollmentToken = "" // clear after use
 		if err := config.Save(configPath, cfg); err != nil {
 			return fmt.Errorf("save config after enroll: %w", err)
 		}
