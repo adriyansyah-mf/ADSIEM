@@ -1,6 +1,6 @@
 # server-api/app/api/routes/audit_logs.py
 from typing import Annotated
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +17,8 @@ Perm = require_permission("settings:manage")  # admin-only
 async def list_audit_logs(
     db: Annotated[AsyncSession, Depends(get_db)],
     _=Depends(Perm),
-    page: int = 1,
-    page_size: int = 50,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=1000),
     action: str | None = None,
     resource_type: str | None = None,
 ):
