@@ -400,6 +400,7 @@ class UebaEntityScoreOut(BaseModel):
     last_anomaly_at: datetime | None
     last_seen_at: datetime | None
     updated_at: datetime
+    feature_profile: dict
     model_config = {"from_attributes": True}
 
 class UebaAnomalyOut(BaseModel):
@@ -410,7 +411,16 @@ class UebaAnomalyOut(BaseModel):
     risk_score: float
     features: dict
     alert_id: UUID | None
+    mitre_techniques: list[dict]
+    ai_narrative: str | None
+    ai_action: str | None
+    case_id: UUID | None
     detected_at: datetime
+    model_config = {"from_attributes": True}
+
+class UebaRiskHistoryPoint(BaseModel):
+    snapshot_hour: datetime
+    risk_score: float
     model_config = {"from_attributes": True}
 
 class UebaEntityDetailOut(BaseModel):
@@ -422,6 +432,7 @@ class UebaStatusOut(BaseModel):
     trained_at: str | None
     user_snapshot_count: int
     ip_snapshot_count: int
+    host_snapshot_count: int
 
 # ─── Threat Hunts ────────────────────────────────────────────────
 
