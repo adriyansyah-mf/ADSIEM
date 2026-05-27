@@ -129,6 +129,7 @@ class UebaFeatureSnapshot(Base):
     entity_value  = Column(String(255), nullable=False)
     group_id      = Column(String(100), nullable=False, default="default")
     features      = Column(JSONB,       nullable=False, default=dict)
+    risk_score    = Column(Float,       nullable=False, default=0.0)
     snapshot_hour = Column(DateTime(timezone=True), nullable=False)
     created_at    = Column(DateTime(timezone=True), default=now_utc)
 
@@ -142,6 +143,7 @@ class UebaEntityScore(Base):
     last_anomaly_at = Column(DateTime(timezone=True))
     last_seen_at    = Column(DateTime(timezone=True))
     updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    feature_profile = Column(JSONB,                   nullable=False, default=dict)
 
 class UebaAnomaly(Base):
     __tablename__ = "ueba_anomalies"
@@ -152,8 +154,12 @@ class UebaAnomaly(Base):
     anomaly_score = Column(Float,       nullable=False)
     risk_score    = Column(Float,       nullable=False)
     features      = Column(JSONB,       nullable=False, default=dict)
-    alert_id      = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
-    detected_at   = Column(DateTime(timezone=True), default=now_utc)
+    alert_id         = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
+    mitre_techniques = Column(JSONB,               nullable=False, default=list)
+    ai_narrative     = Column(Text)
+    ai_action        = Column(String(20))
+    case_id          = Column(UUID(as_uuid=True))
+    detected_at      = Column(DateTime(timezone=True), default=now_utc)
 
 class ThreatHunt(Base):
     __tablename__ = "threat_hunts"

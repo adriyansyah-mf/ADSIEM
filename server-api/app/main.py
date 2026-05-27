@@ -81,12 +81,32 @@ async def _seed_correlation_rules() -> None:
             ))
             await db.commit()
 
+async def _migrate_ueba_columns() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            ALTER TABLE ueba_anomalies
+            ADD COLUMN IF NOT EXISTS mitre_techniques JSONB NOT NULL DEFAULT '[]'::jsonb,
+            ADD COLUMN IF NOT EXISTS ai_narrative TEXT,
+            ADD COLUMN IF NOT EXISTS ai_action VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS case_id UUID REFERENCES cases(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text("""
+            ALTER TABLE ueba_entity_scores
+            ADD COLUMN IF NOT EXISTS feature_profile JSONB NOT NULL DEFAULT '{}'::jsonb
+        """))
+        await conn.execute(text("""
+            ALTER TABLE ueba_feature_snapshots
+            ADD COLUMN IF NOT EXISTS risk_score FLOAT NOT NULL DEFAULT 0.0
+        """))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _seed_settings()
     await _seed_correlation_rules()
+    await _migrate_ueba_columns()
     yield
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
