@@ -1,5 +1,6 @@
 # worker/worker/ueba/scorer.py
 import base64
+import json
 import pickle
 import time
 import numpy as np
@@ -20,42 +21,79 @@ from worker.ueba.features import (
 
 log = structlog.get_logger()
 
-ANOMALY_THRESHOLD = -0.1
-COOLDOWN_TTL = 1800   # 30 minutes between alerts for the same entity
-MODEL_CACHE_TTL = 300  # reload model from Redis every 5 minutes
-MIN_ANOMALY_COUNT = 3  # suppress alerts until entity has this many anomalies (cold entity guard)
+ANOMALY_THRESHOLD    = -0.1   # ensemble score threshold for recording anomaly
+INVESTIGATE_THRESHOLD = -0.2  # stricter threshold to push to AI investigation queue
+INVESTIGATE_RISK_MIN  = 50    # minimum risk score to trigger investigation
+INV_COOLDOWN_TTL      = 3600  # 1 hour between investigations of same entity
+COOLDOWN_TTL          = 1800  # 30 min between alerts for same entity
+MODEL_CACHE_TTL       = 300   # reload models from Redis every 5 min
+MIN_ANOMALY_COUNT     = 3     # cold entity guard
 
-_user_model = None
-_ip_model = None
+UEBA_INVESTIGATE_QUEUE = "siem:ueba:investigate"
+
+_models: dict = {}  # {key: model}
 _model_loaded_at: float = 0
 
 
 async def _load_models(redis) -> bool:
-    global _user_model, _ip_model, _model_loaded_at
+    global _models, _model_loaded_at
     if time.time() - _model_loaded_at < MODEL_CACHE_TTL:
-        return _user_model is not None or _ip_model is not None
+        return bool(_models)
 
     status = await redis.get("ueba:model:status")
     if status != "ready":
-        _model_loaded_at = time.time()  # avoid polling every event when cold
+        _model_loaded_at = time.time()
         return False
 
-    user_b64 = await redis.get("ueba:model:user")
-    ip_b64   = await redis.get("ueba:model:ip")
+    new_models = {}
+    for key in [
+        "ueba:model:user:if", "ueba:model:user:lof",
+        "ueba:model:ip:if",   "ueba:model:ip:lof",
+        "ueba:model:host:if", "ueba:model:host:lof",
+    ]:
+        b64 = await redis.get(key)
+        if b64:
+            new_models[key] = pickle.loads(base64.b64decode(b64))
 
-    if user_b64:
-        _user_model = pickle.loads(base64.b64decode(user_b64))
-    if ip_b64:
-        _ip_model = pickle.loads(base64.b64decode(ip_b64))
-
+    _models = new_models
     _model_loaded_at = time.time()
-    return _user_model is not None or _ip_model is not None
+    return bool(_models)
 
 
-async def _get_risk_score(entity_type: str, entity_value: str) -> float:
+def _ensemble_score(entity_type: str, vec: np.ndarray) -> float | None:
+    """Return combined IF+LOF decision score, or None if models not available."""
+    if_key  = f"ueba:model:{entity_type}:if"
+    lof_key = f"ueba:model:{entity_type}:lof"
+    if if_key not in _models and lof_key not in _models:
+        return None
+    scores = []
+    if if_key in _models:
+        scores.append(float(_models[if_key].decision_function(vec)[0]))
+    if lof_key in _models:
+        scores.append(float(_models[lof_key].decision_function(vec)[0]))
+    return sum(scores) / len(scores)
+
+
+def _zscore_contribution(feat_dict: dict, profile: dict, keys: list[str]) -> float | None:
+    """Compute normalized Z-score contribution (0-100) from entity profile."""
+    if not profile:
+        return None
+    z_scores = []
+    for key in keys:
+        p = profile.get(key)
+        if not p:
+            continue
+        std = p["std"] or 0.1
+        z = abs(feat_dict.get(key, 0.0) - p["mean"]) / std
+        z_scores.append(z)
+    if not z_scores:
+        return None
+    return min(max(z_scores) * 20, 100.0)  # scale max z-score to 0-100
+
+
+async def _get_entity_score_row(entity_type: str, entity_value: str):
     async with AsyncSessionLocal() as db:
-        row = await db.get(UebaEntityScore, (entity_type, entity_value))
-        return row.risk_score if row else 0.0
+        return await db.get(UebaEntityScore, (entity_type, entity_value))
 
 
 async def _upsert_entity_score(
@@ -83,27 +121,39 @@ async def _upsert_entity_score(
         await db.commit()
 
 
-async def _get_anomaly_count(entity_type: str, entity_value: str) -> int:
-    async with AsyncSessionLocal() as db:
-        row = await db.get(UebaEntityScore, (entity_type, entity_value))
-        return row.anomaly_count if row else 0
-
-
 async def _handle_score(
     redis, entity_type: str, entity_value: str,
-    if_score: float, feat_dict: dict,
+    ensemble_score: float | None,
+    feat_dict: dict, feat_keys: list[str],
     group_id: str, decoded: dict,
 ) -> None:
-    old_risk = await _get_risk_score(entity_type, entity_value)
-    contribution = min(abs(if_score) * 100, 100)
-    new_risk = old_risk * 0.9 + contribution * 0.1
+    row = await _get_entity_score_row(entity_type, entity_value)
+    old_risk = row.risk_score if row else 0.0
+    profile  = row.feature_profile if row else {}
+    anomaly_count = row.anomaly_count if row else 0
 
-    is_anomaly = if_score < ANOMALY_THRESHOLD
+    # Compute risk contributions
+    zscore_contrib = _zscore_contribution(feat_dict, profile, feat_keys)
+    global_contrib = min(abs(ensemble_score) * 100, 100.0) if ensemble_score is not None else None
+
+    # Combined risk raw value
+    if zscore_contrib is not None and global_contrib is not None:
+        raw = zscore_contrib * 0.6 + global_contrib * 0.4
+    elif zscore_contrib is not None:
+        raw = zscore_contrib
+    elif global_contrib is not None:
+        raw = global_contrib
+    else:
+        return  # no scoring data available
+
+    new_risk = old_risk * 0.9 + raw * 0.1
+
+    is_anomaly = ensemble_score is not None and ensemble_score < ANOMALY_THRESHOLD
+    alert_id = None
 
     if is_anomaly:
         cd_key = f"ueba:cd:{entity_type}:{entity_value}"
         in_cooldown = await redis.exists(cd_key)
-        anomaly_count = await _get_anomaly_count(entity_type, entity_value)
 
         if not in_cooldown and (anomaly_count + 1) >= MIN_ANOMALY_COUNT:
             severity = (
@@ -111,17 +161,14 @@ async def _handle_score(
                 "high"     if new_risk >= 60 else
                 "medium"   if new_risk >= 40 else "low"
             )
-            title = (
-                f"[UEBA] {entity_type.capitalize()} anomaly: {entity_value} "
-                f"[risk: {new_risk:.0f}/100]"
-            )
-            src_ip = entity_value if entity_type == "ip" else decoded.get("source.ip")
-            hostname = decoded.get("hostname") or decoded.get("host.hostname")
+            src_ip   = entity_value if entity_type == "ip" else decoded.get("source.ip")
+            hostname = (entity_value if entity_type == "host"
+                        else decoded.get("hostname") or decoded.get("host.hostname"))
 
             alert_id = await create_alert(
                 rule_match={
                     "id":         f"ueba-{entity_type}",
-                    "title":      title,
+                    "title":      f"[UEBA] {entity_type.capitalize()} anomaly: {entity_value} [risk: {new_risk:.0f}/100]",
                     "level":      severity,
                     "tags":       ["ueba", f"ueba.{entity_type}"],
                     "mitre_tags": [],
@@ -131,51 +178,83 @@ async def _handle_score(
             )
             await redis.setex(cd_key, COOLDOWN_TTL, "1")
             log.info("ueba_alert_created", entity_type=entity_type, entity_value=entity_value,
-                     risk=new_risk, score=if_score)
-        else:
-            alert_id = None
+                     risk=new_risk, score=ensemble_score)
 
-        # Always record the anomaly in the DB (for timeline)
+        # Record anomaly in DB
         async with AsyncSessionLocal() as db:
-            db.add(UebaAnomaly(
+            anomaly = UebaAnomaly(
                 entity_type=entity_type, entity_value=entity_value, group_id=group_id,
-                anomaly_score=if_score, risk_score=new_risk,
+                anomaly_score=ensemble_score, risk_score=new_risk,
                 features=feat_dict, alert_id=alert_id,
-            ))
+            )
+            db.add(anomaly)
+            await db.flush()
+            anomaly_id = str(anomaly.id)
             await db.commit()
+
+        # Push to investigation queue if score extreme enough
+        if (ensemble_score < INVESTIGATE_THRESHOLD and new_risk >= INVESTIGATE_RISK_MIN):
+            inv_cd_key = f"ueba:inv_cd:{entity_type}:{entity_value}"
+            if not await redis.exists(inv_cd_key):
+                await redis.setex(inv_cd_key, INV_COOLDOWN_TTL, "1")
+                src_ip_inv   = entity_value if entity_type == "ip" else decoded.get("source.ip")
+                hostname_inv = (entity_value if entity_type == "host"
+                                else decoded.get("hostname") or decoded.get("host.hostname"))
+                await redis.rpush(UEBA_INVESTIGATE_QUEUE, json.dumps({
+                    "entity_type":   entity_type,
+                    "entity_value":  entity_value,
+                    "group_id":      group_id,
+                    "anomaly_score": ensemble_score,
+                    "risk_score":    new_risk,
+                    "features":      feat_dict,
+                    "anomaly_id":    anomaly_id,
+                    "source_ip":     src_ip_inv,
+                    "hostname":      hostname_inv,
+                }))
+                log.info("ueba_queued_for_investigation",
+                         entity_type=entity_type, entity_value=entity_value,
+                         score=ensemble_score, risk=new_risk)
 
     await _upsert_entity_score(entity_type, entity_value, group_id, new_risk, is_anomaly)
 
 
 async def score_event(redis, decoded: dict, group_id: str) -> None:
     """Entry point called from consumer.py after each event is saved."""
-    user = decoded.get("user.name")
-    ip   = decoded.get("source.ip")
+    user     = decoded.get("user.name")
+    ip       = decoded.get("source.ip")
+    hostname = decoded.get("hostname") or decoded.get("host.hostname")
 
-    # Always update counters (even when model is cold — builds training data)
+    # Always update counters (builds training data even when model cold)
     if user:
         await update_user_counters(redis, user, decoded)
     if ip:
         await update_ip_counters(redis, ip, decoded, user)
-    hostname = decoded.get("hostname") or decoded.get("host.hostname")
     if hostname:
         await update_host_counters(redis, hostname, decoded, user)
 
     if not await _load_models(redis):
-        return  # model cold or not yet trained
+        return
 
-    if user and _user_model is not None:
+    if user:
         login  = int(await redis.get(f"ueba:u:{user}:login")  or 0)
         failed = int(await redis.get(f"ueba:u:{user}:failed") or 0)
         feat = await build_user_vector_dict(redis, user, login, failed)
         vec  = np.array([vector_from_dict(feat, USER_FEATURE_KEYS)])
-        score = float(_user_model.decision_function(vec)[0])
-        await _handle_score(redis, "user", user, score, feat, group_id, decoded)
+        score = _ensemble_score("user", vec)
+        await _handle_score(redis, "user", user, score, feat, USER_FEATURE_KEYS, group_id, decoded)
 
-    if ip and _ip_model is not None:
+    if ip:
         total  = int(await redis.get(f"ueba:ip:{ip}:total")  or 0)
         failed = int(await redis.get(f"ueba:ip:{ip}:failed") or 0)
         feat = await build_ip_vector_dict(redis, ip, total, failed)
         vec  = np.array([vector_from_dict(feat, IP_FEATURE_KEYS)])
-        score = float(_ip_model.decision_function(vec)[0])
-        await _handle_score(redis, "ip", ip, score, feat, group_id, decoded)
+        score = _ensemble_score("ip", vec)
+        await _handle_score(redis, "ip", ip, score, feat, IP_FEATURE_KEYS, group_id, decoded)
+
+    if hostname:
+        total  = int(await redis.get(f"ueba:host:{hostname}:total")  or 0)
+        failed = int(await redis.get(f"ueba:host:{hostname}:failed") or 0)
+        feat = await build_host_vector_dict(redis, hostname, total, failed)
+        vec  = np.array([vector_from_dict(feat, HOST_FEATURE_KEYS)])
+        score = _ensemble_score("host", vec)
+        await _handle_score(redis, "host", hostname, score, feat, HOST_FEATURE_KEYS, group_id, decoded)
