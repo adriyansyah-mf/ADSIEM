@@ -96,6 +96,10 @@ async def analyze_and_maybe_create_case(
              ioc_count=len(enrichment.iocs) if enrichment else 0)
 
     if not analysis.get("should_create_case"):
+        log.info("ai_no_case",
+                 alert_id=alert_id,
+                 reasoning=analysis.get("reasoning", ""),
+                 confidence=analysis.get("confidence", 0))
         return
 
     ioc_data = analysis.get("ioc_summary", {})

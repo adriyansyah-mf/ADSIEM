@@ -46,8 +46,12 @@ async def analyze_alert_with_groq(
     model = await get_setting("groq_model", "llama-3.3-70b-versatile")
     enabled = await get_setting("ai_analyst_enabled", "true")
 
-    if not api_key or enabled.lower() == "false":
-        return {"should_create_case": False, "reasoning": "AI analyst not configured", "confidence": 0.0, "ioc_summary": {}}
+    if enabled.lower() == "false":
+        log.info("ai_analyst_disabled", reason="ai_analyst_enabled=false in settings")
+        return {"should_create_case": False, "reasoning": "AI analyst disabled", "confidence": 0.0, "ioc_summary": {}}
+    if not api_key:
+        log.warning("ai_analyst_skipped", reason="groq_api_key not set — configure it in Settings page")
+        return {"should_create_case": False, "reasoning": "AI analyst not configured: groq_api_key missing", "confidence": 0.0, "ioc_summary": {}}
 
     # Build enrichment section
     enrichment_section = ""
