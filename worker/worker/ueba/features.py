@@ -1,19 +1,31 @@
 # worker/worker/ueba/features.py
+import json
 from datetime import datetime, timezone
 
-WINDOW = 3600  # 1 hour TTL for sliding window counters
-KNOWN_IPS_TTL = 7 * 24 * 3600  # 7 days
+WINDOW = 3600          # 1-hour sliding window for counters
+KNOWN_IPS_TTL = 7 * 24 * 3600   # 7 days for new-IP detection
+TI_CACHE_TTL  = 86400  # 24 hours for TI reputation cache
 
 USER_FEATURE_KEYS = [
     "login_count", "failed_ratio", "unique_ips", "unique_hosts",
     "sudo_count", "new_ip_seen", "hour_of_day", "is_weekend",
+    "velocity", "hour_deviation",
 ]
 
 IP_FEATURE_KEYS = [
     "unique_users", "total_events", "failed_ratio",
-    "unique_target_hosts", "hour_of_day", "is_weekend", "failed_count",
+    "unique_target_hosts", "hour_of_day", "is_weekend",
+    "failed_count", "velocity", "ti_reputation",
 ]
 
+HOST_FEATURE_KEYS = [
+    "unique_users", "total_events", "failed_ratio",
+    "unique_source_ips", "sudo_count",
+    "hour_of_day", "is_weekend", "velocity", "ti_reputation",
+]
+
+
+# ── Counter updates ──────────────────────────────────────────────
 
 async def update_user_counters(redis, user: str, decoded: dict) -> None:
     action = decoded.get("event.action", "")
@@ -22,11 +34,11 @@ async def update_user_counters(redis, user: str, decoded: dict) -> None:
     p = f"ueba:u:{user}"
 
     await redis.incr(f"{p}:login");  await redis.expire(f"{p}:login",  WINDOW)
-    await redis.sadd("ueba:active:users", user); await redis.expire("ueba:active:users", WINDOW * 2)
+    await redis.sadd("ueba:active:users", user)
+    await redis.expire("ueba:active:users", WINDOW * 2)
 
     if "fail" in action.lower():
         await redis.incr(f"{p}:failed"); await redis.expire(f"{p}:failed", WINDOW)
-
     if "sudo" in action.lower() or "privilege" in action.lower():
         await redis.incr(f"{p}:sudo"); await redis.expire(f"{p}:sudo", WINDOW)
 
@@ -36,7 +48,6 @@ async def update_user_counters(redis, user: str, decoded: dict) -> None:
             await redis.set(f"{p}:new_ip", "1", ex=WINDOW)
         await redis.sadd(f"{p}:ips", ip);       await redis.expire(f"{p}:ips",       WINDOW)
         await redis.sadd(f"{p}:known_ips", ip); await redis.expire(f"{p}:known_ips", KNOWN_IPS_TTL)
-
     if host:
         await redis.sadd(f"{p}:hosts", host); await redis.expire(f"{p}:hosts", WINDOW)
 
@@ -47,20 +58,53 @@ async def update_ip_counters(redis, ip: str, decoded: dict, user: str | None) ->
     p = f"ueba:ip:{ip}"
 
     await redis.incr(f"{p}:total"); await redis.expire(f"{p}:total", WINDOW)
-    await redis.sadd("ueba:active:ips", ip); await redis.expire("ueba:active:ips", WINDOW * 2)
+    await redis.sadd("ueba:active:ips", ip)
+    await redis.expire("ueba:active:ips", WINDOW * 2)
 
     if "fail" in action.lower():
         await redis.incr(f"{p}:failed"); await redis.expire(f"{p}:failed", WINDOW)
-
     if user:
         await redis.sadd(f"{p}:users", user); await redis.expire(f"{p}:users", WINDOW)
-
     if host:
         await redis.sadd(f"{p}:hosts", host); await redis.expire(f"{p}:hosts", WINDOW)
 
 
-async def build_user_vector_dict(redis, user: str, login_count: int, failed_count: int) -> dict:
-    """Build user feature dict. login_count and failed_count passed in to avoid double-fetch."""
+async def update_host_counters(redis, hostname: str, decoded: dict, user: str | None) -> None:
+    action = decoded.get("event.action", "")
+    ip     = decoded.get("source.ip")
+    p = f"ueba:host:{hostname}"
+
+    await redis.incr(f"{p}:total"); await redis.expire(f"{p}:total", WINDOW)
+    await redis.sadd("ueba:active:hosts", hostname)
+    await redis.expire("ueba:active:hosts", WINDOW * 2)
+
+    if "fail" in action.lower():
+        await redis.incr(f"{p}:failed"); await redis.expire(f"{p}:failed", WINDOW)
+    if "sudo" in action.lower() or "privilege" in action.lower():
+        await redis.incr(f"{p}:sudo"); await redis.expire(f"{p}:sudo", WINDOW)
+    if user:
+        await redis.sadd(f"{p}:users", user); await redis.expire(f"{p}:users", WINDOW)
+    if ip:
+        await redis.sadd(f"{p}:src_ips", ip); await redis.expire(f"{p}:src_ips", WINDOW)
+
+
+# ── Feature vector builders ──────────────────────────────────────
+
+async def _get_ti_reputation(redis, ip: str) -> float:
+    """Read cached TI reputation score (0.0–1.0). Written by investigator after TI lookup."""
+    raw = await redis.get(f"ti:cache:{ip}")
+    if not raw:
+        return 0.0
+    try:
+        return float(json.loads(raw).get("score", 0.0))
+    except Exception:
+        return 0.0
+
+
+async def build_user_vector_dict(
+    redis, user: str, login_count: int, failed_count: int,
+    prev_login_count: int = 0, mean_hour: float = 12.0,
+) -> dict:
     p = f"ueba:u:{user}"
     now = datetime.now(timezone.utc)
 
@@ -68,30 +112,36 @@ async def build_user_vector_dict(redis, user: str, login_count: int, failed_coun
     unique_hosts = await redis.scard(f"{p}:hosts")
     sudo_count   = int(await redis.get(f"{p}:sudo") or 0)
     new_ip_seen  = int(await redis.get(f"{p}:new_ip") or 0)
-
     failed_ratio = (failed_count / login_count) if login_count > 0 else 0.0
+    velocity     = login_count / max(prev_login_count, 1)
+    hour_deviation = abs(now.hour - mean_hour)
 
     return {
-        "login_count":  float(login_count),
-        "failed_ratio": failed_ratio,
-        "unique_ips":   float(unique_ips),
-        "unique_hosts": float(unique_hosts),
-        "sudo_count":   float(sudo_count),
-        "new_ip_seen":  float(new_ip_seen),
-        "hour_of_day":  float(now.hour),
-        "is_weekend":   float(1 if now.weekday() >= 5 else 0),
+        "login_count":    float(login_count),
+        "failed_ratio":   failed_ratio,
+        "unique_ips":     float(unique_ips),
+        "unique_hosts":   float(unique_hosts),
+        "sudo_count":     float(sudo_count),
+        "new_ip_seen":    float(new_ip_seen),
+        "hour_of_day":    float(now.hour),
+        "is_weekend":     float(1 if now.weekday() >= 5 else 0),
+        "velocity":       float(velocity),
+        "hour_deviation": float(hour_deviation),
     }
 
 
-async def build_ip_vector_dict(redis, ip: str, total_events: int, failed_count: int) -> dict:
-    """Build IP feature dict. total_events and failed_count passed in to avoid double-fetch."""
+async def build_ip_vector_dict(
+    redis, ip: str, total_events: int, failed_count: int,
+    prev_total: int = 0,
+) -> dict:
     p = f"ueba:ip:{ip}"
     now = datetime.now(timezone.utc)
 
     unique_users        = await redis.scard(f"{p}:users")
     unique_target_hosts = await redis.scard(f"{p}:hosts")
-
     failed_ratio = (failed_count / total_events) if total_events > 0 else 0.0
+    velocity     = total_events / max(prev_total, 1)
+    ti_reputation = await _get_ti_reputation(redis, ip)
 
     return {
         "unique_users":        float(unique_users),
@@ -101,6 +151,39 @@ async def build_ip_vector_dict(redis, ip: str, total_events: int, failed_count: 
         "hour_of_day":         float(now.hour),
         "is_weekend":          float(1 if now.weekday() >= 5 else 0),
         "failed_count":        float(failed_count),
+        "velocity":            float(velocity),
+        "ti_reputation":       ti_reputation,
+    }
+
+
+async def build_host_vector_dict(
+    redis, hostname: str, total_events: int, failed_count: int,
+    prev_total: int = 0,
+) -> dict:
+    p = f"ueba:host:{hostname}"
+    now = datetime.now(timezone.utc)
+
+    unique_users      = await redis.scard(f"{p}:users")
+    unique_source_ips = await redis.scard(f"{p}:src_ips")
+    sudo_count        = int(await redis.get(f"{p}:sudo") or 0)
+    failed_ratio      = (failed_count / total_events) if total_events > 0 else 0.0
+    velocity          = total_events / max(prev_total, 1)
+
+    # TI reputation: worst score among source IPs connecting to this host
+    src_ips = await redis.smembers(f"{p}:src_ips")
+    ti_scores = [await _get_ti_reputation(redis, ip) for ip in list(src_ips)[:5]]
+    ti_reputation = max(ti_scores) if ti_scores else 0.0
+
+    return {
+        "unique_users":      float(unique_users),
+        "total_events":      float(total_events),
+        "failed_ratio":      failed_ratio,
+        "unique_source_ips": float(unique_source_ips),
+        "sudo_count":        float(sudo_count),
+        "hour_of_day":       float(now.hour),
+        "is_weekend":        float(1 if now.weekday() >= 5 else 0),
+        "velocity":          float(velocity),
+        "ti_reputation":     ti_reputation,
     }
 
 

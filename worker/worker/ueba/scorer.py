@@ -12,9 +12,9 @@ from worker.database import AsyncSessionLocal
 from worker.models import UebaEntityScore, UebaAnomaly
 from worker.alert_manager import create_alert
 from worker.ueba.features import (
-    USER_FEATURE_KEYS, IP_FEATURE_KEYS,
-    update_user_counters, update_ip_counters,
-    build_user_vector_dict, build_ip_vector_dict,
+    USER_FEATURE_KEYS, IP_FEATURE_KEYS, HOST_FEATURE_KEYS,
+    update_user_counters, update_ip_counters, update_host_counters,
+    build_user_vector_dict, build_ip_vector_dict, build_host_vector_dict,
     vector_from_dict,
 )
 
@@ -157,6 +157,9 @@ async def score_event(redis, decoded: dict, group_id: str) -> None:
         await update_user_counters(redis, user, decoded)
     if ip:
         await update_ip_counters(redis, ip, decoded, user)
+    hostname = decoded.get("hostname") or decoded.get("host.hostname")
+    if hostname:
+        await update_host_counters(redis, hostname, decoded, user)
 
     if not await _load_models(redis):
         return  # model cold or not yet trained
