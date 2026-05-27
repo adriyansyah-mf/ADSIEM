@@ -11,6 +11,7 @@ from worker.redis_client import get_redis
 from worker.config import AI_ANALYSIS_QUEUE
 from worker.ai_queue import mark_queued
 from worker.correlation_engine import check_correlation
+from worker.email_sender import send_alert_email
 
 log = structlog.get_logger()
 
@@ -95,6 +96,16 @@ async def create_alert(
         )
     except Exception as exc:
         log.error("correlation_check_failed", error=str(exc))
+
+    try:
+        await send_alert_email(
+            title=rule_match["title"],
+            severity=rule_match["level"],
+            source_ip=source_ip,
+            hostname=hostname,
+        )
+    except Exception as exc:
+        log.error("email_dispatch_failed", error=str(exc))
 
     return alert_id
 
