@@ -15,6 +15,33 @@ from worker.email_sender import send_alert_email
 
 log = structlog.get_logger()
 
+
+async def _get_entity_risk_max(source_ip: str | None, hostname: str | None) -> float:
+    """Return the max UEBA risk score between the IP and hostname entities."""
+    from worker.models import UebaEntityScore
+    scores = []
+    async with AsyncSessionLocal() as db:
+        if source_ip:
+            row = await db.get(UebaEntityScore, ("ip", source_ip))
+            if row:
+                scores.append(row.risk_score)
+        if hostname:
+            row = await db.get(UebaEntityScore, ("host", hostname))
+            if row:
+                scores.append(row.risk_score)
+    return max(scores) if scores else 0.0
+
+
+def _should_ai_investigate(risk: float, severity: str) -> bool:
+    if severity == "critical":
+        return True
+    if risk >= 60:
+        return True
+    if severity == "high" and risk >= 40:
+        return True
+    return False
+
+
 async def create_alert(
     rule_match: dict,
     event_id: uuid.UUID | None,
@@ -70,19 +97,24 @@ async def create_alert(
 
         await db.commit()
 
-    # Push to AI analysis queue outside the db session
+    # Push to AI analysis queue — gated by ML entity risk score
     try:
         redis = await get_redis()
-        await mark_queued(redis, str(alert_id))
-        await redis.rpush(AI_ANALYSIS_QUEUE, json.dumps({
-            "alert_id": str(alert_id),
-            "title": rule_match["title"],
-            "severity": rule_match["level"],
-            "source_ip": source_ip,
-            "hostname": hostname,
-            "decoded_fields": rule_match.get("matched_fields", {}),
-            "group_id": group_id,
-        }))
+        risk = await _get_entity_risk_max(source_ip, hostname)
+        if _should_ai_investigate(risk, rule_match["level"]):
+            await mark_queued(redis, str(alert_id))
+            await redis.rpush(AI_ANALYSIS_QUEUE, json.dumps({
+                "alert_id": str(alert_id),
+                "title": rule_match["title"],
+                "severity": rule_match["level"],
+                "source_ip": source_ip,
+                "hostname": hostname,
+                "decoded_fields": rule_match.get("matched_fields", {}),
+                "group_id": group_id,
+            }))
+        else:
+            log.debug("ai_gate_blocked", alert_id=str(alert_id),
+                      severity=rule_match["level"], entity_risk=risk)
     except Exception as exc:
         log.error("ai_queue_push_failed", alert_id=str(alert_id), error=str(exc))
 
