@@ -121,6 +121,23 @@ services:
     networks:
       - siem-net
 
+  syslog-receiver:
+    build:
+      context: ./syslog-receiver
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "514:514/udp"
+      - "514:514/tcp"
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - siem-net
+
   dashboard:
     build:
       context: ./dashboard
