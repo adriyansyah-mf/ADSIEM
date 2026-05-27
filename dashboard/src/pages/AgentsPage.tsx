@@ -218,8 +218,8 @@ wget ${serverUrl}/api/agents/packages/${pkg.filename}
 sudo ${tab === 'deb' ? `dpkg -i ${pkg.filename}` : `rpm -i ${pkg.filename}`}
 
 # 3. Configure
-sudo sed -i 's|server_url:.*|server_url: ${serverUrl}|' /etc/siem-agent/config.yaml
-sudo sed -i 's|enrollment_token:.*|enrollment_token: ${enrollToken}|' /etc/siem-agent/config.yaml
+sudo sed -i 's|REPLACE_WITH_SERVER_URL|${serverUrl}|' /etc/siem-agent/config.yaml
+sudo sed -i 's|REPLACE_WITH_ENROLLMENT_TOKEN|${enrollToken}|' /etc/siem-agent/config.yaml
 
 # 4. Enable & start
 sudo systemctl enable --now siem-agent`
