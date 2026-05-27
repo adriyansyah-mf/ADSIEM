@@ -1,10 +1,16 @@
 # worker/worker/alert_manager.py
+import json
 import uuid
+import structlog
 from datetime import datetime, timezone
 from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from worker.database import AsyncSessionLocal
+from worker.redis_client import get_redis
+from worker.config import AI_ANALYSIS_QUEUE
+
+log = structlog.get_logger()
 
 async def create_alert(
     rule_match: dict,
@@ -15,6 +21,7 @@ async def create_alert(
     hostname: str | None,
 ) -> uuid.UUID:
     from worker.models import Alert, WebhookConfig, WebhookDelivery
+
     async with AsyncSessionLocal() as db:
         alert = Alert(
             title=rule_match["title"],
@@ -30,8 +37,11 @@ async def create_alert(
         db.add(alert)
         await db.flush()
 
+        # capture id before commit so it's safe to use after session closes
+        alert_id: uuid.UUID = alert.id
+
         payload = {
-            "alert_id": str(alert.id),
+            "alert_id": str(alert_id),
             "title": rule_match["title"],
             "severity": rule_match["level"],
             "source_ip": source_ip,
@@ -48,7 +58,7 @@ async def create_alert(
         webhooks = result.scalars().all()
         for webhook in webhooks:
             db.add(WebhookDelivery(
-                alert_id=alert.id,
+                alert_id=alert_id,
                 webhook_config_id=webhook.id,
                 payload=payload,
                 status="pending",
@@ -57,25 +67,22 @@ async def create_alert(
 
         await db.commit()
 
-        # After commit, push to AI analysis queue
-        import json as _json
-        try:
-            from worker.redis_client import get_redis as _get_redis
-            from worker.config import AI_ANALYSIS_QUEUE as _AI_QUEUE
-            _redis = await _get_redis()
-            await _redis.rpush(_AI_QUEUE, _json.dumps({
-                "alert_id": str(alert.id),
-                "title": rule_match["title"],
-                "severity": rule_match["level"],
-                "source_ip": source_ip,
-                "hostname": hostname,
-                "decoded_fields": rule_match.get("matched_fields", {}),
-                "group_id": group_id,
-            }))
-        except Exception as _e:
-            pass  # AI analysis is best-effort
+    # Push to AI analysis queue outside the db session
+    try:
+        redis = await get_redis()
+        await redis.rpush(AI_ANALYSIS_QUEUE, json.dumps({
+            "alert_id": str(alert_id),
+            "title": rule_match["title"],
+            "severity": rule_match["level"],
+            "source_ip": source_ip,
+            "hostname": hostname,
+            "decoded_fields": rule_match.get("matched_fields", {}),
+            "group_id": group_id,
+        }))
+    except Exception as exc:
+        log.error("ai_queue_push_failed", alert_id=str(alert_id), error=str(exc))
 
-        return alert.id
+    return alert_id
 
 
 async def dispatch_case_webhooks(
