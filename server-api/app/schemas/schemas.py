@@ -591,3 +591,45 @@ class EnrollmentTokenOut(BaseModel):
 
 class EnrollmentTokenCreated(EnrollmentTokenOut):
     token: str  # raw value — shown only on creation
+
+# ─── Correlation Rules ────────────────────────────────────────────
+
+class CorrelationRuleCreate(BaseModel):
+    title: str
+    description: str | None = None
+    match_field: str = "source_ip"
+    min_count: int = 5
+    timewindow: int = 300
+    severity_filter: str | None = None
+    output_severity: str = "high"
+    output_title: str
+    is_enabled: bool = True
+    group_id: str | None = None
+
+class CorrelationRuleUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    match_field: str | None = None
+    min_count: int | None = None
+    timewindow: int | None = None
+    severity_filter: str | None = None
+    output_severity: str | None = None
+    output_title: str | None = None
+    is_enabled: bool | None = None
+    group_id: str | None = None
+
+class CorrelationRuleOut(BaseModel):
+    id: UUID
+    title: str
+    description: str | None
+    match_field: str
+    min_count: int
+    timewindow: int
+    severity_filter: str | None
+    output_severity: str
+    output_title: str
+    is_enabled: bool
+    group_id: str | None
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}

@@ -17,6 +17,7 @@ from app.api.routes.tasks import router as tasks_router, fleet_router
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
+from app.api.routes.correlation import router as correlation_router
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -50,11 +51,32 @@ async def _seed_settings() -> None:
                 db.add(PlatformSetting(key=key, value=default, is_secret=is_secret, description=description))
         await db.commit()
 
+async def _seed_correlation_rules() -> None:
+    from sqlalchemy import select, func
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CorrelationRule
+    async with AsyncSessionLocal() as db:
+        count = (await db.execute(select(func.count()).select_from(CorrelationRule))).scalar()
+        if count == 0:
+            db.add(CorrelationRule(
+                title="SSH Brute Force Correlation",
+                description="Multiple SSH auth failures from same IP",
+                match_field="source_ip",
+                min_count=10,
+                timewindow=300,
+                severity_filter=None,
+                output_severity="high",
+                output_title="[Correlated] {count} alerts from {match_value} in 5 min",
+                is_enabled=True,
+            ))
+            await db.commit()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _seed_settings()
+    await _seed_correlation_rules()
     yield
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
@@ -72,6 +94,6 @@ for router in [
     logs.router, events.router, alerts.router, rules.router,
     decoders.router, webhooks.router, system.router, cases_router, settings_router, hygiene_router, ueba_router, fim_router, hunts_router,
     tasks_router, fleet_router, artifacts_router, yara_router,
-    enrollment_tokens_router,
+    enrollment_tokens_router, correlation_router,
 ]:
     app.include_router(router)

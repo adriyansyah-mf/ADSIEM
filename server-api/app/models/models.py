@@ -369,3 +369,19 @@ class EnrollmentToken(Base):
     used_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime(timezone=True), default=now_utc)
+
+class CorrelationRule(Base):
+    __tablename__ = "correlation_rules"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title           = Column(String(255), nullable=False)
+    description     = Column(Text)
+    match_field     = Column(String(100), nullable=False, default="source_ip")
+    min_count       = Column(Integer, nullable=False, default=5)
+    timewindow      = Column(Integer, nullable=False, default=300)
+    severity_filter = Column(String(20))
+    output_severity = Column(String(20), nullable=False, default="high")
+    output_title    = Column(String(255), nullable=False)
+    is_enabled      = Column(Boolean, nullable=False, default=True)
+    group_id        = Column(String(100))
+    created_at      = Column(DateTime(timezone=True), default=now_utc)
+    updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
