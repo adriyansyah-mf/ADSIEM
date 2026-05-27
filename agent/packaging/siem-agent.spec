@@ -56,5 +56,13 @@ fi
 %attr(750,siem-agent,siem-agent) /var/lib/siem-agent
 
 %changelog
+* Wed May 27 2026 SIEM Platform <admin@example.com> - 1.1.0-1
+- Add enrollment_token field to config.yaml for zero-touch installation
+- Fix tailer EOF bug (bufio.Scanner replaced with bufio.Reader)
+- Fix config file saved with 0600 permissions (contains agent token)
+- Fix heartbeat 401 error now logs actionable message
+- Fix tailer manager restarts when log_type changes for existing path
+- Version now injected via ldflags into all packages
+
 * Thu May 21 2026 SIEM Platform <admin@example.com> - 1.0.0-1
 - Initial release

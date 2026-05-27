@@ -19,9 +19,6 @@ import (
 	"github.com/siem-platform/agent/internal/tailer"
 )
 
-// Version is set at build time via -ldflags "-X main.Version=x.y.z"
-var Version = "dev"
-
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()

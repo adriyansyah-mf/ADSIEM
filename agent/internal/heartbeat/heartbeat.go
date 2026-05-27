@@ -9,6 +9,7 @@ import (
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
+	"github.com/siem-platform/agent/internal/version"
 )
 
 type LogSource struct {
@@ -54,7 +55,7 @@ func Loop(
 		payload := HeartbeatRequest{
 			AgentID:       cfg.Agent.ID,
 			Status:        "online",
-			Version:       "1.0.0",
+			Version:       version.Version,
 			BufferDropped: dropped,
 		}
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
