@@ -196,19 +196,17 @@ function InstallModal({ onClose }: { onClose: () => void }) {
 
   const pkg = packages.find(p => p.type === tab)
   const serverUrl = window.location.origin
+  const installCmd = pkg ? (tab === 'deb' ? 'dpkg -i ' + pkg.filename : 'rpm -i ' + pkg.filename) : ''
 
   const cmds = pkg
-    ? `# 1. Download
-wget ${serverUrl}/api/agents/packages/${pkg.filename}
-
-# 2. Install
-sudo ${tab === 'deb' ? `dpkg -i ${pkg.filename}` : `rpm -i ${pkg.filename}`}
-
-# 3. Set server URL
-sudo sed -i 's|REPLACE_WITH_SERVER_URL|${serverUrl}|' /etc/siem-agent/config.yaml
-
-# 4. Enable & start
-sudo systemctl enable --now siem-agent`
+    ? '# 1. Download\n' +
+      'wget ' + serverUrl + '/api/agents/packages/' + pkg.filename + '\n\n' +
+      '# 2. Install\n' +
+      'sudo ' + installCmd + '\n\n' +
+      '# 3. Set server URL\n' +
+      "sudo sed -i 's|REPLACE_WITH_SERVER_URL|" + serverUrl + "|' /etc/siem-agent/config.yaml\n\n" +
+      '# 4. Enable & start\n' +
+      'sudo systemctl enable --now siem-agent'
     : null
 
   return (
@@ -272,8 +270,6 @@ sudo systemctl enable --now siem-agent`
             &nbsp;&middot;&nbsp;
             Logs: <span style={{ color: 'var(--text-primary)' }}>journalctl -u siem-agent -f</span>
           </div>
-            </>
-          )}
         </div>
       </div>
     </div>
