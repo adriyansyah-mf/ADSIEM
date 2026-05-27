@@ -72,6 +72,11 @@ DEB_OUT="$OUTPUT/siem-agent_${VERSION}_${ARCH}.deb"
 dpkg-deb --build "$DEB_ROOT" "$DEB_OUT"
 echo "✓ Created: $DEB_OUT ($(du -sh "$DEB_OUT" | cut -f1))"
 
+# Also copy raw binary for remote agent upgrades
+cp /tmp/siem-agent "$OUTPUT/siem-agent-${VERSION}-${ARCH}"
+chmod 755 "$OUTPUT/siem-agent-${VERSION}-${ARCH}"
+echo "✓ Created: $OUTPUT/siem-agent-${VERSION}-${ARCH}"
+
 # ── .rpm ──────────────────────────────────────────────────────────
 RPM_ARCH="x86_64"
 [ "$ARCH" = "arm64" ] && RPM_ARCH="aarch64"

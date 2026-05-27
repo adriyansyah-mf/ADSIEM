@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Download, X, Plus, ShieldOff, ShieldCheck, Key, Copy, Check, Trash2, RefreshCw } from 'lucide-react'
+import { Download, X, Plus, ShieldOff, ShieldCheck, Key, Copy, Check, Trash2, RefreshCw, ArrowUpCircle } from 'lucide-react'
 import DataTable from '@/components/DataTable'
 import StatusBadge from '@/components/StatusBadge'
 import { useAgents } from '@/hooks/useAgents'
@@ -13,6 +13,18 @@ import type { Agent, AgentPackage } from '@/types'
 function fmt(bytes: number) {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024).toFixed(0)} KB`
+}
+
+function parseLatestVersion(packages: AgentPackage[]): string | null {
+  const versions = packages
+    .map(p => { const m = p.filename.match(/siem-agent[_-](\d+\.\d+\.\d+)/); return m ? m[1] : null })
+    .filter(Boolean) as string[]
+  if (!versions.length) return null
+  return versions.sort((a, b) => {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number)
+    for (let i = 0; i < 3; i++) { if (pa[i] !== pb[i]) return pb[i] - pa[i] }
+    return 0
+  })[0]
 }
 
 interface EnrollmentToken {
@@ -328,12 +340,22 @@ export default function AgentsPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
+  const { data: packages = [] } = useQuery<AgentPackage[]>({
+    queryKey: ['agent-packages'],
+    queryFn: () => api.get('/api/agents/packages').then(r => r.data),
+  })
+  const latestVersion = parseLatestVersion(packages)
+
   const isolate = useMutation({
     mutationFn: (id: string) => api.post(`/api/agents/${id}/isolate`).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
   })
   const unisolate = useMutation({
     mutationFn: (id: string) => api.delete(`/api/agents/${id}/isolate`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
+  })
+  const upgrade = useMutation({
+    mutationFn: (id: string) => api.post(`/api/agents/${id}/upgrade`).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
   })
 
@@ -374,6 +396,29 @@ export default function AgentsPage() {
           {r.is_isolated ? <><ShieldCheck size={11} /> LIFT</> : <><ShieldOff size={11} /> ISOLATE</>}
         </button>
       ),
+    }, {
+      key: 'upgrade', header: 'Upgrade', render: (r: Agent) => {
+        const hasUpgrade = latestVersion && r.version && r.version !== latestVersion
+        if (!hasUpgrade) return <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>—</span>
+        return (
+          <button
+            onClick={e => { e.stopPropagation(); upgrade.mutate(r.id) }}
+            disabled={upgrade.isPending}
+            title={`Upgrade to ${latestVersion}`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '4px',
+              padding: '3px 8px', borderRadius: '3px', fontSize: '11px', fontWeight: 700,
+              fontFamily: 'Rajdhani, sans-serif', letterSpacing: '0.5px', cursor: 'pointer',
+              border: '1px solid rgba(251,191,36,0.5)',
+              background: 'rgba(251,191,36,0.08)',
+              color: '#fbbf24',
+            }}
+          >
+            {upgrade.isPending ? <RefreshCw size={11} className="animate-spin" /> : <ArrowUpCircle size={11} />}
+            {latestVersion}
+          </button>
+        )
+      },
     }] : []),
   ]
 

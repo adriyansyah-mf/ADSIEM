@@ -104,6 +104,12 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 		return nil, isolateHost(r.cfg.Server.URL)
 	case "unisolate_host":
 		return nil, unisolateHost()
+	case "upgrade_agent":
+		downloadURL, _ := task.Params["download_url"].(string)
+		if downloadURL == "" {
+			return nil, fmt.Errorf("download_url is required")
+		}
+		return upgradeAgent(r.cfg.Server.URL, downloadURL)
 	default:
 		return nil, fmt.Errorf("unknown task type: %s", task.TaskType)
 	}

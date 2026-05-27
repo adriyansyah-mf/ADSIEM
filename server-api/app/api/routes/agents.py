@@ -32,6 +32,29 @@ _MEDIA_TYPES = {
     ".rpm": "application/x-rpm",
 }
 
+import re as _re
+
+def _parse_version(filename: str) -> str | None:
+    """Extract version from filenames like siem-agent_1.1.0_amd64.deb or siem-agent-1.1.0-amd64."""
+    m = _re.search(r'siem-agent[_-](\d+\.\d+\.\d+)', filename)
+    return m.group(1) if m else None
+
+def _find_latest_binary() -> tuple[str, str] | None:
+    """Return (filename, version) of the latest raw binary, or None."""
+    if not PACKAGES_DIR.exists():
+        return None
+    candidates = []
+    for f in PACKAGES_DIR.iterdir():
+        if f.suffix in _MEDIA_TYPES or not f.name.startswith("siem-agent-"):
+            continue
+        ver = _parse_version(f.name)
+        if ver:
+            candidates.append((f.name, ver))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: [int(p) for p in x[1].split(".")], reverse=True)
+    return candidates[0]
+
 def _list_packages() -> list[dict]:
     if not PACKAGES_DIR.exists():
         return []
@@ -64,11 +87,13 @@ async def download_package(
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
     path = PACKAGES_DIR / filename
-    if not path.exists() or path.suffix not in _MEDIA_TYPES:
+    if not path.exists():
         raise HTTPException(status_code=404, detail="Package not found")
+    # Packaged installers or raw binary
+    media_type = _MEDIA_TYPES.get(path.suffix, "application/octet-stream")
     return FileResponse(
         path=str(path),
-        media_type=_MEDIA_TYPES[path.suffix],
+        media_type=media_type,
         filename=filename,
     )
 
@@ -293,3 +318,32 @@ async def unisolate_agent(
     await db.commit()
     await db.refresh(agent)
     return agent
+
+
+@router.post("/api/agents/{agent_id}/upgrade", status_code=202)
+async def upgrade_agent(
+    agent_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+):
+    agent = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if agent.status != "online":
+        raise HTTPException(400, "Agent is not online")
+
+    latest = _find_latest_binary()
+    if not latest:
+        raise HTTPException(404, "No upgrade binary available")
+
+    filename, version = latest
+    download_url = f"/api/agents/packages/{filename}"
+    task = AgentTask(
+        agent_id=agent_id,
+        task_type="upgrade_agent",
+        params={"download_url": download_url, "version": version},
+        created_by=current_user.id,
+    )
+    db.add(task)
+    await db.commit()
+    return {"queued": True, "version": version, "download_url": download_url}
