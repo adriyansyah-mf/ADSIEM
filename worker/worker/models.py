@@ -158,7 +158,7 @@ class UebaAnomaly(Base):
     mitre_techniques = Column(JSONB,               nullable=False, default=list)
     ai_narrative     = Column(Text)
     ai_action        = Column(String(20))
-    case_id          = Column(UUID(as_uuid=True))
+    case_id          = Column(UUID(as_uuid=True))  # FK omitted — worker models omit FK constraints by convention
     detected_at      = Column(DateTime(timezone=True), default=now_utc)
 
 class ThreatHunt(Base):

@@ -99,6 +99,11 @@ async def _migrate_ueba_columns() -> None:
             ALTER TABLE ueba_feature_snapshots
             ADD COLUMN IF NOT EXISTS risk_score FLOAT NOT NULL DEFAULT 0.0
         """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ueba_anomalies_case_id
+            ON ueba_anomalies(case_id)
+            WHERE case_id IS NOT NULL
+        """))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
