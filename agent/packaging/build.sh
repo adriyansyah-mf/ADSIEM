@@ -143,6 +143,14 @@ if [ -n "$RPM_FILE" ]; then
   echo "✓ Created: $OUTPUT/siem-agent-${VERSION}-1.${RPM_ARCH}.rpm"
 fi
 
+# ── Windows ───────────────────────────────────────────────────────
+echo ""
+echo "Building Windows binary..."
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+    -ldflags="-s -w -X main.Version=${VERSION}" \
+    -o "$OUTPUT/siem-agent-${VERSION}-windows-amd64.exe" \
+    /src/cmd/agent/ 2>/dev/null || echo "Windows cross-compile skipped (not in build context)"
+
 echo ""
 echo "Packages ready:"
 ls -lh "$OUTPUT"

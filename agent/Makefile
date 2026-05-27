@@ -1,11 +1,16 @@
 VERSION ?= 1.0.0
 ARCH    ?= $(shell dpkg --print-architecture 2>/dev/null || uname -m)
 
-.PHONY: build package-deb package-rpm package clean
+.PHONY: build build-windows package-deb package-rpm package clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.Version=$(VERSION)" \
 		-o bin/siem-agent ./cmd/agent/
+
+build-windows:
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+		-ldflags="-s -w -X main.Version=$(VERSION)" \
+		-o bin/siem-agent.exe ./cmd/agent/
 
 package-deb:
 	@mkdir -p dist

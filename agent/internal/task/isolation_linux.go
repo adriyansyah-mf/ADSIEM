@@ -1,4 +1,6 @@
-// agent/internal/task/isolation.go
+//go:build linux
+
+// agent/internal/task/isolation_linux.go
 package task
 
 import (
@@ -15,12 +17,8 @@ func isolateHost(serverURL string) error {
 	if err != nil {
 		return fmt.Errorf("resolve SIEM IP: %w", err)
 	}
-
-	// Create chain (ignore error if already exists)
 	exec.Command("iptables", "-N", isolateChain).Run()
-	// Flush existing rules in chain
 	exec.Command("iptables", "-F", isolateChain).Run()
-
 	rules := [][]string{
 		{"-A", isolateChain, "-i", "lo", "-j", "ACCEPT"},
 		{"-A", isolateChain, "-o", "lo", "-j", "ACCEPT"},
@@ -29,13 +27,11 @@ func isolateHost(serverURL string) error {
 		{"-A", isolateChain, "-s", siemIP, "-j", "ACCEPT"},
 		{"-A", isolateChain, "-j", "DROP"},
 	}
-
 	for _, r := range rules {
 		if out, err := exec.Command("iptables", r...).CombinedOutput(); err != nil {
 			return fmt.Errorf("iptables %v: %s", r, out)
 		}
 	}
-
 	insertJumpIfMissing("INPUT")
 	insertJumpIfMissing("OUTPUT")
 	return nil
@@ -50,9 +46,8 @@ func unisolateHost() error {
 }
 
 func insertJumpIfMissing(chain string) {
-	err := exec.Command("iptables", "-C", chain, "-j", isolateChain).Run()
-	if err == nil {
-		return // already present
+	if exec.Command("iptables", "-C", chain, "-j", isolateChain).Run() == nil {
+		return
 	}
 	exec.Command("iptables", "-I", chain, "1", "-j", isolateChain).Run()
 }
