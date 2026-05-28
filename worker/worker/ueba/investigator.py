@@ -1210,21 +1210,28 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
     ai_response = await _call_groq(prompt)
     action = ai_response.get("action", "ALERT").upper()
 
-    # Write max IOC TI score back to Redis for ML feature consumption
+    # Write ML feedback scores to Redis for next snapshot cycle
+    _score_ttl = 7 * 86400
+    _et, _ev = entity_type, entity_value
+
     all_ti_scores = (
         [h["score"] for h in hash_ti_hits]
         + [h["score"] for h in domain_ti_hits]
         + [h["score"] for h in url_ti_hits]
         + [h["score"] for h in ip_ti_hits]
     )
-    if all_ti_scores:
-        max_ioc_score = max(all_ti_scores)
-        if max_ioc_score > 0:
-            await redis.set(
-                f"ueba:ioc_score:{entity_type}:{entity_value}",
-                str(max_ioc_score),
-                ex=7 * 86400,
-            )
+    max_ps_score  = max((h["score"] for h in powershell_hits), default=0.0)
+    max_cmd_score = max((h["score"] for h in command_hits),    default=0.0)
+
+    writes = []
+    if all_ti_scores and (s := max(all_ti_scores)) > 0:
+        writes.append(redis.set(f"ueba:ioc_score:{_et}:{_ev}", str(s),  ex=_score_ttl))
+    if max_ps_score > 0:
+        writes.append(redis.set(f"ueba:ps_score:{_et}:{_ev}",  str(max_ps_score),  ex=_score_ttl))
+    if max_cmd_score > 0:
+        writes.append(redis.set(f"ueba:cmd_score:{_et}:{_ev}", str(max_cmd_score), ex=_score_ttl))
+    if writes:
+        await asyncio.gather(*writes)
 
     log.info("ueba_investigation_complete",
              entity_type=entity_type, entity_value=entity_value,
