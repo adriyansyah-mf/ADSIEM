@@ -391,7 +391,8 @@ class HygieneSnapshotOut(BaseModel):
 
 # ─── UEBA ────────────────────────────────────────────────────────
 
-class UebaEntityScoreOut(BaseModel):
+class UebaEntityScoreListOut(BaseModel):
+    """Lightweight schema for entity list — omits feature_profile to save bandwidth."""
     entity_type: str
     entity_value: str
     group_id: str
@@ -400,8 +401,11 @@ class UebaEntityScoreOut(BaseModel):
     last_anomaly_at: datetime | None
     last_seen_at: datetime | None
     updated_at: datetime
-    feature_profile: dict
     model_config = {"from_attributes": True}
+
+class UebaEntityScoreOut(UebaEntityScoreListOut):
+    """Full schema for entity detail — includes feature_profile."""
+    feature_profile: dict
 
 class UebaAnomalyOut(BaseModel):
     id: UUID

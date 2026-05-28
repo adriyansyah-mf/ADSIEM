@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { UebaEntityScore, UebaEntityDetail, UebaStatus, UebaRiskPoint } from '@/types'
+import type { UebaEntityScore, UebaEntityDetail, UebaStatus, UebaRiskPoint, UebaAnomaly } from '@/types'
 
 export function useUebaEntities(entityType: 'user' | 'ip' | 'host' | 'all' = 'all', minRisk = 0) {
   return useQuery<UebaEntityScore[]>({
@@ -37,5 +37,31 @@ export function useUebaRiskHistory(entityType: string, entityValue: string, days
       api.get(`/api/ueba/entity/${entityType}/${encodeURIComponent(entityValue)}/history`, { params: { days } })
         .then(r => r.data),
     enabled: !!entityType && !!entityValue,
+  })
+}
+
+export function useUebaAnomalies(params: {
+  entity_type?: string
+  ai_action?: string
+  min_risk?: number
+  hours?: number
+  limit?: number
+} = {}) {
+  return useQuery<UebaAnomaly[]>({
+    queryKey: ['ueba', 'anomalies', params],
+    queryFn: () =>
+      api.get('/api/ueba/anomalies', { params }).then(r => r.data),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useTriggerInvestigation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ entityType, entityValue }: { entityType: string; entityValue: string }) =>
+      api.post(`/api/ueba/entity/${entityType}/${encodeURIComponent(entityValue)}/investigate`).then(r => r.data),
+    onSuccess: (_data, { entityType, entityValue }) => {
+      qc.invalidateQueries({ queryKey: ['ueba', 'entity', entityType, entityValue] })
+    },
   })
 }

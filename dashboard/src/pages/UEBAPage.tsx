@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useUebaEntities, useUebaEntityDetail, useUebaStatus, useUebaRiskHistory } from '@/hooks/useUeba'
+import { useUebaEntities, useUebaEntityDetail, useUebaStatus, useUebaRiskHistory, useTriggerInvestigation } from '@/hooks/useUeba'
 import type { UebaEntityScore, UebaAnomaly, UebaRiskPoint } from '@/types'
 
 function riskColor(score: number) {
@@ -405,6 +405,7 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
 function DetailPanel({ entityType, entityValue, onClose }: { entityType: string; entityValue: string; onClose: () => void }) {
   const { data, isLoading } = useUebaEntityDetail(entityType, entityValue)
   const { data: history = [] } = useUebaRiskHistory(entityType, entityValue)
+  const investigate = useTriggerInvestigation()
 
   return (
     <div style={{
@@ -424,7 +425,23 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
             {entityType.toUpperCase()} ENTITY
           </div>
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '16px', cursor: 'pointer' }}>&#10005;</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={() => investigate.mutate({ entityType, entityValue })}
+            disabled={investigate.isPending}
+            title="Force AI investigation now"
+            style={{
+              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px',
+              letterSpacing: '0.5px', padding: '3px 8px', borderRadius: '3px',
+              border: '1px solid var(--accent-cyan)', background: investigate.isPending ? 'rgba(0,212,255,0.05)' : 'rgba(0,212,255,0.1)',
+              color: investigate.isPending ? 'var(--text-muted)' : 'var(--accent-cyan)',
+              cursor: investigate.isPending ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {investigate.isPending ? 'QUEUING…' : '⚡ INVESTIGATE'}
+          </button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '16px', cursor: 'pointer' }}>&#10005;</button>
+        </div>
       </div>
 
       {isLoading ? (

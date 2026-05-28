@@ -113,6 +113,23 @@ async def _migrate_ueba_columns() -> None:
             ON ueba_anomalies(case_id)
             WHERE case_id IS NOT NULL
         """))
+        # Performance indexes for multi-tenant queries and sorted lists
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ueba_entity_scores_group_risk
+            ON ueba_entity_scores(group_id, risk_score DESC)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ueba_anomalies_group_detected
+            ON ueba_anomalies(group_id, detected_at DESC)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ueba_anomalies_entity_detected
+            ON ueba_anomalies(entity_type, entity_value, detected_at DESC)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ueba_snapshots_group_type_hour
+            ON ueba_feature_snapshots(group_id, entity_type, snapshot_hour DESC)
+        """))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

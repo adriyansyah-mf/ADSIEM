@@ -243,6 +243,9 @@ export interface UebaEntityScore {
   last_anomaly_at: string | null
   last_seen_at: string | null
   updated_at: string
+}
+
+export interface UebaEntityScoreDetail extends UebaEntityScore {
   feature_profile: Record<string, { mean: number; std: number }>
 }
 
@@ -312,7 +315,7 @@ export interface UebaAnomaly {
 }
 
 export interface UebaEntityDetail {
-  score: UebaEntityScore
+  score: UebaEntityScoreDetail
   anomalies: UebaAnomaly[]
 }
 
