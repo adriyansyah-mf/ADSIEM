@@ -1,7 +1,11 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { format, isToday } from 'date-fns'
-import type { Alert, Case, Event } from '@/types'
+import { Search, Loader2 } from 'lucide-react'
+import type { Alert, Agent, Case, Event } from '@/types'
+
+interface WorkloadItem { user_id: string; username: string; open_alerts: number; open_cases: number; total: number }
 
 const severityColors = {
   critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
@@ -108,9 +112,41 @@ export default function DashboardPage() {
 
   const { data: agentsData } = useQuery({
     queryKey: ['agents-dashboard'],
-    queryFn: () => api.get('/api/agents', { params: { page_size: 1 } }).then(r => r.data),
+    queryFn: () => api.get('/api/agents', { params: { page_size: 500 } }).then(r => r.data),
     refetchInterval: 30_000,
   })
+
+  const { data: socMetrics } = useQuery({
+    queryKey: ['metrics-soc'],
+    queryFn: () => api.get('/api/metrics/soc').then(r => r.data),
+    refetchInterval: 60_000,
+  })
+
+  const { data: workload = [] } = useQuery<WorkloadItem[]>({
+    queryKey: ['metrics-workload'],
+    queryFn: () => api.get('/api/metrics/workload').then(r => r.data),
+    refetchInterval: 60_000,
+  })
+
+  const [tiIoc, setTiIoc] = useState('')
+  const [tiType, setTiType] = useState('ip')
+  const [tiResult, setTiResult] = useState<Record<string, unknown> | null>(null)
+  const [tiLoading, setTiLoading] = useState(false)
+
+  const handleTiLookup = async () => {
+    const val = tiIoc.trim()
+    if (!val) return
+    setTiLoading(true)
+    setTiResult(null)
+    try {
+      const r = await api.get('/api/metrics/ti/quick', { params: { ioc: val, type: tiType } })
+      setTiResult(r.data)
+    } catch { setTiResult({ error: 'Lookup failed' }) }
+    finally { setTiLoading(false) }
+  }
+
+  const agents: Agent[] = agentsData?.items ?? []
+  const onlineAgentCount = agents.filter((a: Agent) => a.status === 'online').length
 
   const alerts: Alert[] = allAlerts?.items ?? []
   const todayAlerts = alerts.filter(a => isToday(new Date(a.created_at)))
@@ -193,6 +229,50 @@ export default function DashboardPage() {
                 )}
               </div>
             ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Quick TI Lookup">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <select value={tiType} onChange={e => setTiType(e.target.value)} style={{
+                background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '3px',
+                color: 'var(--text-primary)', fontSize: '11px', padding: '3px 4px',
+              }}>
+                <option value="ip">IP</option>
+                <option value="hash">Hash</option>
+                <option value="domain">Domain</option>
+              </select>
+              <input value={tiIoc} onChange={e => setTiIoc(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleTiLookup()}
+                placeholder="IoC value…" style={{
+                  flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--border)',
+                  borderRadius: '3px', color: 'var(--text-primary)', fontSize: '11px',
+                  padding: '3px 6px', fontFamily: 'Share Tech Mono, monospace',
+                }} />
+              <button onClick={handleTiLookup} disabled={tiLoading} style={{
+                background: 'var(--accent-cyan)', color: '#000', border: 'none',
+                borderRadius: '3px', padding: '3px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center',
+              }}>
+                {tiLoading ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={11} />}
+              </button>
+            </div>
+            {tiResult && (
+              <div style={{
+                padding: '6px', borderRadius: '3px',
+                background: 'var(--bg-panel)', border: '1px solid var(--border)',
+                fontSize: '10px', fontFamily: 'Share Tech Mono, monospace',
+                color: 'var(--text-secondary)', overflowX: 'hidden',
+              }}>
+                {tiResult.error ? (
+                  <span style={{ color: '#ff2244' }}>{String(tiResult.error)}</span>
+                ) : (
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    {JSON.stringify(tiResult, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )}
           </div>
         </SectionCard>
       </div>
@@ -358,28 +438,75 @@ export default function DashboardPage() {
           ))}
         </SectionCard>
 
-        <SectionCard title="Performance Metrics">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <SectionCard title="Platform Stats">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {[
               { label: 'TOTAL ALERTS', value: allAlerts?.total ?? '—', color: 'var(--accent-cyan)' },
               { label: 'TOTAL CASES', value: casesData?.total ?? '—', color: 'var(--accent-green)' },
-              { label: 'AGENTS ONLINE', value: agentsData?.total ?? '—', color: 'var(--accent-orange)' },
+              { label: 'AGENTS ONLINE', value: onlineAgentCount, color: 'var(--accent-orange)' },
             ].map(m => (
               <div key={m.label} style={{
-                padding: '10px',
-                borderRadius: '4px',
-                background: 'var(--bg-panel)',
-                border: '1px solid var(--border)',
+                padding: '8px', borderRadius: '4px',
+                background: 'var(--bg-panel)', border: '1px solid var(--border)',
               }}>
                 <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                   {m.label}
                 </div>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '22px', fontWeight: 700, color: m.color, marginTop: '2px' }}>
+                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '20px', fontWeight: 700, color: m.color, marginTop: '2px' }}>
                   {m.value}
                 </div>
               </div>
             ))}
           </div>
+        </SectionCard>
+
+        <SectionCard title="SOC Response">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {[
+              { label: 'AVG MTTD', value: socMetrics?.avg_ack_minutes != null ? `${Math.round(socMetrics.avg_ack_minutes)}m` : '—', color: '#00d4ff' },
+              { label: 'AVG MTTR', value: socMetrics?.avg_mttr_minutes != null ? `${Math.round(socMetrics.avg_mttr_minutes)}m` : '—', color: '#00ff88' },
+              { label: 'FP RATE', value: socMetrics?.false_positive_rate_pct != null ? `${(socMetrics.false_positive_rate_pct as number).toFixed(1)}%` : '—', color: '#ffd700' },
+            ].map(m => (
+              <div key={m.label} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '6px 8px', borderRadius: '3px',
+                background: 'var(--bg-panel)', border: '1px solid var(--border)',
+              }}>
+                <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  {m.label}
+                </span>
+                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '15px', fontWeight: 700, color: m.color }}>
+                  {m.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Analyst Workload">
+          {workload.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No analysts assigned</div>
+          ) : workload.slice(0, 6).map((w) => (
+            <div key={w.user_id} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '5px 0', borderBottom: '1px solid var(--border)',
+            }}>
+              <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '11px', color: 'var(--text-primary)' }}>
+                {w.username}
+              </span>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <span title="Open alerts" style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: '#ff6b00' }}>
+                  {w.open_alerts}A
+                </span>
+                <span title="Open cases" style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: '#00d4ff' }}>
+                  {w.open_cases}C
+                </span>
+                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                  {w.total}
+                </span>
+              </div>
+            </div>
+          ))}
         </SectionCard>
       </div>
     </div>

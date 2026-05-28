@@ -4,16 +4,55 @@ import SeverityBadge from './SeverityBadge'
 import StatusBadge from './StatusBadge'
 import { useUpdateAlert, useAddAlertNote } from '@/hooks/useAlerts'
 import { format } from 'date-fns'
-import { X } from 'lucide-react'
+import { X, ShieldOff, CheckCircle } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/api/client'
 
 interface Props { alert: Alert; onClose: () => void }
 
 const STATUS_OPTIONS = ['new', 'in_progress', 'resolved', 'false_positive']
 
 export default function AlertDetailModal({ alert, onClose }: Props) {
+  const qc = useQueryClient()
   const [note, setNote] = useState('')
+  const [fpSuggestion, setFpSuggestion] = useState<{ entity_type: string; entity_value: string } | null>(null)
+  const [suppressDone, setSuppressDone] = useState(false)
+
   const updateAlert = useUpdateAlert()
   const addNote = useAddAlertNote()
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users-list'],
+    queryFn: () => api.get('/api/users', { params: { page_size: 100 } }).then(r => r.data),
+  })
+  const users: Array<{ id: string; username: string }> = usersData?.items ?? []
+
+  const createSuppression = useMutation({
+    mutationFn: (body: { entity_type: string; entity_value: string; reason: string }) =>
+      api.post('/api/suppressions', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['suppressions'] })
+      setSuppressDone(true)
+      setFpSuggestion(null)
+    },
+  })
+
+  const handleStatusChange = (newStatus: string) => {
+    updateAlert.mutate(
+      { id: alert.id, data: { status: newStatus } },
+      {
+        onSuccess: (data: any) => {
+          if (data?.fp_suppression_suggestion) {
+            setFpSuggestion(data.fp_suppression_suggestion)
+          }
+        },
+      }
+    )
+  }
+
+  const handleAssigneeChange = (assigneeId: string) => {
+    updateAlert.mutate({ id: alert.id, data: { assignee_id: assigneeId || undefined } })
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -37,16 +76,67 @@ export default function AlertDetailModal({ alert, onClose }: Props) {
           <div><span className="text-muted-foreground">Group:</span> {alert.group_id}</div>
         </div>
 
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">Update Status</label>
-          <select
-            value={alert.status}
-            onChange={(e) => updateAlert.mutate({ id: alert.id, data: { status: e.target.value } })}
-            className="px-3 py-1.5 rounded border border-border bg-background text-sm"
-          >
-            {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-          </select>
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Update Status</label>
+            <select
+              value={alert.status}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="w-full px-3 py-1.5 rounded border border-border bg-background text-sm"
+            >
+              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Assignee</label>
+            <select
+              value={alert.assignee_id ?? ''}
+              onChange={(e) => handleAssigneeChange(e.target.value)}
+              className="w-full px-3 py-1.5 rounded border border-border bg-background text-sm"
+            >
+              <option value="">Unassigned</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.username}</option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        {/* FP suppression suggestion */}
+        {fpSuggestion && !suppressDone && (
+          <div className="mb-4 p-3 rounded border border-yellow-600/40 bg-yellow-900/20 flex items-start gap-3">
+            <ShieldOff size={16} className="text-yellow-400 mt-0.5 shrink-0" />
+            <div className="flex-1 text-sm">
+              <div className="font-medium text-yellow-300 mb-1">Create suppression rule?</div>
+              <div className="text-muted-foreground text-xs mb-2">
+                Suppress future alerts for{' '}
+                <span className="font-mono text-yellow-200">{fpSuggestion.entity_type}: {fpSuggestion.entity_value}</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => createSuppression.mutate({
+                    entity_type: fpSuggestion.entity_type,
+                    entity_value: fpSuggestion.entity_value,
+                    reason: 'Confirmed false positive',
+                  })}
+                  disabled={createSuppression.isPending}
+                  className="px-3 py-1 rounded bg-yellow-600 text-black text-xs font-medium disabled:opacity-50"
+                >
+                  Yes, suppress
+                </button>
+                <button onClick={() => setFpSuggestion(null)}
+                  className="px-3 py-1 rounded border border-border text-xs hover:bg-muted">
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {suppressDone && (
+          <div className="mb-4 p-2 rounded border border-emerald-600/40 bg-emerald-900/20 flex items-center gap-2 text-xs text-emerald-300">
+            <CheckCircle size={13} /> Suppression rule created.
+          </div>
+        )}
 
         <div className="mb-4">
           <h3 className="text-sm font-medium mb-2">Notes ({alert.notes.length})</h3>

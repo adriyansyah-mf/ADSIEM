@@ -3,7 +3,7 @@ import { useAuthStore } from '@/stores/auth'
 import {
   LayoutDashboard, Shield, FileText, Activity, Bell,
   BookOpen, Code, Users, Webhook, LogOut, Sun, Moon,
-  ShieldAlert
+  ShieldAlert, GitMerge, ClipboardList, ArrowRightLeft
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -14,9 +14,12 @@ const nav = [
   { to: '/events', label: 'Events', icon: Activity, minRole: 'viewer' },
   { to: '/alerts', label: 'Alerts', icon: Bell, minRole: 'viewer' },
   { to: '/rules', label: 'Rules', icon: BookOpen, minRole: 'viewer' },
+  { to: '/correlation', label: 'Correlation', icon: GitMerge, minRole: 'viewer' },
   { to: '/decoders', label: 'Decoders', icon: Code, minRole: 'viewer' },
   { to: '/fim', label: 'FIM', icon: ShieldAlert, minRole: 'viewer' },
   { to: '/webhooks', label: 'Webhooks', icon: Webhook, minRole: 'admin' },
+  { to: '/audit-logs', label: 'Audit Log', icon: ClipboardList, minRole: 'admin' },
+  { to: '/handover', label: 'Handover', icon: ArrowRightLeft, minRole: 'analyst' },
   { to: '/users', label: 'Users', icon: Users, minRole: 'superadmin' },
 ]
 

@@ -123,20 +123,23 @@ class Decoder(Base):
 
 class Alert(Base):
     __tablename__ = "alerts"
-    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    title       = Column(String(255), nullable=False)
-    severity    = Column(String(20), nullable=False, default="medium")
-    status      = Column(String(30), nullable=False, default="new")
-    rule_id     = Column(UUID(as_uuid=True), ForeignKey("rules.id", ondelete="SET NULL"))
-    event_id    = Column(UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"))
-    agent_id    = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"))
-    group_id    = Column(String(100), nullable=False, default="default")
-    source_ip   = Column(String(45))
-    hostname    = Column(String(255))
-    assignee_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
-    created_at  = Column(DateTime(timezone=True), default=now_utc)
-    updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
-    notes       = relationship("AlertNote", back_populates="alert", cascade="all, delete-orphan")
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title            = Column(String(255), nullable=False)
+    severity         = Column(String(20), nullable=False, default="medium")
+    status           = Column(String(30), nullable=False, default="new")
+    rule_id          = Column(UUID(as_uuid=True), ForeignKey("rules.id", ondelete="SET NULL"))
+    event_id         = Column(UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"))
+    agent_id         = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"))
+    group_id         = Column(String(100), nullable=False, default="default")
+    source_ip        = Column(String(45))
+    hostname         = Column(String(255))
+    assignee_id      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    duplicate_count  = Column(Integer, nullable=False, default=0)
+    acknowledged_at  = Column(DateTime(timezone=True))
+    resolved_at      = Column(DateTime(timezone=True))
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+    updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    notes            = relationship("AlertNote", back_populates="alert", cascade="all, delete-orphan")
 
 class AlertNote(Base):
     __tablename__ = "alert_notes"
@@ -246,6 +249,7 @@ class UebaFeatureSnapshot(Base):
     entity_value  = Column(String(255), nullable=False)
     group_id      = Column(String(100), nullable=False, default="default")
     features      = Column(JSONB,       nullable=False, default=dict)
+    risk_score    = Column(Float,       nullable=False, default=0.0)
     snapshot_hour = Column(DateTime(timezone=True), nullable=False)
     created_at    = Column(DateTime(timezone=True), default=now_utc)
 
@@ -259,6 +263,7 @@ class UebaEntityScore(Base):
     last_anomaly_at = Column(DateTime(timezone=True))
     last_seen_at    = Column(DateTime(timezone=True))
     updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    feature_profile = Column(JSONB,                   nullable=False, default=dict)
 
 class UebaAnomaly(Base):
     __tablename__ = "ueba_anomalies"
@@ -269,8 +274,18 @@ class UebaAnomaly(Base):
     anomaly_score = Column(Float,       nullable=False)
     risk_score    = Column(Float,       nullable=False)
     features      = Column(JSONB,       nullable=False, default=dict)
-    alert_id      = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
-    detected_at   = Column(DateTime(timezone=True), default=now_utc)
+    alert_id         = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
+    mitre_techniques = Column(JSONB,               nullable=False, default=list)
+    ai_narrative     = Column(Text)
+    ai_action        = Column(String(20))
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="SET NULL"))
+    hash_ti_hits     = Column(JSONB,               nullable=False, default=list)
+    domain_ti_hits   = Column(JSONB,               nullable=False, default=list)
+    url_ti_hits      = Column(JSONB,               nullable=False, default=list)
+    ip_ti_hits       = Column(JSONB,               nullable=False, default=list)
+    powershell_hits  = Column(JSONB,               nullable=False, default=list)
+    command_hits     = Column(JSONB,               nullable=False, default=list)
+    detected_at      = Column(DateTime(timezone=True), default=now_utc)
 
 class ThreatHunt(Base):
     __tablename__ = "threat_hunts"
@@ -319,6 +334,7 @@ class FleetHunt(Base):
     status           = Column(String(20), nullable=False, default="running")
     total_agents     = Column(Integer, nullable=False, default=0)
     completed_agents = Column(Integer, nullable=False, default=0)
+    group_id         = Column(String(100), nullable=False, default="default")
     created_by       = Column(UUID(as_uuid=True))
     created_at       = Column(DateTime(timezone=True), nullable=False, default=now_utc)
     tasks            = relationship("AgentTask", back_populates="fleet_hunt")
@@ -356,3 +372,68 @@ class YaraRule(Base):
     content     = Column(Text, nullable=False)
     is_enabled  = Column(Boolean, nullable=False, default=True)
     created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+class EnrollmentToken(Base):
+    __tablename__ = "enrollment_tokens"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    token_hash       = Column(Text, nullable=False, unique=True)
+    label            = Column(String(255), nullable=False, default="")
+    group_id         = Column(String(100), nullable=False, default="default")
+    expires_at       = Column(DateTime(timezone=True), nullable=True)
+    is_active        = Column(Boolean, nullable=False, default=True)
+    used_at          = Column(DateTime(timezone=True), nullable=True)
+    used_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
+    created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+
+class CorrelationRule(Base):
+    __tablename__ = "correlation_rules"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title           = Column(String(255), nullable=False)
+    description     = Column(Text)
+    match_field     = Column(String(100), nullable=False, default="source_ip")
+    min_count       = Column(Integer, nullable=False, default=5)
+    timewindow      = Column(Integer, nullable=False, default=300)
+    severity_filter = Column(String(20))
+    output_severity = Column(String(20), nullable=False, default="high")
+    output_title    = Column(String(255), nullable=False)
+    is_enabled      = Column(Boolean, nullable=False, default=True)
+    group_id        = Column(String(100))
+    created_at      = Column(DateTime(timezone=True), default=now_utc)
+    updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class AlertSuppression(Base):
+    __tablename__ = "alert_suppressions"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type  = Column(String(20),  nullable=False)  # ip | hostname | user | rule_title
+    entity_value = Column(String(255), nullable=False)
+    reason       = Column(Text)
+    group_id     = Column(String(100), nullable=False, default="default")
+    is_active    = Column(Boolean, nullable=False, default=True)
+    created_by   = Column(UUID(as_uuid=True))
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class ShiftHandover(Base):
+    __tablename__ = "shift_handovers"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id     = Column(String(100), nullable=False, default="default")
+    shift_label  = Column(String(50), nullable=False, default="day")  # day|night|morning|evening
+    summary      = Column(Text, nullable=False)
+    open_alerts  = Column(Integer, nullable=False, default=0)
+    open_cases   = Column(Integer, nullable=False, default=0)
+    escalations  = Column(Integer, nullable=False, default=0)
+    created_by   = Column(UUID(as_uuid=True))
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class HuntSchedule(Base):
+    __tablename__ = "hunt_schedules"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name            = Column(String(255), nullable=False)
+    ioc_type        = Column(String(20), nullable=False)
+    ioc_value       = Column(String(255), nullable=False)
+    interval_hours  = Column(Integer, nullable=False, default=24)
+    group_id        = Column(String(100), nullable=False, default="default")
+    is_enabled      = Column(Boolean, nullable=False, default=True)
+    last_run_at     = Column(DateTime(timezone=True))
+    created_by      = Column(UUID(as_uuid=True))
+    created_at      = Column(DateTime(timezone=True), default=now_utc)

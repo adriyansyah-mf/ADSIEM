@@ -13,11 +13,15 @@ from worker.decoder_engine import DecoderEngine
 from worker.redis_client import get_redis
 from worker.seeder import seed_if_empty
 from worker.sigma_engine import SigmaEngine
-from worker.consumer import consume_loop, load_engines, reload_loop
+from worker.consumer import consume_loop, load_engines, reload_loop, dlq_retry_loop
 from worker.webhook_sender import webhook_retry_loop
-from worker.ai_consumer import ai_analysis_loop
-from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop
+from worker.ai_consumer import ai_analysis_loop, ai_backfill_loop
+from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop, ueba_ai_loop
 from worker.hunter import hunt_loop
+from worker.agent_monitor import agent_monitor_loop
+from worker.maintenance import maintenance_loop
+from worker.report_sender import report_loop
+from worker.hunt_scheduler import hunt_scheduler_loop
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -73,16 +77,25 @@ async def main():
 
     async def _consume():
         while True:
-            await consume_loop(state["dec_engine"], state["sig_engine"])
+            await consume_loop(state)
+
+    redis = await get_redis()
 
     await asyncio.gather(
         _consume(),
         reload_loop(state),
+        dlq_retry_loop(state),
         webhook_retry_loop(),
         ai_analysis_loop(),
+        ai_backfill_loop(),
         ueba_snapshot_loop(),
         ueba_train_loop(),
+        ueba_ai_loop(),
         hunt_loop(),
+        agent_monitor_loop(),
+        maintenance_loop(),
+        report_loop(redis),
+        hunt_scheduler_loop(),
     )
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # server-api/app/schemas/schemas.py
 from __future__ import annotations
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
 
@@ -58,7 +58,7 @@ class LogSourceIn(BaseModel):
     is_enabled: bool = True
 
 class EnrollRequest(BaseModel):
-    enrollment_token: str
+    enrollment_token: str = ""
     hostname: str
     version: str
     group: str = "default"
@@ -114,7 +114,6 @@ class HeartbeatResponse(BaseModel):
 
 class LogIngestRequest(BaseModel):
     agent_id: UUID
-    agent_token: str
     log_type: str
     raw_message: str
     received_at: datetime
@@ -252,6 +251,9 @@ class AlertOut(BaseModel):
     source_ip: str | None
     hostname: str | None
     assignee_id: UUID | None
+    duplicate_count: int = 0
+    acknowledged_at: datetime | None = None
+    resolved_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     notes: list[AlertNoteOut] = []
@@ -392,7 +394,8 @@ class HygieneSnapshotOut(BaseModel):
 
 # ─── UEBA ────────────────────────────────────────────────────────
 
-class UebaEntityScoreOut(BaseModel):
+class UebaEntityScoreListOut(BaseModel):
+    """Lightweight schema for entity list — omits feature_profile to save bandwidth."""
     entity_type: str
     entity_value: str
     group_id: str
@@ -403,6 +406,10 @@ class UebaEntityScoreOut(BaseModel):
     updated_at: datetime
     model_config = {"from_attributes": True}
 
+class UebaEntityScoreOut(UebaEntityScoreListOut):
+    """Full schema for entity detail — includes feature_profile."""
+    feature_profile: dict
+
 class UebaAnomalyOut(BaseModel):
     id: UUID
     entity_type: str
@@ -411,7 +418,22 @@ class UebaAnomalyOut(BaseModel):
     risk_score: float
     features: dict
     alert_id: UUID | None
+    mitre_techniques: list[dict]
+    ai_narrative: str | None
+    ai_action: str | None
+    case_id: UUID | None
+    hash_ti_hits: list[dict]
+    domain_ti_hits: list[dict]
+    url_ti_hits: list[dict]
+    ip_ti_hits: list[dict]
+    powershell_hits: list[dict]
+    command_hits: list[dict]
     detected_at: datetime
+    model_config = {"from_attributes": True}
+
+class UebaRiskHistoryPoint(BaseModel):
+    snapshot_hour: datetime
+    risk_score: float
     model_config = {"from_attributes": True}
 
 class UebaEntityDetailOut(BaseModel):
@@ -423,6 +445,7 @@ class UebaStatusOut(BaseModel):
     trained_at: str | None
     user_snapshot_count: int
     ip_snapshot_count: int
+    host_snapshot_count: int
 
 # ─── Threat Hunts ────────────────────────────────────────────────
 
@@ -525,6 +548,7 @@ class FleetHuntOut(BaseModel):
     status: str
     total_agents: int
     completed_agents: int
+    group_id: str = "default"
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -571,3 +595,78 @@ class YaraScanRequest(BaseModel):
     path: str
     recursive: bool = False
     rule_ids: list[UUID] | None = None  # None = all enabled rules
+
+# ─── Enrollment Tokens ───────────────────────────────────────────
+
+class EnrollmentTokenCreate(BaseModel):
+    label: str = ""
+    group_id: str = "default"
+    expires_hours: int = 24  # 0 = never expires
+
+class EnrollmentTokenOut(BaseModel):
+    id: UUID
+    label: str
+    group_id: str
+    expires_at: datetime | None
+    is_active: bool
+    used_at: datetime | None
+    used_by_agent_id: UUID | None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class EnrollmentTokenCreated(EnrollmentTokenOut):
+    token: str  # raw value — shown only on creation
+
+# ─── Correlation Rules ────────────────────────────────────────────
+
+class CorrelationRuleCreate(BaseModel):
+    title: str
+    description: str | None = None
+    match_field: Literal["source_ip", "hostname", "group_id"] = "source_ip"
+    min_count: int = 5
+    timewindow: int = 300
+    severity_filter: str | None = None
+    output_severity: str = "high"
+    output_title: str
+    is_enabled: bool = True
+    group_id: str | None = None
+
+class CorrelationRuleUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    match_field: Literal["source_ip", "hostname", "group_id"] | None = None
+    min_count: int | None = None
+    timewindow: int | None = None
+    severity_filter: str | None = None
+    output_severity: str | None = None
+    output_title: str | None = None
+    is_enabled: bool | None = None
+    group_id: str | None = None
+
+class CorrelationRuleOut(BaseModel):
+    id: UUID
+    title: str
+    description: str | None
+    match_field: str
+    min_count: int
+    timewindow: int
+    severity_filter: str | None
+    output_severity: str
+    output_title: str
+    is_enabled: bool
+    group_id: str | None
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+# ─── Audit Logs ──────────────────────────────────────────────────
+
+class AuditLogOut(BaseModel):
+    id: UUID
+    actor_id: UUID | None
+    action: str
+    resource_type: str | None
+    resource_id: str | None
+    detail: dict[str, Any]
+    created_at: datetime
+    model_config = {"from_attributes": True}
