@@ -1,10 +1,28 @@
 # worker/worker/ai_analyst.py
+"""
+AI SOC L1 Analyst — aktif mentriage setiap alert, bukan hanya memfilter.
+
+Alur per alert:
+1. TI enrichment (best-effort, tidak berhenti jika gagal)
+2. Groq L1 triage → verdict: escalate | create_case | monitor | false_positive
+3. Tulis triage notes langsung ke alert (AlertNote)
+4. Acknowledge alert (update status + acknowledged_at)
+5. Handle verdict:
+   - escalate/create_case : cek duplicate case → link atau buat baru → campaign analyzer
+   - monitor              : cukup acknowledge + notes
+   - false_positive       : close alert + tulis alasan
+"""
 import asyncio
 import json
 import uuid
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
 import structlog
+from sqlalchemy import select, update
+
 from worker.database import AsyncSessionLocal
-from worker.models import Case, CaseNote
+from worker.models import Alert, AlertNote, Case, CaseNote
 from worker.groq_client import analyze_alert_with_groq
 from worker.alert_manager import dispatch_case_webhooks
 from worker.settings_cache import get_setting
@@ -38,12 +56,194 @@ async def _build_ti_config() -> TIConfig:
     )
 
 
+async def _write_alert_note(alert_id: str, content: str) -> None:
+    """Tulis catatan triage AI langsung ke alert."""
+    try:
+        async with AsyncSessionLocal() as db:
+            note = AlertNote(
+                alert_id=uuid.UUID(alert_id),
+                author_id=None,
+                content=content,
+            )
+            db.add(note)
+            await db.commit()
+    except Exception as exc:
+        log.warning("alert_note_write_failed", alert_id=alert_id, error=str(exc))
+
+
+async def _update_alert_status(alert_id: str, status: str) -> None:
+    """Update status alert + set acknowledged_at jika belum di-set."""
+    try:
+        async with AsyncSessionLocal() as db:
+            alert = await db.get(Alert, uuid.UUID(alert_id))
+            if alert:
+                alert.status = status
+                if not alert.acknowledged_at:
+                    alert.acknowledged_at = datetime.now(timezone.utc)
+                if status in ("closed", "resolved"):
+                    alert.resolved_at = datetime.now(timezone.utc)
+                await db.commit()
+    except Exception as exc:
+        log.warning("alert_status_update_failed", alert_id=alert_id, error=str(exc))
+
+
+async def _find_existing_open_case(
+    source_ip: Optional[str],
+    hostname: Optional[str],
+    group_id: str,
+) -> Optional[str]:
+    """Cari open case yang sudah ada untuk entity yang sama (24 jam terakhir)."""
+    if not source_ip and not hostname:
+        return None
+    window = datetime.now(timezone.utc) - timedelta(hours=24)
+    async with AsyncSessionLocal() as db:
+        q = select(Case).where(
+            Case.group_id == group_id,
+            Case.status == "open",
+            Case.created_at >= window,
+            Case.created_by_ai == True,
+        )
+        cases = (await db.execute(q)).scalars().all()
+        for case in cases:
+            ioc = case.ioc_data or {}
+            if source_ip and ioc.get("source_ip") == source_ip:
+                return str(case.id)
+            if hostname and ioc.get("hostname") == hostname:
+                return str(case.id)
+    return None
+
+
+async def _add_note_to_existing_case(
+    case_id: str,
+    alert_id: str,
+    title: str,
+    triage_notes: str,
+    severity: str,
+) -> None:
+    """Tambah catatan ke case yang sudah ada (alert baru terkait kasus yang sama)."""
+    async with AsyncSessionLocal() as db:
+        note = CaseNote(
+            case_id=uuid.UUID(case_id),
+            author_id=None,
+            content=(
+                f"**[AI L1] Alert baru terkait case ini**\n\n"
+                f"Alert: {title} | Severity: {severity}\n\n"
+                f"**Catatan triage:**\n{triage_notes}"
+            ),
+            is_ai_generated=True,
+        )
+        db.add(note)
+        await db.commit()
+    log.info("alert_linked_to_existing_case", case_id=case_id, alert_id=alert_id)
+
+
+async def _create_case_from_verdict(
+    alert_id: str,
+    title: str,
+    severity: str,
+    verdict: str,
+    analysis: dict,
+    enrichment,
+    group_id: str,
+) -> Optional[str]:
+    """Buat case baru dari hasil triage."""
+    triage_notes = analysis.get("triage_notes", "")
+    mitre = analysis.get("mitre_techniques", [])
+    actions = analysis.get("immediate_actions", [])
+    confidence = analysis.get("confidence", 0.0)
+    threat_type = analysis.get("threat_type", "other")
+
+    ioc_data: dict = {
+        "threat_type": threat_type,
+        "mitre_techniques": mitre,
+        "verdict": verdict,
+    }
+    if enrichment:
+        ioc_data["source_ip"] = getattr(enrichment, "source_ip", None)
+        ioc_data["extracted_iocs"] = [
+            {"type": i.type.value, "value": i.value}
+            for i in enrichment.iocs[:20]
+        ]
+        ioc_data["overall_risk"] = enrichment.overall_risk
+
+    search_intel: dict = {}
+    if enrichment and enrichment.provider_bullets:
+        non_searx = [b for b in enrichment.provider_bullets if not b.startswith("searxng:")][:10]
+        search_intel["ti_bullets"] = non_searx
+        if enrichment.overall_risk > 0:
+            search_intel["ti_risk"] = enrichment.overall_risk
+
+    # Prefix berbeda untuk escalate vs create_case
+    prefix = "🚨 [ESKALASI]" if verdict == "escalate" else "[AI]"
+    case_status = "open"
+
+    async with AsyncSessionLocal() as db:
+        alert_uuid = uuid.UUID(alert_id) if alert_id else None
+        case = Case(
+            title=f"{prefix} {title}",
+            description=triage_notes,
+            severity=severity,
+            status=case_status,
+            alert_id=alert_uuid,
+            ai_reasoning=triage_notes,
+            ioc_data=ioc_data,
+            search_intel=search_intel,
+            created_by_ai=True,
+            group_id=group_id,
+        )
+        db.add(case)
+        await db.flush()
+
+        # Bangun note lengkap dari perspektif L1 analyst
+        ti_section = ""
+        if enrichment and enrichment.provider_bullets:
+            bullets = [b for b in enrichment.provider_bullets if not b.startswith("searxng:")][:8]
+            if bullets:
+                ti_section = "\n\n**Threat Intel:**\n" + "\n".join(f"- {b}" for b in bullets)
+            if enrichment.overall_risk > 0:
+                ti_section += f"\n\n**TI Risk Score:** {enrichment.overall_risk:.2f}"
+
+        mitre_section = ""
+        if mitre:
+            mitre_section = "\n\n**MITRE ATT&CK:**\n" + "\n".join(f"- {t}" for t in mitre)
+
+        actions_section = ""
+        if actions:
+            actions_section = "\n\n**Aksi Segera:**\n" + "\n".join(f"- {a}" for a in actions)
+
+        verdict_label = "🚨 ESKALASI — Butuh perhatian L2 SEGERA" if verdict == "escalate" else "📋 Case dibuat untuk review L2"
+
+        note_content = (
+            f"## AI SOC L1 Analyst — Laporan Triage\n\n"
+            f"**Verdict:** {verdict_label}\n"
+            f"**Confidence:** {confidence:.0%}\n"
+            f"**Threat Type:** {threat_type}\n\n"
+            f"**Catatan Investigasi:**\n{triage_notes}"
+            f"{ti_section}{mitre_section}{actions_section}"
+        )
+
+        note = CaseNote(
+            case_id=case.id,
+            author_id=None,
+            content=note_content,
+            is_ai_generated=True,
+        )
+        db.add(note)
+        await db.commit()
+        log.info("case_created_by_ai_l1",
+                 case_id=str(case.id),
+                 verdict=verdict,
+                 confidence=confidence,
+                 threat_type=threat_type)
+        return str(case.id)
+
+
 async def analyze_and_maybe_create_case(
     alert_id: str,
     title: str,
     severity: str,
-    source_ip: str | None,
-    hostname: str | None,
+    source_ip: Optional[str],
+    hostname: Optional[str],
     decoded_fields: dict,
     group_id: str,
 ) -> None:
@@ -51,14 +251,9 @@ async def analyze_and_maybe_create_case(
     if enabled.lower() == "false":
         return
 
-    # Build enrichment context from raw alert text
-    text_blob = "\n".join(filter(None, [
-        title,
-        source_ip,
-        hostname,
-        json.dumps(decoded_fields, default=str)[:800],
-    ]))
-
+    # ── 1. TI enrichment (best-effort) ──────────────────────────────────────
+    text_blob = "\n".join(filter(None, [title, source_ip, hostname,
+                                        json.dumps(decoded_fields, default=str)[:800]]))
     cfg = await _build_ti_config()
     aggregator = EnrichmentAggregator(cfg)
 
@@ -68,18 +263,16 @@ async def analyze_and_maybe_create_case(
         log.warning("enrichment_failed", error=str(e))
         enrichment = None
 
-    # Heuristic MITRE from alert text
-    heuristic_mitre = suggest_mitre(text_blob)
-
-    # Effective severity after TI escalation
+    # ── 2. Eskalasi severity dari TI ────────────────────────────────────────
     effective_severity = severity
     if enrichment and enrichment.overall_risk > 0:
         effective_severity = _escalate_severity(severity, enrichment.overall_risk)
         if effective_severity != severity:
-            log.info("severity_escalated",
-                     original=severity, escalated=effective_severity,
-                     risk=enrichment.overall_risk)
+            log.info("severity_escalated", original=severity, escalated=effective_severity)
 
+    heuristic_mitre = suggest_mitre(text_blob)
+
+    # ── 3. Groq L1 triage — selalu dijalankan ───────────────────────────────
     analysis = await analyze_alert_with_groq(
         title=title,
         severity=effective_severity,
@@ -90,89 +283,89 @@ async def analyze_and_maybe_create_case(
         heuristic_mitre=heuristic_mitre,
     )
 
-    log.info("ai_analysis_complete",
-             alert_id=alert_id,
-             should_create_case=analysis.get("should_create_case"),
-             confidence=analysis.get("confidence"),
-             overall_risk=enrichment.overall_risk if enrichment else 0,
-             ioc_count=len(enrichment.iocs) if enrichment else 0)
+    verdict = analysis.get("verdict", "monitor")
+    triage_notes = analysis.get("triage_notes", "")
+    confidence = analysis.get("confidence", 0.0)
+    actions = analysis.get("immediate_actions", [])
 
-    if not analysis.get("should_create_case"):
+    log.info("ai_l1_triage_done",
+             alert_id=alert_id,
+             verdict=verdict,
+             severity=effective_severity,
+             confidence=confidence)
+
+    # ── 4. Tulis triage notes ke alert (selalu, apapun verdictnya) ──────────
+    actions_str = ("\n\n**Aksi Segera:**\n" + "\n".join(f"- {a}" for a in actions)) if actions else ""
+    note_content = (
+        f"## 🤖 AI L1 Triage — {verdict.upper()}\n\n"
+        f"**Confidence:** {confidence:.0%}\n\n"
+        f"**Catatan Investigasi:**\n{triage_notes}"
+        f"{actions_str}"
+    )
+    await _write_alert_note(alert_id, note_content)
+
+    # ── 5. Update alert status berdasarkan verdict ───────────────────────────
+    if verdict == "false_positive":
+        fp_reason = analysis.get("false_positive_reason", "Ditentukan oleh AI L1")
+        await _update_alert_status(alert_id, "closed")
+        log.info("alert_closed_as_fp", alert_id=alert_id, reason=fp_reason)
         return
 
-    ioc_data = analysis.get("ioc_summary", {})
-    if enrichment:
-        ioc_data["extracted_iocs"] = [
-            {"type": i.type.value, "value": i.value}
-            for i in enrichment.iocs[:20]
-        ]
-        ioc_data["overall_risk"] = enrichment.overall_risk
-        if heuristic_mitre:
-            existing = ioc_data.get("mitre_techniques") or []
-            if isinstance(existing, str):
-                existing = [existing]
-            ioc_data["mitre_techniques"] = sorted(set(existing + heuristic_mitre))
+    if verdict == "monitor":
+        await _update_alert_status(alert_id, "acknowledged")
+        return
 
-    search_intel = {}
-    if enrichment:
-        searxng_bullets = [b for b in enrichment.provider_bullets if b.startswith("searxng:")]
-        if searxng_bullets:
-            search_intel["searxng_context"] = searxng_bullets[0]
-        search_intel["ti_bullets"] = [b for b in enrichment.provider_bullets if not b.startswith("searxng:")][:10]
+    # verdict == "create_case" atau "escalate"
+    await _update_alert_status(alert_id, "acknowledged")
 
-    async with AsyncSessionLocal() as db:
-        alert_uuid = uuid.UUID(alert_id) if alert_id else None
-        reasoning = analysis.get("reasoning", "")
-        case = Case(
-            title=f"[AI] {title}",
-            description=reasoning,
-            severity=effective_severity,
-            status="open",
-            alert_id=alert_uuid,
-            ai_reasoning=reasoning,
-            ioc_data=ioc_data,
-            search_intel=search_intel,
-            created_by_ai=True,
+    # ── 6. Cek apakah sudah ada open case untuk entity yang sama ────────────
+    existing_case_id = await _find_existing_open_case(source_ip, hostname, group_id)
+    if existing_case_id:
+        await _add_note_to_existing_case(
+            existing_case_id, alert_id, title, triage_notes, effective_severity
+        )
+        # Tetap jalankan campaign analyzer untuk update timeline
+        asyncio.ensure_future(analyze_campaign(
+            trigger_alert_id=alert_id,
+            source_ip=source_ip,
+            hostname=hostname,
             group_id=group_id,
-        )
-        db.add(case)
-        await db.flush()
+            case_id=existing_case_id,
+        ))
+        return
 
-        ti_summary = ""
-        if enrichment and enrichment.provider_bullets:
-            non_searx = [b for b in enrichment.provider_bullets if not b.startswith("searxng:")][:8]
-            if non_searx:
-                ti_summary = "\n\n**Threat Intel:**\n" + "\n".join(f"- {b}" for b in non_searx)
-            if enrichment.overall_risk > 0:
-                ti_summary += f"\n\n**TI Risk Score:** {enrichment.overall_risk:.2f}"
+    # ── 7. Buat case baru ───────────────────────────────────────────────────
+    case_id = await _create_case_from_verdict(
+        alert_id=alert_id,
+        title=title,
+        severity=effective_severity,
+        verdict=verdict,
+        analysis=analysis,
+        enrichment=enrichment,
+        group_id=group_id,
+    )
 
-        note = CaseNote(
-            case_id=case.id,
-            author_id=None,
-            content=f"**AI SOC L1 Analysis**\n\n{reasoning}\n\nConfidence: {analysis.get('confidence', 0):.0%}{ti_summary}",
-            is_ai_generated=True,
-        )
-        db.add(note)
-        await db.commit()
-        log.info("case_created_by_ai", case_id=str(case.id), title=case.title)
+    if not case_id:
+        return
 
-    # Fire-and-forget: campaign analysis runs in background, tidak block alert processing
+    # ── 8. Campaign analyzer (background) ──────────────────────────────────
     asyncio.ensure_future(analyze_campaign(
         trigger_alert_id=alert_id,
         source_ip=source_ip,
         hostname=hostname,
         group_id=group_id,
-        case_id=str(case.id),
+        case_id=case_id,
     ))
 
+    # ── 9. Webhook notification ─────────────────────────────────────────────
     try:
         await dispatch_case_webhooks(
-            case_id=str(case.id),
-            title=case.title,
-            severity=case.severity,
-            description=reasoning[:500] if reasoning else "",
+            case_id=case_id,
+            title=f"{'🚨 ESKALASI' if verdict == 'escalate' else '[AI]'} {title}",
+            severity=effective_severity,
+            description=triage_notes[:500] if triage_notes else "",
             group_id=group_id,
-            alert_id=alert_uuid,
+            alert_id=uuid.UUID(alert_id) if alert_id else None,
         )
-    except Exception as _e:
-        log.warning("case_webhook_dispatch_failed", error=str(_e))
+    except Exception as exc:
+        log.warning("case_webhook_dispatch_failed", error=str(exc))

@@ -127,6 +127,14 @@ class CaseNote(Base):
     is_ai_generated = Column(Boolean, nullable=False, default=False)
     created_at      = Column(DateTime(timezone=True), default=now_utc)
 
+class AlertNote(Base):
+    __tablename__ = "alert_notes"
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id   = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
+    author_id  = Column(UUID(as_uuid=True))
+    content    = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+
 class UebaFeatureSnapshot(Base):
     __tablename__ = "ueba_feature_snapshots"
     id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -173,6 +173,18 @@ async def _migrate_alerts_columns() -> None:
             )
         """))
         await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS alert_notes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                alert_id UUID NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+                author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_alert_notes_alert_id ON alert_notes(alert_id)
+        """))
+        await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS hunt_schedules (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 name VARCHAR(200) NOT NULL,
