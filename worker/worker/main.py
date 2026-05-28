@@ -13,7 +13,7 @@ from worker.decoder_engine import DecoderEngine
 from worker.redis_client import get_redis
 from worker.seeder import seed_if_empty
 from worker.sigma_engine import SigmaEngine
-from worker.consumer import consume_loop, load_engines, reload_loop
+from worker.consumer import consume_loop, load_engines, reload_loop, dlq_retry_loop
 from worker.webhook_sender import webhook_retry_loop
 from worker.ai_consumer import ai_analysis_loop, ai_backfill_loop
 from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop, ueba_ai_loop
@@ -78,6 +78,7 @@ async def main():
     await asyncio.gather(
         _consume(),
         reload_loop(state),
+        dlq_retry_loop(state),
         webhook_retry_loop(),
         ai_analysis_loop(),
         ai_backfill_loop(),

@@ -10,7 +10,7 @@ import uuid
 import structlog
 from sqlalchemy import select
 from worker.database import AsyncSessionLocal
-from worker.models import Alert, CorrelationRule
+from worker.models import CorrelationRule
 from worker.redis_client import get_redis
 
 log = structlog.get_logger()
@@ -82,17 +82,21 @@ async def check_correlation(
             log.info("correlation_triggered", rule_id=str(rule.id), match_value=match_value, count=count)
 
             try:
-                async with AsyncSessionLocal() as db:
-                    corr_alert = Alert(
-                        title=title,
-                        severity=rule.output_severity,
-                        status="new",
-                        group_id=group_id,
-                        source_ip=source_ip if rule.match_field == "source_ip" else None,
-                        hostname=hostname if rule.match_field == "hostname" else None,
-                    )
-                    db.add(corr_alert)
-                    await db.commit()
+                from worker.alert_manager import create_alert  # lazy — avoids circular import
+                await create_alert(
+                    rule_match={
+                        "id": f"corr-{rule.id}",
+                        "title": title,
+                        "level": rule.output_severity,
+                        "tags": ["correlation"],
+                        "mitre_tags": [],
+                    },
+                    event_id=None,
+                    agent_id=None,
+                    group_id=group_id,
+                    source_ip=source_ip if rule.match_field == "source_ip" else None,
+                    hostname=hostname if rule.match_field == "hostname" else None,
+                )
             except Exception as db_exc:
                 log.error("correlation_alert_db_failed", rule_id=str(rule.id), error=str(db_exc))
                 await redis.delete(dedup_key)

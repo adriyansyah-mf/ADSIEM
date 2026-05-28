@@ -144,6 +144,28 @@ async def consume_loop(dec_engine: DecoderEngine, sig_engine: SigmaEngine) -> No
             log.error("consume_loop_error", error=str(exc))
             await asyncio.sleep(5)
 
+async def dlq_retry_loop(state: dict) -> None:
+    """Retry each failed message once from the DLQ stream, then discard it."""
+    dlq_key = f"{REDIS_STREAM_KEY}:failed"
+    while True:
+        try:
+            redis = await get_redis()
+            entries = await redis.xrange(dlq_key, count=10)
+            for msg_id, data in entries:
+                try:
+                    await process_message(data, state["dec_engine"], state["sig_engine"])
+                except Exception as exc:
+                    log.error("dlq_retry_failed", msg_id=msg_id, error=str(exc))
+                finally:
+                    await redis.xdel(dlq_key, msg_id)
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            log.error("dlq_loop_error", error=str(exc))
+            await asyncio.sleep(30)
+
+
 async def reload_loop(state: dict) -> None:
     from worker.config import RELOAD_INTERVAL
     while True:

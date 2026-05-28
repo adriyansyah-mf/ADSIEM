@@ -145,6 +145,12 @@ class SigmaEngine:
                 continue
             if isinstance(value, dict):
                 named[key] = self._evaluate_selection(value, event)
+            elif isinstance(value, list):
+                # OR semantics: any dict in the list that matches counts
+                named[key] = any(
+                    self._evaluate_selection(item, event) if isinstance(item, dict) else False
+                    for item in value
+                )
         return self._eval_condition(condition.strip(), named)
 
     def _evaluate_selection(self, selection: dict, event: dict) -> bool:
@@ -175,10 +181,35 @@ class SigmaEngine:
             return fv.endswith(cv)
         elif modifier == "re":
             return bool(re.search(cv, fv))
+        elif modifier == "cidr":
+            import ipaddress
+            try:
+                return ipaddress.ip_address(fv) in ipaddress.ip_network(cv, strict=False)
+            except ValueError:
+                return False
         return fv == cv
 
     def _eval_condition(self, expr: str, selections: dict[str, bool]) -> bool:
         expr = expr.strip()
+
+        # "all of them" / "N of them" / "1 of them"
+        _m = re.match(r'^(\d+|all)\s+of\s+them$', expr)
+        if _m:
+            n_str = _m.group(1)
+            vals = list(selections.values())
+            if n_str == "all":
+                return all(vals) if vals else False
+            return sum(1 for v in vals if v) >= int(n_str)
+
+        # "all of X*" / "N of X*"
+        _mp = re.match(r'^(\d+|all)\s+of\s+(\w+)\*$', expr)
+        if _mp:
+            n_str, prefix = _mp.group(1), _mp.group(2)
+            vals = [v for k, v in selections.items() if k.startswith(prefix)]
+            if n_str == "all":
+                return all(vals) if vals else False
+            return sum(1 for v in vals if v) >= int(n_str)
+
         if " or " in expr:
             return any(self._eval_condition(p.strip(), selections) for p in expr.split(" or "))
         if " and " in expr:

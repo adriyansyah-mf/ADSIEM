@@ -1284,9 +1284,10 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
     # 8. Post-decision actions
     case_id = None
 
+    ueba_alert_id = None
     if action in ("ALERT", "ESCALATE"):
         from worker.alert_manager import create_alert
-        await create_alert(
+        ueba_alert_id = await create_alert(
             rule_match={
                 "id":    f"ueba-ai-{entity_type}",
                 "title": f"[UEBA AI] {entity_type.capitalize()} threat confirmed: {entity_value} [risk: {risk_score:.0f}/100]",
@@ -1304,7 +1305,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
         case_id = await _create_case(
             entity_type=entity_type, entity_value=entity_value,
             risk_score=risk_score, severity=severity,
-            alert_id=None,
+            alert_id=ueba_alert_id,
             ai_response=ai_response, mitre_techniques=mitre_techniques,
             similar_cases=similar_cases, group_id=group_id,
             hash_ti_hits=hash_ti_hits,
@@ -1316,6 +1317,18 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
         )
         log.info("ueba_case_created", case_id=str(case_id),
                  entity_type=entity_type, entity_value=entity_value)
+        try:
+            from worker.alert_manager import dispatch_case_webhooks
+            await dispatch_case_webhooks(
+                case_id=str(case_id),
+                title=f"[UEBA AI] Case: {entity_value}",
+                severity=severity,
+                description=ai_response.get("narrative", ""),
+                group_id=group_id,
+                alert_id=ueba_alert_id,
+            )
+        except Exception as _wh_exc:
+            log.error("ueba_case_webhook_failed", case_id=str(case_id), error=str(_wh_exc))
 
     # 9. Update anomaly record with AI results
     await _update_anomaly(
