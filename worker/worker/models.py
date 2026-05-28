@@ -13,9 +13,11 @@ def now_utc():
 
 class Agent(Base):
     __tablename__ = "agents"
-    id       = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    group_id = Column(String(100), nullable=False, default="default")
-    hostname = Column(String(255), nullable=False)
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id     = Column(String(100), nullable=False, default="default")
+    hostname     = Column(String(255), nullable=False)
+    status       = Column(String(30), nullable=False, default="online")
+    last_seen_at = Column(DateTime(timezone=True))
 
 class RawLog(Base):
     __tablename__ = "raw_logs"
