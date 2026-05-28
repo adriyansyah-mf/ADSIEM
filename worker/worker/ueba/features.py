@@ -9,20 +9,22 @@ TI_CACHE_TTL  = 86400  # 24 hours for TI reputation cache
 USER_FEATURE_KEYS = [
     "login_count", "failed_ratio", "unique_ips", "unique_hosts",
     "sudo_count", "new_ip_seen", "hour_of_day", "is_weekend",
-    "velocity", "hour_deviation",
+    "velocity", "hour_deviation", "max_ioc_ti_score",
 ]
 
 IP_FEATURE_KEYS = [
     "unique_users", "total_events", "failed_ratio",
     "unique_target_hosts", "hour_of_day", "is_weekend",
-    "failed_count", "velocity", "ti_reputation",
+    "failed_count", "velocity", "ti_reputation", "max_ioc_ti_score",
 ]
 
 HOST_FEATURE_KEYS = [
     "unique_users", "total_events", "failed_ratio",
     "unique_source_ips", "sudo_count",
-    "hour_of_day", "is_weekend", "velocity", "ti_reputation",
+    "hour_of_day", "is_weekend", "velocity", "ti_reputation", "max_ioc_ti_score",
 ]
+
+IOC_SCORE_TTL = 7 * 24 * 3600   # 7 days — written by investigator, decays if no new anomaly
 
 
 # ── Counter updates ──────────────────────────────────────────────
@@ -90,6 +92,17 @@ async def update_host_counters(redis, hostname: str, decoded: dict, user: str | 
 
 # ── Feature vector builders ──────────────────────────────────────
 
+async def _get_max_ioc_ti_score(redis, entity_type: str, entity_value: str) -> float:
+    """Read max IOC TI score written by investigator after hash/domain/URL enrichment."""
+    raw = await redis.get(f"ueba:ioc_score:{entity_type}:{entity_value}")
+    if not raw:
+        return 0.0
+    try:
+        return float(raw)
+    except Exception:
+        return 0.0
+
+
 async def _get_ti_reputation(redis, ip: str) -> float:
     """Read cached TI reputation score (0.0–1.0). Written by investigator after TI lookup."""
     raw = await redis.get(f"ti:cache:{ip}")
@@ -108,25 +121,27 @@ async def build_user_vector_dict(
     p = f"ueba:u:{user}"
     now = datetime.now(timezone.utc)
 
-    unique_ips   = await redis.scard(f"{p}:ips")
-    unique_hosts = await redis.scard(f"{p}:hosts")
-    sudo_count   = int(await redis.get(f"{p}:sudo") or 0)
-    new_ip_seen  = int(await redis.get(f"{p}:new_ip") or 0)
-    failed_ratio = (failed_count / login_count) if login_count > 0 else 0.0
-    velocity     = login_count / max(prev_login_count, 1)
-    hour_deviation = abs(now.hour - mean_hour)
+    unique_ips      = await redis.scard(f"{p}:ips")
+    unique_hosts    = await redis.scard(f"{p}:hosts")
+    sudo_count      = int(await redis.get(f"{p}:sudo") or 0)
+    new_ip_seen     = int(await redis.get(f"{p}:new_ip") or 0)
+    failed_ratio    = (failed_count / login_count) if login_count > 0 else 0.0
+    velocity        = login_count / max(prev_login_count, 1)
+    hour_deviation  = abs(now.hour - mean_hour)
+    max_ioc_ti_score = await _get_max_ioc_ti_score(redis, "user", user)
 
     return {
-        "login_count":    float(login_count),
-        "failed_ratio":   failed_ratio,
-        "unique_ips":     float(unique_ips),
-        "unique_hosts":   float(unique_hosts),
-        "sudo_count":     float(sudo_count),
-        "new_ip_seen":    float(new_ip_seen),
-        "hour_of_day":    float(now.hour),
-        "is_weekend":     float(1 if now.weekday() >= 5 else 0),
-        "velocity":       float(velocity),
-        "hour_deviation": float(hour_deviation),
+        "login_count":      float(login_count),
+        "failed_ratio":     failed_ratio,
+        "unique_ips":       float(unique_ips),
+        "unique_hosts":     float(unique_hosts),
+        "sudo_count":       float(sudo_count),
+        "new_ip_seen":      float(new_ip_seen),
+        "hour_of_day":      float(now.hour),
+        "is_weekend":       float(1 if now.weekday() >= 5 else 0),
+        "velocity":         float(velocity),
+        "hour_deviation":   float(hour_deviation),
+        "max_ioc_ti_score": max_ioc_ti_score,
     }
 
 
@@ -139,9 +154,10 @@ async def build_ip_vector_dict(
 
     unique_users        = await redis.scard(f"{p}:users")
     unique_target_hosts = await redis.scard(f"{p}:hosts")
-    failed_ratio = (failed_count / total_events) if total_events > 0 else 0.0
-    velocity     = total_events / max(prev_total, 1)
-    ti_reputation = await _get_ti_reputation(redis, ip)
+    failed_ratio     = (failed_count / total_events) if total_events > 0 else 0.0
+    velocity         = total_events / max(prev_total, 1)
+    ti_reputation    = await _get_ti_reputation(redis, ip)
+    max_ioc_ti_score = await _get_max_ioc_ti_score(redis, "ip", ip)
 
     return {
         "unique_users":        float(unique_users),
@@ -153,6 +169,7 @@ async def build_ip_vector_dict(
         "failed_count":        float(failed_count),
         "velocity":            float(velocity),
         "ti_reputation":       ti_reputation,
+        "max_ioc_ti_score":    max_ioc_ti_score,
     }
 
 
@@ -172,7 +189,8 @@ async def build_host_vector_dict(
     # TI reputation: worst score among source IPs connecting to this host
     src_ips = await redis.smembers(f"{p}:src_ips")
     ti_scores = [await _get_ti_reputation(redis, ip) for ip in list(src_ips)[:5]]
-    ti_reputation = max(ti_scores) if ti_scores else 0.0
+    ti_reputation    = max(ti_scores) if ti_scores else 0.0
+    max_ioc_ti_score = await _get_max_ioc_ti_score(redis, "host", hostname)
 
     return {
         "unique_users":      float(unique_users),
@@ -184,6 +202,7 @@ async def build_host_vector_dict(
         "is_weekend":        float(1 if now.weekday() >= 5 else 0),
         "velocity":          float(velocity),
         "ti_reputation":     ti_reputation,
+        "max_ioc_ti_score":  max_ioc_ti_score,
     }
 
 

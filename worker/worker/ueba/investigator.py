@@ -1210,6 +1210,22 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
     ai_response = await _call_groq(prompt)
     action = ai_response.get("action", "ALERT").upper()
 
+    # Write max IOC TI score back to Redis for ML feature consumption
+    all_ti_scores = (
+        [h["score"] for h in hash_ti_hits]
+        + [h["score"] for h in domain_ti_hits]
+        + [h["score"] for h in url_ti_hits]
+        + [h["score"] for h in ip_ti_hits]
+    )
+    if all_ti_scores:
+        max_ioc_score = max(all_ti_scores)
+        if max_ioc_score > 0:
+            await redis.set(
+                f"ueba:ioc_score:{entity_type}:{entity_value}",
+                str(max_ioc_score),
+                ex=7 * 86400,
+            )
+
     log.info("ueba_investigation_complete",
              entity_type=entity_type, entity_value=entity_value,
              action=action, confidence=ai_response.get("confidence", 0))
