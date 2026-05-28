@@ -104,3 +104,74 @@ Decoded fields: {json.dumps(decoded_fields, default=str)[:400]}{ioc_list}{mitre_
     except Exception as e:
         log.error("groq_analysis_failed", error=str(e))
         return {"should_create_case": False, "reasoning": f"AI analysis error: {e}", "confidence": 0.0, "ioc_summary": {}}
+
+
+_CAMPAIGN_SYSTEM_PROMPT = """You are a senior SOC Threat Intelligence Analyst. You are given a chronological timeline of security alerts and UEBA anomalies all related to the same IP address or hostname within the last 24 hours.
+
+Your job is to:
+1. Understand the FULL attack story — not individual alerts, but the campaign as a whole
+2. Identify which stage of the kill chain this represents
+3. Map to MITRE ATT&CK techniques across the full timeline
+4. Assess attacker intent and sophistication
+5. Recommend concrete response actions
+
+Respond ONLY with valid JSON — no markdown outside the JSON:
+{
+  "kill_chain_stage": "<one of: Reconnaissance, Initial Access, Execution, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Lateral Movement, Collection, Command & Control, Exfiltration, Impact, Unknown>",
+  "attacker_intent": "<1-2 sentences about what the attacker is trying to achieve>",
+  "narrative": "<3-5 sentences in Indonesian: full attack story, timeline, how alerts connect>",
+  "mitre_techniques": ["<T-code: name>", ...],
+  "recommended_actions": ["<specific action>", ...],
+  "confidence": <0.0-1.0>,
+  "sophistication": "<low|medium|high|apt>"
+}"""
+
+
+async def analyze_campaign_with_groq(
+    source_ip: str | None,
+    hostname: str | None,
+    timeline: str,
+    alert_count: int,
+) -> dict | None:
+    """Analyze a full attack campaign timeline and return structured assessment."""
+    api_key = await get_setting("groq_api_key") or GROQ_API_KEY
+    model = await get_setting("groq_model", "llama-3.3-70b-versatile")
+    enabled = await get_setting("ai_analyst_enabled", "true")
+
+    if not api_key or enabled.lower() == "false":
+        return None
+
+    entity = source_ip or hostname or "unknown"
+    prompt = f"""Entity under analysis: {entity}
+Total alerts in 24h window: {alert_count}
+
+CHRONOLOGICAL ATTACK TIMELINE:
+{timeline}
+
+Analyze this as a complete attack campaign. What is the full story?"""
+
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            resp = await client.post(
+                GROQ_API_URL,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": _CAMPAIGN_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.2,
+                    "max_tokens": 1024,
+                },
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+            return json.loads(content)
+    except Exception as e:
+        log.error("groq_campaign_failed", error=str(e))
+        return None

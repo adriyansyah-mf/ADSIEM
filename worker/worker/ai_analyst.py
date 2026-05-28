@@ -1,4 +1,5 @@
 # worker/worker/ai_analyst.py
+import asyncio
 import json
 import uuid
 import structlog
@@ -10,6 +11,7 @@ from worker.settings_cache import get_setting
 from worker.ti.config import TIConfig
 from worker.ti.aggregator import EnrichmentAggregator
 from worker.ti.mitre import suggest_mitre
+from worker.campaign_analyzer import analyze_campaign
 
 log = structlog.get_logger()
 
@@ -153,6 +155,15 @@ async def analyze_and_maybe_create_case(
         db.add(note)
         await db.commit()
         log.info("case_created_by_ai", case_id=str(case.id), title=case.title)
+
+    # Fire-and-forget: campaign analysis runs in background, tidak block alert processing
+    asyncio.ensure_future(analyze_campaign(
+        trigger_alert_id=alert_id,
+        source_ip=source_ip,
+        hostname=hostname,
+        group_id=group_id,
+        case_id=str(case.id),
+    ))
 
     try:
         await dispatch_case_webhooks(
