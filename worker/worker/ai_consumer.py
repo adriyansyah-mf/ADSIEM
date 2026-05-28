@@ -36,7 +36,7 @@ async def ai_analysis_loop() -> None:
 
 
 async def ai_backfill_loop() -> None:
-    """Analyse unprocessed alerts (ai_action is NULL) that were created before the AI consumer started."""
+    """Analyse unprocessed alerts (status='new') that were created before the AI consumer started."""
     from worker.database import AsyncSessionLocal
     from worker.models import Alert
     from sqlalchemy import select
@@ -46,7 +46,7 @@ async def ai_backfill_loop() -> None:
         try:
             async with AsyncSessionLocal() as db:
                 rows = (await db.execute(
-                    select(Alert).where(Alert.ai_action == None).order_by(Alert.created_at.desc()).limit(50)
+                    select(Alert).where(Alert.status == "new").order_by(Alert.created_at.desc()).limit(50)
                 )).scalars().all()
             for alert in rows:
                 try:
