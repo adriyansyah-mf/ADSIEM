@@ -24,6 +24,7 @@ async def agent_monitor_loop() -> None:
                     update(Agent)
                     .where(Agent.status == "online")
                     .where(Agent.last_seen_at < cutoff)
+                    .values(status="offline")
                     .returning(Agent.id, Agent.hostname)
                 )
                 went_offline = result.fetchall()
