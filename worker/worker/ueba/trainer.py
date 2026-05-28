@@ -71,6 +71,81 @@ async def _upsert_profile(db, entity_type: str, entity_value: str, profile: dict
     # If not existing yet, profile will be set on next risk score upsert
 
 
+# ── Per-entity snapshot helpers (each owns its own DB session) ────────────────
+
+async def _snapshot_user(redis, user: str, snapshot_hour, cutoff) -> None:
+    login  = int(await redis.get(f"ueba:u:{user}:login")  or 0)
+    failed = int(await redis.get(f"ueba:u:{user}:failed") or 0)
+    async with AsyncSessionLocal() as db:
+        past       = await _get_past_snapshots(db, "user", user, cutoff)
+        past_feats = [p.features for p in past]
+        feat = await build_user_vector_dict(
+            redis, user, login, failed,
+            prev_login_count=int(_get_prev_count(past_feats, "login_count")),
+            mean_hour=_get_mean_hour(past_feats),
+        )
+        profile      = _compute_profile(past_feats + [feat], USER_FEATURE_KEYS) if len(past_feats) >= MIN_PROFILE - 1 else {}
+        current_risk = await _get_current_risk(db, "user", user)
+        await db.execute(pg_insert(UebaFeatureSnapshot).values(
+            entity_type="user", entity_value=user, group_id="default",
+            features=feat, snapshot_hour=snapshot_hour, risk_score=current_risk,
+        ).on_conflict_do_update(
+            index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
+            set_={"features": feat, "risk_score": current_risk},
+        ))
+        if profile:
+            await _upsert_profile(db, "user", user, profile)
+        await db.commit()
+
+
+async def _snapshot_ip(redis, ip: str, snapshot_hour, cutoff) -> None:
+    total  = int(await redis.get(f"ueba:ip:{ip}:total")  or 0)
+    failed = int(await redis.get(f"ueba:ip:{ip}:failed") or 0)
+    async with AsyncSessionLocal() as db:
+        past       = await _get_past_snapshots(db, "ip", ip, cutoff)
+        past_feats = [p.features for p in past]
+        feat = await build_ip_vector_dict(
+            redis, ip, total, failed,
+            prev_total=int(_get_prev_count(past_feats, "total_events")),
+        )
+        profile      = _compute_profile(past_feats + [feat], IP_FEATURE_KEYS) if len(past_feats) >= MIN_PROFILE - 1 else {}
+        current_risk = await _get_current_risk(db, "ip", ip)
+        await db.execute(pg_insert(UebaFeatureSnapshot).values(
+            entity_type="ip", entity_value=ip, group_id="default",
+            features=feat, snapshot_hour=snapshot_hour, risk_score=current_risk,
+        ).on_conflict_do_update(
+            index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
+            set_={"features": feat, "risk_score": current_risk},
+        ))
+        if profile:
+            await _upsert_profile(db, "ip", ip, profile)
+        await db.commit()
+
+
+async def _snapshot_host(redis, host: str, snapshot_hour, cutoff) -> None:
+    total  = int(await redis.get(f"ueba:host:{host}:total")  or 0)
+    failed = int(await redis.get(f"ueba:host:{host}:failed") or 0)
+    async with AsyncSessionLocal() as db:
+        past       = await _get_past_snapshots(db, "host", host, cutoff)
+        past_feats = [p.features for p in past]
+        feat = await build_host_vector_dict(
+            redis, host, total, failed,
+            prev_total=int(_get_prev_count(past_feats, "total_events")),
+        )
+        profile      = _compute_profile(past_feats + [feat], HOST_FEATURE_KEYS) if len(past_feats) >= MIN_PROFILE - 1 else {}
+        current_risk = await _get_current_risk(db, "host", host)
+        await db.execute(pg_insert(UebaFeatureSnapshot).values(
+            entity_type="host", entity_value=host, group_id="default",
+            features=feat, snapshot_hour=snapshot_hour, risk_score=current_risk,
+        ).on_conflict_do_update(
+            index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
+            set_={"features": feat, "risk_score": current_risk},
+        ))
+        if profile:
+            await _upsert_profile(db, "host", host, profile)
+        await db.commit()
+
+
 async def take_snapshots(redis) -> None:
     now = datetime.now(timezone.utc)
     snapshot_hour = now.replace(minute=0, second=0, microsecond=0)
@@ -80,93 +155,28 @@ async def take_snapshots(redis) -> None:
     ips   = await redis.smembers("ueba:active:ips")
     hosts = await redis.smembers("ueba:active:hosts")
 
+    # Process all entities concurrently; semaphore caps DB connection pressure
+    sem = asyncio.Semaphore(20)
+
+    async def bounded(coro):
+        async with sem:
+            try:
+                await coro
+            except Exception as exc:
+                log.warning("ueba_snapshot_entity_failed", error=str(exc))
+
+    await asyncio.gather(
+        *[bounded(_snapshot_user(redis, u,  snapshot_hour, cutoff)) for u  in users],
+        *[bounded(_snapshot_ip(redis,   ip, snapshot_hour, cutoff)) for ip in ips],
+        *[bounded(_snapshot_host(redis, h,  snapshot_hour, cutoff)) for h  in hosts],
+    )
+
+    # Prune > 8 days
     async with AsyncSessionLocal() as db:
-        # ── Users ─────────────────────────────────────────────────
-        for user in users:
-            login  = int(await redis.get(f"ueba:u:{user}:login")  or 0)
-            failed = int(await redis.get(f"ueba:u:{user}:failed") or 0)
-
-            past = await _get_past_snapshots(db, "user", user, cutoff)
-            past_feats = [p.features for p in past]
-            prev_count = _get_prev_count(past_feats, "login_count")
-            mean_hour  = _get_mean_hour(past_feats)
-
-            feat = await build_user_vector_dict(
-                redis, user, login, failed,
-                prev_login_count=int(prev_count), mean_hour=mean_hour,
-            )
-
-            profile = _compute_profile(past_feats + [feat], USER_FEATURE_KEYS) if len(past_feats) >= MIN_PROFILE - 1 else {}
-            current_risk = await _get_current_risk(db, "user", user)
-
-            stmt = pg_insert(UebaFeatureSnapshot).values(
-                entity_type="user", entity_value=user, group_id="default",
-                features=feat, snapshot_hour=snapshot_hour, risk_score=current_risk,
-            ).on_conflict_do_update(
-                index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
-                set_={"features": feat, "risk_score": current_risk},
-            )
-            await db.execute(stmt)
-
-            if profile:
-                await _upsert_profile(db, "user", user, profile)
-
-        # ── IPs ───────────────────────────────────────────────────
-        for ip in ips:
-            total  = int(await redis.get(f"ueba:ip:{ip}:total")  or 0)
-            failed = int(await redis.get(f"ueba:ip:{ip}:failed") or 0)
-
-            past = await _get_past_snapshots(db, "ip", ip, cutoff)
-            past_feats = [p.features for p in past]
-            prev_count = _get_prev_count(past_feats, "total_events")
-
-            feat = await build_ip_vector_dict(redis, ip, total, failed, prev_total=int(prev_count))
-
-            profile = _compute_profile(past_feats + [feat], IP_FEATURE_KEYS) if len(past_feats) >= MIN_PROFILE - 1 else {}
-            current_risk = await _get_current_risk(db, "ip", ip)
-
-            stmt = pg_insert(UebaFeatureSnapshot).values(
-                entity_type="ip", entity_value=ip, group_id="default",
-                features=feat, snapshot_hour=snapshot_hour, risk_score=current_risk,
-            ).on_conflict_do_update(
-                index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
-                set_={"features": feat, "risk_score": current_risk},
-            )
-            await db.execute(stmt)
-
-            if profile:
-                await _upsert_profile(db, "ip", ip, profile)
-
-        # ── Hosts ─────────────────────────────────────────────────
-        for host in hosts:
-            total  = int(await redis.get(f"ueba:host:{host}:total")  or 0)
-            failed = int(await redis.get(f"ueba:host:{host}:failed") or 0)
-
-            past = await _get_past_snapshots(db, "host", host, cutoff)
-            past_feats = [p.features for p in past]
-            prev_count = _get_prev_count(past_feats, "total_events")
-
-            feat = await build_host_vector_dict(redis, host, total, failed, prev_total=int(prev_count))
-
-            profile = _compute_profile(past_feats + [feat], HOST_FEATURE_KEYS) if len(past_feats) >= MIN_PROFILE - 1 else {}
-            current_risk = await _get_current_risk(db, "host", host)
-
-            stmt = pg_insert(UebaFeatureSnapshot).values(
-                entity_type="host", entity_value=host, group_id="default",
-                features=feat, snapshot_hour=snapshot_hour, risk_score=current_risk,
-            ).on_conflict_do_update(
-                index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
-                set_={"features": feat, "risk_score": current_risk},
-            )
-            await db.execute(stmt)
-
-            if profile:
-                await _upsert_profile(db, "host", host, profile)
-
-        # Prune > 8 days
-        prune_cutoff = now - timedelta(days=8)
         await db.execute(
-            delete(UebaFeatureSnapshot).where(UebaFeatureSnapshot.snapshot_hour < prune_cutoff)
+            delete(UebaFeatureSnapshot).where(
+                UebaFeatureSnapshot.snapshot_hour < now - timedelta(days=8)
+            )
         )
         await db.commit()
 

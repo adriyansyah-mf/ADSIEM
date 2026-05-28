@@ -281,6 +281,44 @@ async def _get_concurrent_anomalies(entity_type: str, entity_value: str) -> str:
         return "Concurrent anomaly fetch failed."
 
 
+async def _get_fim_events(entity_type: str, entity_value: str) -> str:
+    """Fetch FIM events correlated to a host entity in the last 24h."""
+    if entity_type != "host":
+        return ""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    try:
+        from sqlalchemy import text
+        from worker.models import Agent
+        async with AsyncSessionLocal() as db:
+            agent_rows = (await db.execute(
+                select(Agent.id).where(Agent.hostname == entity_value)
+            )).fetchall()
+            if not agent_rows:
+                return ""
+            agent_ids = [str(r[0]) for r in agent_rows]
+            fim_rows = (await db.execute(
+                text(
+                    "SELECT path, event_type, sha256, detected_at "
+                    "FROM fim_events "
+                    "WHERE agent_id = ANY(:ids) AND detected_at >= :cutoff "
+                    "ORDER BY detected_at DESC LIMIT 15"
+                ),
+                {"ids": agent_ids, "cutoff": cutoff},
+            )).fetchall()
+
+        if not fim_rows:
+            return ""
+        lines = []
+        for r in fim_rows:
+            ts  = r.detected_at.strftime('%H:%M') if r.detected_at else "?"
+            sha = f" sha256={r.sha256[:12]}…" if r.sha256 else ""
+            lines.append(f"  [{ts}] {r.event_type} {r.path}{sha}")
+        return f"{len(fim_rows)} file integrity event(s) in last 24h:\n" + "\n".join(lines)
+    except Exception as exc:
+        log.warning("ueba_fim_fetch_failed", error=str(exc))
+        return ""
+
+
 async def _get_similar_cases(entity_type: str, mitre_ids: list[str]) -> list[dict]:
     """Find top-3 past UEBA anomalies that were escalated, matching entity_type + MITRE overlap."""
     if not mitre_ids:
@@ -1127,12 +1165,13 @@ async def investigate(redis, payload: dict) -> None:
         _run_ti_ips(redis, ip_iocs),
     )
 
-    # 4. Case memory
-    similar_cases = await _get_similar_cases(entity_type, mitre_ids)
-
-    # 4b. Broader context — alert history + concurrent wave detection
-    alert_history_text = await _get_entity_alert_history(source_ip, hostname)
-    concurrent_text    = await _get_concurrent_anomalies(entity_type, entity_value)
+    # 4. Case memory + broader context (parallel)
+    similar_cases, alert_history_text, concurrent_text, fim_text = await asyncio.gather(
+        _get_similar_cases(entity_type, mitre_ids),
+        _get_entity_alert_history(source_ip, hostname),
+        _get_concurrent_anomalies(entity_type, entity_value),
+        _get_fim_events(entity_type, entity_value),
+    )
 
     # 5. Entity profile for Z-score context in prompt
     profile = {}
@@ -1203,8 +1242,13 @@ POWERSHELL ANALYSIS ({len(powershell_hits)} command(s) detected):
 
 SUSPICIOUS COMMAND ANALYSIS ({len(command_hits)} command(s) detected):
 {_format_command_analysis(command_hits)}
-
+{f"FILE INTEGRITY MONITORING:{chr(10)}{fim_text}" if fim_text else ""}
 Analyze all evidence. Consider whether this is an isolated event or part of a broader attack pattern, and reflect that in your narrative and confidence. Provide your investigation verdict as JSON."""
+
+    # Truncate prompt if too long to avoid Groq context overflow
+    _MAX_PROMPT = 14_000
+    if len(prompt) > _MAX_PROMPT:
+        prompt = prompt[:_MAX_PROMPT] + "\n\n[Context truncated — respond based on available evidence above.]"
 
     # 7. Groq analysis
     ai_response = await _call_groq(prompt)
@@ -1287,6 +1331,24 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
         powershell_hits=powershell_hits,
         command_hits=command_hits,
     )
+
+    # 10. Persist AI verdict to entity risk score immediately (don't wait for next ML cycle)
+    try:
+        from worker.models import UebaEntityScore
+        async with AsyncSessionLocal() as db:
+            row = await db.get(UebaEntityScore, (entity_type, entity_value))
+            if row:
+                now_ts = datetime.now(timezone.utc)
+                if action == "ESCALATE":
+                    row.risk_score      = max(row.risk_score, risk_score)
+                    row.last_anomaly_at = now_ts
+                elif action == "DISMISS":
+                    row.risk_score = row.risk_score * 0.5  # aggressive decay — AI cleared it
+                row.updated_at = now_ts
+                await db.commit()
+    except Exception as exc:
+        log.warning("ueba_risk_persist_failed", entity_type=entity_type,
+                    entity_value=entity_value, error=str(exc))
 
 
 async def ueba_investigator_loop(redis) -> None:

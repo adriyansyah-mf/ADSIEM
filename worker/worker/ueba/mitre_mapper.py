@@ -5,6 +5,7 @@ Each rule specifies: technique ID, name, applicable entity types, and a conditio
 """
 
 _RULES = [
+    # ── Existing behavioural rules ────────────────────────────────
     {
         "id": "T1110",
         "name": "Brute Force",
@@ -46,6 +47,48 @@ _RULES = [
         "name": "Valid Accounts: Local Accounts",
         "entity_types": {"user"},
         "condition": lambda f, t: f.get("sudo_count", 0) >= 2 and f.get("is_weekend", 0) == 1,
+    },
+    # ── Enrichment-driven rules (use max_ps_score / max_cmd_score / max_ioc_ti_score) ──
+    {
+        "id": "T1059.001",
+        "name": "Command and Scripting Interpreter: PowerShell",
+        "entity_types": {"user", "host"},
+        "condition": lambda f, t: f.get("max_ps_score", 0) >= 0.35,
+    },
+    {
+        "id": "T1003",
+        "name": "OS Credential Dumping",
+        "entity_types": {"user", "host"},
+        # High PS score implies mimikatz / sekurlsa / lsadump patterns detected
+        "condition": lambda f, t: f.get("max_ps_score", 0) >= 0.85,
+    },
+    {
+        "id": "T1105",
+        "name": "Ingress Tool Transfer",
+        "entity_types": {"user", "ip", "host"},
+        # Download-cradle commands (curl, wget, certutil, bitsadmin) push cmd score
+        "condition": lambda f, t: f.get("max_cmd_score", 0) >= 0.40,
+    },
+    {
+        "id": "T1562",
+        "name": "Impair Defenses",
+        "entity_types": {"user", "host"},
+        # Defence evasion patterns (audit disable, eventlog clear, selinux off)
+        "condition": lambda f, t: f.get("max_cmd_score", 0) >= 0.70,
+    },
+    {
+        "id": "T1071",
+        "name": "Application Layer Protocol (C2 Communication)",
+        "entity_types": {"user", "ip", "host"},
+        # IOC TI hit indicates known C2 / malicious infrastructure contact
+        "condition": lambda f, t: f.get("max_ioc_ti_score", 0) >= 0.50,
+    },
+    {
+        "id": "T1566",
+        "name": "Phishing / Malicious Artifact",
+        "entity_types": {"user", "ip", "host"},
+        # Very high IOC score implies malware hash / blacklisted URL / domain
+        "condition": lambda f, t: f.get("max_ioc_ti_score", 0) >= 0.78,
     },
 ]
 
