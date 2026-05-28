@@ -110,6 +110,7 @@ class Case(Base):
     alert_id      = Column(UUID(as_uuid=True))
     assignee_id   = Column(UUID(as_uuid=True))
     ai_reasoning  = Column(Text)
+    ai_confidence = Column(Float)
     ioc_data      = Column(JSONB, nullable=False, default=dict)
     search_intel  = Column(JSONB, nullable=False, default=dict)
     created_by_ai = Column(Boolean, nullable=False, default=False)

@@ -148,6 +148,10 @@ async def _migrate_alerts_columns() -> None:
             ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ
         """))
         await conn.execute(text("""
+            ALTER TABLE cases
+            ADD COLUMN IF NOT EXISTS ai_confidence FLOAT
+        """))
+        await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS alert_suppressions (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 entity_type VARCHAR(50) NOT NULL,

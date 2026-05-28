@@ -201,6 +201,7 @@ class Case(Base):
     alert_id      = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"), nullable=True)
     assignee_id   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     ai_reasoning  = Column(Text)
+    ai_confidence = Column(Float)
     ioc_data      = Column(JSONB, nullable=False, default=dict)
     search_intel  = Column(JSONB, nullable=False, default=dict)
     created_by_ai = Column(Boolean, nullable=False, default=False)

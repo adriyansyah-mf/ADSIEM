@@ -305,6 +305,7 @@ class CaseOut(BaseModel):
     alert_id: UUID | None
     assignee_id: UUID | None
     ai_reasoning: str | None
+    ai_confidence: float | None
     ioc_data: dict
     search_intel: dict
     created_by_ai: bool

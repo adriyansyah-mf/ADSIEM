@@ -257,6 +257,7 @@ async def _create_case_from_verdict(
             status=case_status,
             alert_id=alert_uuid,
             ai_reasoning=triage_notes,
+            ai_confidence=confidence,
             ioc_data=ioc_data,
             search_intel=search_intel,
             created_by_ai=True,

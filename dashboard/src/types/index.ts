@@ -131,6 +131,7 @@ export interface Case {
   alert_id: string | null
   assignee_id: string | null
   ai_reasoning: string | null
+  ai_confidence: number | null
   ioc_data: Record<string, unknown>
   search_intel: { results?: Array<{title: string; url: string; content: string}> }
   created_by_ai: boolean

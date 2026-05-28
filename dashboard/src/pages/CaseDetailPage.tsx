@@ -214,23 +214,30 @@ export default function CaseDetailPage() {
                   content={caseData.ai_reasoning}
                   style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '12px' }}
                 />
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 12px',
-                  borderRadius: '4px',
-                  background: 'rgba(0,255,136,0.07)',
-                  border: '1px solid rgba(0,255,136,0.2)',
-                }}>
-                  <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
-                    AI CONFIDENCE
-                  </span>
-                  <div style={{ flex: 1, height: '4px', borderRadius: '2px', background: 'var(--border)', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: '75%', background: 'var(--accent-green)', borderRadius: '2px' }} />
-                  </div>
-                  <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--accent-green)' }}>75%</span>
-                </div>
+                {(() => {
+                  const pct = caseData.ai_confidence != null ? caseData.ai_confidence : null
+                  if (pct == null) return null
+                  const color = pct >= 0.75 ? 'var(--accent-green)' : pct >= 0.5 ? 'var(--accent-yellow)' : 'var(--accent-orange)'
+                  return (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '8px 12px',
+                      borderRadius: '4px',
+                      background: `${color}12`,
+                      border: `1px solid ${color}44`,
+                    }}>
+                      <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
+                        AI CONFIDENCE
+                      </span>
+                      <div style={{ flex: 1, height: '4px', borderRadius: '2px', background: 'var(--border)', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${Math.round(pct * 100)}%`, background: color, borderRadius: '2px' }} />
+                      </div>
+                      <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color }}>{Math.round(pct * 100)}%</span>
+                    </div>
+                  )
+                })()}
               </div>
             ) : (
               <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
