@@ -169,6 +169,33 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
               {a.ai_narrative}
             </div>
           )}
+          {a.hash_ti_hits && a.hash_ti_hits.length > 0 && (
+            <div style={{ marginTop: '4px', padding: '4px 6px', borderRadius: '3px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)' }}>
+              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', color: '#fbbf24', letterSpacing: '0.8px', marginBottom: '3px' }}>
+                FILE HASH IOC ({a.hash_ti_hits.length})
+              </div>
+              {a.hash_ti_hits.map((h, i) => (
+                <div key={i} style={{ marginBottom: '3px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: 'rgba(251,191,36,0.7)', background: 'rgba(251,191,36,0.12)', padding: '1px 4px', borderRadius: '2px' }}>
+                      {h.ioc_type.replace('hash_', '').toUpperCase()}
+                    </span>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: 'var(--text-muted)' }}>
+                      {h.hash.slice(0, 16)}…
+                    </span>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: h.score >= 0.7 ? '#ef4444' : h.score >= 0.3 ? '#fbbf24' : 'var(--text-muted)' }}>
+                      score {h.score.toFixed(2)}
+                    </span>
+                  </div>
+                  {h.bullets.map((b, j) => (
+                    <div key={j} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: 'var(--text-muted)', paddingLeft: '8px', lineHeight: 1.4 }}>
+                      · {b}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
           {a.ai_action === 'escalate' && a.case_id && (
             <a href={`/cases/${a.case_id}`} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', marginTop: '2px', display: 'block' }}>
               View Case →

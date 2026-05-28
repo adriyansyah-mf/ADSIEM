@@ -100,6 +100,10 @@ async def _migrate_ueba_columns() -> None:
             ADD COLUMN IF NOT EXISTS risk_score FLOAT NOT NULL DEFAULT 0.0
         """))
         await conn.execute(text("""
+            ALTER TABLE ueba_anomalies
+            ADD COLUMN IF NOT EXISTS hash_ti_hits JSONB NOT NULL DEFAULT '[]'::jsonb
+        """))
+        await conn.execute(text("""
             CREATE INDEX IF NOT EXISTS ix_ueba_anomalies_case_id
             ON ueba_anomalies(case_id)
             WHERE case_id IS NOT NULL

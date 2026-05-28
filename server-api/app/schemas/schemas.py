@@ -415,6 +415,7 @@ class UebaAnomalyOut(BaseModel):
     ai_narrative: str | None
     ai_action: str | None
     case_id: UUID | None
+    hash_ti_hits: list[dict]
     detected_at: datetime
     model_config = {"from_attributes": True}
 

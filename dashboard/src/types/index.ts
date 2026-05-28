@@ -246,6 +246,14 @@ export interface UebaEntityScore {
   feature_profile: Record<string, { mean: number; std: number }>
 }
 
+export interface HashTiHit {
+  hash: string
+  ioc_type: string
+  score: number
+  bullets: string[]
+  cached_at: string
+}
+
 export interface UebaAnomaly {
   id: string
   entity_type: string
@@ -258,6 +266,7 @@ export interface UebaAnomaly {
   ai_narrative: string | null
   ai_action: string | null
   case_id: string | null
+  hash_ti_hits: HashTiHit[]
   detected_at: string
 }
 
