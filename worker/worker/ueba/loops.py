@@ -52,13 +52,15 @@ async def ueba_ai_loop() -> None:
                 )).scalars().all()
             for anomaly in rows:
                 try:
+                    # alert_id di-pass kosong karena UEBA anomaly bukan alert —
+                    # cases.alert_id FK harus NULL untuk anomali UEBA
                     await analyze_and_maybe_create_case(
-                        alert_id=str(anomaly.id),
+                        alert_id="",
                         title=f"UEBA: {anomaly.entity_type} anomaly — {anomaly.entity_value}",
                         severity="high" if anomaly.risk_score >= 85 else "medium",
                         source_ip=None,
                         hostname=anomaly.entity_value if anomaly.entity_type == "hostname" else None,
-                        decoded_fields={"ueba_risk_score": anomaly.risk_score},
+                        decoded_fields={"ueba_risk_score": anomaly.risk_score, "entity_type": anomaly.entity_type},
                         group_id=anomaly.group_id or "default",
                     )
                 except Exception as exc:

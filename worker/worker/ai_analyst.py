@@ -121,7 +121,9 @@ async def _run_ai_searches(
 
 
 async def _write_alert_note(alert_id: str, content: str) -> None:
-    """Tulis catatan triage AI langsung ke alert."""
+    """Tulis catatan triage AI langsung ke alert. No-op jika alert_id kosong (misal UEBA)."""
+    if not alert_id:
+        return
     try:
         async with AsyncSessionLocal() as db:
             note = AlertNote(
@@ -136,7 +138,9 @@ async def _write_alert_note(alert_id: str, content: str) -> None:
 
 
 async def _update_alert_status(alert_id: str, status: str) -> None:
-    """Update status alert + set acknowledged_at jika belum di-set."""
+    """Update status alert + set acknowledged_at jika belum di-set. No-op jika alert_id kosong."""
+    if not alert_id:
+        return
     try:
         async with AsyncSessionLocal() as db:
             alert = await db.get(Alert, uuid.UUID(alert_id))
@@ -242,7 +246,10 @@ async def _create_case_from_verdict(
     case_status = "open"
 
     async with AsyncSessionLocal() as db:
-        alert_uuid = uuid.UUID(alert_id) if alert_id else None
+        try:
+            alert_uuid = uuid.UUID(alert_id) if alert_id else None
+        except ValueError:
+            alert_uuid = None
         case = Case(
             title=f"{prefix} {title}",
             description=triage_notes,
