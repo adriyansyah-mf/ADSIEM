@@ -321,6 +321,141 @@ async def _get_similar_cases(entity_type: str, mitre_ids: list[str]) -> list[dic
         return []
 
 
+_PRIVATE_NETS = (
+    "10.", "192.168.", "127.", "0.0.0.0", "::1", "fe80::",
+    "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.",
+    "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.",
+    "172.28.", "172.29.", "172.30.", "172.31.",
+)
+
+
+def _is_private_ip(ip: str) -> bool:
+    return any(ip.startswith(p) for p in _PRIVATE_NETS)
+
+
+def _extract_ips_from_events(events: list, exclude: set[str]) -> list[str]:
+    """Extract public IPs from event decoded_fields, excluding already-known IPs."""
+    import json as _json
+    from worker.ti.extractor import extract_iocs
+    from worker.ti.iocs import IOCType
+
+    seen: set[str] = set(exclude)
+    results: list[str] = []
+    for ev in events:
+        df = ev.decoded_fields or {}
+        try:
+            text = _json.dumps(df)
+        except Exception:
+            continue
+        for ioc in extract_iocs(text):
+            if ioc.type not in (IOCType.ipv4, IOCType.ipv6):
+                continue
+            ip = ioc.value
+            if _is_private_ip(ip) or ip in seen:
+                continue
+            seen.add(ip)
+            results.append(ip)
+    return results[:8]
+
+
+async def _run_ti_ips(redis, ips: list[str]) -> list[dict]:
+    """Lookup TI for IPs from logs. Reuses ti:cache:{ip} shared with _run_ti()."""
+    if not ips:
+        return []
+
+    cfg = await _build_ti_config()
+    from worker.ti.providers.abuseipdb import AbuseIPDBProvider
+    from worker.ti.providers.virustotal import VirusTotalProvider
+    from worker.ti.providers.otx import OTXProvider
+    from worker.ti.providers.greynoise import GreyNoiseProvider
+
+    abuse_p = AbuseIPDBProvider(cfg)
+    vt_p    = VirusTotalProvider(cfg)
+    otx_p   = OTXProvider(cfg)
+    gn_p    = GreyNoiseProvider(cfg)
+
+    results: list[dict] = []
+
+    for ip in ips:
+        cache_key = f"ti:cache:{ip}"
+        cached = await redis.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            results.append({"ip": ip, "score": data.get("score", 0.0), "bullets": data.get("bullets", []), "cached_at": data.get("cached_at", "")})
+            continue
+
+        try:
+            abuse, vt, otx, gn = await asyncio.gather(
+                abuse_p.lookup_ip(ip),
+                vt_p.lookup_ip(ip),
+                otx_p.lookup_ip(ip),
+                gn_p.lookup_ip(ip),
+            )
+
+            bullets: list[str] = []
+            risk = 0.0
+
+            if not abuse.get("skipped"):
+                ac = abuse.get("data", {}).get("abuseConfidenceScore")
+                if ac is not None:
+                    bullets.append(f"abuseipdb: abuseConfidenceScore={ac}")
+                    risk = max(risk, min(1.0, float(ac) / 100.0))
+
+            stats = vt.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            if not vt.get("skipped") and not vt.get("not_found"):
+                mal = int(stats.get("malicious") or 0)
+                sus = int(stats.get("suspicious") or 0)
+                bullets.append(f"virustotal(ip): malicious={mal} suspicious={sus}")
+                tot = sum(int(stats.get(k) or 0) for k in ("harmless", "malicious", "suspicious"))
+                if tot and mal:
+                    risk = max(risk, min(1.0, mal / tot + 0.1))
+
+            pc = otx.get("pulse_info", {}).get("count")
+            if not otx.get("skipped") and not otx.get("not_found") and pc is not None:
+                bullets.append(f"otx(ip): pulse_count={pc}")
+                if isinstance(pc, int) and pc > 0:
+                    risk = max(risk, min(1.0, 0.2 + min(pc, 10) / 50.0))
+
+            if not gn.get("skipped") and not gn.get("not_found"):
+                bits: list[str] = []
+                if "noise" in gn:
+                    bits.append(f"noise={gn['noise']}")
+                if cls := (gn.get("classification") or gn.get("grey_type")):
+                    bits.append(f"class={str(cls)[:60]}")
+                if bits:
+                    bullets.append(f"greynoise: {' '.join(bits)}")
+                if str(gn.get("classification") or "").lower().find("malicious") >= 0:
+                    risk = max(risk, 0.82)
+                elif isinstance(gn.get("noise"), bool) and gn["noise"]:
+                    risk = max(risk, 0.35)
+
+            entry = {
+                "score":     round(risk, 3),
+                "sources":   [],
+                "bullets":   bullets,
+                "cached_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await redis.setex(cache_key, TI_CACHE_TTL, json.dumps(entry))
+
+            results.append({"ip": ip, "score": entry["score"], "bullets": bullets, "cached_at": entry["cached_at"]})
+        except Exception as exc:
+            log.warning("ueba_ip_ti_failed", ip=ip, error=str(exc))
+
+    return results
+
+
+def _format_ip_ti(hits: list[dict]) -> str:
+    if not hits:
+        return "No additional public IPs detected in recent logs."
+    lines = []
+    for h in hits:
+        score = h.get("score", 0.0)
+        lines.append(f"  {h['ip']}  score={score:.2f}")
+        for b in h.get("bullets", []):
+            lines.append(f"    {b}")
+    return "\n".join(lines)
+
+
 _INTERNAL_DOMAIN_SUFFIXES = (".local", ".internal", ".corp", ".lan", ".home", ".localdomain")
 _SKIP_DOMAINS = {"localhost", "broadcasthost"}
 
@@ -644,6 +779,7 @@ async def _create_case(
     hash_ti_hits: list[dict] | None = None,
     domain_ti_hits: list[dict] | None = None,
     url_ti_hits: list[dict] | None = None,
+    ip_ti_hits: list[dict] | None = None,
 ) -> uuid.UUID:
     async with AsyncSessionLocal() as db:
         case = Case(
@@ -659,7 +795,7 @@ async def _create_case(
                 "mitre_techniques":   [t["id"] for t in mitre_techniques],
                 "confidence":         ai_response.get("confidence", 0),
             }, ensure_ascii=False),
-            ioc_data={"mitre_techniques": mitre_techniques, "hash_ti_hits": hash_ti_hits or [], "domain_ti_hits": domain_ti_hits or [], "url_ti_hits": url_ti_hits or []},
+            ioc_data={"mitre_techniques": mitre_techniques, "hash_ti_hits": hash_ti_hits or [], "domain_ti_hits": domain_ti_hits or [], "url_ti_hits": url_ti_hits or [], "ip_ti_hits": ip_ti_hits or []},
             created_by_ai=True,
             group_id=group_id,
         )
@@ -692,6 +828,7 @@ async def _update_anomaly(
     hash_ti_hits: list[dict],
     domain_ti_hits: list[dict],
     url_ti_hits: list[dict],
+    ip_ti_hits: list[dict],
 ) -> None:
     try:
         async with AsyncSessionLocal() as db:
@@ -703,6 +840,7 @@ async def _update_anomaly(
                 row.hash_ti_hits     = hash_ti_hits
                 row.domain_ti_hits   = domain_ti_hits
                 row.url_ti_hits      = url_ti_hits
+                row.ip_ti_hits       = ip_ti_hits
                 if case_id:
                     row.case_id = case_id
                 await db.commit()
@@ -735,10 +873,14 @@ async def investigate(redis, payload: dict) -> None:
     hash_iocs   = _extract_hashes_from_events(recent_events)
     domain_iocs = _extract_domains_from_events(recent_events)
     url_iocs    = _extract_urls_from_events(recent_events)
-    hash_ti_hits, domain_ti_hits, url_ti_hits = await asyncio.gather(
+    # exclude source_ip and entity itself (if ip) — already covered by _run_ti()
+    _known_ips  = {ip for ip in (source_ip, entity_value if entity_type == "ip" else None) if ip}
+    ip_iocs     = _extract_ips_from_events(recent_events, exclude=_known_ips)
+    hash_ti_hits, domain_ti_hits, url_ti_hits, ip_ti_hits = await asyncio.gather(
         _run_ti_hashes(redis, hash_iocs),
         _run_ti_domains(redis, domain_iocs),
         _run_ti_urls(redis, url_iocs),
+        _run_ti_ips(redis, ip_iocs),
     )
 
     # 4. Case memory
@@ -809,6 +951,9 @@ DOMAIN INTELLIGENCE ({len(domain_ti_hits)} external domain(s) found in logs):
 URL INTELLIGENCE ({len(url_ti_hits)} external URL(s) found in logs):
 {_format_url_ti(url_ti_hits)}
 
+RELATED IP INTELLIGENCE ({len(ip_ti_hits)} additional public IP(s) found in logs):
+{_format_ip_ti(ip_ti_hits)}
+
 Analyze all evidence. Consider whether this is an isolated event or part of a broader attack pattern, and reflect that in your narrative and confidence. Provide your investigation verdict as JSON."""
 
     # 7. Groq analysis
@@ -848,6 +993,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
             hash_ti_hits=hash_ti_hits,
             domain_ti_hits=domain_ti_hits,
             url_ti_hits=url_ti_hits,
+            ip_ti_hits=ip_ti_hits,
         )
         log.info("ueba_case_created", case_id=str(case_id),
                  entity_type=entity_type, entity_value=entity_value)
@@ -862,6 +1008,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
         hash_ti_hits=hash_ti_hits,
         domain_ti_hits=domain_ti_hits,
         url_ti_hits=url_ti_hits,
+        ip_ti_hits=ip_ti_hits,
     )
 
 

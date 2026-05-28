@@ -418,6 +418,7 @@ class UebaAnomalyOut(BaseModel):
     hash_ti_hits: list[dict]
     domain_ti_hits: list[dict]
     url_ti_hits: list[dict]
+    ip_ti_hits: list[dict]
     detected_at: datetime
     model_config = {"from_attributes": True}
 

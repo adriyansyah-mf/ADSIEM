@@ -268,6 +268,13 @@ export interface UrlTiHit {
   cached_at: string
 }
 
+export interface IpTiHit {
+  ip: string
+  score: number
+  bullets: string[]
+  cached_at: string
+}
+
 export interface UebaAnomaly {
   id: string
   entity_type: string
@@ -283,6 +290,7 @@ export interface UebaAnomaly {
   hash_ti_hits: HashTiHit[]
   domain_ti_hits: DomainTiHit[]
   url_ti_hits: UrlTiHit[]
+  ip_ti_hits: IpTiHit[]
   detected_at: string
 }
 
