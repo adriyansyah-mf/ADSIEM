@@ -1,4 +1,5 @@
 # worker/worker/groq_client.py
+import asyncio
 import json
 import httpx
 import structlog
@@ -7,6 +8,43 @@ from worker.settings_cache import get_setting
 
 log = structlog.get_logger()
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Max 3 concurrent Groq calls — hindari burst yang memicu rate limit
+_groq_semaphore = asyncio.Semaphore(3)
+
+
+async def _groq_post(api_key: str, payload: dict, max_retries: int = 4) -> dict:
+    """POST ke Groq dengan retry exponential backoff saat kena 429."""
+    delay = 5.0
+    async with _groq_semaphore:
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=40) as client:
+                    resp = await client.post(
+                        GROQ_API_URL,
+                        headers={"Authorization": f"Bearer {api_key}",
+                                 "Content-Type": "application/json"},
+                        json=payload,
+                    )
+                    if resp.status_code == 429:
+                        retry_after = float(resp.headers.get("retry-after", delay))
+                        wait = max(retry_after, delay)
+                        log.warning("groq_rate_limited", attempt=attempt + 1,
+                                    wait_seconds=wait)
+                        await asyncio.sleep(wait)
+                        delay = min(delay * 2, 60)
+                        continue
+                    resp.raise_for_status()
+                    return resp.json()
+            except httpx.HTTPStatusError:
+                raise
+            except Exception as exc:
+                if attempt == max_retries - 1:
+                    raise
+                log.warning("groq_retry", attempt=attempt + 1, error=str(exc))
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60)
+    raise RuntimeError("Groq max retries exceeded")
 
 _L1_SYSTEM_PROMPT = """Kamu adalah SOC Analyst L1 yang sedang bertugas. Kamu WAJIB melakukan triage pada SETIAP alert — tidak ada yang dilewati.
 
@@ -92,27 +130,21 @@ Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}
 Lakukan triage dan berikan verdict-mu sebagai analis L1."""
 
     try:
-        async with httpx.AsyncClient(timeout=35) as client:
-            resp = await client.post(
-                GROQ_API_URL,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": _L1_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.15,
-                    "max_tokens": 700,
-                },
-            )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            return json.loads(content)
+        result = await _groq_post(api_key, {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": _L1_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.15,
+            "max_tokens": 700,
+        })
+        content = result["choices"][0]["message"]["content"].strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        return json.loads(content)
     except Exception as e:
         log.error("groq_l1_triage_failed", error=str(e))
         return _fallback_verdict(severity)
@@ -186,27 +218,21 @@ CHRONOLOGICAL ATTACK TIMELINE:
 Analyze this as a complete attack campaign. What is the full story?"""
 
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            resp = await client.post(
-                GROQ_API_URL,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": _CAMPAIGN_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 1024,
-                },
-            )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            return json.loads(content)
+        result = await _groq_post(api_key, {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": _CAMPAIGN_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 1024,
+        })
+        content = result["choices"][0]["message"]["content"].strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        return json.loads(content)
     except Exception as e:
         log.error("groq_campaign_failed", error=str(e))
         return None

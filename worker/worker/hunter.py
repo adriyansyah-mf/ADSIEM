@@ -3,21 +3,19 @@
 import json
 import uuid
 import asyncio
-import httpx
 import structlog
 from datetime import datetime, timezone
 
-from sqlalchemy import or_, select, desc, text
+from sqlalchemy import select, desc, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from worker.database import AsyncSessionLocal
 from worker.models import Alert, Event, ThreatHunt
 from worker.settings_cache import get_setting
 from worker.config import GROQ_API_KEY
+from worker.groq_client import _groq_post
 
 log = structlog.get_logger()
-
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 _HUNT_SYSTEM_PROMPT = """You are an elite threat hunter and SOC analyst. You are given an IoC (Indicator of Compromise) and a timeline of historical security alerts and events where it appeared.
 
@@ -53,27 +51,21 @@ Timeline of appearances ({len(timeline_text.splitlines())} entries):
 Analyze this IoC's historical footprint and determine the attack pattern."""
 
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
-            resp = await client.post(
-                GROQ_API_URL,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": _HUNT_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.15,
-                    "max_tokens": 700,
-                },
-            )
-            resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            return json.loads(content)
+        result = await _groq_post(api_key, {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": _HUNT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.15,
+            "max_tokens": 700,
+        })
+        content = result["choices"][0]["message"]["content"].strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        return json.loads(content)
     except Exception as e:
         log.error("hunt_llm_failed", error=str(e))
         return {"risk_level": "unknown", "attack_narrative": f"Analysis failed: {e}", "confidence": 0.0}
