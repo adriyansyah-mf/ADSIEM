@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from 'react-query'
+import { useQuery } from '@tanstack/react-query'
 import { ClipboardList } from 'lucide-react'
 import { format } from 'date-fns'
 import { api } from '@/api/client'
@@ -67,7 +67,7 @@ export default function AuditLogsPage() {
               </tr>
             </thead>
             <tbody>
-              {logs.map(log => (
+              {logs.map((log: AuditLog) => (
                 <tr key={log.id} className="border-t border-border hover:bg-muted/30">
                   <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
                     {format(new Date(log.created_at), 'yyyy-MM-dd HH:mm:ss')}

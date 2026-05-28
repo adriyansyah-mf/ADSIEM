@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from 'react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { GitMerge, Plus, Trash2, Pencil, X, Check } from 'lucide-react'
 import { api } from '@/api/client'
 
@@ -241,7 +241,7 @@ export default function CorrelationPage() {
               </tr>
             </thead>
             <tbody>
-              {rules.map(rule => (
+              {rules.map((rule: CorrelationRule) => (
                 <tr key={rule.id} className="border-t border-border hover:bg-muted/30">
                   <td className="px-3 py-2 font-medium">{rule.title}</td>
                   <td className="px-3 py-2 text-muted-foreground">{rule.match_field}</td>
