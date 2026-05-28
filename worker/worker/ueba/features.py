@@ -136,35 +136,36 @@ async def build_user_vector_dict(
     p = f"ueba:u:{user}"
     now = datetime.now(timezone.utc)
 
-    unique_ips      = await redis.scard(f"{p}:ips")
-    unique_hosts    = await redis.scard(f"{p}:hosts")
-    sudo_count      = int(await redis.get(f"{p}:sudo") or 0)
-    new_ip_seen     = int(await redis.get(f"{p}:new_ip") or 0)
-    failed_ratio    = (failed_count / login_count) if login_count > 0 else 0.0
-    velocity        = login_count / max(prev_login_count, 1)
-    hour_deviation  = abs(now.hour - mean_hour)
-    user_ips = list(await redis.smembers(f"{p}:ips"))[:5]
-    ti_scores = await asyncio.gather(*[_get_ti_reputation(redis, ip) for ip in user_ips])
-    ti_reputation = max(ti_scores) if ti_scores else 0.0
-
-    max_ioc_ti_score, max_ps_score, max_cmd_score = await asyncio.gather(
+    # Stage 1 — all independent reads in one gather (smembers replaces scard for :ips)
+    (
+        user_ips_set, unique_hosts, sudo_raw, new_ip_raw,
+        max_ioc_ti_score, max_ps_score, max_cmd_score,
+    ) = await asyncio.gather(
+        redis.smembers(f"{p}:ips"),
+        redis.scard(f"{p}:hosts"),
+        redis.get(f"{p}:sudo"),
+        redis.get(f"{p}:new_ip"),
         _get_max_ioc_ti_score(redis, "user", user),
         _get_max_ps_score(redis, "user", user),
         _get_max_cmd_score(redis, "user", user),
     )
 
+    # Stage 2 — ti_reputation depends on stage-1 smembers result
+    user_ips  = list(user_ips_set)[:5]
+    ti_scores = await asyncio.gather(*[_get_ti_reputation(redis, ip) for ip in user_ips])
+
     return {
         "login_count":      float(login_count),
-        "failed_ratio":     failed_ratio,
-        "unique_ips":       float(unique_ips),
+        "failed_ratio":     (failed_count / login_count) if login_count > 0 else 0.0,
+        "unique_ips":       float(len(user_ips_set)),
         "unique_hosts":     float(unique_hosts),
-        "sudo_count":       float(sudo_count),
-        "new_ip_seen":      float(new_ip_seen),
+        "sudo_count":       float(int(sudo_raw or 0)),
+        "new_ip_seen":      float(int(new_ip_raw or 0)),
         "hour_of_day":      float(now.hour),
         "is_weekend":       float(1 if now.weekday() >= 5 else 0),
-        "velocity":         float(velocity),
-        "hour_deviation":   float(hour_deviation),
-        "ti_reputation":    ti_reputation,
+        "velocity":         float(login_count / max(prev_login_count, 1)),
+        "hour_deviation":   float(abs(now.hour - mean_hour)),
+        "ti_reputation":    max(ti_scores) if ti_scores else 0.0,
         "max_ioc_ti_score": max_ioc_ti_score,
         "max_ps_score":     max_ps_score,
         "max_cmd_score":    max_cmd_score,
@@ -178,16 +179,19 @@ async def build_ip_vector_dict(
     p = f"ueba:ip:{ip}"
     now = datetime.now(timezone.utc)
 
-    unique_users        = await redis.scard(f"{p}:users")
-    unique_target_hosts = await redis.scard(f"{p}:hosts")
-    failed_ratio     = (failed_count / total_events) if total_events > 0 else 0.0
-    velocity         = total_events / max(prev_total, 1)
-    ti_reputation, max_ioc_ti_score, max_ps_score, max_cmd_score = await asyncio.gather(
+    (
+        unique_users, unique_target_hosts, ti_reputation,
+        max_ioc_ti_score, max_ps_score, max_cmd_score,
+    ) = await asyncio.gather(
+        redis.scard(f"{p}:users"),
+        redis.scard(f"{p}:hosts"),
         _get_ti_reputation(redis, ip),
         _get_max_ioc_ti_score(redis, "ip", ip),
         _get_max_ps_score(redis, "ip", ip),
         _get_max_cmd_score(redis, "ip", ip),
     )
+    failed_ratio = (failed_count / total_events) if total_events > 0 else 0.0
+    velocity     = total_events / max(prev_total, 1)
 
     return {
         "unique_users":        float(unique_users),
@@ -212,21 +216,27 @@ async def build_host_vector_dict(
     p = f"ueba:host:{hostname}"
     now = datetime.now(timezone.utc)
 
-    unique_users      = await redis.scard(f"{p}:users")
-    unique_source_ips = await redis.scard(f"{p}:src_ips")
-    sudo_count        = int(await redis.get(f"{p}:sudo") or 0)
-    failed_ratio      = (failed_count / total_events) if total_events > 0 else 0.0
-    velocity          = total_events / max(prev_total, 1)
-
-    # TI reputation: worst score among source IPs connecting to this host
-    src_ips = list(await redis.smembers(f"{p}:src_ips"))[:5]
-    ti_scores = await asyncio.gather(*[_get_ti_reputation(redis, ip) for ip in src_ips])
-    ti_reputation = max(ti_scores) if ti_scores else 0.0
-    max_ioc_ti_score, max_ps_score, max_cmd_score = await asyncio.gather(
+    # Stage 1 — all independent reads; smembers covers both count and iteration
+    (
+        unique_users, src_ips_set, sudo_raw,
+        max_ioc_ti_score, max_ps_score, max_cmd_score,
+    ) = await asyncio.gather(
+        redis.scard(f"{p}:users"),
+        redis.smembers(f"{p}:src_ips"),
+        redis.get(f"{p}:sudo"),
         _get_max_ioc_ti_score(redis, "host", hostname),
         _get_max_ps_score(redis, "host", hostname),
         _get_max_cmd_score(redis, "host", hostname),
     )
+
+    # Stage 2 — TI reputation depends on Stage 1 smembers result
+    src_ips   = list(src_ips_set)[:5]
+    ti_scores = await asyncio.gather(*[_get_ti_reputation(redis, ip) for ip in src_ips])
+
+    sudo_count   = int(sudo_raw or 0)
+    failed_ratio = (failed_count / total_events) if total_events > 0 else 0.0
+    velocity     = total_events / max(prev_total, 1)
+    ti_reputation = max(ti_scores) if ti_scores else 0.0
 
     return {
         "unique_users":      float(unique_users),
