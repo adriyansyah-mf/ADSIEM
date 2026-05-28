@@ -143,8 +143,8 @@ async def build_user_vector_dict(
     failed_ratio    = (failed_count / login_count) if login_count > 0 else 0.0
     velocity        = login_count / max(prev_login_count, 1)
     hour_deviation  = abs(now.hour - mean_hour)
-    user_ips = await redis.smembers(f"{p}:ips")
-    ti_scores = [await _get_ti_reputation(redis, ip) for ip in list(user_ips)[:5]]
+    user_ips = list(await redis.smembers(f"{p}:ips"))[:5]
+    ti_scores = await asyncio.gather(*[_get_ti_reputation(redis, ip) for ip in user_ips])
     ti_reputation = max(ti_scores) if ti_scores else 0.0
 
     max_ioc_ti_score, max_ps_score, max_cmd_score = await asyncio.gather(
@@ -219,8 +219,8 @@ async def build_host_vector_dict(
     velocity          = total_events / max(prev_total, 1)
 
     # TI reputation: worst score among source IPs connecting to this host
-    src_ips = await redis.smembers(f"{p}:src_ips")
-    ti_scores = [await _get_ti_reputation(redis, ip) for ip in list(src_ips)[:5]]
+    src_ips = list(await redis.smembers(f"{p}:src_ips"))[:5]
+    ti_scores = await asyncio.gather(*[_get_ti_reputation(redis, ip) for ip in src_ips])
     ti_reputation = max(ti_scores) if ti_scores else 0.0
     max_ioc_ti_score, max_ps_score, max_cmd_score = await asyncio.gather(
         _get_max_ioc_ti_score(redis, "host", hostname),
