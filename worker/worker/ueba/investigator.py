@@ -321,6 +321,119 @@ async def _get_similar_cases(entity_type: str, mitre_ids: list[str]) -> list[dic
         return []
 
 
+_INTERNAL_DOMAIN_SUFFIXES = (".local", ".internal", ".corp", ".lan", ".home", ".localdomain")
+_SKIP_DOMAINS = {"localhost", "broadcasthost"}
+
+
+def _extract_domains_from_events(events: list) -> list[str]:
+    """Extract external domains from event decoded_fields. Returns list of domain strings."""
+    import json as _json
+    from worker.ti.extractor import extract_iocs
+    from worker.ti.iocs import IOCType
+
+    seen: set[str] = set()
+    results: list[str] = []
+    for ev in events:
+        df = ev.decoded_fields or {}
+        try:
+            text = _json.dumps(df)
+        except Exception:
+            continue
+        for ioc in extract_iocs(text):
+            if ioc.type != IOCType.domain:
+                continue
+            dom = ioc.value.lower()
+            if dom in _SKIP_DOMAINS:
+                continue
+            if any(dom.endswith(s) for s in _INTERNAL_DOMAIN_SUFFIXES):
+                continue
+            if dom not in seen:
+                seen.add(dom)
+                results.append(dom)
+    return results[:8]
+
+
+async def _run_ti_domains(redis, domains: list[str]) -> list[dict]:
+    """Lookup TI for domains. Checks ti:cache:domain:{d} first, caches misses for 24h."""
+    if not domains:
+        return []
+
+    cfg = await _build_ti_config()
+    from worker.ti.providers.virustotal import VirusTotalProvider
+    from worker.ti.providers.otx import OTXProvider
+    from worker.ti.providers.urlhaus import URLhausProvider
+
+    vt_p  = VirusTotalProvider(cfg)
+    otx_p = OTXProvider(cfg)
+    uh_p  = URLhausProvider(cfg)
+
+    results: list[dict] = []
+
+    for dom in domains:
+        cache_key = f"ti:cache:domain:{dom}"
+        cached = await redis.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            results.append({"domain": dom, **data})
+            continue
+
+        try:
+            vt, otx, uh = await asyncio.gather(
+                vt_p.lookup_domain(dom),
+                otx_p.lookup_domain(dom),
+                uh_p.lookup_domain(dom),
+            )
+
+            bullets: list[str] = []
+            risk = 0.0
+
+            stats = vt.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            if not vt.get("skipped") and not vt.get("not_found"):
+                mal = int(stats.get("malicious") or 0)
+                sus = int(stats.get("suspicious") or 0)
+                bullets.append(f"virustotal(domain): malicious={mal} suspicious={sus}")
+                tot = sum(int(stats.get(k) or 0) for k in ("harmless", "malicious", "suspicious", "undetected"))
+                if tot and mal:
+                    risk = max(risk, min(1.0, 0.5 + mal / 40.0))
+
+            pc = otx.get("pulse_info", {}).get("count")
+            if not otx.get("skipped") and not otx.get("not_found") and pc is not None:
+                bullets.append(f"otx(domain): pulse_count={pc}")
+                if isinstance(pc, int) and pc > 0:
+                    risk = max(risk, min(1.0, 0.2 + min(pc, 10) / 50.0))
+
+            if not uh.get("skipped") and uh.get("query_status") == "ok":
+                if ref := uh.get("urlhaus_reference"):
+                    bullets.append(f"urlhaus(domain): listed ref={ref}")
+                    risk = max(risk, 0.65)
+
+            entry = {
+                "score":     round(risk, 3),
+                "bullets":   bullets,
+                "cached_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await redis.setex(cache_key, TI_HASH_CACHE_TTL, json.dumps(entry))
+
+            results.append({"domain": dom, **entry})
+        except Exception as exc:
+            log.warning("ueba_domain_ti_failed", domain=dom, error=str(exc))
+
+    return results
+
+
+def _format_domain_ti(hits: list[dict]) -> str:
+    if not hits:
+        return "No external domains detected in recent logs."
+    lines = []
+    for h in hits:
+        score = h.get("score", 0.0)
+        bullets = h.get("bullets", [])
+        lines.append(f"  {h['domain']}  score={score:.2f}")
+        for b in bullets:
+            lines.append(f"    {b}")
+    return "\n".join(lines)
+
+
 def _format_hash_ti(hits: list[dict]) -> str:
     if not hits:
         return "No file hashes detected in recent logs."
@@ -400,6 +513,7 @@ async def _create_case(
     ai_response: dict, mitre_techniques: list[dict],
     similar_cases: list[dict], group_id: str,
     hash_ti_hits: list[dict] | None = None,
+    domain_ti_hits: list[dict] | None = None,
 ) -> uuid.UUID:
     async with AsyncSessionLocal() as db:
         case = Case(
@@ -415,7 +529,7 @@ async def _create_case(
                 "mitre_techniques":   [t["id"] for t in mitre_techniques],
                 "confidence":         ai_response.get("confidence", 0),
             }, ensure_ascii=False),
-            ioc_data={"mitre_techniques": mitre_techniques, "hash_ti_hits": hash_ti_hits or []},
+            ioc_data={"mitre_techniques": mitre_techniques, "hash_ti_hits": hash_ti_hits or [], "domain_ti_hits": domain_ti_hits or []},
             created_by_ai=True,
             group_id=group_id,
         )
@@ -446,6 +560,7 @@ async def _update_anomaly(
     ai_action: str,
     case_id: uuid.UUID | None,
     hash_ti_hits: list[dict],
+    domain_ti_hits: list[dict],
 ) -> None:
     try:
         async with AsyncSessionLocal() as db:
@@ -455,6 +570,7 @@ async def _update_anomaly(
                 row.ai_narrative     = ai_narrative
                 row.ai_action        = ai_action.lower()
                 row.hash_ti_hits     = hash_ti_hits
+                row.domain_ti_hits   = domain_ti_hits
                 if case_id:
                     row.case_id = case_id
                 await db.commit()
@@ -482,10 +598,14 @@ async def investigate(redis, payload: dict) -> None:
     # 2. Threat Intelligence
     ti_text, ti_score = await _run_ti(redis, source_ip)
 
-    # 3. Recent logs + hash extraction
+    # 3. Recent logs + IOC extraction
     logs_text, recent_events = await _get_recent_logs(entity_type, entity_value)
-    hash_iocs    = _extract_hashes_from_events(recent_events)
-    hash_ti_hits = await _run_ti_hashes(redis, hash_iocs)
+    hash_iocs      = _extract_hashes_from_events(recent_events)
+    domain_iocs    = _extract_domains_from_events(recent_events)
+    hash_ti_hits, domain_ti_hits = await asyncio.gather(
+        _run_ti_hashes(redis, hash_iocs),
+        _run_ti_domains(redis, domain_iocs),
+    )
 
     # 4. Case memory
     similar_cases = await _get_similar_cases(entity_type, mitre_ids)
@@ -549,6 +669,9 @@ CONCURRENT ANOMALIES (same 24h window — potential coordinated attack):
 FILE HASH INTELLIGENCE ({len(hash_ti_hits)} hash(es) found in logs):
 {_format_hash_ti(hash_ti_hits)}
 
+DOMAIN INTELLIGENCE ({len(domain_ti_hits)} external domain(s) found in logs):
+{_format_domain_ti(domain_ti_hits)}
+
 Analyze all evidence. Consider whether this is an isolated event or part of a broader attack pattern, and reflect that in your narrative and confidence. Provide your investigation verdict as JSON."""
 
     # 7. Groq analysis
@@ -586,6 +709,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
             ai_response=ai_response, mitre_techniques=mitre_techniques,
             similar_cases=similar_cases, group_id=group_id,
             hash_ti_hits=hash_ti_hits,
+            domain_ti_hits=domain_ti_hits,
         )
         log.info("ueba_case_created", case_id=str(case_id),
                  entity_type=entity_type, entity_value=entity_value)
@@ -598,6 +722,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
         ai_action=action,
         case_id=case_id,
         hash_ti_hits=hash_ti_hits,
+        domain_ti_hits=domain_ti_hits,
     )
 
 

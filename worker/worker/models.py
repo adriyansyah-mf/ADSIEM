@@ -160,6 +160,7 @@ class UebaAnomaly(Base):
     ai_action        = Column(String(20))
     case_id          = Column(UUID(as_uuid=True))  # FK omitted — worker models omit FK constraints by convention
     hash_ti_hits     = Column(JSONB,               nullable=False, default=list)
+    domain_ti_hits   = Column(JSONB,               nullable=False, default=list)
     detected_at      = Column(DateTime(timezone=True), default=now_utc)
 
 class ThreatHunt(Base):

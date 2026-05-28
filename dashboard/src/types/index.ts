@@ -254,6 +254,13 @@ export interface HashTiHit {
   cached_at: string
 }
 
+export interface DomainTiHit {
+  domain: string
+  score: number
+  bullets: string[]
+  cached_at: string
+}
+
 export interface UebaAnomaly {
   id: string
   entity_type: string
@@ -267,6 +274,7 @@ export interface UebaAnomaly {
   ai_action: string | null
   case_id: string | null
   hash_ti_hits: HashTiHit[]
+  domain_ti_hits: DomainTiHit[]
   detected_at: string
 }
 

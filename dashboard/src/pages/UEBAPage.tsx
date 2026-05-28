@@ -196,6 +196,30 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
               ))}
             </div>
           )}
+          {a.domain_ti_hits && a.domain_ti_hits.length > 0 && (
+            <div style={{ marginTop: '4px', padding: '4px 6px', borderRadius: '3px', background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.2)' }}>
+              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', color: '#a78bfa', letterSpacing: '0.8px', marginBottom: '3px' }}>
+                DOMAIN IOC ({a.domain_ti_hits.length})
+              </div>
+              {a.domain_ti_hits.map((d, i) => (
+                <div key={i} style={{ marginBottom: '3px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: '#a78bfa' }}>
+                      {d.domain}
+                    </span>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: d.score >= 0.7 ? '#ef4444' : d.score >= 0.3 ? '#fbbf24' : 'var(--text-muted)' }}>
+                      score {d.score.toFixed(2)}
+                    </span>
+                  </div>
+                  {d.bullets.map((b, j) => (
+                    <div key={j} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: 'var(--text-muted)', paddingLeft: '8px', lineHeight: 1.4 }}>
+                      · {b}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
           {a.ai_action === 'escalate' && a.case_id && (
             <a href={`/cases/${a.case_id}`} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', marginTop: '2px', display: 'block' }}>
               View Case →
