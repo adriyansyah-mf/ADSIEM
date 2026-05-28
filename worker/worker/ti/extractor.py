@@ -45,6 +45,8 @@ def extract_iocs(text: str) -> list[IOC]:
             parsed = ipaddress.ip_address(raw)
         except ValueError:
             continue
+        if parsed.is_private or parsed.is_loopback or parsed.is_link_local or parsed.is_reserved:
+            continue
         canon = str(parsed)
         if canon in ip_seen:
             continue

@@ -132,7 +132,13 @@ export default function CaseDetailPage() {
     )
   }
 
-  const iocEntries = Object.entries(caseData.ioc_data ?? {}).filter(([, v]) => v != null && v !== '' && !(Array.isArray(v) && (v as unknown[]).length === 0))
+  const iocEntries = Object.entries(caseData.ioc_data ?? {}).filter(([k, v]) => {
+    if (v == null || v === '') return false
+    if (Array.isArray(v) && (v as unknown[]).length === 0) return false
+    // hide overall_risk=0 — means no TI data available, not an actual zero-risk score
+    if (k === 'overall_risk' && (v === 0 || v === 0.0)) return false
+    return true
+  })
   const searchResults = caseData.search_intel?.results ?? []
   const sortedNotes = [...(caseData.notes ?? [])].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -258,10 +264,10 @@ export default function CaseDetailPage() {
                     border: '1px solid var(--border)',
                   }}>
                     <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '3px' }}>
-                      {key.replace(/_/g, ' ')}
+                      {key === 'overall_risk' ? 'TI RISK SCORE' : key.replace(/_/g, ' ')}
                     </div>
-                    <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>
-                      {Array.isArray(val)
+                    <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: key === 'overall_risk' ? (Number(val) >= 0.75 ? 'var(--accent-red)' : Number(val) >= 0.45 ? 'var(--accent-orange)' : 'var(--accent-yellow)') : 'var(--accent-cyan)', wordBreak: 'break-all' }}>
+                      {key === 'overall_risk' ? `${Math.round(Number(val) * 100)}%` : Array.isArray(val)
                         ? (val as unknown[]).map((item, i) =>
                             typeof item === 'object' && item !== null
                               ? <div key={i} style={{ marginBottom: '2px' }}>
