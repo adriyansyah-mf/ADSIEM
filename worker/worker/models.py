@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Float, Integer, String, Text, ARRAY
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase
+from pgvector.sqlalchemy import Vector
 
 class Base(DeclarativeBase):
     pass
@@ -127,6 +128,16 @@ class CaseNote(Base):
     content         = Column(Text, nullable=False)
     is_ai_generated = Column(Boolean, nullable=False, default=False)
     created_at      = Column(DateTime(timezone=True), default=now_utc)
+
+class CaseEmbedding(Base):
+    __tablename__ = "case_embeddings"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id      = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"),
+                          nullable=False, unique=True)
+    group_id     = Column(String(100), nullable=False, default="default")
+    embedding    = Column(Vector(384), nullable=False)
+    summary_text = Column(Text, nullable=False)
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
 
 class AlertNote(Base):
     __tablename__ = "alert_notes"

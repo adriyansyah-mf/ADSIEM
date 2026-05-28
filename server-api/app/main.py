@@ -202,6 +202,28 @@ async def _migrate_alerts_columns() -> None:
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS case_embeddings (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                case_id      UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+                group_id     VARCHAR(100) NOT NULL DEFAULT 'default',
+                embedding    vector(384) NOT NULL,
+                summary_text TEXT NOT NULL,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_case_embeddings_case_id UNIQUE (case_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_case_embeddings_group
+            ON case_embeddings(group_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_case_embeddings_ivfflat
+            ON case_embeddings
+            USING ivfflat (embedding vector_cosine_ops)
+            WITH (lists = 10)
+        """))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
