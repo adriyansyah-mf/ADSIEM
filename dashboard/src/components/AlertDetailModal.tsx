@@ -7,6 +7,7 @@ import { format } from 'date-fns'
 import { X, ShieldOff, CheckCircle } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import MarkdownNote from './MarkdownNote'
 
 interface Props { alert: Alert; onClose: () => void }
 
@@ -144,7 +145,7 @@ export default function AlertDetailModal({ alert, onClose }: Props) {
             {alert.notes.map((n) => (
               <div key={n.id} className="p-3 rounded bg-muted text-sm">
                 <div className="text-xs text-muted-foreground mb-1">{format(new Date(n.created_at), 'yyyy-MM-dd HH:mm')}</div>
-                {n.content}
+                <MarkdownNote content={n.content} />
               </div>
             ))}
           </div>

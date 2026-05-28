@@ -5,6 +5,7 @@ import { useHunts, useStartHunt } from '@/hooks/useHunts'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { ThreatHunt } from '@/types'
+import MarkdownNote from '@/components/MarkdownNote'
 
 interface HuntSchedule {
   id: string; name: string; ioc_type: string; ioc_value: string
@@ -262,7 +263,7 @@ function HuntCard({ hunt }: { hunt: ThreatHunt }) {
               {analysis?.attack_narrative && (
                 <div className="rounded bg-muted/30 border border-border p-3 space-y-1">
                   <p className="text-xs text-muted-foreground uppercase font-medium">Analisa AI</p>
-                  <p className="text-sm leading-relaxed">{analysis.attack_narrative}</p>
+                  <MarkdownNote content={analysis.attack_narrative} className="text-sm" />
                 </div>
               )}
 

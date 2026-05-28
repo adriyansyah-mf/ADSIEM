@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { Alert } from '@/types'
+import MarkdownNote from '@/components/MarkdownNote'
 
 const severityColors = {
   critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
@@ -209,9 +210,10 @@ export default function CaseDetailPage() {
           <Box title="AI Analysis">
             {caseData.ai_reasoning ? (
               <div>
-                <p style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.7, margin: '0 0 12px 0' }}>
-                  {caseData.ai_reasoning}
-                </p>
+                <MarkdownNote
+                  content={caseData.ai_reasoning}
+                  style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '12px' }}
+                />
                 <div style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -360,9 +362,10 @@ export default function CaseDetailPage() {
                       {format(new Date(note.created_at), 'yyyy-MM-dd HH:mm:ss')}
                     </span>
                   </div>
-                  <div style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
-                    {note.content}
-                  </div>
+                  <MarkdownNote
+                    content={note.content}
+                    style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)' }}
+                  />
                 </div>
               ))}
             </div>
