@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useUebaEntities, useUebaEntityDetail, useUebaStatus, useUebaRiskHistory } from '@/hooks/useUeba'
 import type { UebaEntityScore, UebaAnomaly, UebaRiskPoint } from '@/types'
 
@@ -55,6 +56,8 @@ function RiskSparkline({ data }: { data: UebaRiskPoint[] }) {
 }
 
 function EntityRow({ entity, selected, onClick }: { entity: UebaEntityScore; selected: boolean; onClick: () => void }) {
+  const lastAnomaly = entity.last_anomaly_at ? new Date(entity.last_anomaly_at) : null
+  const minsAgo = lastAnomaly ? Math.floor((Date.now() - lastAnomaly.getTime()) / 60000) : null
   return (
     <div
       onClick={onClick}
@@ -63,7 +66,7 @@ function EntityRow({ entity, selected, onClick }: { entity: UebaEntityScore; sel
         alignItems: 'center', gap: '10px',
         padding: '8px 12px',
         background: selected ? 'rgba(0,212,255,0.08)' : 'transparent',
-        borderLeft: `2px solid ${selected ? 'var(--accent-cyan)' : 'transparent'}`,
+        borderLeft: `2px solid ${selected ? 'var(--accent-cyan)' : riskColor(entity.risk_score) + (entity.risk_score >= 60 ? '88' : '33')}`,
         cursor: 'pointer',
         transition: 'background 0.15s',
       }}
@@ -72,11 +75,18 @@ function EntityRow({ entity, selected, onClick }: { entity: UebaEntityScore; sel
         <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-primary)' }}>
           {entity.entity_value}
         </div>
-        {entity.anomaly_count > 0 && (
-          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-            {entity.anomaly_count} anomal{entity.anomaly_count === 1 ? 'y' : 'ies'}
-          </div>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+          {entity.anomaly_count > 0 && (
+            <span style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
+              {entity.anomaly_count} anomal{entity.anomaly_count === 1 ? 'y' : 'ies'}
+            </span>
+          )}
+          {minsAgo !== null && (
+            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: minsAgo < 60 ? 'var(--accent-yellow)' : 'var(--text-muted)' }}>
+              {minsAgo < 60 ? `${minsAgo}m ago` : lastAnomaly!.toLocaleDateString()}
+            </span>
+          )}
+        </div>
       </div>
       <div style={{ width: '80px' }}>
         <RiskBar score={entity.risk_score} />
@@ -92,17 +102,31 @@ function FeatureTable({ features }: { features: Record<string, number> }) {
     unique_users: 5,
     sudo_count: 3,
     new_ip_seen: 0.5,
+    // enrichment scores — same thresholds as MITRE mapper
+    max_ps_score: 0.35,
+    max_cmd_score: 0.40,
+    max_ioc_ti_score: 0.50,
+    ti_reputation: 0.50,
+  }
+  const CRIT_THRESHOLDS: Record<string, number> = {
+    max_ps_score: 0.85,
+    max_ioc_ti_score: 0.78,
+    max_cmd_score: 0.70,
+    ti_reputation: 0.80,
+    failed_ratio: 0.8,
   }
   return (
     <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
       <tbody>
         {Object.entries(features).map(([k, v]) => {
-          const warn = WARN_THRESHOLDS[k] !== undefined && v >= WARN_THRESHOLDS[k]
+          const crit = CRIT_THRESHOLDS[k] !== undefined && v >= CRIT_THRESHOLDS[k]
+          const warn = !crit && WARN_THRESHOLDS[k] !== undefined && v >= WARN_THRESHOLDS[k]
           return (
             <tr key={k}>
               <td style={{ color: 'var(--text-muted)', padding: '2px 8px 2px 0', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px' }}>{k}</td>
-              <td style={{ color: warn ? 'var(--accent-yellow)' : 'var(--text-primary)', padding: '2px 0', fontFamily: 'Share Tech Mono, monospace' }}>
+              <td style={{ color: crit ? 'var(--accent-red)' : warn ? 'var(--accent-yellow)' : 'var(--text-primary)', padding: '2px 0', fontFamily: 'Share Tech Mono, monospace' }}>
                 {typeof v === 'number' ? v.toFixed(2) : v}
+                {crit && <span style={{ marginLeft: '4px', color: 'var(--accent-red)' }}>&#9888;&#9888;</span>}
                 {warn && <span style={{ marginLeft: '4px', color: 'var(--accent-yellow)' }}>&#9888;</span>}
               </td>
             </tr>
@@ -114,40 +138,45 @@ function FeatureTable({ features }: { features: Record<string, number> }) {
 }
 
 function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
+  const navigate = useNavigate()
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggle = (id: string) => setExpanded(prev => {
+    const s = new Set(prev)
+    s.has(id) ? s.delete(id) : s.add(id)
+    return s
+  })
+
   if (anomalies.length === 0) return <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>No anomalies recorded</div>
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '160px', overflow: 'auto' }}>
-      {anomalies.map((a) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '480px', overflow: 'auto' }}>
+      {anomalies.map((a) => {
+        const isOpen = expanded.has(a.id)
+        const hasDetails = (a.ai_narrative || (a.mitre_techniques?.length ?? 0) > 0 ||
+          (a.hash_ti_hits?.length ?? 0) > 0 || (a.domain_ti_hits?.length ?? 0) > 0 ||
+          (a.url_ti_hits?.length ?? 0) > 0 || (a.ip_ti_hits?.length ?? 0) > 0 ||
+          (a.powershell_hits?.length ?? 0) > 0 || (a.command_hits?.length ?? 0) > 0)
+        return (
         <div key={a.id} style={{
-          padding: '4px 8px', borderRadius: '3px',
+          borderRadius: '3px',
           background: 'var(--bg-base)',
           border: `1px solid ${riskColor(a.risk_score)}44`,
+          overflow: 'hidden',
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
+          {/* ── Header row (always visible, clickable to expand) ── */}
+          <div
+            onClick={() => hasDetails && toggle(a.id)}
+            style={{
+              padding: '5px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              cursor: hasDetails ? 'pointer' : 'default',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: riskColor(a.risk_score) }}>
                 risk {a.risk_score.toFixed(0)}
               </span>
-              <span style={{ marginLeft: '8px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
                 score {a.anomaly_score.toFixed(3)}
               </span>
-            </div>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
-              {new Date(a.detected_at).toLocaleString()}
-            </span>
-          </div>
-          {/* MITRE badges */}
-          {a.mitre_techniques && a.mitre_techniques.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '3px' }}>
-              {a.mitre_techniques.map(t => (
-                <span key={t.id} title={t.name} style={{
-                  fontFamily: 'Share Tech Mono, monospace', fontSize: '9px',
-                  padding: '1px 5px', borderRadius: '2px',
-                  background: 'rgba(255,107,53,0.2)', color: '#ff6b35',
-                }}>
-                  {t.id}
-                </span>
-              ))}
               {a.ai_action && (
                 <span style={{
                   fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px',
@@ -162,12 +191,45 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
                   {a.ai_action.toUpperCase()}
                 </span>
               )}
+              {a.mitre_techniques?.map(t => (
+                <span key={t.id} title={t.name} style={{
+                  fontFamily: 'Share Tech Mono, monospace', fontSize: '9px',
+                  padding: '1px 5px', borderRadius: '2px',
+                  background: 'rgba(255,107,53,0.2)', color: '#ff6b35',
+                }}>
+                  {t.id}
+                </span>
+              ))}
             </div>
-          )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
+                {new Date(a.detected_at).toLocaleString()}
+              </span>
+              {hasDetails && (
+                <span style={{ color: 'var(--text-muted)', fontSize: '9px', lineHeight: 1 }}>
+                  {isOpen ? '▲' : '▼'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* ── Expanded detail ── */}
+          {isOpen && (
+          <div style={{ padding: '0 8px 8px', borderTop: '1px solid var(--border)' }}>
           {a.ai_narrative && (
-            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', marginTop: '3px', lineHeight: 1.4, fontStyle: 'italic' }}>
+            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.4, fontStyle: 'italic' }}>
               {a.ai_narrative}
             </div>
+          )}
+          {a.ai_action === 'escalate' && a.case_id && (
+            <button onClick={() => navigate(`/cases/${a.case_id}`)} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', marginTop: '4px', display: 'block', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              View Case →
+            </button>
+          )}
+          {a.alert_id && a.ai_action !== 'escalate' && (
+            <button onClick={() => navigate(`/alerts?id=${a.alert_id}`)} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-yellow)', marginTop: '4px', display: 'block', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              View Alert →
+            </button>
           )}
           {a.hash_ti_hits && a.hash_ti_hits.length > 0 && (
             <div style={{ marginTop: '4px', padding: '4px 6px', borderRadius: '3px', background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.2)' }}>
@@ -331,13 +393,11 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
               ))}
             </div>
           )}
-          {a.ai_action === 'escalate' && a.case_id && (
-            <a href={`/cases/${a.case_id}`} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', marginTop: '2px', display: 'block' }}>
-              View Case →
-            </a>
+          </div> {/* end expanded */}
           )}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -411,9 +471,10 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
 export default function UEBAPage() {
   const [tab, setTab] = useState<'user' | 'ip' | 'host'>('user')
   const [selected, setSelected] = useState<{ type: string; value: string } | null>(null)
-  const { data: entities = [], isLoading } = useUebaEntities(tab, 0)
+  const { data: rawEntities = [], isLoading } = useUebaEntities(tab, 0)
   const { data: status } = useUebaStatus()
 
+  const entities = [...rawEntities].sort((a, b) => b.risk_score - a.risk_score)
   const highRisk = entities.filter(e => e.risk_score >= 60).length
   const statusReady = status?.status === 'ready'
 
