@@ -105,7 +105,8 @@ async def _migrate_ueba_columns() -> None:
             ADD COLUMN IF NOT EXISTS domain_ti_hits JSONB NOT NULL DEFAULT '[]'::jsonb,
             ADD COLUMN IF NOT EXISTS url_ti_hits JSONB NOT NULL DEFAULT '[]'::jsonb,
             ADD COLUMN IF NOT EXISTS ip_ti_hits JSONB NOT NULL DEFAULT '[]'::jsonb,
-            ADD COLUMN IF NOT EXISTS powershell_hits JSONB NOT NULL DEFAULT '[]'::jsonb
+            ADD COLUMN IF NOT EXISTS powershell_hits JSONB NOT NULL DEFAULT '[]'::jsonb,
+            ADD COLUMN IF NOT EXISTS command_hits JSONB NOT NULL DEFAULT '[]'::jsonb
         """))
         await conn.execute(text("""
             CREATE INDEX IF NOT EXISTS ix_ueba_anomalies_case_id

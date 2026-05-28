@@ -302,6 +302,35 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
               ))}
             </div>
           )}
+          {a.command_hits && a.command_hits.length > 0 && (
+            <div style={{ marginTop: '4px', padding: '4px 6px', borderRadius: '3px', background: 'rgba(251,146,60,0.06)', border: '1px solid rgba(251,146,60,0.25)' }}>
+              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', color: '#fb923c', letterSpacing: '0.8px', marginBottom: '3px' }}>
+                SUSPICIOUS CMD ({a.command_hits.length})
+              </div>
+              {a.command_hits.map((c, i) => (
+                <div key={i} style={{ marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: c.score >= 0.7 ? '#ef4444' : c.score >= 0.3 ? '#fbbf24' : 'var(--text-muted)' }}>
+                      score {c.score.toFixed(2)}
+                    </span>
+                    {c.flags.map((f, j) => (
+                      <span key={j} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '7px', padding: '0 3px', borderRadius: '2px', background: 'rgba(251,146,60,0.15)', color: '#fb923c' }}>
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: 'var(--text-muted)', marginTop: '2px', wordBreak: 'break-all' }}>
+                    {c.command.length > 100 ? c.command.slice(0, 100) + '…' : c.command}
+                  </div>
+                  {c.secondary_iocs.length > 0 && (
+                    <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '7px', color: '#a78bfa', marginTop: '2px' }}>
+                      iocs: {c.secondary_iocs.join(' · ')}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {a.ai_action === 'escalate' && a.case_id && (
             <a href={`/cases/${a.case_id}`} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', marginTop: '2px', display: 'block' }}>
               View Case →

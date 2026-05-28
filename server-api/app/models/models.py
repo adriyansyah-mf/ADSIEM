@@ -281,6 +281,7 @@ class UebaAnomaly(Base):
     url_ti_hits      = Column(JSONB,               nullable=False, default=list)
     ip_ti_hits       = Column(JSONB,               nullable=False, default=list)
     powershell_hits  = Column(JSONB,               nullable=False, default=list)
+    command_hits     = Column(JSONB,               nullable=False, default=list)
     detected_at      = Column(DateTime(timezone=True), default=now_utc)
 
 class ThreatHunt(Base):

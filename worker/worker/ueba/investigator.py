@@ -578,6 +578,119 @@ def _format_powershell_analysis(hits: list[dict]) -> str:
     return "\n".join(lines).rstrip()
 
 
+_CMD_PATTERNS: list[tuple[str, str, float]] = [
+    # download/fetch
+    (r'(?i)curl\s+.*-[oO]\s+\S+|curl\s+.*http',           'curl_download',         0.40),
+    (r'(?i)wget\s+.*-[oO]\s+\S+|wget\s+.*http',           'wget_download',         0.40),
+    (r'(?i)certutil\s+.*-urlcache\s+-[Ss]plit',           'certutil_download',     0.65),
+    (r'(?i)certutil\s+.*-decode',                          'certutil_decode',       0.55),
+    (r'(?i)bitsadmin\s+/transfer',                         'bitsadmin_download',    0.60),
+    # execution / LOLBins
+    (r'(?i)rundll32\s+\S+,\S+',                            'rundll32_exec',         0.65),
+    (r'(?i)regsvr32\s+.*/[Ss]\s',                          'regsvr32_scrobj',       0.70),
+    (r'(?i)mshta\s+http',                                  'mshta_remote',          0.75),
+    (r'(?i)wscript\s+\S+\.(js|vbs|wsf)',                   'wscript_script',        0.60),
+    (r'(?i)cscript\s+\S+\.(js|vbs|wsf)',                   'cscript_script',        0.60),
+    (r'(?i)msiexec\s+.*/[qQ]\s.*/[iI]\s+http',            'msiexec_remote',        0.70),
+    # shell chaining
+    (r'\|\s*(?:bash|sh|zsh|cmd)\b',                        'pipe_to_shell',         0.55),
+    (r'(?i)base64\s+-d\s*\|',                              'b64_pipe_shell',        0.65),
+    (r'&&\s*(?:curl|wget|bash|sh|python|perl|ruby)\b',     'chain_exec',            0.45),
+    # recon
+    (r'(?i)\bwhoami\b',                                    'recon_whoami',          0.20),
+    (r'(?i)\bnet\s+user\b|\bnet\s+group\b',                'recon_net_enum',        0.25),
+    (r'(?i)\barp\s+-a\b|\bnetstat\b|\bipconfig\b|\bifconfig\b', 'recon_network',    0.20),
+    # privilege / lateral movement
+    (r'(?i)net\s+user\s+\S+\s+\S+\s*/add',                'user_add',              0.80),
+    (r'(?i)net\s+localgroup.*administrators.*\/add',        'admin_group_add',       0.85),
+    (r'(?i)ssh\s+.*-[Rr]\s+\d+:',                         'ssh_tunnel',            0.65),
+    (r'(?i)nc\s+.*-[eElLp]|ncat\s+.*-[eE]',               'netcat_shell',          0.80),
+    # persistence
+    (r'(?i)schtasks\s+/create',                            'scheduled_task',        0.65),
+    (r'(?i)sc\s+(create|config)\s+.*binpath',              'service_install',       0.70),
+    (r'(?i)reg\s+add.*\\run\b',                            'registry_run_key',      0.75),
+    (r'(?i)crontab\s+-[el]',                               'crontab_edit',          0.50),
+    (r'(?i)at\s+\d{1,2}:\d{2}\s+',                        'at_scheduler',          0.55),
+    # defence evasion
+    (r'(?i)auditpol\s+/set.*failure:disable',              'audit_disable',         0.75),
+    (r'(?i)wevtutil\s+cl\s',                               'eventlog_clear',        0.85),
+    (r'(?i)setenforce\s+0|selinux.*permissive',            'selinux_disable',       0.70),
+    (r'(?i)ufw\s+disable|iptables\s+-[FXZ]',              'firewall_disable',      0.75),
+    (r'(?i)chmod\s+[4-7][0-7][0-7][0-7]\s+',              'suid_setuid',           0.60),
+]
+
+
+def _extract_commands_from_events(events: list) -> list[str]:
+    """Extract non-PowerShell suspicious command strings from event decoded_fields."""
+    import json as _json
+    from worker.ti.extractor import extract_iocs
+    from worker.ti.iocs import IOCType
+
+    seen: set[str] = set()
+    results: list[str] = []
+    for ev in events:
+        df = ev.decoded_fields or {}
+        try:
+            text = _json.dumps(df)
+        except Exception:
+            continue
+        for ioc in extract_iocs(text):
+            if ioc.type != IOCType.command:
+                continue
+            cmd = ioc.value.strip()
+            key = cmd[:120]
+            if key not in seen:
+                seen.add(key)
+                results.append(cmd)
+    return results[:8]
+
+
+def _analyze_commands(commands: list[str]) -> list[dict]:
+    """Heuristic analysis of non-PowerShell suspicious commands."""
+    from worker.ti.extractor import extract_iocs
+    from worker.ti.iocs import IOCType
+
+    results: list[dict] = []
+    for cmd in commands:
+        flags: list[str] = []
+        score = 0.0
+
+        for pattern, flag, weight in _CMD_PATTERNS:
+            if _re.search(pattern, cmd):
+                flags.append(flag)
+                score = min(1.0, score + weight)
+
+        secondary: list[str] = []
+        for ioc in extract_iocs(cmd):
+            if ioc.type in (IOCType.ipv4, IOCType.ipv6, IOCType.domain, IOCType.url):
+                if not _is_private_ip(ioc.value):
+                    secondary.append(f"{ioc.type.value}:{ioc.value}")
+        secondary = secondary[:10]
+
+        if flags:  # only include commands that matched at least one pattern
+            results.append({
+                "command":        cmd[:400],
+                "score":          round(min(score, 1.0), 3),
+                "flags":          flags,
+                "secondary_iocs": secondary,
+            })
+
+    return results
+
+
+def _format_command_analysis(hits: list[dict]) -> str:
+    if not hits:
+        return "No suspicious non-PowerShell commands detected in recent logs."
+    lines = []
+    for h in hits:
+        lines.append(f"  CMD: {h['command'][:120]}{'…' if len(h['command']) > 120 else ''}")
+        lines.append(f"  Score: {h['score']:.2f}  Flags: {', '.join(h['flags'])}")
+        if h.get("secondary_iocs"):
+            lines.append(f"  IOCs: {', '.join(h['secondary_iocs'])}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 _INTERNAL_DOMAIN_SUFFIXES = (".local", ".internal", ".corp", ".lan", ".home", ".localdomain")
 _SKIP_DOMAINS = {"localhost", "broadcasthost"}
 
@@ -903,6 +1016,7 @@ async def _create_case(
     url_ti_hits: list[dict] | None = None,
     ip_ti_hits: list[dict] | None = None,
     powershell_hits: list[dict] | None = None,
+    command_hits: list[dict] | None = None,
 ) -> uuid.UUID:
     async with AsyncSessionLocal() as db:
         case = Case(
@@ -918,7 +1032,7 @@ async def _create_case(
                 "mitre_techniques":   [t["id"] for t in mitre_techniques],
                 "confidence":         ai_response.get("confidence", 0),
             }, ensure_ascii=False),
-            ioc_data={"mitre_techniques": mitre_techniques, "hash_ti_hits": hash_ti_hits or [], "domain_ti_hits": domain_ti_hits or [], "url_ti_hits": url_ti_hits or [], "ip_ti_hits": ip_ti_hits or [], "powershell_hits": powershell_hits or []},
+            ioc_data={"mitre_techniques": mitre_techniques, "hash_ti_hits": hash_ti_hits or [], "domain_ti_hits": domain_ti_hits or [], "url_ti_hits": url_ti_hits or [], "ip_ti_hits": ip_ti_hits or [], "powershell_hits": powershell_hits or [], "command_hits": command_hits or []},
             created_by_ai=True,
             group_id=group_id,
         )
@@ -953,6 +1067,7 @@ async def _update_anomaly(
     url_ti_hits: list[dict],
     ip_ti_hits: list[dict],
     powershell_hits: list[dict],
+    command_hits: list[dict],
 ) -> None:
     try:
         async with AsyncSessionLocal() as db:
@@ -966,6 +1081,7 @@ async def _update_anomaly(
                 row.url_ti_hits      = url_ti_hits
                 row.ip_ti_hits       = ip_ti_hits
                 row.powershell_hits  = powershell_hits
+                row.command_hits     = command_hits
                 if case_id:
                     row.case_id = case_id
                 await db.commit()
@@ -1000,8 +1116,10 @@ async def investigate(redis, payload: dict) -> None:
     url_iocs    = _extract_urls_from_events(recent_events)
     _known_ips  = {ip for ip in (source_ip, entity_value if entity_type == "ip" else None) if ip}
     ip_iocs     = _extract_ips_from_events(recent_events, exclude=_known_ips)
-    ps_commands = _extract_powershell_from_events(recent_events)
-    powershell_hits = _analyze_powershell(ps_commands)   # sync — no I/O
+    ps_commands     = _extract_powershell_from_events(recent_events)
+    shell_commands  = _extract_commands_from_events(recent_events)
+    powershell_hits = _analyze_powershell(ps_commands)    # sync — no I/O
+    command_hits    = _analyze_commands(shell_commands)   # sync — no I/O
     hash_ti_hits, domain_ti_hits, url_ti_hits, ip_ti_hits = await asyncio.gather(
         _run_ti_hashes(redis, hash_iocs),
         _run_ti_domains(redis, domain_iocs),
@@ -1083,6 +1201,9 @@ RELATED IP INTELLIGENCE ({len(ip_ti_hits)} additional public IP(s) found in logs
 POWERSHELL ANALYSIS ({len(powershell_hits)} command(s) detected):
 {_format_powershell_analysis(powershell_hits)}
 
+SUSPICIOUS COMMAND ANALYSIS ({len(command_hits)} command(s) detected):
+{_format_command_analysis(command_hits)}
+
 Analyze all evidence. Consider whether this is an isolated event or part of a broader attack pattern, and reflect that in your narrative and confidence. Provide your investigation verdict as JSON."""
 
     # 7. Groq analysis
@@ -1124,6 +1245,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
             url_ti_hits=url_ti_hits,
             ip_ti_hits=ip_ti_hits,
             powershell_hits=powershell_hits,
+            command_hits=command_hits,
         )
         log.info("ueba_case_created", case_id=str(case_id),
                  entity_type=entity_type, entity_value=entity_value)
@@ -1140,6 +1262,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
         url_ti_hits=url_ti_hits,
         ip_ti_hits=ip_ti_hits,
         powershell_hits=powershell_hits,
+        command_hits=command_hits,
     )
 
 

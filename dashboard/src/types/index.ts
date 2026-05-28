@@ -283,6 +283,13 @@ export interface PowershellHit {
   secondary_iocs: string[]
 }
 
+export interface CommandHit {
+  command: string
+  score: number
+  flags: string[]
+  secondary_iocs: string[]
+}
+
 export interface UebaAnomaly {
   id: string
   entity_type: string
@@ -300,6 +307,7 @@ export interface UebaAnomaly {
   url_ti_hits: UrlTiHit[]
   ip_ti_hits: IpTiHit[]
   powershell_hits: PowershellHit[]
+  command_hits: CommandHit[]
   detected_at: string
 }
 
