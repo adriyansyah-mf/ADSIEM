@@ -37,8 +37,11 @@ Respond ONLY dengan valid JSON — tidak ada markdown di luar JSON:
   "mitre_techniques": ["<T-code: nama teknik>"],
   "immediate_actions": ["<aksi konkret yang harus dilakukan segera>"],
   "false_positive_reason": "<alasan jika FP, null jika bukan FP>",
-  "threat_type": "<jenis ancaman: brute_force|scan|malware|c2|exfiltration|lateral_movement|privilege_escalation|other|benign>"
-}"""
+  "threat_type": "<jenis ancaman: brute_force|scan|malware|c2|exfiltration|lateral_movement|privilege_escalation|other|benign>",
+  "search_queries": ["<1-3 query pencarian spesifik untuk menggali konteks lebih dalam — buat query yang akan kamu ketik di Google jika kamu analis yang ingin tahu lebih banyak tentang ancaman ini. Contoh: 'SSH brute force Linux MITRE T1110 defense 2024', 'Mimikatz LSASS dump detection bypass technique', 'Log4Shell CVE-2021-44228 indicators of compromise'>"]
+}
+
+PENTING untuk search_queries: buat query yang SPESIFIK dan BERGUNA — bukan sekadar nama alert. Pikirkan: apa yang ingin kamu cari di internet untuk memahami ancaman ini lebih dalam?"""
 
 
 async def analyze_alert_with_groq(

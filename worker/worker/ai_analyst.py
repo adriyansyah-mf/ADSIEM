@@ -30,6 +30,7 @@ from worker.ti.config import TIConfig
 from worker.ti.aggregator import EnrichmentAggregator
 from worker.ti.mitre import suggest_mitre
 from worker.campaign_analyzer import analyze_campaign
+from worker.searxng_client import search_threat_intel
 
 log = structlog.get_logger()
 
@@ -54,6 +55,69 @@ async def _build_ti_config() -> TIConfig:
         greynoise_api_key=await get_setting("greynoise_api_key"),
         searxng_url=await get_setting("searxng_url", "http://searxng:8080"),
     )
+
+
+async def _run_ai_searches(
+    alert_id: str,
+    case_id: Optional[str],
+    search_queries: list[str],
+) -> None:
+    """
+    Jalankan SearXNG dengan query yang dipilih AI sendiri,
+    lalu tambahkan hasilnya ke alert note (dan case note jika ada).
+    """
+    if not search_queries:
+        return
+    all_results = []
+    for query in search_queries[:3]:
+        results = await search_threat_intel(query, num_results=4)
+        if results:
+            all_results.append((query, results))
+        await asyncio.sleep(0.5)
+
+    if not all_results:
+        return
+
+    # Susun catatan dari hasil pencarian
+    lines = ["## 🔎 AI Web Research (SearXNG)"]
+    lines.append("*Query ditentukan oleh AI berdasarkan konteks alert.*\n")
+    for query, results in all_results:
+        lines.append(f"**Query:** `{query}`")
+        for r in results[:3]:
+            title = r.get("title", "")
+            content = r.get("content", "")[:250]
+            url = r.get("url", "")
+            lines.append(f"- **{title}**")
+            if content:
+                lines.append(f"  {content}")
+            if url:
+                lines.append(f"  🔗 {url}")
+        lines.append("")
+
+    search_note = "\n".join(lines)
+
+    # Tulis ke alert note
+    await _write_alert_note(alert_id, search_note)
+
+    # Juga tambahkan ke case note jika ada case
+    if case_id:
+        try:
+            async with AsyncSessionLocal() as db:
+                note = CaseNote(
+                    case_id=uuid.UUID(case_id),
+                    author_id=None,
+                    content=search_note,
+                    is_ai_generated=True,
+                )
+                db.add(note)
+                await db.commit()
+        except Exception as exc:
+            log.warning("search_case_note_failed", case_id=case_id, error=str(exc))
+
+    log.info("ai_searches_completed",
+             alert_id=alert_id,
+             query_count=len(all_results),
+             queries=[q for q, _ in all_results])
 
 
 async def _write_alert_note(alert_id: str, content: str) -> None:
@@ -287,6 +351,7 @@ async def analyze_and_maybe_create_case(
     triage_notes = analysis.get("triage_notes", "")
     confidence = analysis.get("confidence", 0.0)
     actions = analysis.get("immediate_actions", [])
+    search_queries = analysis.get("search_queries", [])
 
     log.info("ai_l1_triage_done",
              alert_id=alert_id,
@@ -303,6 +368,11 @@ async def analyze_and_maybe_create_case(
         f"{actions_str}"
     )
     await _write_alert_note(alert_id, note_content)
+
+    # ── 4b. AI-driven web research (background, case_id belum ada di sini) ──
+    # Search langsung dijalankan; case_id akan di-pass dari langkah 7 jika ada
+    if search_queries:
+        asyncio.ensure_future(_run_ai_searches(alert_id, None, search_queries))
 
     # ── 5. Update alert status berdasarkan verdict ───────────────────────────
     if verdict == "false_positive":
@@ -324,7 +394,6 @@ async def analyze_and_maybe_create_case(
         await _add_note_to_existing_case(
             existing_case_id, alert_id, title, triage_notes, effective_severity
         )
-        # Tetap jalankan campaign analyzer untuk update timeline
         asyncio.ensure_future(analyze_campaign(
             trigger_alert_id=alert_id,
             source_ip=source_ip,
@@ -332,6 +401,8 @@ async def analyze_and_maybe_create_case(
             group_id=group_id,
             case_id=existing_case_id,
         ))
+        if search_queries:
+            asyncio.ensure_future(_run_ai_searches(alert_id, existing_case_id, search_queries))
         return
 
     # ── 7. Buat case baru ───────────────────────────────────────────────────
@@ -348,7 +419,7 @@ async def analyze_and_maybe_create_case(
     if not case_id:
         return
 
-    # ── 8. Campaign analyzer (background) ──────────────────────────────────
+    # ── 8. Campaign analyzer + search results ke case (background) ─────────
     asyncio.ensure_future(analyze_campaign(
         trigger_alert_id=alert_id,
         source_ip=source_ip,
@@ -356,6 +427,8 @@ async def analyze_and_maybe_create_case(
         group_id=group_id,
         case_id=case_id,
     ))
+    if search_queries:
+        asyncio.ensure_future(_run_ai_searches(alert_id, case_id, search_queries))
 
     # ── 9. Webhook notification ─────────────────────────────────────────────
     try:
