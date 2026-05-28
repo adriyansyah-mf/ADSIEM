@@ -18,6 +18,18 @@ interface CorrelationRule {
   created_at: string
 }
 
+interface RulePayload {
+  title: string
+  description: string
+  match_field: string
+  min_count: number
+  timewindow: number
+  severity_filter: string | null
+  output_severity: string
+  output_title: string
+  is_enabled: boolean
+}
+
 const SEVERITIES = ['info', 'low', 'medium', 'high', 'critical']
 const MATCH_FIELDS = ['source_ip', 'destination_ip', 'user', 'hostname', 'rule_title']
 
@@ -39,44 +51,47 @@ export default function CorrelationPage() {
   const [form, setForm] = useState(defaultForm)
   const [editId, setEditId] = useState<string | null>(null)
 
-  const { data: rules = [], isLoading } = useQuery<CorrelationRule[]>(
-    'correlation-rules',
-    () => api.get('/api/correlation-rules').then(r => r.data),
-    { refetchInterval: 30000 }
-  )
+  const { data: rules = [], isLoading } = useQuery<CorrelationRule[]>({
+    queryKey: ['correlation-rules'],
+    queryFn: () => api.get('/api/correlation-rules').then(r => r.data),
+    refetchInterval: 30000,
+  })
 
-  const createRule = useMutation(
-    (body: typeof defaultForm) => api.post('/api/correlation-rules', body),
-    {
-      onSuccess: () => {
-        qc.invalidateQueries('correlation-rules')
-        setShowForm(false)
-        setForm(defaultForm)
-      },
-    }
-  )
+  const createRule = useMutation<unknown, Error, RulePayload>({
+    mutationFn: (body) => api.post('/api/correlation-rules', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['correlation-rules'] })
+      setShowForm(false)
+      setForm(defaultForm)
+    },
+  })
 
-  const updateRule = useMutation(
-    ({ id, body }: { id: string; body: Partial<typeof defaultForm> }) =>
-      api.patch(`/api/correlation-rules/${id}`, body),
-    { onSuccess: () => { qc.invalidateQueries('correlation-rules'); setEditId(null) } }
-  )
+  const updateRule = useMutation<unknown, Error, { id: string; body: Partial<RulePayload> }>({
+    mutationFn: ({ id, body }) => api.patch(`/api/correlation-rules/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['correlation-rules'] })
+      setEditId(null)
+    },
+  })
 
-  const deleteRule = useMutation(
-    (id: string) => api.delete(`/api/correlation-rules/${id}`),
-    { onSuccess: () => qc.invalidateQueries('correlation-rules') }
-  )
+  const deleteRule = useMutation<unknown, Error, string>({
+    mutationFn: (id) => api.delete(`/api/correlation-rules/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['correlation-rules'] }),
+  })
 
   const toggleRule = (rule: CorrelationRule) =>
     updateRule.mutate({ id: rule.id, body: { is_enabled: !rule.is_enabled } })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    const payload = { ...form, severity_filter: form.severity_filter || null }
+    const payload: RulePayload = {
+      ...form,
+      severity_filter: form.severity_filter || null,
+    }
     if (editId) {
       updateRule.mutate({ id: editId, body: payload })
     } else {
-      createRule.mutate(payload as typeof defaultForm)
+      createRule.mutate(payload)
     }
   }
 
@@ -146,7 +161,7 @@ export default function CorrelationPage() {
               <label className="text-xs text-muted-foreground">Severity Filter (optional)</label>
               <select
                 className="w-full mt-1 px-2 py-1 text-sm bg-background border border-border rounded"
-                value={form.severity_filter}
+                value={form.severity_filter ?? ''}
                 onChange={e => setForm(f => ({ ...f, severity_filter: e.target.value }))}
               >
                 <option value="">Any severity</option>

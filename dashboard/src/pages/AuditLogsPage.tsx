@@ -29,11 +29,11 @@ function actionColor(action: string) {
 export default function AuditLogsPage() {
   const [actionFilter, setActionFilter] = useState('')
 
-  const { data: logs = [], isLoading } = useQuery<AuditLog[]>(
-    ['audit-logs', actionFilter],
-    () => api.get('/api/audit-logs', { params: { limit: 200, action: actionFilter || undefined } }).then(r => r.data),
-    { refetchInterval: 30000 }
-  )
+  const { data: logs = [], isLoading } = useQuery<AuditLog[]>({
+    queryKey: ['audit-logs', actionFilter],
+    queryFn: () => api.get('/api/audit-logs', { params: { limit: 200, action: actionFilter || undefined } }).then(r => r.data),
+    refetchInterval: 30000,
+  })
 
   return (
     <div className="p-6 space-y-4">
