@@ -44,3 +44,9 @@ def test_retrieve_similar_cases_returns_list():
             assert isinstance(result, list)
 
     asyncio.run(run())
+
+
+def test_rag_indexer_module_importable():
+    from worker.rag_indexer import rag_index_loop
+    import asyncio
+    assert asyncio.iscoroutinefunction(rag_index_loop)
