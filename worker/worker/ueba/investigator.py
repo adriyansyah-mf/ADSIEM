@@ -434,6 +434,135 @@ def _format_domain_ti(hits: list[dict]) -> str:
     return "\n".join(lines)
 
 
+_INTERNAL_URL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+_INTERNAL_URL_PREFIXES = ("http://10.", "http://192.168.", "http://172.16.", "http://172.17.",
+                          "https://10.", "https://192.168.", "https://172.16.", "https://172.17.")
+
+
+def _extract_urls_from_events(events: list) -> list[str]:
+    """Extract external HTTP(S) URLs from event decoded_fields."""
+    import json as _json
+    from urllib.parse import urlparse
+    from worker.ti.extractor import extract_iocs
+    from worker.ti.iocs import IOCType
+
+    seen: set[str] = set()
+    results: list[str] = []
+    for ev in events:
+        df = ev.decoded_fields or {}
+        try:
+            text = _json.dumps(df)
+        except Exception:
+            continue
+        for ioc in extract_iocs(text):
+            if ioc.type != IOCType.url:
+                continue
+            url = ioc.value
+            if any(url.startswith(p) for p in _INTERNAL_URL_PREFIXES):
+                continue
+            try:
+                host = urlparse(url).hostname or ""
+                if host in _INTERNAL_URL_HOSTS:
+                    continue
+            except Exception:
+                continue
+            if url not in seen:
+                seen.add(url)
+                results.append(url)
+    return results[:8]
+
+
+async def _run_ti_urls(redis, urls: list[str]) -> list[dict]:
+    """Lookup TI for URLs. Checks ti:cache:url:{md5} first, caches misses for 24h."""
+    if not urls:
+        return []
+
+    import hashlib
+
+    cfg = await _build_ti_config()
+    from worker.ti.providers.virustotal import VirusTotalProvider
+    from worker.ti.providers.otx import OTXProvider
+    from worker.ti.providers.urlhaus import URLhausProvider
+
+    vt_p  = VirusTotalProvider(cfg)
+    otx_p = OTXProvider(cfg)
+    uh_p  = URLhausProvider(cfg)
+
+    results: list[dict] = []
+
+    for url in urls:
+        url_key = hashlib.md5(url.encode()).hexdigest()
+        cache_key = f"ti:cache:url:{url_key}"
+        cached = await redis.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            results.append({"url": url, **data})
+            continue
+
+        try:
+            uh, vt, otx = await asyncio.gather(
+                uh_p.lookup_url(url),
+                vt_p.lookup_url(url),
+                otx_p.lookup_url(url),
+            )
+
+            bullets: list[str] = []
+            risk = 0.0
+
+            if not uh.get("skipped"):
+                qs = uh.get("query_status", "")
+                if qs == "ok":
+                    parts: list[str] = []
+                    if ref := uh.get("urlhaus_reference"):
+                        parts.append(f"ref={ref}")
+                    if st := uh.get("urlhaus_status"):
+                        parts.append(f"status={st}")
+                    if parts:
+                        bullets.append(f"urlhaus(url): {', '.join(parts)}")
+                        risk = max(risk, 0.85)
+
+            stats = vt.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+            if not vt.get("skipped") and not vt.get("not_found"):
+                mal = int(stats.get("malicious") or 0)
+                sus = int(stats.get("suspicious") or 0)
+                bullets.append(f"virustotal(url): malicious={mal} suspicious={sus}")
+                tot = sum(int(stats.get(k) or 0) for k in ("harmless", "malicious", "suspicious", "undetected"))
+                if tot and mal:
+                    risk = max(risk, min(1.0, 0.5 + mal / 40.0))
+
+            pc = otx.get("pulse_info", {}).get("count")
+            if not otx.get("skipped") and not otx.get("not_found") and pc is not None:
+                bullets.append(f"otx(url): pulse_count={pc}")
+                if isinstance(pc, int) and pc > 0:
+                    risk = max(risk, min(1.0, 0.2 + min(pc, 10) / 50.0))
+
+            entry = {
+                "score":     round(risk, 3),
+                "bullets":   bullets,
+                "cached_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await redis.setex(cache_key, TI_HASH_CACHE_TTL, json.dumps(entry))
+
+            results.append({"url": url, **entry})
+        except Exception as exc:
+            log.warning("ueba_url_ti_failed", url=url[:60], error=str(exc))
+
+    return results
+
+
+def _format_url_ti(hits: list[dict]) -> str:
+    if not hits:
+        return "No external URLs detected in recent logs."
+    lines = []
+    for h in hits:
+        score = h.get("score", 0.0)
+        short_url = h["url"][:80] + ("…" if len(h["url"]) > 80 else "")
+        lines.append(f"  {short_url}  score={score:.2f}")
+        for b in h.get("bullets", []):
+            lines.append(f"    {b}")
+    return "\n".join(lines)
+
+
 def _format_hash_ti(hits: list[dict]) -> str:
     if not hits:
         return "No file hashes detected in recent logs."
@@ -514,6 +643,7 @@ async def _create_case(
     similar_cases: list[dict], group_id: str,
     hash_ti_hits: list[dict] | None = None,
     domain_ti_hits: list[dict] | None = None,
+    url_ti_hits: list[dict] | None = None,
 ) -> uuid.UUID:
     async with AsyncSessionLocal() as db:
         case = Case(
@@ -529,7 +659,7 @@ async def _create_case(
                 "mitre_techniques":   [t["id"] for t in mitre_techniques],
                 "confidence":         ai_response.get("confidence", 0),
             }, ensure_ascii=False),
-            ioc_data={"mitre_techniques": mitre_techniques, "hash_ti_hits": hash_ti_hits or [], "domain_ti_hits": domain_ti_hits or []},
+            ioc_data={"mitre_techniques": mitre_techniques, "hash_ti_hits": hash_ti_hits or [], "domain_ti_hits": domain_ti_hits or [], "url_ti_hits": url_ti_hits or []},
             created_by_ai=True,
             group_id=group_id,
         )
@@ -561,6 +691,7 @@ async def _update_anomaly(
     case_id: uuid.UUID | None,
     hash_ti_hits: list[dict],
     domain_ti_hits: list[dict],
+    url_ti_hits: list[dict],
 ) -> None:
     try:
         async with AsyncSessionLocal() as db:
@@ -571,6 +702,7 @@ async def _update_anomaly(
                 row.ai_action        = ai_action.lower()
                 row.hash_ti_hits     = hash_ti_hits
                 row.domain_ti_hits   = domain_ti_hits
+                row.url_ti_hits      = url_ti_hits
                 if case_id:
                     row.case_id = case_id
                 await db.commit()
@@ -600,11 +732,13 @@ async def investigate(redis, payload: dict) -> None:
 
     # 3. Recent logs + IOC extraction
     logs_text, recent_events = await _get_recent_logs(entity_type, entity_value)
-    hash_iocs      = _extract_hashes_from_events(recent_events)
-    domain_iocs    = _extract_domains_from_events(recent_events)
-    hash_ti_hits, domain_ti_hits = await asyncio.gather(
+    hash_iocs   = _extract_hashes_from_events(recent_events)
+    domain_iocs = _extract_domains_from_events(recent_events)
+    url_iocs    = _extract_urls_from_events(recent_events)
+    hash_ti_hits, domain_ti_hits, url_ti_hits = await asyncio.gather(
         _run_ti_hashes(redis, hash_iocs),
         _run_ti_domains(redis, domain_iocs),
+        _run_ti_urls(redis, url_iocs),
     )
 
     # 4. Case memory
@@ -672,6 +806,9 @@ FILE HASH INTELLIGENCE ({len(hash_ti_hits)} hash(es) found in logs):
 DOMAIN INTELLIGENCE ({len(domain_ti_hits)} external domain(s) found in logs):
 {_format_domain_ti(domain_ti_hits)}
 
+URL INTELLIGENCE ({len(url_ti_hits)} external URL(s) found in logs):
+{_format_url_ti(url_ti_hits)}
+
 Analyze all evidence. Consider whether this is an isolated event or part of a broader attack pattern, and reflect that in your narrative and confidence. Provide your investigation verdict as JSON."""
 
     # 7. Groq analysis
@@ -710,6 +847,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
             similar_cases=similar_cases, group_id=group_id,
             hash_ti_hits=hash_ti_hits,
             domain_ti_hits=domain_ti_hits,
+            url_ti_hits=url_ti_hits,
         )
         log.info("ueba_case_created", case_id=str(case_id),
                  entity_type=entity_type, entity_value=entity_value)
@@ -723,6 +861,7 @@ Analyze all evidence. Consider whether this is an isolated event or part of a br
         case_id=case_id,
         hash_ti_hits=hash_ti_hits,
         domain_ti_hits=domain_ti_hits,
+        url_ti_hits=url_ti_hits,
     )
 
 

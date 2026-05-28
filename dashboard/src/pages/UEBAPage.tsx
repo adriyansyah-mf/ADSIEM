@@ -220,6 +220,30 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
               ))}
             </div>
           )}
+          {a.url_ti_hits && a.url_ti_hits.length > 0 && (
+            <div style={{ marginTop: '4px', padding: '4px 6px', borderRadius: '3px', background: 'rgba(52,211,153,0.06)', border: '1px solid rgba(52,211,153,0.2)' }}>
+              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', color: '#34d399', letterSpacing: '0.8px', marginBottom: '3px' }}>
+                URL IOC ({a.url_ti_hits.length})
+              </div>
+              {a.url_ti_hits.map((u, i) => (
+                <div key={i} style={{ marginBottom: '3px' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: '#34d399', wordBreak: 'break-all' }}>
+                      {u.url.length > 60 ? u.url.slice(0, 60) + '…' : u.url}
+                    </span>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: u.score >= 0.7 ? '#ef4444' : u.score >= 0.3 ? '#fbbf24' : 'var(--text-muted)', flexShrink: 0 }}>
+                      score {u.score.toFixed(2)}
+                    </span>
+                  </div>
+                  {u.bullets.map((b, j) => (
+                    <div key={j} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: 'var(--text-muted)', paddingLeft: '8px', lineHeight: 1.4 }}>
+                      · {b}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
           {a.ai_action === 'escalate' && a.case_id && (
             <a href={`/cases/${a.case_id}`} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', marginTop: '2px', display: 'block' }}>
               View Case →
