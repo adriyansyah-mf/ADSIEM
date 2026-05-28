@@ -275,6 +275,14 @@ export interface IpTiHit {
   cached_at: string
 }
 
+export interface PowershellHit {
+  command: string
+  decoded: string | null
+  score: number
+  flags: string[]
+  secondary_iocs: string[]
+}
+
 export interface UebaAnomaly {
   id: string
   entity_type: string
@@ -291,6 +299,7 @@ export interface UebaAnomaly {
   domain_ti_hits: DomainTiHit[]
   url_ti_hits: UrlTiHit[]
   ip_ti_hits: IpTiHit[]
+  powershell_hits: PowershellHit[]
   detected_at: string
 }
 

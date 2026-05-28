@@ -268,6 +268,40 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
               ))}
             </div>
           )}
+          {a.powershell_hits && a.powershell_hits.length > 0 && (
+            <div style={{ marginTop: '4px', padding: '4px 6px', borderRadius: '3px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.25)' }}>
+              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', color: '#f87171', letterSpacing: '0.8px', marginBottom: '3px' }}>
+                POWERSHELL ({a.powershell_hits.length})
+              </div>
+              {a.powershell_hits.map((p, i) => (
+                <div key={i} style={{ marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: p.score >= 0.7 ? '#ef4444' : p.score >= 0.3 ? '#fbbf24' : 'var(--text-muted)' }}>
+                      score {p.score.toFixed(2)}
+                    </span>
+                    {p.flags.map((f, j) => (
+                      <span key={j} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '7px', padding: '0 3px', borderRadius: '2px', background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                  <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '8px', color: 'var(--text-muted)', marginTop: '2px', wordBreak: 'break-all' }}>
+                    {p.command.length > 80 ? p.command.slice(0, 80) + '…' : p.command}
+                  </div>
+                  {p.decoded && (
+                    <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '7px', color: '#fbbf24', marginTop: '2px', paddingLeft: '6px', borderLeft: '2px solid rgba(251,191,36,0.3)', wordBreak: 'break-all' }}>
+                      decoded: {p.decoded.length > 120 ? p.decoded.slice(0, 120) + '…' : p.decoded}
+                    </div>
+                  )}
+                  {p.secondary_iocs.length > 0 && (
+                    <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '7px', color: '#a78bfa', marginTop: '2px' }}>
+                      iocs: {p.secondary_iocs.join(' · ')}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {a.ai_action === 'escalate' && a.case_id && (
             <a href={`/cases/${a.case_id}`} style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', marginTop: '2px', display: 'block' }}>
               View Case →
