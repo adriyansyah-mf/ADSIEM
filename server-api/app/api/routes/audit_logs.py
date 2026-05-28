@@ -4,9 +4,8 @@ from sqlalchemy import select
 from typing import Optional
 
 from app.core.database import get_db
-from app.core.auth import get_current_user
+from app.core.deps import get_current_user, get_scoped_group
 from app.models.models import AuditLog, User
-from app.api.routes.cases import get_scoped_group
 
 router = APIRouter(prefix="/api/audit-logs", tags=["audit-logs"])
 

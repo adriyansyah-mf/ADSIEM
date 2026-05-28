@@ -6,9 +6,8 @@ from typing import Optional
 import uuid
 
 from app.core.database import get_db
-from app.core.auth import get_current_user
+from app.core.deps import get_current_user, get_scoped_group
 from app.models.models import CorrelationRule, User
-from app.api.routes.cases import get_scoped_group
 
 router = APIRouter(prefix="/api/correlation-rules", tags=["correlation"])
 
