@@ -33,11 +33,14 @@ async def _get_entity_risk_max(source_ip: str | None, hostname: str | None) -> f
 
 
 def _should_ai_investigate(risk: float, severity: str) -> bool:
-    if severity == "critical":
+    # high/critical selalu diinvestigasi — sesuai peran AI sebagai L1 analyst aktif
+    if severity in ("critical", "high"):
         return True
-    if risk >= 60:
+    # medium: investigasi jika ada sinyal UEBA
+    if severity == "medium" and risk >= 40:
         return True
-    if severity == "high" and risk >= 40:
+    # low/info: hanya jika UEBA sangat yakin
+    if risk >= 70:
         return True
     return False
 
