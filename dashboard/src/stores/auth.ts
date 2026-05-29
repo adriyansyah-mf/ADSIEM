@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { User } from '@/types'
 
 interface AuthState {
@@ -12,15 +13,23 @@ interface AuthState {
 
 const ROLE_ORDER = ['viewer', 'analyst', 'admin', 'superadmin']
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  accessToken: null,
-  user: null,
-  setAccessToken: (token) => set({ accessToken: token }),
-  setUser: (user) => set({ user }),
-  logout: () => set({ accessToken: null, user: null }),
-  hasRole: (minRole) => {
-    const user = get().user
-    if (!user) return false
-    return ROLE_ORDER.indexOf(user.role) >= ROLE_ORDER.indexOf(minRole)
-  },
-}))
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set, get) => ({
+      accessToken: null,
+      user: null,
+      setAccessToken: (token) => set({ accessToken: token }),
+      setUser: (user) => set({ user }),
+      logout: () => set({ accessToken: null, user: null }),
+      hasRole: (minRole) => {
+        const user = get().user
+        if (!user) return false
+        return ROLE_ORDER.indexOf(user.role) >= ROLE_ORDER.indexOf(minRole)
+      },
+    }),
+    {
+      name: 'siem-auth',
+      partialize: (state) => ({ accessToken: state.accessToken, user: state.user }),
+    }
+  )
+)
