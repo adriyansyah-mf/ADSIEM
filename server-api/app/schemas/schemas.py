@@ -671,3 +671,15 @@ class AuditLogOut(BaseModel):
     detail: dict[str, Any]
     created_at: datetime
     model_config = {"from_attributes": True}
+
+# ─── SOP Documents ───────────────────────────────────────────────
+
+class SopDocumentOut(BaseModel):
+    id: UUID
+    group_id: str
+    filename: str
+    content_type: str
+    status: str
+    uploaded_by: UUID | None
+    created_at: datetime
+    model_config = {"from_attributes": True}

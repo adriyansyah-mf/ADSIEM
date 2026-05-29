@@ -24,6 +24,7 @@ from app.api.routes.suppressions import router as suppressions_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.handover import router as handover_router
 from app.api.routes.hunt_schedules import router as hunt_schedules_router
+from app.api.routes.sop import router as sop_router
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -290,6 +291,6 @@ for router in [
     tasks_router, fleet_router, artifacts_router, yara_router,
     enrollment_tokens_router, correlation_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
-    hunt_schedules_router,
+    hunt_schedules_router, sop_router,
 ]:
     app.include_router(router)
