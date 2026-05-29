@@ -144,7 +144,7 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
 
   const normalizeConditions = (tc: TriggerConditions): TriggerConditions => ({
     ...tc,
-    conditions: tc.conditions.map(c => ({ id: crypto.randomUUID(), ...c })),
+    conditions: tc.conditions.map(c => ({ ...c, id: crypto.randomUUID() })),
   })
 
   const [trigger, setTrigger] = useState<TriggerConditions>(
