@@ -4,9 +4,11 @@ description: HTTP request URL contains SQL injection keywords
 logsource:
   product: webserver
 detection:
-  union_select:
+  union_select_url:
     url.path|re: '(?i)(?:union[\s\+]+(?:all[\s\+]+)?select|select[\s\+]+.+[\s\+]+from|insert[\s\+]+into|drop[\s\+]+table|exec(?:ute)?[\s\+]*\()'
-  error_based:
+  union_select_ref:
+    url.referrer|re: '(?i)(?:union[\s\+]+(?:all[\s\+]+)?select|select[\s\+]+.+[\s\+]+from|insert[\s\+]+into|drop[\s\+]+table|exec(?:ute)?[\s\+]*\()'
+  error_based_url:
     url.path|contains:
       - "sleep("
       - "benchmark("
@@ -15,7 +17,16 @@ detection:
       - "1=1--"
       - "'or'"
       - "' or '"
-  condition: union_select or error_based
+  error_based_ref:
+    url.referrer|contains:
+      - "sleep("
+      - "benchmark("
+      - "extractvalue("
+      - "updatexml("
+      - "1=1--"
+      - "'or'"
+      - "' or '"
+  condition: union_select_url or union_select_ref or error_based_url or error_based_ref
 level: high
 tags:
   - attack.initial_access
