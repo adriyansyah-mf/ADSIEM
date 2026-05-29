@@ -57,3 +57,11 @@ def test_analyze_alert_accepts_similar_cases_param():
     from worker.groq_client import analyze_alert_with_groq
     sig = inspect.signature(analyze_alert_with_groq)
     assert "similar_cases" in sig.parameters
+
+
+def test_sop_models_have_required_fields():
+    from worker.models import SopDocument, SopChunk
+    doc_cols = {c.name for c in SopDocument.__table__.columns}
+    assert {"group_id", "filename", "raw_text", "status"}.issubset(doc_cols)
+    chunk_cols = {c.name for c in SopChunk.__table__.columns}
+    assert {"document_id", "group_id", "chunk_index", "chunk_text", "embedding"}.issubset(chunk_cols)

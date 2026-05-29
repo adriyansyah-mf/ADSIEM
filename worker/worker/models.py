@@ -257,3 +257,28 @@ class HuntSchedule(Base):
     last_run_at     = Column(DateTime(timezone=True))
     created_by      = Column(UUID(as_uuid=True))
     created_at      = Column(DateTime(timezone=True), default=now_utc)
+
+
+class SopDocument(Base):
+    __tablename__ = "sop_documents"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id     = Column(String(100), nullable=False, default="default")
+    filename     = Column(String(500), nullable=False)
+    content_type = Column(String(100), nullable=False, default="text/plain")
+    raw_text     = Column(Text, nullable=False)
+    status       = Column(String(20), nullable=False, default="pending")  # pending/indexed/failed
+    uploaded_by  = Column(UUID(as_uuid=True))
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+    updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class SopChunk(Base):
+    __tablename__ = "sop_chunks"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id  = Column(UUID(as_uuid=True), ForeignKey("sop_documents.id", ondelete="CASCADE"),
+                          nullable=False)
+    group_id     = Column(String(100), nullable=False, default="default")
+    chunk_index  = Column(Integer, nullable=False)
+    chunk_text   = Column(Text, nullable=False)
+    embedding    = Column(Vector(384), nullable=False)
+    created_at   = Column(DateTime(timezone=True), default=now_utc)

@@ -224,6 +224,44 @@ async def _migrate_alerts_columns() -> None:
             USING ivfflat (embedding vector_cosine_ops)
             WITH (lists = 10)
         """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sop_documents (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                group_id     VARCHAR(100) NOT NULL DEFAULT 'default',
+                filename     VARCHAR(500) NOT NULL,
+                content_type VARCHAR(100) NOT NULL DEFAULT 'text/plain',
+                raw_text     TEXT NOT NULL,
+                status       VARCHAR(20) NOT NULL DEFAULT 'pending',
+                uploaded_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_sop_documents_group
+            ON sop_documents(group_id)
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sop_chunks (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                document_id  UUID NOT NULL REFERENCES sop_documents(id) ON DELETE CASCADE,
+                group_id     VARCHAR(100) NOT NULL DEFAULT 'default',
+                chunk_index  INTEGER NOT NULL,
+                chunk_text   TEXT NOT NULL,
+                embedding    vector(384) NOT NULL,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_sop_chunks_group
+            ON sop_chunks(group_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_sop_chunks_ivfflat
+            ON sop_chunks
+            USING ivfflat (embedding vector_cosine_ops)
+            WITH (lists = 10)
+        """))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
