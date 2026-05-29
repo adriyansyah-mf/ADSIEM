@@ -3,25 +3,34 @@ import { useAuthStore } from '@/stores/auth'
 import {
   LayoutDashboard, Shield, FileText, Activity, Bell,
   BookOpen, Code, Users, Webhook, LogOut, Sun, Moon,
-  ShieldAlert, GitMerge, ClipboardList, ArrowRightLeft, BookMarked
+  ShieldAlert, GitMerge, ClipboardList, ArrowRightLeft, BookMarked,
+  FolderOpen, HeartPulse, Brain, Search, Terminal, Package, FileCode, Settings
 } from 'lucide-react'
 import { useState } from 'react'
 
 const nav = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, minRole: 'viewer' },
-  { to: '/agents', label: 'Agents', icon: Shield, minRole: 'viewer' },
-  { to: '/logs', label: 'Logs', icon: FileText, minRole: 'viewer' },
-  { to: '/events', label: 'Events', icon: Activity, minRole: 'viewer' },
-  { to: '/alerts', label: 'Alerts', icon: Bell, minRole: 'viewer' },
-  { to: '/rules', label: 'Rules', icon: BookOpen, minRole: 'viewer' },
-  { to: '/correlation', label: 'Correlation', icon: GitMerge, minRole: 'viewer' },
-  { to: '/decoders', label: 'Decoders', icon: Code, minRole: 'viewer' },
-  { to: '/fim', label: 'FIM', icon: ShieldAlert, minRole: 'viewer' },
-  { to: '/webhooks', label: 'Webhooks', icon: Webhook, minRole: 'admin' },
-  { to: '/audit-logs', label: 'Audit Log', icon: ClipboardList, minRole: 'admin' },
-  { to: '/handover', label: 'Handover', icon: ArrowRightLeft, minRole: 'analyst' },
-  { to: '/sop', label: 'SOP Docs', icon: BookMarked, minRole: 'analyst' },
-  { to: '/users', label: 'Users', icon: Users, minRole: 'superadmin' },
+  { to: '/',              label: 'Dashboard',    icon: LayoutDashboard, minRole: 'viewer'     },
+  { to: '/agents',        label: 'Agents',       icon: Shield,          minRole: 'viewer'     },
+  { to: '/logs',          label: 'Logs',         icon: FileText,        minRole: 'viewer'     },
+  { to: '/events',        label: 'Events',       icon: Activity,        minRole: 'viewer'     },
+  { to: '/alerts',        label: 'Alerts',       icon: Bell,            minRole: 'viewer'     },
+  { to: '/cases',         label: 'Cases',        icon: FolderOpen,      minRole: 'viewer'     },
+  { to: '/hunts',         label: 'Threat Hunts', icon: Search,          minRole: 'viewer'     },
+  { to: '/ueba',          label: 'UEBA',         icon: Brain,           minRole: 'viewer'     },
+  { to: '/hygiene',       label: 'Hygiene',      icon: HeartPulse,      minRole: 'viewer'     },
+  { to: '/fim',           label: 'FIM',          icon: ShieldAlert,     minRole: 'viewer'     },
+  { to: '/live-response', label: 'Live Response',icon: Terminal,        minRole: 'analyst'    },
+  { to: '/rules',         label: 'Rules',        icon: BookOpen,        minRole: 'viewer'     },
+  { to: '/correlation',   label: 'Correlation',  icon: GitMerge,        minRole: 'viewer'     },
+  { to: '/decoders',      label: 'Decoders',     icon: Code,            minRole: 'viewer'     },
+  { to: '/yara',          label: 'YARA',         icon: FileCode,        minRole: 'analyst'    },
+  { to: '/artifacts',     label: 'Artifacts',    icon: Package,         minRole: 'analyst'    },
+  { to: '/sop',           label: 'SOP Docs',     icon: BookMarked,      minRole: 'analyst'    },
+  { to: '/handover',      label: 'Handover',     icon: ArrowRightLeft,  minRole: 'analyst'    },
+  { to: '/webhooks',      label: 'Webhooks',     icon: Webhook,         minRole: 'admin'      },
+  { to: '/audit-logs',    label: 'Audit Log',    icon: ClipboardList,   minRole: 'admin'      },
+  { to: '/settings',      label: 'Settings',     icon: Settings,        minRole: 'admin'      },
+  { to: '/users',         label: 'Users',        icon: Users,           minRole: 'superadmin' },
 ]
 
 export default function Sidebar() {
@@ -37,7 +46,7 @@ export default function Sidebar() {
   return (
     <aside className="w-56 flex-shrink-0 bg-card border-r border-border flex flex-col">
       <div className="p-4 font-bold text-lg border-b border-border">SIEM Platform</div>
-      <nav className="flex-1 p-2 space-y-1">
+      <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
         {nav.filter((item) => hasRole(item.minRole)).map((item) => {
           const Icon = item.icon
           const active = pathname === item.to
