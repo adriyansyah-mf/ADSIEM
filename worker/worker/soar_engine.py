@@ -1,9 +1,7 @@
 """SOAR engine: evaluate playbook triggers and execute action sequences."""
 from __future__ import annotations
-import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 import httpx
 import structlog
@@ -11,15 +9,10 @@ from sqlalchemy import select
 
 from worker.database import AsyncSessionLocal
 from worker.models import (
-    Alert, AlertNote, AlertSuppression, Case, SoarAction, SoarPlaybook,
+    AlertNote, AlertSuppression, Case, SoarAction, SoarPlaybook,
 )
 
 log = structlog.get_logger()
-
-SUPPORTED_FIELDS = {
-    "severity", "rule_title", "source_ip", "hostname",
-    "user_name", "tags", "mitre_tags",
-}
 
 
 def _matches_condition(cond: dict, ctx: dict) -> bool:
@@ -88,7 +81,8 @@ async def _action_send_webhook(alert_id: uuid.UUID, ctx: dict, params: dict) -> 
     }
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(url, json=payload)
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
         log.info("soar_webhook_sent", alert_id=str(alert_id), url=url)
     except Exception as exc:
         log.warning("soar_webhook_failed", alert_id=str(alert_id), url=url, error=str(exc))
@@ -97,8 +91,12 @@ async def _action_send_webhook(alert_id: uuid.UUID, ctx: dict, params: dict) -> 
 async def _action_create_case(alert_id: uuid.UUID, ctx: dict, params: dict) -> None:
     title_tpl = params.get("title_template", "SOAR: {alert_title}")
     desc_tpl = params.get("description_template", "Auto-created from alert {alert_id}.")
-    title = title_tpl.format(alert_title=ctx.get("rule_title", ""), alert_id=str(alert_id))
-    desc = desc_tpl.format(alert_title=ctx.get("rule_title", ""), alert_id=str(alert_id))
+    try:
+        title = title_tpl.format(alert_title=ctx.get("rule_title", ""), alert_id=str(alert_id))
+        desc = desc_tpl.format(alert_title=ctx.get("rule_title", ""), alert_id=str(alert_id))
+    except KeyError:
+        title = title_tpl
+        desc = desc_tpl
     async with AsyncSessionLocal() as db:
         existing = (await db.execute(
             select(Case).where(Case.alert_id == alert_id).limit(1)
