@@ -267,6 +267,36 @@ async def _migrate_alerts_columns() -> None:
             WITH (lists = 10)
         """))
 
+async def _migrate_soar_tables() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_playbooks (
+                id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name               VARCHAR(255) NOT NULL,
+                description        TEXT,
+                trigger_conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
+                is_enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+                group_id           VARCHAR(100) NOT NULL DEFAULT 'default',
+                created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_actions (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                playbook_id UUID NOT NULL REFERENCES soar_playbooks(id) ON DELETE CASCADE,
+                action_type VARCHAR(50) NOT NULL,
+                order_index INTEGER NOT NULL DEFAULT 0,
+                params      JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_soar_actions_playbook
+            ON soar_actions(playbook_id, order_index)
+        """))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
@@ -275,6 +305,7 @@ async def lifespan(app: FastAPI):
     await _seed_correlation_rules()
     await _migrate_ueba_columns()
     await _migrate_alerts_columns()
+    await _migrate_soar_tables()
     yield
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
