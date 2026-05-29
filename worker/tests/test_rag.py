@@ -65,3 +65,33 @@ def test_sop_models_have_required_fields():
     assert {"group_id", "filename", "raw_text", "status"}.issubset(doc_cols)
     chunk_cols = {c.name for c in SopChunk.__table__.columns}
     assert {"document_id", "group_id", "chunk_index", "chunk_text", "embedding"}.issubset(chunk_cols)
+
+
+def test_chunk_text_splits_correctly():
+    from worker.rag import _chunk_text
+    text = "Paragraph one.\n\nParagraph two.\n\nParagraph three."
+    chunks = _chunk_text(text, max_chars=30)
+    assert len(chunks) >= 2
+    assert all(len(c) <= 30 for c in chunks)
+    assert all(c.strip() for c in chunks)
+
+
+def test_retrieve_sop_context_returns_list():
+    from unittest.mock import AsyncMock, patch, MagicMock
+    import asyncio
+
+    async def run():
+        with patch("worker.rag.AsyncSessionLocal") as mock_session_cls:
+            mock_session = AsyncMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=False)
+            mock_result = MagicMock()
+            mock_result.mappings.return_value.all.return_value = []
+            mock_session.execute = AsyncMock(return_value=mock_result)
+            mock_session_cls.return_value = mock_session
+
+            from worker.rag import retrieve_sop_context
+            result = await retrieve_sop_context("brute force incident response", "default")
+            assert isinstance(result, list)
+
+    asyncio.run(run())

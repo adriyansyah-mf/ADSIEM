@@ -3,7 +3,7 @@ import asyncio
 import structlog
 from sqlalchemy import text
 from worker.database import AsyncSessionLocal
-from worker.rag import index_case
+from worker.rag import index_case, index_sop_document
 
 log = structlog.get_logger()
 INDEX_INTERVAL = 3600  # once per hour
@@ -40,3 +40,33 @@ async def rag_index_loop() -> None:
             log.error("rag_indexer_error", error=str(e))
 
         await asyncio.sleep(INDEX_INTERVAL)
+
+
+SOP_INDEX_INTERVAL = 60  # poll every 60s for pending documents
+
+
+async def sop_index_loop() -> None:
+    await asyncio.sleep(90)  # stagger startup after rag_index_loop
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                rows = (await db.execute(text("""
+                    SELECT id::text, group_id, raw_text
+                    FROM sop_documents
+                    WHERE status = 'pending'
+                    ORDER BY created_at ASC
+                    LIMIT 10
+                """))).mappings().all()
+
+            for row in rows:
+                await index_sop_document(
+                    document_id=row["id"],
+                    group_id=row["group_id"],
+                    raw_text=row["raw_text"],
+                )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.error("sop_indexer_error", error=str(e))
+
+        await asyncio.sleep(SOP_INDEX_INTERVAL)

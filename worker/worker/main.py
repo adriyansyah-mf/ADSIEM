@@ -22,7 +22,7 @@ from worker.agent_monitor import agent_monitor_loop
 from worker.maintenance import maintenance_loop
 from worker.report_sender import report_loop
 from worker.hunt_scheduler import hunt_scheduler_loop
-from worker.rag_indexer import rag_index_loop
+from worker.rag_indexer import rag_index_loop, sop_index_loop
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -98,6 +98,7 @@ async def main():
         report_loop(redis),
         hunt_scheduler_loop(),
         rag_index_loop(),
+        sop_index_loop(),
     )
 
 if __name__ == "__main__":
