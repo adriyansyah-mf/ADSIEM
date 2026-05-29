@@ -27,6 +27,8 @@ detection:
       - "'or'"
       - "' or '"
   condition: union_select_url or union_select_ref or error_based_url or error_based_ref
+suppression:
+  timewindow: 300
 level: high
 tags:
   - attack.initial_access
