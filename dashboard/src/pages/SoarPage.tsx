@@ -8,6 +8,7 @@ const OPERATORS = ['eq', 'neq', 'contains', 'in', 'not_null']
 const ACTION_TYPES = ['enrich_ioc', 'send_webhook', 'create_case', 'suppress_alert', 'add_note']
 
 interface Condition {
+  id: string
   field: string
   operator: string
   value: string | string[] | null
@@ -139,7 +140,16 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
 
   const [name, setName] = useState(playbook?.name ?? '')
   const [description, setDescription] = useState(playbook?.description ?? '')
-  const [trigger, setTrigger] = useState<TriggerConditions>(playbook?.trigger_conditions ?? emptyTrigger())
+  const [deletedActionIds, setDeletedActionIds] = useState<string[]>([])
+
+  const normalizeConditions = (tc: TriggerConditions): TriggerConditions => ({
+    ...tc,
+    conditions: tc.conditions.map(c => ({ id: crypto.randomUUID(), ...c })),
+  })
+
+  const [trigger, setTrigger] = useState<TriggerConditions>(
+    playbook?.trigger_conditions ? normalizeConditions(playbook.trigger_conditions) : emptyTrigger()
+  )
   const [actions, setActions] = useState<Action[]>(playbook?.actions ?? [])
 
   const savePlaybook = useMutation({
@@ -154,6 +164,9 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
         }
       } else {
         await api.patch(`/api/soar/playbooks/${playbook!.id}`, { name, description, trigger_conditions: trigger })
+        for (const id of deletedActionIds) {
+          await api.delete(`/api/soar/actions/${id}`)
+        }
         for (const act of actions) {
           if (act.id.startsWith('new-')) {
             await api.post(`/api/soar/playbooks/${playbook!.id}/actions`, {
@@ -169,15 +182,14 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
   })
 
   const addCondition = () =>
-    setTrigger(t => ({ ...t, conditions: [...t.conditions, { field: 'severity', operator: 'eq', value: 'high' }] }))
+    setTrigger(t => ({ ...t, conditions: [...t.conditions, { id: crypto.randomUUID(), field: 'severity', operator: 'eq', value: 'high' }] }))
 
   const addAction = (type: string) =>
     setActions(a => [...a, { id: `new-${Date.now()}`, action_type: type, order_index: a.length, params: {} }])
 
-  const removeAction = async (act: Action) => {
-    if (!act.id.startsWith('new-') && playbook) {
-      await api.delete(`/api/soar/actions/${act.id}`)
-      qc.invalidateQueries({ queryKey: ['soar-playbooks'] })
+  const removeAction = (act: Action) => {
+    if (!act.id.startsWith('new-')) {
+      setDeletedActionIds(ids => [...ids, act.id])
     }
     setActions(a => a.filter(x => x.id !== act.id))
   }
@@ -215,7 +227,7 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
           )}
           {trigger.conditions.map((c, i) => (
             <ConditionRow
-              key={i}
+              key={c.id}
               cond={c}
               onChange={nc => setTrigger(t => ({ ...t, conditions: t.conditions.map((x, j) => j === i ? nc : x) }))}
               onRemove={() => setTrigger(t => ({ ...t, conditions: t.conditions.filter((_, j) => j !== i) }))}

@@ -67,7 +67,7 @@ export default function App() {
             <Route path="/artifacts" element={<ArtifactsPage />} />
             <Route path="/yara" element={<YaraPage />} />
             <Route path="/correlation" element={<CorrelationPage />} />
-            <Route path="/soar" element={<SoarPage />} />
+            <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />
             <Route path="/audit-logs" element={<ProtectedRoute minRole="admin"><AuditLogsPage /></ProtectedRoute>} />
             <Route path="/handover" element={<HandoverPage />} />
             <Route path="/sop" element={<ProtectedRoute minRole="analyst"><SopPage /></ProtectedRoute>} />
