@@ -463,3 +463,23 @@ class SopChunk(Base):
     chunk_index  = Column(Integer, nullable=False)
     chunk_text   = Column(Text, nullable=False)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class SoarPlaybook(Base):
+    __tablename__ = "soar_playbooks"
+    id                 = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name               = Column(String(255), nullable=False)
+    description        = Column(Text)
+    trigger_conditions = Column(JSONB, nullable=False, default=dict)
+    is_enabled         = Column(Boolean, nullable=False, default=True)
+    group_id           = Column(String(100), nullable=False, default="default")
+    created_at         = Column(DateTime(timezone=True), default=now_utc)
+    updated_at         = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class SoarAction(Base):
+    __tablename__ = "soar_actions"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    playbook_id = Column(UUID(as_uuid=True), ForeignKey("soar_playbooks.id", ondelete="CASCADE"), nullable=False)
+    action_type = Column(String(50), nullable=False)
+    order_index = Column(Integer, nullable=False, default=0)
+    params      = Column(JSONB, nullable=False, default=dict)
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
