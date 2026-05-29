@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission
@@ -23,7 +24,7 @@ async def list_users(
 ):
     offset = (page - 1) * page_size
     total = (await db.execute(select(func.count()).select_from(User))).scalar()
-    result = await db.execute(select(User).offset(offset).limit(page_size))
+    result = await db.execute(select(User).options(selectinload(User.role)).offset(offset).limit(page_size))
     users = result.scalars().all()
     return PaginatedResponse(total=total, page=page, page_size=page_size, items=[UserOut.model_validate(u) for u in users])
 
@@ -41,7 +42,8 @@ async def create_user(
     )
     db.add(user)
     await db.commit()
-    await db.refresh(user)
+    result2 = await db.execute(select(User).options(selectinload(User.role)).where(User.id == user.id))
+    user = result2.scalar_one()
     background.add_task(audit_log, db, current_user.id, "user_created", "user", str(user.id))
     return UserOut.model_validate(user)
 
@@ -63,7 +65,8 @@ async def update_user(
         else:
             setattr(user, field, value)
     await db.commit()
-    await db.refresh(user)
+    result2 = await db.execute(select(User).options(selectinload(User.role)).where(User.id == user_id))
+    user = result2.scalar_one()
     background.add_task(audit_log, db, current_user.id, "user_updated", "user", str(user_id))
     return UserOut.model_validate(user)
 

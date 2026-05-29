@@ -139,7 +139,7 @@ export default function DashboardPage() {
     setTiLoading(true)
     setTiResult(null)
     try {
-      const r = await api.get('/api/metrics/ti/quick', { params: { ioc: val, type: tiType } })
+      const r = await api.get('/api/metrics/ti/quick', { params: { ioc: val, ioc_type: tiType } })
       setTiResult(r.data)
     } catch { setTiResult({ error: 'Lookup failed' }) }
     finally { setTiLoading(false) }

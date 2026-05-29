@@ -13,6 +13,7 @@ from app.models.models import Alert, User
 router = APIRouter(prefix="/api/export", tags=["export"])
 
 
+@router.get("/alerts/csv")
 @router.get("/alerts")
 async def export_alerts_csv(
     status: Optional[str] = None,

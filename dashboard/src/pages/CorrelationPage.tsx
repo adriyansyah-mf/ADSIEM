@@ -31,7 +31,7 @@ interface RulePayload {
 }
 
 const SEVERITIES = ['info', 'low', 'medium', 'high', 'critical']
-const MATCH_FIELDS = ['source_ip', 'destination_ip', 'user', 'hostname', 'rule_title']
+const MATCH_FIELDS = ['source_ip', 'hostname', 'group_id']
 
 const defaultForm = {
   title: '',

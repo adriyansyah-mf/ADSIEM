@@ -161,10 +161,6 @@ export default function AlertsPage() {
             className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
             <Download size={13} /> CSV
           </button>
-          <button onClick={() => downloadFile('/api/export/alerts/pdf', 'alerts.pdf')}
-            className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
-            <Download size={13} /> PDF
-          </button>
         </div>
       </div>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
