@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 import uuid
 
 from app.core.database import get_db
@@ -26,8 +26,10 @@ class PlaybookUpdate(BaseModel):
     is_enabled: Optional[bool] = None
 
 
+ACTION_TYPES = Literal['enrich_ioc', 'send_webhook', 'create_case', 'suppress_alert', 'add_note']
+
 class ActionIn(BaseModel):
-    action_type: str
+    action_type: ACTION_TYPES
     order_index: int = 0
     params: dict = {}
 
@@ -103,10 +105,13 @@ async def get_playbook(
     playbook_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_filter: Optional[str] = Depends(get_scoped_group),
 ):
     pb = await db.get(SoarPlaybook, uuid.UUID(playbook_id))
     if not pb:
         raise HTTPException(status_code=404, detail="Playbook not found")
+    if group_filter and pb.group_id != group_filter:
+        raise HTTPException(status_code=403, detail="Forbidden")
     actions = (await db.execute(
         select(SoarAction).where(SoarAction.playbook_id == pb.id)
     )).scalars().all()
@@ -119,10 +124,13 @@ async def update_playbook(
     body: PlaybookUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_filter: Optional[str] = Depends(get_scoped_group),
 ):
     pb = await db.get(SoarPlaybook, uuid.UUID(playbook_id))
     if not pb:
         raise HTTPException(status_code=404, detail="Playbook not found")
+    if group_filter and pb.group_id != group_filter:
+        raise HTTPException(status_code=403, detail="Forbidden")
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(pb, field, value)
     await db.commit()
@@ -134,10 +142,13 @@ async def delete_playbook(
     playbook_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_filter: Optional[str] = Depends(get_scoped_group),
 ):
     pb = await db.get(SoarPlaybook, uuid.UUID(playbook_id))
     if not pb:
         raise HTTPException(status_code=404, detail="Playbook not found")
+    if group_filter and pb.group_id != group_filter:
+        raise HTTPException(status_code=403, detail="Forbidden")
     await db.delete(pb)
     await db.commit()
 
@@ -148,10 +159,13 @@ async def add_action(
     body: ActionIn,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_filter: Optional[str] = Depends(get_scoped_group),
 ):
     pb = await db.get(SoarPlaybook, uuid.UUID(playbook_id))
     if not pb:
         raise HTTPException(status_code=404, detail="Playbook not found")
+    if group_filter and pb.group_id != group_filter:
+        raise HTTPException(status_code=403, detail="Forbidden")
     action = SoarAction(
         playbook_id=pb.id,
         action_type=body.action_type,
@@ -171,10 +185,15 @@ async def update_action(
     body: ActionUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_filter: Optional[str] = Depends(get_scoped_group),
 ):
     action = await db.get(SoarAction, uuid.UUID(action_id))
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
+    if group_filter:
+        pb = await db.get(SoarPlaybook, action.playbook_id)
+        if not pb or pb.group_id != group_filter:
+            raise HTTPException(status_code=403, detail="Forbidden")
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(action, field, value)
     await db.commit()
@@ -186,9 +205,14 @@ async def delete_action(
     action_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_filter: Optional[str] = Depends(get_scoped_group),
 ):
     action = await db.get(SoarAction, uuid.UUID(action_id))
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
+    if group_filter:
+        pb = await db.get(SoarPlaybook, action.playbook_id)
+        if not pb or pb.group_id != group_filter:
+            raise HTTPException(status_code=403, detail="Forbidden")
     await db.delete(action)
     await db.commit()

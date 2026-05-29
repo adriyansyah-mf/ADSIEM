@@ -23,6 +23,8 @@ def _matches_condition(cond: dict, ctx: dict) -> bool:
 
     if operator == "not_null":
         return actual is not None and actual != ""
+    if actual is None:
+        return operator == "neq"
     if operator == "eq":
         return str(actual).lower() == str(value).lower()
     if operator == "neq":

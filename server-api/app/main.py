@@ -297,6 +297,10 @@ async def _migrate_soar_tables() -> None:
             CREATE INDEX IF NOT EXISTS idx_soar_actions_playbook_order
             ON soar_actions(playbook_id, order_index)
         """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_soar_playbooks_enabled_group
+            ON soar_playbooks(is_enabled, group_id)
+        """))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
