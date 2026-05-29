@@ -28,6 +28,7 @@ import YaraPage from '@/pages/YaraPage'
 import CorrelationPage from '@/pages/CorrelationPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
 import HandoverPage from '@/pages/HandoverPage'
+import SopPage from '@/pages/SopPage'
 
 export default function App() {
   const { accessToken, setUser, logout } = useAuthStore()
@@ -67,6 +68,7 @@ export default function App() {
             <Route path="/correlation" element={<CorrelationPage />} />
             <Route path="/audit-logs" element={<ProtectedRoute minRole="admin"><AuditLogsPage /></ProtectedRoute>} />
             <Route path="/handover" element={<HandoverPage />} />
+            <Route path="/sop" element={<ProtectedRoute minRole="analyst"><SopPage /></ProtectedRoute>} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
