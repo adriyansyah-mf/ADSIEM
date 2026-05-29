@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 # ─── Auth ────────────────────────────────────────────────────────
 
@@ -49,6 +49,11 @@ class UserOut(BaseModel):
     is_active: bool
     created_at: datetime
     model_config = {"from_attributes": True}
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def extract_role_name(cls, v: object) -> str:
+        return v.name if hasattr(v, "name") else str(v)
 
 # ─── Agents ──────────────────────────────────────────────────────
 
