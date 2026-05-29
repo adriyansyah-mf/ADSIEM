@@ -293,7 +293,7 @@ async def _migrate_soar_tables() -> None:
             )
         """))
         await conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_soar_actions_playbook
+            CREATE INDEX IF NOT EXISTS idx_soar_actions_playbook_order
             ON soar_actions(playbook_id, order_index)
         """))
 
