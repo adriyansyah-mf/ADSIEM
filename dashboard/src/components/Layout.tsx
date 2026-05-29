@@ -6,7 +6,7 @@ import { api } from '@/api/client'
 import {
   LayoutDashboard, FileText, Activity, Bell, FolderOpen,
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
-  Terminal, Package, Server, BookOpen, Wrench,
+  Terminal, Package, Server, BookOpen, Wrench, Shield,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
   GitMerge, BookMarked, ArrowRightLeft, Webhook, ClipboardList,
   type LucideIcon,
@@ -54,6 +54,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/rules', label: 'Rules', icon: BookOpen },
       { to: '/decoders', label: 'Decoders', icon: Wrench },
       { to: '/correlation', label: 'Correlation', icon: GitMerge },
+      { to: '/soar', label: 'SOAR', icon: Shield },
     ],
   },
   {

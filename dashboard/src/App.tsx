@@ -29,6 +29,7 @@ import CorrelationPage from '@/pages/CorrelationPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
 import HandoverPage from '@/pages/HandoverPage'
 import SopPage from '@/pages/SopPage'
+import SoarPage from '@/pages/SoarPage'
 
 export default function App() {
   const { accessToken, setUser, logout } = useAuthStore()
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="/artifacts" element={<ArtifactsPage />} />
             <Route path="/yara" element={<YaraPage />} />
             <Route path="/correlation" element={<CorrelationPage />} />
+            <Route path="/soar" element={<SoarPage />} />
             <Route path="/audit-logs" element={<ProtectedRoute minRole="admin"><AuditLogsPage /></ProtectedRoute>} />
             <Route path="/handover" element={<HandoverPage />} />
             <Route path="/sop" element={<ProtectedRoute minRole="analyst"><SopPage /></ProtectedRoute>} />
