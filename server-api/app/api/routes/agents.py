@@ -58,7 +58,6 @@ async def list_packages(
 @router.get("/api/agents/packages/{filename}")
 async def download_package(
     filename: str,
-    current_user: Annotated[User, Depends(get_current_user)],
 ):
     # Prevent path traversal
     if "/" in filename or "\\" in filename or ".." in filename:
