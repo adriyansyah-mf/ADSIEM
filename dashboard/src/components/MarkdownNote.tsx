@@ -1,4 +1,5 @@
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface Props {
   content: string
@@ -10,6 +11,7 @@ export default function MarkdownNote({ content, className, style }: Props) {
   return (
     <div className={className} style={style}>
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           p: ({ children }) => (
             <p style={{ margin: '0 0 8px 0', lineHeight: 1.65 }}>{children}</p>
