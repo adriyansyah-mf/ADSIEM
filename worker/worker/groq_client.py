@@ -92,6 +92,7 @@ async def analyze_alert_with_groq(
     heuristic_mitre: list[str] | None = None,
     search_results: list[dict] | None = None,
     similar_cases: list[dict] | None = None,
+    sop_context: list[str] | None = None,
 ) -> dict:
     """L1 SOC analyst triage. Returns verdict + triage_notes + immediate_actions."""
     api_key = await get_setting("groq_api_key") or GROQ_API_KEY
@@ -133,12 +134,17 @@ async def analyze_alert_with_groq(
             )
         similar_cases_section = "\n\nPEMBELAJARAN DARI KASUS SEBELUMNYA:\n" + "\n".join(lines)
 
+    sop_section = ""
+    if sop_context:
+        lines = "\n\n".join(f"- {chunk}" for chunk in sop_context[:3])
+        sop_section = f"\n\nSOP PERUSAHAAN — PANDUAN INSIDEN:\n{lines}"
+
     prompt = f"""ALERT UNTUK DITRIAGE:
 Title    : {title}
 Severity : {severity}
 Source IP: {source_ip or 'tidak diketahui'}
 Hostname : {hostname or 'tidak diketahui'}
-Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{similar_cases_section}
+Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{similar_cases_section}{sop_section}
 
 Lakukan triage dan berikan verdict-mu sebagai analis L1."""
 

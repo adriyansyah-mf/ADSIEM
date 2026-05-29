@@ -95,3 +95,10 @@ def test_retrieve_sop_context_returns_list():
             assert isinstance(result, list)
 
     asyncio.run(run())
+
+
+def test_analyze_alert_accepts_sop_context_param():
+    import inspect
+    from worker.groq_client import analyze_alert_with_groq
+    sig = inspect.signature(analyze_alert_with_groq)
+    assert "sop_context" in sig.parameters

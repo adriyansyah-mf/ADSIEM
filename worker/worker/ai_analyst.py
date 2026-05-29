@@ -31,7 +31,7 @@ from worker.ti.aggregator import EnrichmentAggregator
 from worker.ti.mitre import suggest_mitre
 from worker.campaign_analyzer import analyze_campaign
 from worker.searxng_client import search_threat_intel
-from worker.rag import retrieve_similar_cases
+from worker.rag import retrieve_similar_cases, retrieve_sop_context
 
 log = structlog.get_logger()
 
@@ -352,6 +352,11 @@ async def analyze_and_maybe_create_case(
         log.info("rag_similar_found", alert_id=alert_id, count=len(similar_cases),
                  top_similarity=round(float(similar_cases[0].get("similarity", 0)), 2))
 
+    # ── RAG — SOP perusahaan ─────────────────────────────────────────────────
+    sop_context = await retrieve_sop_context(query_text, group_id)
+    if sop_context:
+        log.info("rag_sop_found", alert_id=alert_id, chunks=len(sop_context))
+
     # ── 3. Groq L1 triage — selalu dijalankan ───────────────────────────────
     analysis = await analyze_alert_with_groq(
         title=title,
@@ -362,6 +367,7 @@ async def analyze_and_maybe_create_case(
         enrichment=enrichment,
         heuristic_mitre=heuristic_mitre,
         similar_cases=similar_cases if similar_cases else None,
+        sop_context=sop_context if sop_context else None,
     )
 
     verdict = analysis.get("verdict", "monitor")
