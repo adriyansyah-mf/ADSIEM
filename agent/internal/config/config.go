@@ -13,11 +13,12 @@ type LogSource struct {
 }
 
 type AgentConfig struct {
-	ID         string `yaml:"id"`
-	Name       string `yaml:"name"`
-	Group      string `yaml:"group"`
-	Token      string `yaml:"token"`
-	BufferSize int    `yaml:"buffer_size"`
+	ID              string `yaml:"id"`
+	Name            string `yaml:"name"`
+	Group           string `yaml:"group"`
+	Token           string `yaml:"token"`
+	EnrollmentToken string `yaml:"enrollment_token"`
+	BufferSize      int    `yaml:"buffer_size"`
 }
 
 type ServerConfig struct {

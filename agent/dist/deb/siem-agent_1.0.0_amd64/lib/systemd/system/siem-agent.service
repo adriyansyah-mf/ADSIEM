@@ -11,7 +11,7 @@ Group=siem-agent
 EnvironmentFile=-/etc/siem-agent/env
 ExecStart=/usr/bin/siem-agent -config /etc/siem-agent/config.yaml
 Restart=on-failure
-RestartSec=5s
+RestartSec=10s
 TimeoutStopSec=30s
 
 # Hardening

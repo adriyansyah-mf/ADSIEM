@@ -1,8 +1,9 @@
 agent:
   id: ""
-  name: ""        # set to hostname if blank at runtime
+  name: ""               # set to hostname if blank at runtime
   group: default
-  token: ""       # populated automatically after enrollment
+  token: ""              # populated automatically after enrollment
+  enrollment_token: ""   # set this OR use AGENT_ENROLLMENT_TOKEN env var
   buffer_size: 10000
 
 server:

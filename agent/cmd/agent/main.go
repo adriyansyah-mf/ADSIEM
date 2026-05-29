@@ -34,7 +34,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	enrollToken := os.Getenv("AGENT_ENROLLMENT_TOKEN")
+	enrollToken := cfg.Agent.EnrollmentToken
+	if enrollToken == "" {
+		enrollToken = os.Getenv("AGENT_ENROLLMENT_TOKEN")
+	}
 	if enrollToken == "" {
 		enrollToken = "bootstrap-token"
 	}
