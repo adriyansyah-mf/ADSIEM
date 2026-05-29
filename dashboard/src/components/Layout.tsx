@@ -8,6 +8,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Package, Server, BookOpen, Wrench,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
+  GitMerge, BookMarked, ArrowRightLeft, Webhook, ClipboardList,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -52,13 +53,23 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/agents', label: 'Agents', icon: Server },
       { to: '/rules', label: 'Rules', icon: BookOpen },
       { to: '/decoders', label: 'Decoders', icon: Wrench },
+      { to: '/correlation', label: 'Correlation', icon: GitMerge },
+    ],
+  },
+  {
+    label: 'SOC Tools',
+    items: [
+      { to: '/sop', label: 'SOP Docs', icon: BookMarked, minRole: 'analyst' },
+      { to: '/handover', label: 'Handover', icon: ArrowRightLeft, minRole: 'analyst' },
     ],
   },
 ]
 
 const ADMIN_ITEMS: NavItem[] = [
-  { to: '/users', label: 'Users', icon: Users, minRole: 'superadmin' },
+  { to: '/webhooks', label: 'Webhooks', icon: Webhook, minRole: 'admin' },
+  { to: '/audit-logs', label: 'Audit Log', icon: ClipboardList, minRole: 'admin' },
   { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
+  { to: '/users', label: 'Users', icon: Users, minRole: 'superadmin' },
 ]
 
 type OpMode = 'MANUAL' | 'OBSERVER' | 'OPERATOR'
@@ -146,7 +157,10 @@ export default function Layout() {
 
         {/* Nav */}
         <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
-          {NAV_GROUPS.map((group, gi) => (
+          {NAV_GROUPS.map((group, gi) => {
+            const visibleItems = group.items.filter(i => hasRole(i.minRole ?? 'viewer'))
+            if (visibleItems.length === 0) return null
+            return (
             <div key={group.label} style={{ marginBottom: 4 }}>
               {!collapsed && (
                 <div style={{
@@ -161,7 +175,7 @@ export default function Layout() {
                 </div>
               )}
               {collapsed && gi > 0 && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
-              {group.items.map(item => {
+              {visibleItems.map(item => {
                 const active = isActive(item.to)
                 const Icon = item.icon
                 return (
@@ -198,7 +212,8 @@ export default function Layout() {
                 )
               })}
             </div>
-          ))}
+            )
+          })}
 
           {/* Admin */}
           {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
