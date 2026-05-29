@@ -91,6 +91,7 @@ async def analyze_alert_with_groq(
     enrichment=None,
     heuristic_mitre: list[str] | None = None,
     search_results: list[dict] | None = None,
+    similar_cases: list[dict] | None = None,
 ) -> dict:
     """L1 SOC analyst triage. Returns verdict + triage_notes + immediate_actions."""
     api_key = await get_setting("groq_api_key") or GROQ_API_KEY
@@ -120,12 +121,24 @@ async def analyze_alert_with_groq(
         iocs = [f"{i.type.value}:{i.value}" for i in enrichment.iocs[:10]]
         ioc_list = f"\nIOCs yang diekstrak: {', '.join(iocs)}"
 
+    similar_cases_section = ""
+    if similar_cases:
+        lines = []
+        for i, c in enumerate(similar_cases[:3], 1):
+            sim_pct = int(float(c.get("similarity", 0)) * 100)
+            desc = (c.get("description") or "")[:200]
+            lines.append(
+                f"{i}. [{c.get('status','?').upper()}] {c.get('title','?')} "
+                f"(similarity: {sim_pct}%)\n   {desc}"
+            )
+        similar_cases_section = "\n\nPEMBELAJARAN DARI KASUS SEBELUMNYA:\n" + "\n".join(lines)
+
     prompt = f"""ALERT UNTUK DITRIAGE:
 Title    : {title}
 Severity : {severity}
 Source IP: {source_ip or 'tidak diketahui'}
 Hostname : {hostname or 'tidak diketahui'}
-Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}
+Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{similar_cases_section}
 
 Lakukan triage dan berikan verdict-mu sebagai analis L1."""
 

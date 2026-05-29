@@ -50,3 +50,10 @@ def test_rag_indexer_module_importable():
     from worker.rag_indexer import rag_index_loop
     import asyncio
     assert asyncio.iscoroutinefunction(rag_index_loop)
+
+
+def test_analyze_alert_accepts_similar_cases_param():
+    import inspect
+    from worker.groq_client import analyze_alert_with_groq
+    sig = inspect.signature(analyze_alert_with_groq)
+    assert "similar_cases" in sig.parameters
