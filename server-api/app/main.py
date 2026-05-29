@@ -249,9 +249,12 @@ async def _migrate_alerts_columns() -> None:
                 group_id     VARCHAR(100) NOT NULL DEFAULT 'default',
                 chunk_index  INTEGER NOT NULL,
                 chunk_text   TEXT NOT NULL,
-                embedding    vector(384) NOT NULL,
                 created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
             )
+        """))
+        await conn.execute(text("""
+            ALTER TABLE sop_chunks
+            ADD COLUMN IF NOT EXISTS embedding vector(384)
         """))
         await conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_sop_chunks_group
