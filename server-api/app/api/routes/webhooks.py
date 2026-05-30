@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import require_permission, get_current_user
+from app.core.deps import get_scoped_group, require_permission, get_current_user
 from app.models.models import User, WebhookConfig
 from app.schemas.schemas import PaginatedResponse, WebhookCreate, WebhookOut, WebhookUpdate
 from app.services.audit import audit_log
@@ -17,9 +17,12 @@ router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 async def list_webhooks(
     db: Annotated[AsyncSession, Depends(get_db)],
     _=Depends(require_permission("agents:manage")),
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
     page: int = 1, page_size: int = 25,
 ):
     q = select(WebhookConfig)
+    if group_filter is not None:
+        q = q.where(WebhookConfig.group_id == group_filter)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
     return PaginatedResponse(total=total, page=page, page_size=page_size,
