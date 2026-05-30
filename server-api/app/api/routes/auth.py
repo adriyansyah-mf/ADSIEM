@@ -1,6 +1,6 @@
 # server-api/app/api/routes/auth.py
 from typing import Annotated
-from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
 from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,11 +14,14 @@ from app.core.security import (
 from app.models.models import Role, User
 from app.schemas.schemas import LoginRequest, TokenResponse, UserMe
 from app.services.audit import audit_log
+from app.core.limiter import limiter
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     body: LoginRequest,
     response: Response,
     background: BackgroundTasks,
