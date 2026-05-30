@@ -28,7 +28,7 @@ Your job is to:
 Respond ONLY in valid JSON:
 {
   "risk_level": "critical|high|medium|low",
-  "attack_narrative": "<2-4 sentences in Indonesian describing what happened and the attack progression>",
+  "attack_narrative": "<2-4 sentences in English describing what happened and the attack progression>",
   "mitre_techniques": ["T1190", "T1059", ...],
   "campaign_assessment": "isolated|likely_campaign|confirmed_campaign",
   "kill_chain_phase": "recon|initial_access|execution|persistence|lateral_movement|exfiltration|impact|unknown",

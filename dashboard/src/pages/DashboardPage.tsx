@@ -179,7 +179,7 @@ export default function DashboardPage() {
   return (
     <div style={{ display: 'flex', gap: '12px', height: '100%', minHeight: 0 }}>
       {/* LEFT COLUMN */}
-      <div style={{ width: '260px', flexShrink: 0, overflowY: 'auto' }}>
+      <div style={{ width: '220px', flexShrink: 0, overflowY: 'auto' }}>
         <SectionCard title="Alert Statistics">
           <StatRow label="Critical" value={severityCounts.critical} color="#ff2244" />
           <StatRow label="High" value={severityCounts.high} color="#ff6b00" />
@@ -405,7 +405,7 @@ export default function DashboardPage() {
       </div>
 
       {/* RIGHT COLUMN */}
-      <div style={{ width: '260px', flexShrink: 0, overflowY: 'auto' }}>
+      <div style={{ width: '280px', flexShrink: 0, overflowY: 'auto' }}>
         <SectionCard title="Active Cases">
           {openCases.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No open cases</div>

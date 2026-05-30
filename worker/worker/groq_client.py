@@ -46,40 +46,40 @@ async def _groq_post(api_key: str, payload: dict, max_retries: int = 4) -> dict:
                 delay = min(delay * 2, 60)
     raise RuntimeError("Groq max retries exceeded")
 
-_L1_SYSTEM_PROMPT = """Kamu adalah SOC Analyst L1 yang sedang bertugas. Kamu WAJIB melakukan triage pada SETIAP alert — tidak ada yang dilewati.
+_L1_SYSTEM_PROMPT = """You are an on-duty L1 SOC Analyst. You MUST triage EVERY alert — none are skipped.
 
-PERAN KAMU:
-- Investigasi setiap alert secara aktif, seperti analis nyata yang bekerja di SOC
-- Tulis catatan investigasi seolah kamu mendokumentasikan untuk shift berikutnya
-- Buat keputusan yang tegas berdasarkan konteks alert, bukan hanya TI data
-- Jika tidak ada TI data, gunakan keahlianmu untuk menganalisis konten alert itu sendiri
+YOUR ROLE:
+- Actively investigate each alert as a real analyst working in a SOC would
+- Write investigation notes as if documenting for the next shift analyst
+- Make definitive decisions based on alert context, not only TI data
+- If no TI data is available, apply your expertise to analyze the alert content itself
 
-VERDICT yang tersedia:
-- "escalate"     : Ancaman AKTIF / KRITIS — butuh perhatian L2 SEKARANG (ransomware aktif, eksploitasi CVE yang terkonfirmasi, exfiltration data sedang berlangsung)
-- "create_case"  : Ancaman terkonfirmasi atau high-confidence — perlu investigasi L2
-- "monitor"      : Mencurigakan tapi belum konklusif — acknowledge, pantau lebih lanjut
-- "false_positive": Jelas benign — scanner yang dikenal, internal tool, perilaku normal
+Available VERDICTs:
+- "escalate"      : ACTIVE / CRITICAL threat — L2 attention required NOW (active ransomware, confirmed CVE exploitation, ongoing data exfiltration)
+- "create_case"   : Confirmed or high-confidence threat — requires L2 investigation
+- "monitor"       : Suspicious but not conclusive — acknowledge and continue monitoring
+- "false_positive": Clearly benign — known scanner, internal tool, normal behavior
 
-ATURAN TRIAGE:
-- Alert severity critical/high → minimal "create_case", kecuali ada bukti KUAT bahwa ini FP
-- Alert severity medium tanpa TI → analisis dari konten: apakah waktunya aneh? portnya mencurigakan? polanya tidak normal?
-- Alert severity low/info → "create_case" hanya jika ada tanda-tanda jelas berbahaya
-- JANGAN gunakan "false_positive" untuk severity high/critical tanpa justifikasi sangat kuat
-- Jika ragu antara "monitor" vs "create_case", pilih "create_case"
+TRIAGE RULES:
+- Alert severity critical/high → minimum "create_case", unless there is STRONG evidence of FP
+- Alert severity medium without TI → analyze content: unusual timing? suspicious port? abnormal pattern?
+- Alert severity low/info → "create_case" only if there are clear signs of malicious intent
+- DO NOT use "false_positive" for high/critical severity without very strong justification
+- If unsure between "monitor" vs "create_case", choose "create_case"
 
-Respond ONLY dengan valid JSON — tidak ada markdown di luar JSON:
+Respond ONLY with valid JSON — no markdown outside the JSON:
 {
   "verdict": "<escalate|create_case|monitor|false_positive>",
-  "triage_notes": "<3-5 kalimat dalam Bahasa Indonesia — tulis catatan investigasimu seolah untuk analis shift berikutnya. Jelaskan apa yang kamu temukan, mengapa ini mencurigakan atau tidak, dan apa yang harus diperhatikan>",
+  "triage_notes": "<3-5 sentences in English — write your investigation notes as if for the next shift analyst. Explain what you found, why it is or is not suspicious, and what to watch for>",
   "confidence": <0.0-1.0>,
-  "mitre_techniques": ["<T-code: nama teknik>"],
-  "immediate_actions": ["<aksi konkret yang harus dilakukan segera>"],
-  "false_positive_reason": "<alasan jika FP, null jika bukan FP>",
-  "threat_type": "<jenis ancaman: brute_force|scan|malware|c2|exfiltration|lateral_movement|privilege_escalation|other|benign>",
-  "search_queries": ["<1-3 query pencarian spesifik untuk menggali konteks lebih dalam — buat query yang akan kamu ketik di Google jika kamu analis yang ingin tahu lebih banyak tentang ancaman ini. Contoh: 'SSH brute force Linux MITRE T1110 defense 2024', 'Mimikatz LSASS dump detection bypass technique', 'Log4Shell CVE-2021-44228 indicators of compromise'>"]
+  "mitre_techniques": ["<T-code: technique name>"],
+  "immediate_actions": ["<concrete action to take immediately>"],
+  "false_positive_reason": "<reason if FP, null if not FP>",
+  "threat_type": "<threat type: brute_force|scan|malware|c2|exfiltration|lateral_movement|privilege_escalation|other|benign>",
+  "search_queries": ["<1-3 specific search queries to gather more context — write queries you would type into Google as an analyst wanting to learn more about this threat. Example: 'SSH brute force Linux MITRE T1110 defense 2024', 'Mimikatz LSASS dump detection bypass technique', 'Log4Shell CVE-2021-44228 indicators of compromise'>"]
 }
 
-PENTING untuk search_queries: buat query yang SPESIFIK dan BERGUNA — bukan sekadar nama alert. Pikirkan: apa yang ingin kamu cari di internet untuk memahami ancaman ini lebih dalam?"""
+IMPORTANT for search_queries: make queries SPECIFIC and USEFUL — not just the alert name. Think: what would you search online to understand this threat more deeply?"""
 
 
 async def analyze_alert_with_groq(
@@ -113,14 +113,14 @@ async def analyze_alert_with_groq(
             hints = "\n".join(f"  * {h}" for h in enrichment.triage_hints[:5])
             enrichment_section += f"\nTriage hints:\n{hints}"
     else:
-        enrichment_section = "\nTHREAT INTEL: Tidak tersedia — gunakan konteks alert untuk analisis."
+        enrichment_section = "\nTHREAT INTEL: Not available — use alert context for analysis."
 
     mitre_hint = f"\nHeuristic MITRE: {', '.join(heuristic_mitre)}" if heuristic_mitre else ""
 
     ioc_list = ""
     if enrichment and enrichment.iocs:
         iocs = [f"{i.type.value}:{i.value}" for i in enrichment.iocs[:10]]
-        ioc_list = f"\nIOCs yang diekstrak: {', '.join(iocs)}"
+        ioc_list = f"\nExtracted IOCs: {', '.join(iocs)}"
 
     similar_cases_section = ""
     if similar_cases:
@@ -132,21 +132,21 @@ async def analyze_alert_with_groq(
                 f"{i}. [{c.get('status','?').upper()}] {c.get('title','?')} "
                 f"(similarity: {sim_pct}%)\n   {desc}"
             )
-        similar_cases_section = "\n\nPEMBELAJARAN DARI KASUS SEBELUMNYA:\n" + "\n".join(lines)
+        similar_cases_section = "\n\nLEARNINGS FROM PREVIOUS CASES:\n" + "\n".join(lines)
 
     sop_section = ""
     if sop_context:
         lines = "\n\n".join(f"- {chunk}" for chunk in sop_context[:3])
-        sop_section = f"\n\nSOP PERUSAHAAN — PANDUAN INSIDEN:\n{lines}"
+        sop_section = f"\n\nCOMPANY SOP — INCIDENT RESPONSE GUIDE:\n{lines}"
 
-    prompt = f"""ALERT UNTUK DITRIAGE:
+    prompt = f"""ALERT TO TRIAGE:
 Title    : {title}
 Severity : {severity}
-Source IP: {source_ip or 'tidak diketahui'}
-Hostname : {hostname or 'tidak diketahui'}
+Source IP: {source_ip or 'unknown'}
+Hostname : {hostname or 'unknown'}
 Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{similar_cases_section}{sop_section}
 
-Lakukan triage dan berikan verdict-mu sebagai analis L1."""
+Perform triage and provide your verdict as an L1 analyst."""
 
     try:
         result = await _groq_post(api_key, {
@@ -170,23 +170,23 @@ Lakukan triage dan berikan verdict-mu sebagai analis L1."""
 
 
 def _fallback_verdict(severity: str) -> dict:
-    """Fallback ketika Groq tidak tersedia — buat keputusan deterministik dari severity."""
+    """Fallback when Groq is unavailable — deterministic decision based on severity."""
     if severity in ("critical", "high"):
         return {
             "verdict": "create_case",
-            "triage_notes": f"AI analyst tidak tersedia. Alert severity {severity} secara otomatis dieskalasi untuk review L2.",
+            "triage_notes": f"AI analyst unavailable. Severity {severity} alert automatically escalated for L2 review.",
             "confidence": 0.5,
             "mitre_techniques": [],
-            "immediate_actions": ["Review alert secara manual", "Verifikasi source IP"],
+            "immediate_actions": ["Review alert manually", "Verify source IP"],
             "false_positive_reason": None,
             "threat_type": "other",
         }
     return {
         "verdict": "monitor",
-        "triage_notes": f"AI analyst tidak tersedia. Alert severity {severity} diakui untuk pemantauan lebih lanjut.",
+        "triage_notes": f"AI analyst unavailable. Severity {severity} alert acknowledged for continued monitoring.",
         "confidence": 0.3,
         "mitre_techniques": [],
-        "immediate_actions": ["Pantau alert serupa"],
+        "immediate_actions": ["Monitor for similar alerts"],
         "false_positive_reason": None,
         "threat_type": "other",
     }
@@ -205,7 +205,7 @@ Respond ONLY with valid JSON — no markdown outside the JSON:
 {
   "kill_chain_stage": "<one of: Reconnaissance, Initial Access, Execution, Persistence, Privilege Escalation, Defense Evasion, Credential Access, Discovery, Lateral Movement, Collection, Command & Control, Exfiltration, Impact, Unknown>",
   "attacker_intent": "<1-2 sentences about what the attacker is trying to achieve>",
-  "narrative": "<3-5 sentences in Indonesian: full attack story, timeline, how alerts connect>",
+  "narrative": "<3-5 sentences in English: full attack story, timeline, how alerts connect>",
   "mitre_techniques": ["<T-code: name>", ...],
   "recommended_actions": ["<specific action>", ...],
   "confidence": <0.0-1.0>,

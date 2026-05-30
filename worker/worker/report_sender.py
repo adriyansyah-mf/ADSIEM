@@ -69,7 +69,7 @@ Data for this week:
 - AI verdict distribution: {json.dumps(verdict_dist)}
 - MITRE ATT&CK techniques observed: {top_mitre}
 
-Write a 3-paragraph executive summary in Indonesian:
+Write a 3-paragraph executive summary in English:
 1. Overview of the week's threat landscape
 2. Key findings (campaigns detected, top techniques, notable patterns)
 3. Recommended focus areas for the coming week

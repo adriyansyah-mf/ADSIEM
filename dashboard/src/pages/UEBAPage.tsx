@@ -188,7 +188,7 @@ export default function UEBAPage() {
             UEBA
           </h1>
           <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-            User &amp; Entity Behavior Analytics &middot; Isolation Forest
+            User &amp; Entity Behavior Analytics &middot; Anomaly Detection Engine
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>

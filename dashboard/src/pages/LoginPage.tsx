@@ -4,7 +4,7 @@ import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
 
 @keyframes ring-pulse {
   0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.5; }
@@ -100,6 +100,14 @@ const CSS = `
 .soc-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 .error-shake {
@@ -229,7 +237,7 @@ export default function LoginPage() {
           {/* Brand text */}
           <div style={{ textAlign: 'center', animation: 'fade-up 0.9s ease-out both', position: 'relative', zIndex: 1 }}>
             <div style={{
-              fontFamily: "'Orbitron', monospace",
+              fontFamily: "'Rajdhani', sans-serif",
               fontSize: 52,
               fontWeight: 900,
               color: '#06b6d4',
@@ -238,7 +246,7 @@ export default function LoginPage() {
               lineHeight: 1,
             }}>SIEM</div>
             <div style={{
-              fontFamily: "'Orbitron', monospace",
+              fontFamily: "'Rajdhani', sans-serif",
               fontSize: 13,
               fontWeight: 400,
               color: 'rgba(6,182,212,0.55)',
@@ -261,7 +269,7 @@ export default function LoginPage() {
             animation: 'fade-up-delay 1.2s ease-out both',
           }}>
             {STATUS_ITEMS.map(({ label, value, color }) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 10, letterSpacing: '0.1em' }}>
+              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, letterSpacing: '0.1em' }}>
                 <div style={{ width: 5, height: 5, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}`, flexShrink: 0 }} />
                 <span style={{ color: 'rgba(100,116,139,0.7)' }}>{label}:</span>
                 <span style={{ color, fontWeight: 600 }}>{value}</span>
@@ -295,14 +303,14 @@ export default function LoginPage() {
             {/* Form header */}
             <div style={{ marginBottom: 44 }}>
               <div style={{
-                fontFamily: "'Orbitron', monospace",
-                fontSize: 10,
+                fontFamily: "'Rajdhani', sans-serif",
+                fontSize: 12,
                 letterSpacing: '0.32em',
-                color: 'rgba(100,116,139,0.5)',
+                color: 'rgba(100,116,139,0.6)',
                 marginBottom: 10,
               }}>SECURE ACCESS PORTAL</div>
               <div style={{
-                fontFamily: "'Orbitron', monospace",
+                fontFamily: "'Rajdhani', sans-serif",
                 fontSize: 24,
                 fontWeight: 700,
                 color: '#e2e8f0',
@@ -322,8 +330,8 @@ export default function LoginPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 32, marginBottom: 40 }}>
                 <div>
                   <div style={{
-                    fontSize: 10, letterSpacing: '0.22em',
-                    color: 'rgba(6,182,212,0.55)', marginBottom: 6, textTransform: 'uppercase',
+                    fontSize: 12, letterSpacing: '0.18em',
+                    color: 'rgba(6,182,212,0.7)', marginBottom: 6, textTransform: 'uppercase',
                   }}>[ USERNAME ]</div>
                   <input
                     className="soc-input"
@@ -337,8 +345,8 @@ export default function LoginPage() {
                 </div>
                 <div>
                   <div style={{
-                    fontSize: 10, letterSpacing: '0.22em',
-                    color: 'rgba(6,182,212,0.55)', marginBottom: 6, textTransform: 'uppercase',
+                    fontSize: 12, letterSpacing: '0.18em',
+                    color: 'rgba(6,182,212,0.7)', marginBottom: 6, textTransform: 'uppercase',
                   }}>[ PASSWORD ]</div>
                   <input
                     className="soc-input"
@@ -383,7 +391,7 @@ export default function LoginPage() {
                   background: 'rgba(6,182,212,0.12)',
                   border: '1px solid rgba(6,182,212,0.4)',
                   color: '#06b6d4',
-                  fontFamily: "'Orbitron', monospace",
+                  fontFamily: "'Rajdhani', sans-serif",
                   fontSize: 12,
                   letterSpacing: '0.28em',
                   fontWeight: 700,

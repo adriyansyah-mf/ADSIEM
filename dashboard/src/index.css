@@ -62,7 +62,7 @@ html, body {
   background-color: var(--bg-base);
   color: var(--text-primary);
   font-family: 'Exo 2', system-ui, sans-serif;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
 }
 
@@ -112,6 +112,18 @@ body::before {
 }
 .glow-orange {
   box-shadow: 0 0 12px rgba(255, 107, 0, 0.4);
+}
+
+.sign-out-btn {
+  transition: color 0.12s, border-color 0.12s;
+}
+.sign-out-btn:hover {
+  color: #ef4444 !important;
+  border-color: #7f1d1d !important;
+}
+.sign-out-btn:focus-visible {
+  outline: 2px solid #ef4444;
+  outline-offset: 2px;
 }
 
 /* Tailwind base overrides */

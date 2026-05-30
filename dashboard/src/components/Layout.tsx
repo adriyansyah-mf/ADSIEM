@@ -169,7 +169,7 @@ export default function Layout() {
                   fontSize: 10,
                   fontWeight: 600,
                   letterSpacing: '0.08em',
-                  color: '#3f4558',
+                  color: '#64748b',
                   textTransform: 'uppercase',
                 }}>
                   {group.label}
@@ -225,7 +225,7 @@ export default function Layout() {
                   fontSize: 10,
                   fontWeight: 600,
                   letterSpacing: '0.08em',
-                  color: '#3f4558',
+                  color: '#64748b',
                   textTransform: 'uppercase',
                 }}>
                   Administration
@@ -295,8 +295,8 @@ export default function Layout() {
               </div>
               <button
                 onClick={() => setCollapsed(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#3f4558', display: 'flex', padding: 2 }}
-                title="Collapse"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', padding: '8px', borderRadius: 4 }}
+                title="Collapse sidebar"
               >
                 <PanelLeftClose size={14} />
               </button>
@@ -304,12 +304,12 @@ export default function Layout() {
           ) : (
             <button
               onClick={() => setCollapsed(false)}
-              title="Expand"
+              title="Expand sidebar"
               style={{
                 width: '100%', background: 'none', border: 'none',
-                cursor: 'pointer', color: '#3f4558',
+                cursor: 'pointer', color: '#64748b',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: '10px 0',
+                padding: '14px 0',
               }}
             >
               <PanelLeftOpen size={14} />
@@ -342,10 +342,16 @@ export default function Layout() {
               <button
                 key={mode}
                 onClick={() => setOpMode(mode)}
+                title={
+                  mode === 'MANUAL'   ? 'Manual: all AI automation disabled — analyst drives everything' :
+                  mode === 'OBSERVER' ? 'Observer: AI monitors and annotates, no automatic actions' :
+                                       'Operator: AI-assisted response — automation rules execute automatically'
+                }
                 style={{
-                  padding: '3px 10px',
+                  padding: '8px 12px',
                   borderRadius: 4,
                   border: 'none',
+                  minHeight: 32,
                   background: opMode === mode ? '#1e2028' : 'transparent',
                   color: opMode === mode ? MODE_COLOR[mode] : '#475569',
                   fontSize: 11,
@@ -374,6 +380,7 @@ export default function Layout() {
             </div>
             <button
               onClick={logout}
+              className="sign-out-btn"
               style={{
                 padding: '5px 12px',
                 borderRadius: 5,
@@ -383,10 +390,7 @@ export default function Layout() {
                 fontSize: 12,
                 fontWeight: 500,
                 cursor: 'pointer',
-                transition: 'border-color 0.12s, color 0.12s',
               }}
-              onMouseEnter={e => { (e.target as HTMLElement).style.color = '#ef4444'; (e.target as HTMLElement).style.borderColor = '#7f1d1d' }}
-              onMouseLeave={e => { (e.target as HTMLElement).style.color = '#64748b'; (e.target as HTMLElement).style.borderColor = '#1e2028' }}
             >
               Sign out
             </button>
