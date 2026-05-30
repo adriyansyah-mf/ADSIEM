@@ -271,12 +271,14 @@ class WebhookCreate(BaseModel):
     url: str
     is_enabled: bool = True
     group_id: str | None = None
+    payload_format: str = "default"
 
 class WebhookUpdate(BaseModel):
     name: str | None = None
     url: str | None = None
     is_enabled: bool | None = None
     group_id: str | None = None
+    payload_format: str | None = None
 
 class WebhookOut(BaseModel):
     id: UUID
@@ -284,6 +286,7 @@ class WebhookOut(BaseModel):
     url: str
     is_enabled: bool
     group_id: str | None
+    payload_format: str
     created_at: datetime
     model_config = {"from_attributes": True}
 

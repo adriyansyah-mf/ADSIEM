@@ -46,6 +46,56 @@ async def _process_pending_deliveries() -> None:
                 continue
         await _deliver(delivery, config)
 
+def _build_jira_payload(ctx: dict) -> dict:
+    """Build Jira Create Issue API payload from alert context."""
+    severity = ctx.get("severity", "medium")
+    priority_map = {"critical": "Highest", "high": "High", "medium": "Medium", "low": "Low", "info": "Lowest"}
+    title = ctx.get("title", "Security Alert")
+    source_ip = ctx.get("source_ip", "N/A")
+    hostname = ctx.get("hostname", "N/A")
+    triage_notes = ctx.get("triage_notes", "Pending AI analysis")
+    alert_id = ctx.get("alert_id", "")
+    created_at = ctx.get("created_at", "")
+    desc = (
+        f"Source: {source_ip} / {hostname}\n"
+        f"Severity: {severity}\n"
+        f"Detected: {created_at}\n\n"
+        f"AI Triage Notes:\n{triage_notes}\n\n"
+        f"Alert ID: {alert_id}"
+    )
+    return {
+        "fields": {
+            "summary": f"[SIEM {severity.upper()}] {title}",
+            "description": {
+                "version": 1, "type": "doc",
+                "content": [{"type": "paragraph", "content": [{"type": "text", "text": desc}]}],
+            },
+            "issuetype": {"name": "Bug"},
+            "priority": {"name": priority_map.get(severity, "Medium")},
+            "labels": ["siem", f"severity-{severity}", "auto-created"],
+        }
+    }
+
+
+def _build_servicenow_payload(ctx: dict) -> dict:
+    """Build ServiceNow Create Incident API payload from alert context."""
+    severity = ctx.get("severity", "medium")
+    urgency_map = {"critical": "1", "high": "2", "medium": "3", "low": "4", "info": "4"}
+    return {
+        "short_description": f"[SIEM] {ctx.get('title', 'Security Alert')}",
+        "description": (
+            f"Source IP: {ctx.get('source_ip', 'N/A')}\n"
+            f"Hostname: {ctx.get('hostname', 'N/A')}\n"
+            f"Severity: {severity}\n"
+            f"AI Notes: {ctx.get('triage_notes', '')}"
+        ),
+        "urgency": urgency_map.get(severity, "3"),
+        "category": "Security",
+        "subcategory": "Intrusion",
+        "caller_id": "siem-platform",
+    }
+
+
 _SEVERITY_COLORS = {
     "critical": 0xE74C3C,
     "high":     0xE67E22,
@@ -94,7 +144,16 @@ async def _deliver(delivery: WebhookDelivery, config: WebhookConfig) -> None:
         now = datetime.now(timezone.utc)
         try:
             is_discord = "discord.com/api/webhooks" in config.url
-            post_payload = _discord_payload(delivery.payload) if is_discord else delivery.payload
+            # Select payload format based on webhook config
+            fmt = getattr(config, "payload_format", "default") or "default"
+            if is_discord:
+                post_payload = _discord_payload(delivery.payload)
+            elif fmt == "jira":
+                post_payload = _build_jira_payload(delivery.payload)
+            elif fmt == "servicenow":
+                post_payload = _build_servicenow_payload(delivery.payload)
+            else:
+                post_payload = delivery.payload
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(config.url, json=post_payload)
                 resp.raise_for_status()

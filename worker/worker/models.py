@@ -83,11 +83,12 @@ class Alert(Base):
 
 class WebhookConfig(Base):
     __tablename__ = "webhook_configs"
-    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name       = Column(String(255), nullable=False)
-    url        = Column(Text, nullable=False)
-    is_enabled = Column(Boolean, nullable=False, default=True)
-    group_id   = Column(String(100))
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name           = Column(String(255), nullable=False)
+    url            = Column(Text, nullable=False)
+    is_enabled     = Column(Boolean, nullable=False, default=True)
+    group_id       = Column(String(100))
+    payload_format = Column(String(50), nullable=False, server_default='default')
 
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
