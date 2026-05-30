@@ -22,7 +22,7 @@ import structlog
 from sqlalchemy import select, update
 
 from worker.database import AsyncSessionLocal
-from worker.models import Alert, AlertNote, Case, CaseNote
+from worker.models import Alert, AlertNote, Case, CaseNote, ThreatHunt
 from worker.groq_client import analyze_alert_with_groq
 from worker.alert_manager import dispatch_case_webhooks
 from worker.settings_cache import get_setting
@@ -312,6 +312,34 @@ async def _create_case_from_verdict(
         return str(case.id)
 
 
+async def _maybe_enqueue_hunt(source_ip: str, group_id: str) -> None:
+    """Enqueue a ThreatHunt for source_ip if not already hunted in last 24h."""
+    window = datetime.now(timezone.utc) - timedelta(hours=24)
+    try:
+        async with AsyncSessionLocal() as db:
+            existing = (await db.execute(
+                select(ThreatHunt).where(
+                    ThreatHunt.ioc_type == "ip",
+                    ThreatHunt.ioc_value == source_ip,
+                    ThreatHunt.group_id == group_id,
+                    ThreatHunt.created_at >= window,
+                )
+            )).scalars().first()
+            if existing:
+                log.debug("hunt_skip_recent", source_ip=source_ip)
+                return
+            hunt = ThreatHunt(
+                ioc_type="ip",
+                ioc_value=source_ip,
+                group_id=group_id,
+            )
+            db.add(hunt)
+            await db.commit()
+            log.info("hunt_enqueued_by_ai", source_ip=source_ip, group_id=group_id)
+    except Exception as exc:
+        log.warning("hunt_enqueue_failed", source_ip=source_ip, error=str(exc))
+
+
 async def analyze_and_maybe_create_case(
     alert_id: str,
     title: str,
@@ -351,6 +379,10 @@ async def analyze_and_maybe_create_case(
             log.info("severity_escalated", original=severity, escalated=effective_severity)
 
     heuristic_mitre = suggest_mitre(text_blob)
+
+    # ── 2b. Auto-enqueue threat hunt for malicious IPs ───────────────────────
+    if source_ip and enrichment and enrichment.overall_risk > 0.5:
+        asyncio.ensure_future(_maybe_enqueue_hunt(source_ip, group_id))
 
     # ── RAG — similar past cases ─────────────────────────────────────────────
     query_text = f"{title}\n{source_ip or ''}\n{hostname or ''}"
