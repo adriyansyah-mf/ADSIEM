@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useUebaEntities, useUebaEntityDetail, useUebaStatus } from '@/hooks/useUeba'
+import { api } from '@/api/client'
 import type { UebaEntityScore, UebaAnomaly } from '@/types'
 
 function riskColor(score: number) {
@@ -109,8 +111,61 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
   )
 }
 
+function RiskSparkline({ data }: { data: { day: string; max_risk: number }[] }) {
+  if (!data || data.length === 0) return (
+    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+      No historical data yet
+    </div>
+  )
+  const W = 280, H = 60, PAD = 4
+  const maxRisk = Math.max(...data.map(d => d.max_risk), 100)
+  const pts = data.map((d, i) => {
+    const x = PAD + (i / Math.max(data.length - 1, 1)) * (W - PAD * 2)
+    const y = H - PAD - (d.max_risk / maxRisk) * (H - PAD * 2)
+    return `${x},${y}`
+  }).join(' ')
+  const areaPath = `M${PAD},${H - PAD} ` +
+    data.map((d, i) => {
+      const x = PAD + (i / Math.max(data.length - 1, 1)) * (W - PAD * 2)
+      const y = H - PAD - (d.max_risk / maxRisk) * (H - PAD * 2)
+      return `L${x},${y}`
+    }).join(' ') + ` L${W - PAD},${H - PAD} Z`
+  const lastRisk = data[data.length - 1].max_risk
+  const color = lastRisk >= 80 ? '#ff2244' : lastRisk >= 60 ? '#ff6b35' : lastRisk >= 40 ? '#ffd700' : '#00ff88'
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 10, color: 'var(--text-muted)' }}>30-day risk trend</span>
+        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 10, color }}>{data.length} days · latest {lastRisk.toFixed(0)}</span>
+      </div>
+      <svg width={W} height={H} style={{ overflow: 'visible' }}>
+        {[25, 50, 75].map(v => (
+          <line key={v}
+            x1={PAD} y1={H - PAD - (v / maxRisk) * (H - PAD * 2)}
+            x2={W - PAD} y2={H - PAD - (v / maxRisk) * (H - PAD * 2)}
+            stroke="rgba(255,255,255,0.05)" strokeWidth={1}
+          />
+        ))}
+        <path d={areaPath} fill={`${color}18`} />
+        <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+        {(() => {
+          const last = data[data.length - 1]
+          const x = W - PAD
+          const y = H - PAD - (last.max_risk / maxRisk) * (H - PAD * 2)
+          return <circle cx={x} cy={y} r={3} fill={color} />
+        })()}
+      </svg>
+    </div>
+  )
+}
+
 function DetailPanel({ entityType, entityValue, onClose }: { entityType: string; entityValue: string; onClose: () => void }) {
   const { data, isLoading } = useUebaEntityDetail(entityType, entityValue)
+  const { data: history } = useQuery({
+    queryKey: ['ueba-history', entityType, entityValue],
+    queryFn: () => api.get(`/api/ueba/${entityType}/${entityValue}/history?days=30`).then(r => r.data),
+    enabled: !!entityType && !!entityValue,
+  })
 
   return (
     <div style={{
@@ -149,6 +204,15 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
               last seen {data.score.last_seen_at ? new Date(data.score.last_seen_at).toLocaleString() : '&mdash;'}
             </div>
           </div>
+
+          {history && (
+            <div>
+              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+                RISK BASELINE
+              </div>
+              <RiskSparkline data={history.history} />
+            </div>
+          )}
 
           {data.anomalies.length > 0 && (
             <div>
