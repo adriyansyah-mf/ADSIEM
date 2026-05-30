@@ -1,3 +1,4 @@
+anthropic==0.40.0
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 redis==5.2.0

@@ -50,6 +50,8 @@ _DEFAULT_SETTINGS = [
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
     ("otx_api_key",        "",                          True,  "AlienVault OTX API key — free (otx.alienvault.com)"),
     ("greynoise_api_key",  "",                          True,  "GreyNoise API key — optional, community endpoint used if empty"),
+    ("anthropic_api_key",   "",        True,  "Anthropic Claude API key — fallback LLM when Groq fails (optional)"),
+    ("fallback_llm",        "false",   False, "Use Claude as fallback when Groq fails (true/false)"),
     ("smtp_enabled",      "false",     False, "Enable email alert notifications (true/false)"),
     ("smtp_host",         "",          False, "SMTP server hostname (e.g. smtp.gmail.com)"),
     ("smtp_port",         "587",       False, "SMTP port (587=STARTTLS, 465=SSL, 25=plain)"),

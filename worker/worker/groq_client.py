@@ -1,10 +1,13 @@
 # worker/worker/groq_client.py
 import asyncio
 import json
+import os as _os
 import httpx
 import structlog
 from worker.config import GROQ_API_KEY
 from worker.settings_cache import get_setting
+
+ANTHROPIC_API_KEY = _os.environ.get("ANTHROPIC_API_KEY", "")
 
 log = structlog.get_logger()
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -166,7 +169,52 @@ Perform triage and provide your verdict as an L1 analyst."""
         return json.loads(content)
     except Exception as e:
         log.error("groq_l1_triage_failed", error=str(e))
+        fallback = await _claude_triage(title, severity, source_ip, hostname, decoded_fields)
+        if fallback:
+            log.info("groq_fallback_used", model="claude-haiku-4-5-20251001")
+            return fallback
         return _fallback_verdict(severity)
+
+
+async def _claude_triage(
+    title: str,
+    severity: str,
+    source_ip: str | None,
+    hostname: str | None,
+    decoded_fields: dict,
+) -> dict | None:
+    """Fallback LLM triage via Anthropic Claude when Groq is unavailable."""
+    api_key = await get_setting("anthropic_api_key", "") or ANTHROPIC_API_KEY
+    enabled = await get_setting("fallback_llm", "false")
+    if not api_key or enabled.lower() != "true":
+        return None
+    try:
+        import anthropic as _anthropic
+        prompt = (
+            f"ALERT TO TRIAGE:\nTitle: {title}\nSeverity: {severity}\n"
+            f"Source IP: {source_ip or 'unknown'}\nHostname: {hostname or 'unknown'}\n"
+            f"Fields: {json.dumps(decoded_fields, default=str)[:400]}\n\n"
+            "Respond ONLY with valid JSON:\n"
+            '{"verdict":"<escalate|create_case|monitor|false_positive>",'
+            '"triage_notes":"<2-3 sentences in English>",'
+            '"confidence":0.7,"mitre_techniques":[],"immediate_actions":[],'
+            '"false_positive_reason":null,"threat_type":"other","search_queries":[]}'
+        )
+        client = _anthropic.AsyncAnthropic(api_key=api_key)
+        msg = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = msg.content[0].text.strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        return json.loads(content)
+    except Exception as exc:
+        log.warning("claude_fallback_failed", error=str(exc))
+        return None
 
 
 def _fallback_verdict(severity: str) -> dict:
