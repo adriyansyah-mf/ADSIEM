@@ -1,3 +1,4 @@
+import json
 import structlog
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -30,6 +31,7 @@ from app.api.routes.hunt_schedules import router as hunt_schedules_router
 from app.api.routes.sop import router as sop_router
 from app.api.routes.soar import router as soar_router
 from app.api.routes.search import router as search_router
+from app.api.routes.ws import router as ws_router, manager as ws_manager
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -321,6 +323,28 @@ async def _migrate_mfa_columns() -> None:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
 
 @asynccontextmanager
+async def _ws_redis_listener():
+    """Subscribe to Redis ws:alerts channel and broadcast to WebSocket clients."""
+    import asyncio
+    import redis.asyncio as aioredis
+    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = redis.pubsub()
+    await pubsub.subscribe("ws:alerts")
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                try:
+                    data = json.loads(message["data"])
+                    await ws_manager.broadcast(data)
+                except Exception:
+                    pass
+    except asyncio.CancelledError:
+        pass
+    finally:
+        await pubsub.unsubscribe("ws:alerts")
+        await redis.aclose()
+
+
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -331,7 +355,10 @@ async def lifespan(app: FastAPI):
     await _migrate_soar_tables()
     await _migrate_webhook_payload_format()
     await _migrate_mfa_columns()
+    import asyncio
+    _listener_task = asyncio.create_task(_ws_redis_listener())
     yield
+    _listener_task.cancel()
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
 
@@ -354,5 +381,6 @@ for router in [
     enrollment_tokens_router, correlation_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
+    ws_router,
 ]:
     app.include_router(router)

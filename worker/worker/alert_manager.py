@@ -162,6 +162,21 @@ async def create_alert(
 
         await db.commit()
 
+    # Publish to Redis for WebSocket broadcast (best-effort)
+    try:
+        redis = await get_redis()
+        await redis.publish("ws:alerts", json.dumps({
+            "type": "new_alert",
+            "id": str(alert_id),
+            "title": rule_match["title"],
+            "severity": rule_match["level"],
+            "source_ip": source_ip,
+            "hostname": hostname,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }))
+    except Exception:
+        pass
+
     # Push to AI analysis queue — gated by ML entity risk score
     try:
         redis = await get_redis()
