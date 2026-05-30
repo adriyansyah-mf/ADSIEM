@@ -44,6 +44,8 @@ class User(Base):
     role_id       = Column(Integer, ForeignKey("roles.id"), nullable=False)
     group_id      = Column(String(100), nullable=False, default="default")
     is_active     = Column(Boolean, nullable=False, default=True)
+    mfa_secret    = Column(Text, nullable=True)
+    mfa_enabled   = Column(Boolean, nullable=False, server_default='false')
     created_at    = Column(DateTime(timezone=True), default=now_utc)
     updated_at    = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     role          = relationship("Role", back_populates="users")

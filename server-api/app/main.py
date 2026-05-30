@@ -314,6 +314,12 @@ async def _migrate_webhook_payload_format() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE webhook_configs ADD COLUMN IF NOT EXISTS payload_format VARCHAR(50) NOT NULL DEFAULT 'default'"))
 
+async def _migrate_mfa_columns() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
@@ -324,6 +330,7 @@ async def lifespan(app: FastAPI):
     await _migrate_alerts_columns()
     await _migrate_soar_tables()
     await _migrate_webhook_payload_format()
+    await _migrate_mfa_columns()
     yield
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)

@@ -1,5 +1,9 @@
 # server-api/app/api/routes/auth.py
 from typing import Annotated
+import pyotp
+import qrcode
+import io
+import base64
 from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Request, Response, status
 from jose import JWTError
 from sqlalchemy import select
@@ -35,6 +39,16 @@ async def login(
     if not user or not verify_password(body.password, user.password_hash):
         background.add_task(audit_log, db, None, "login_failed", "user", body.username, {"reason": "bad credentials"})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    # MFA enforcement
+    if user.mfa_enabled and user.mfa_secret:
+        mfa_code = body.mfa_code
+        if not mfa_code:
+            # Client must re-submit with mfa_code
+            return {"mfa_required": True, "access_token": ""}
+        totp = pyotp.TOTP(user.mfa_secret)
+        if not totp.verify(mfa_code, valid_window=1):
+            raise HTTPException(status_code=401, detail="Invalid MFA code")
 
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
@@ -74,3 +88,56 @@ async def me(current_user: Annotated[User, Depends(get_current_user)]):
         role=current_user.role.name,
         group_id=current_user.group_id,
     )
+
+
+@router.post("/mfa/setup")
+async def mfa_setup(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Generate a TOTP secret and QR code PNG for the current user (not yet enabled)."""
+    secret = pyotp.random_base32()
+    totp = pyotp.TOTP(secret)
+    uri = totp.provisioning_uri(name=current_user.username, issuer_name="SIEM Platform")
+    img = qrcode.make(uri)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    qr_b64 = base64.b64encode(buf.getvalue()).decode()
+    current_user.mfa_secret = secret
+    current_user.mfa_enabled = False
+    await db.commit()
+    return {"secret": secret, "qr_code": f"data:image/png;base64,{qr_b64}", "uri": uri}
+
+
+@router.post("/mfa/enable")
+async def mfa_enable(
+    body: dict,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Verify a TOTP code and enable MFA for the current user."""
+    if not current_user.mfa_secret:
+        raise HTTPException(status_code=400, detail="MFA setup not started. Call /mfa/setup first.")
+    totp = pyotp.TOTP(current_user.mfa_secret)
+    if not totp.verify(str(body.get("code", "")), valid_window=1):
+        raise HTTPException(status_code=400, detail="Invalid TOTP code")
+    current_user.mfa_enabled = True
+    await db.commit()
+    return {"ok": True, "message": "MFA enabled successfully"}
+
+
+@router.post("/mfa/disable")
+async def mfa_disable(
+    body: dict,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Disable MFA after verifying the current TOTP code."""
+    if current_user.mfa_enabled and current_user.mfa_secret:
+        totp = pyotp.TOTP(current_user.mfa_secret)
+        if not totp.verify(str(body.get("code", "")), valid_window=1):
+            raise HTTPException(status_code=400, detail="Invalid TOTP code")
+    current_user.mfa_enabled = False
+    current_user.mfa_secret = None
+    await db.commit()
+    return {"ok": True}

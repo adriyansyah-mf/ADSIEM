@@ -1,7 +1,7 @@
 # server-api/app/schemas/schemas.py
 from __future__ import annotations
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -10,10 +10,12 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 class LoginRequest(BaseModel):
     username: str
     password: str
+    mfa_code: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    mfa_required: Optional[bool] = None
 
 class UserMe(BaseModel):
     id: UUID
