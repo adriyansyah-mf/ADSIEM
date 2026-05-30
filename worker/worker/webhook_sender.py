@@ -4,12 +4,19 @@ import math
 from datetime import datetime, timezone
 import httpx
 import structlog
+from prometheus_client import Counter
 from sqlalchemy import select
 from worker.config import MAX_WEBHOOK_ATTEMPTS, WEBHOOK_RETRY_INTERVAL
 from worker.database import AsyncSessionLocal
 from worker.models import WebhookConfig, WebhookDelivery
 
 log = structlog.get_logger()
+
+webhook_deliveries_total = Counter(
+    "siem_webhook_deliveries_total",
+    "Webhook delivery attempts by status",
+    ["status"],
+)
 
 async def webhook_retry_loop() -> None:
     while True:
@@ -92,10 +99,12 @@ async def _deliver(delivery: WebhookDelivery, config: WebhookConfig) -> None:
                 resp = await client.post(config.url, json=post_payload)
                 resp.raise_for_status()
             status = "delivered"
+            webhook_deliveries_total.labels(status="delivered").inc()
             log.info("webhook_delivered", delivery_id=str(delivery.id), url=config.url)
         except Exception as exc:
             new_attempts = delivery.attempts + 1
             status = "failed" if new_attempts >= MAX_WEBHOOK_ATTEMPTS else "pending"
+            webhook_deliveries_total.labels(status=status).inc()
             log.warning("webhook_failed", delivery_id=str(delivery.id), attempts=new_attempts, error=str(exc))
 
         from sqlalchemy import update

@@ -23,7 +23,7 @@ CONSUMER_NAME = f"worker-{socket.gethostname()}"
 logs_ingested   = Counter("siem_logs_ingested_total", "Total logs ingested")
 events_decoded  = Counter("siem_events_decoded_total", "Total events decoded")
 decode_failures = Counter("siem_decode_failures_total", "Total decode failures")
-alerts_total    = Counter("siem_alerts_generated_total", "Alerts generated", ["severity"])
+alerts_total    = Counter("siem_alerts_generated_total", "Alerts generated", ["severity", "rule_id"])
 sigma_matches   = Counter("siem_sigma_matches_total", "Sigma rule matches", ["rule_id"])
 
 async def ensure_stream_group(redis) -> None:
@@ -99,7 +99,7 @@ async def process_message(
     rule_matches = await sig_engine.evaluate(flat_event)
     for match in rule_matches:
         sigma_matches.labels(rule_id=match["id"]).inc()
-        alerts_total.labels(severity=match["level"]).inc()
+        alerts_total.labels(severity=match["level"], rule_id=match["id"]).inc()
         await create_alert(
             rule_match=match,
             event_id=event.id,
