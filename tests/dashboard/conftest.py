@@ -4,8 +4,7 @@
 # test methods in test_siem_platform.fixture.e2e.test.py.
 
 import json
-import re
-from typing import Callable, Generator
+from typing import Generator
 
 import pytest
 from playwright.sync_api import Page, Route, sync_playwright
@@ -73,6 +72,11 @@ class MockAPI:
             body:        Python dict/list that is JSON-serialised into the
                          response body.  ``None`` produces an empty body.
             status:      HTTP status code for the stubbed response.
+
+        Note: Calling register() twice with the same url_pattern and method
+        adds a second Playwright route handler — it does NOT override the first.
+        Playwright uses the first matching handler, so call_count() tracks
+        only the most recent registration for that key.
         """
         key = f"{method.upper()}:{url_pattern}"
         self._handlers.setdefault(key, [])
