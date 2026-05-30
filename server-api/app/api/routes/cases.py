@@ -2,13 +2,13 @@
 from typing import Annotated
 from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import timezone
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_scoped_group
-from app.models.models import Case, CaseNote, User
+from app.models.models import Alert, AlertNote, Case, CaseNote, User
 from app.schemas.schemas import CaseOut, CaseCreate, CaseUpdate, CaseNoteCreate, CaseNoteOut, PaginatedResponse
 from app.services.audit import audit_log
 from app.core.config import settings
@@ -144,3 +144,75 @@ async def delete_case(
     await db.delete(case)
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "case_deleted", "case", str(case_id))
+
+@router.get("/api/cases/{case_id}/timeline")
+async def case_timeline(
+    case_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    _: User = Depends(get_current_user),
+):
+    """Return chronological related alerts and notes for a case (±24h window around case creation)."""
+    import uuid as _uuid
+    from datetime import timedelta
+
+    case = await db.get(Case, _uuid.UUID(case_id))
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    items = []
+    window_start = case.created_at - timedelta(hours=24)
+    window_end   = case.created_at + timedelta(hours=24)
+
+    # Resolve source_ip/hostname from the triggering alert if available
+    source_ip = None
+    hostname  = None
+    if case.alert_id:
+        triggering = await db.get(Alert, case.alert_id)
+        if triggering:
+            source_ip = triggering.source_ip
+            hostname  = triggering.hostname
+
+    # Related alerts: same source_ip or hostname within ±24h
+    if source_ip or hostname:
+        filters = [Alert.created_at.between(window_start, window_end)]
+        if source_ip and hostname:
+            filters.append(or_(Alert.source_ip == source_ip, Alert.hostname == hostname))
+        elif source_ip:
+            filters.append(Alert.source_ip == source_ip)
+        else:
+            filters.append(Alert.hostname == hostname)
+
+        related_alerts = (await db.execute(
+            select(Alert).where(*filters).order_by(Alert.created_at.asc()).limit(50)
+        )).scalars().all()
+
+        for a in related_alerts:
+            items.append({
+                "type": "alert",
+                "id": str(a.id),
+                "ts": a.created_at.isoformat(),
+                "title": a.title,
+                "severity": a.severity,
+                "source_ip": a.source_ip,
+                "hostname": a.hostname,
+                "is_this_case": bool(case.alert_id and str(a.id) == str(case.alert_id)),
+            })
+
+    # Case notes linked to the triggering alert
+    if case.alert_id:
+        notes = (await db.execute(
+            select(AlertNote)
+            .where(AlertNote.alert_id == case.alert_id)
+            .order_by(AlertNote.created_at.asc())
+        )).scalars().all()
+        for n in notes:
+            content_preview = n.content[:120] + ("…" if len(n.content) > 120 else "")
+            items.append({
+                "type": "note",
+                "id": str(n.id),
+                "ts": n.created_at.isoformat(),
+                "title": content_preview,
+            })
+
+    items.sort(key=lambda x: x["ts"])
+    return {"case_id": case_id, "items": items}
