@@ -207,6 +207,15 @@ async def _action_block_ip(alert_id: uuid.UUID, ctx: dict, params: dict) -> None
         log.warning("soar_block_ip_skipped", reason="no source_ip in context")
         return
 
+    if not hostname:
+        async with AsyncSessionLocal() as db:
+            db.add(AlertNote(
+                alert_id=alert_id,
+                content=f"**SOAR Block IP** — no hostname in alert context. Manual block required for `{source_ip}`."
+            ))
+            await db.commit()
+        return
+
     async with AsyncSessionLocal() as db:
         from worker.models import Agent, AgentTask
         from sqlalchemy import select as _select

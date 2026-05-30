@@ -69,7 +69,11 @@ func blockIP(ip string, durationSeconds int) error {
 		exec.Command("iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run() // rollback
 		return fmt.Errorf("block_ip iptables FORWARD: %w", err)
 	}
-	log.Printf("[task] blocked IP %s for %d seconds (manual unblock: iptables -D INPUT -s %s -j DROP)", ip, durationSeconds, ip)
+	// TODO: auto-unblock after durationSeconds — requires scheduler integration
+	// Best-effort: schedule removal via `at` if available on the host
+	atCmd := fmt.Sprintf("iptables -D INPUT -s %s -j DROP; iptables -D FORWARD -s %s -j DROP", ip, ip)
+	exec.Command("sh", "-c", fmt.Sprintf("echo '%s' | at now + %d seconds 2>/dev/null || true", atCmd, durationSeconds)).Run()
+	log.Printf("[task] blocked IP %s (requested duration: %ds, auto-unblock via `at` if available)", ip, durationSeconds)
 	return nil
 }
 
