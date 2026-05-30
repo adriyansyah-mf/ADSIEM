@@ -34,6 +34,15 @@ services:
     environment:
       LOG_LEVEL: info
 
+  dashboard:
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'
+    environment:
+      LOG_LEVEL: info
+
   nginx:
     ports:
       - "80:80"
@@ -41,3 +50,8 @@ services:
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'

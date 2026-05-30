@@ -1,5 +1,6 @@
 # worker/worker/main.py
 import asyncio
+import json
 import time
 import logging
 import structlog
@@ -8,7 +9,7 @@ from threading import Thread
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
 from worker.config import LOG_LEVEL
-from worker.database import AsyncSessionLocal
+from worker.database import AsyncSessionLocal, engine
 from worker.decoder_engine import DecoderEngine
 from worker.redis_client import get_redis
 from worker.seeder import seed_if_empty
@@ -39,12 +40,25 @@ _start_time = time.time()
 queue_lag_gauge = Gauge("siem_worker_queue_lag", "Redis stream pending messages")
 active_agents_gauge = Gauge("siem_active_agents", "Active agents count")
 
+# Shared health state updated by the async health probe loop.
+_health_state: dict = {"postgres": "ok", "redis": "ok"}
+
+
 class HealthHandler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
 
     def do_GET(self):
         if self.path == "/health":
-            body = b'{"status":"ok"}'
+            pg = _health_state.get("postgres", "ok")
+            rd = _health_state.get("redis", "ok")
+            status = "ok" if pg == "ok" and rd == "ok" else "degraded"
+            payload = {
+                "status": status,
+                "postgres": pg,
+                "redis": rd,
+                "uptime_seconds": int(time.time() - _start_time),
+            }
+            body = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -58,6 +72,28 @@ class HealthHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
+
+async def health_probe_loop():
+    """Periodically check postgres and redis; update _health_state for the sync handler."""
+    import sqlalchemy
+    while True:
+        redis = await get_redis()
+        pg_status = "ok"
+        rd_status = "ok"
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(sqlalchemy.text("SELECT 1"))
+        except Exception:
+            pg_status = "error"
+        try:
+            await redis.ping()
+        except Exception:
+            rd_status = "error"
+        _health_state["postgres"] = pg_status
+        _health_state["redis"] = rd_status
+        await asyncio.sleep(30)
+
 
 def start_health_server():
     server = HTTPServer(("0.0.0.0", 8001), HealthHandler)
@@ -99,6 +135,7 @@ async def main():
         hunt_scheduler_loop(),
         rag_index_loop(),
         sop_index_loop(),
+        health_probe_loop(),
     )
 
 if __name__ == "__main__":
