@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import {
   LayoutDashboard, FileText, Activity, Bell, FolderOpen,
@@ -76,10 +76,12 @@ const MODE_COLOR: Record<OpMode, string> = {
 
 export default function Layout() {
   const { pathname } = useLocation()
-  const { user, logout, hasRole } = useAuthStore()
+  const { user, logout, hasRole, accessToken } = useAuthStore()
+  const queryClient = useQueryClient()
   const [opMode, setOpMode] = useState<OpMode>('OBSERVER')
   const [clock, setClock] = useState(new Date())
   const [collapsed, setCollapsed] = useState(false)
+  const [wsConnected, setWsConnected] = useState(false)
 
   const { data: agentsData } = useQuery({
     queryKey: ['agents-health'],
@@ -91,6 +93,25 @@ export default function Layout() {
     const t = setInterval(() => setClock(new Date()), 1000)
     return () => clearInterval(t)
   }, [])
+
+  useEffect(() => {
+    if (!accessToken) return
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${proto}://${window.location.host}/api/ws/alerts?token=${accessToken}`)
+    ws.onopen = () => setWsConnected(true)
+    ws.onclose = () => setWsConnected(false)
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.type === 'new_alert') {
+          queryClient.invalidateQueries({ queryKey: ['alerts-recent'] })
+          queryClient.invalidateQueries({ queryKey: ['alerts-dashboard'] })
+        }
+      } catch {}
+    }
+    const ping = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send('ping') }, 30000)
+    return () => { clearInterval(ping); ws.close() }
+  }, [accessToken, queryClient])
 
   const onlineCount = (agentsData?.items ?? []).filter((a: { status: string }) => a.status === 'online').length
   const totalCount = agentsData?.total ?? 0
@@ -340,8 +361,16 @@ export default function Layout() {
           background: '#111318',
           borderBottom: '1px solid #1e2028',
         }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', letterSpacing: '0.01em', flexShrink: 0 }}>
-            {currentLabel}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', letterSpacing: '0.01em' }}>
+              {currentLabel}
+            </span>
+            {wsConnected && (
+              <span
+                title="Live feed connected"
+                style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', boxShadow: '0 0 6px #34d399', animation: 'pulse 2s infinite', flexShrink: 0, display: 'inline-block' }}
+              />
+            )}
           </span>
 
           {/* Global Search */}
