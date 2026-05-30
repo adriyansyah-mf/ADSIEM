@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -94,6 +94,21 @@ export default function Layout() {
 
   const onlineCount = (agentsData?.items ?? []).filter((a: { status: string }) => a.status === 'online').length
   const totalCount = agentsData?.total ?? 0
+
+  const navigate = useNavigate()
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<{ alerts: any[]; cases: any[] } | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+
+  const handleSearch = async (q: string) => {
+    if (q.length < 2) { setSearchResults(null); return }
+    try {
+      const r = await api.get('/api/search', { params: { q, limit: 5 } })
+      setSearchResults(r.data)
+    } catch {
+      setSearchResults(null)
+    }
+  }
 
   const isActive = (to: string) => to === '/' ? pathname === '/' : pathname.startsWith(to)
 
@@ -325,9 +340,75 @@ export default function Layout() {
           background: '#111318',
           borderBottom: '1px solid #1e2028',
         }}>
-          <span style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', flex: 1, letterSpacing: '0.01em' }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', letterSpacing: '0.01em', flexShrink: 0 }}>
             {currentLabel}
           </span>
+
+          {/* Global Search */}
+          <div style={{ flex: 1, maxWidth: 320, position: 'relative', margin: '0 16px' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: '#0d0f14', border: '1px solid #1e2028',
+              borderRadius: 6, padding: '4px 10px',
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true); handleSearch(e.target.value) }}
+                onFocus={() => setSearchOpen(true)}
+                onBlur={() => setTimeout(() => setSearchOpen(false), 200)}
+                placeholder="Search alerts, cases, IPs…"
+                style={{
+                  background: 'none', border: 'none', outline: 'none',
+                  color: '#94a3b8', fontSize: 12, width: '100%',
+                }}
+              />
+            </div>
+            {searchOpen && searchResults && (searchResults.alerts.length > 0 || searchResults.cases.length > 0) && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
+                background: '#111318', border: '1px solid #1e2028', borderRadius: 6,
+                zIndex: 1000, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+              }}>
+                {searchResults.alerts.map((a: any) => (
+                  <div
+                    key={a.id}
+                    onMouseDown={() => { navigate('/alerts'); setSearchOpen(false); setSearchQuery('') }}
+                    style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid #1e2028', display: 'flex', gap: 8, alignItems: 'center' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1e2028' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                  >
+                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: 'rgba(255,34,68,0.15)', color: '#ff2244', fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                      {a.severity}
+                    </span>
+                    <span style={{ fontSize: 12, color: '#e2e8f0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {a.title}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#475569', whiteSpace: 'nowrap' }}>alert</span>
+                  </div>
+                ))}
+                {searchResults.cases.map((c: any) => (
+                  <div
+                    key={c.id}
+                    onMouseDown={() => { navigate(`/cases/${c.id}`); setSearchOpen(false); setSearchQuery('') }}
+                    style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid #1e2028', display: 'flex', gap: 8, alignItems: 'center' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1e2028' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                  >
+                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: 'rgba(0,212,255,0.1)', color: '#00d4ff', fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                      {c.status}
+                    </span>
+                    <span style={{ fontSize: 12, color: '#e2e8f0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {c.title}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#475569', whiteSpace: 'nowrap' }}>case</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Op mode */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 1, background: '#0d0f14', borderRadius: 6, padding: 2 }}>
