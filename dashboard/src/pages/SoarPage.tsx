@@ -3,6 +3,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { Shield, Plus, Trash2, ToggleLeft, ToggleRight, ChevronDown, ChevronRight } from 'lucide-react'
 
+const generateId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return generateId()
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+  })
+}
+
 const TRIGGER_FIELDS = ['severity', 'rule_title', 'source_ip', 'hostname', 'user_name', 'tags', 'mitre_tags']
 const OPERATORS = ['eq', 'neq', 'contains', 'in', 'not_null']
 const ACTION_TYPES = ['enrich_ioc', 'send_webhook', 'create_case', 'suppress_alert', 'add_note']
@@ -144,7 +154,7 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
 
   const normalizeConditions = (tc: TriggerConditions): TriggerConditions => ({
     ...tc,
-    conditions: tc.conditions.map(c => ({ ...c, id: crypto.randomUUID() })),
+    conditions: tc.conditions.map(c => ({ ...c, id: generateId() })),
   })
 
   const [trigger, setTrigger] = useState<TriggerConditions>(
@@ -182,7 +192,7 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
   })
 
   const addCondition = () =>
-    setTrigger(t => ({ ...t, conditions: [...t.conditions, { id: crypto.randomUUID(), field: 'severity', operator: 'eq', value: 'high' }] }))
+    setTrigger(t => ({ ...t, conditions: [...t.conditions, { id: generateId(), field: 'severity', operator: 'eq', value: 'high' }] }))
 
   const addAction = (type: string) =>
     setActions(a => [...a, { id: `new-${Date.now()}`, action_type: type, order_index: a.length, params: {} }])
