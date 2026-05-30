@@ -32,6 +32,7 @@ from worker.ti.mitre import suggest_mitre
 from worker.campaign_analyzer import analyze_campaign
 from worker.searxng_client import search_threat_intel
 from worker.rag import retrieve_similar_cases, retrieve_sop_context
+from worker.soar_engine import run_soar_playbooks
 
 log = structlog.get_logger()
 
@@ -403,6 +404,30 @@ async def analyze_and_maybe_create_case(
         f"{actions_str}"
     )
     await _write_alert_note(alert_id, note_content)
+
+    # ── 4c. Fire SOAR playbooks with AI context (fire-and-forget) ───────────
+    if alert_id:
+        try:
+            alert_uuid = uuid.UUID(alert_id)
+            rule_match_ctx = {
+                "level": effective_severity,
+                "title": title,
+                "tags": decoded_fields.get("tags", []),
+                "mitre_tags": analysis.get("mitre_techniques", []),
+            }
+            asyncio.ensure_future(run_soar_playbooks(
+                alert_id=alert_uuid,
+                rule_match=rule_match_ctx,
+                source_ip=source_ip,
+                hostname=hostname,
+                user_name=decoded_fields.get("user.name"),
+                group_id=group_id,
+                ai_verdict=verdict,
+                ai_confidence=confidence,
+                ti_risk_score=enrichment.overall_risk if enrichment else None,
+            ))
+        except Exception as exc:
+            log.warning("ai_soar_dispatch_failed", alert_id=alert_id, error=str(exc))
 
     # ── 4b. AI-driven web research (background, case_id belum ada di sini) ──
     # Search langsung dijalankan; case_id akan di-pass dari langkah 7 jika ada

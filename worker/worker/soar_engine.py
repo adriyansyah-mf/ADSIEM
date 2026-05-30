@@ -29,6 +29,16 @@ def _matches_condition(cond: dict, ctx: dict) -> bool:
         return str(actual).lower() == str(value).lower()
     if operator == "neq":
         return str(actual).lower() != str(value).lower()
+    if operator == "gte":
+        try:
+            return float(actual) >= float(value)
+        except (TypeError, ValueError):
+            return False
+    if operator == "lte":
+        try:
+            return float(actual) <= float(value)
+        except (TypeError, ValueError):
+            return False
     if operator == "in":
         if not isinstance(value, list):
             return False
@@ -170,16 +180,22 @@ async def run_soar_playbooks(
     hostname: str | None,
     user_name: str | None,
     group_id: str,
+    ai_verdict: str | None = None,
+    ai_confidence: float | None = None,
+    ti_risk_score: float | None = None,
 ) -> None:
     ctx = {
-        "severity":   rule_match.get("level", "medium"),
-        "rule_title": rule_match.get("title", ""),
-        "tags":       rule_match.get("tags", []),
-        "mitre_tags": rule_match.get("mitre_tags", []),
-        "source_ip":  source_ip,
-        "hostname":   hostname,
-        "user_name":  user_name,
-        "group_id":   group_id,
+        "severity":     rule_match.get("level", "medium"),
+        "rule_title":   rule_match.get("title", ""),
+        "tags":         rule_match.get("tags", []),
+        "mitre_tags":   rule_match.get("mitre_tags", []),
+        "source_ip":    source_ip,
+        "hostname":     hostname,
+        "user_name":    user_name,
+        "group_id":     group_id,
+        "ai_verdict":   ai_verdict,
+        "ai_confidence": ai_confidence,
+        "ti_risk_score": ti_risk_score,
     }
 
     async with AsyncSessionLocal() as db:
