@@ -3,7 +3,34 @@
 # Registers pytest markers and auto-skips service_e2e tests when docker-compose stack is down
 
 import socket
+from typing import Generator
+
 import pytest
+from playwright.sync_api import Page, sync_playwright
+
+
+# ---------------------------------------------------------------------------
+# page fixture (function-scoped headless Chromium — used by service_e2e tests)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="function")
+def page() -> Generator[Page, None, None]:
+    """
+    Launch a headless Chromium browser, yield a single Page, then close.
+
+    Scope is function-level so each test gets a fresh browser context with no
+    shared cookies, localStorage, or network state.
+
+    Available to all tests under tests/ (including service_e2e tests that live
+    at the top level, outside tests/dashboard/).
+    """
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        context = browser.new_context()
+        pg = context.new_page()
+        yield pg
+        context.close()
+        browser.close()
 
 
 def pytest_configure(config):

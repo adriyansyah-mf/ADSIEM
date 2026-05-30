@@ -19,7 +19,10 @@
 #
 # Framework: Playwright (Python bindings). Install: pip install playwright && playwright install chromium
 
+import json
+
 import pytest
+import requests
 
 BASE_URL = "http://localhost"
 SEED_USERNAME = "admin"
@@ -92,4 +95,100 @@ class TestLoginDashboardRealStack:
         - Run only in a local dev environment with the stack started via docker-compose.dev.yml
         - Tag this test with @pytest.mark.service_e2e for selective CI execution
         """
-        pass
+        # ------------------------------------------------------------------
+        # Step 1 — Navigate to the login page
+        # ------------------------------------------------------------------
+        page.goto(f"{BASE_URL}/login", wait_until="networkidle")
+
+        # ------------------------------------------------------------------
+        # Step 2 — Fill credentials and capture the POST /api/auth/login response
+        # ------------------------------------------------------------------
+        # Use expect_response() to intercept the real POST response before
+        # clicking submit, so we don't miss it in a race.
+        with page.expect_response(
+            lambda r: "/api/auth/login" in r.url and r.request.method == "POST",
+            timeout=30_000,
+        ) as login_response_info:
+            # The login form inputs have no name/id/placeholder attributes in this SPA.
+            # The username field is the first <input> (type defaults to text);
+            # the password field is input[type="password"].
+            # Use nth(0) / nth(1) ordering within the form to be robust.
+            username_input = page.locator("input").first
+            username_input.wait_for(state="visible", timeout=15_000)
+            username_input.fill(SEED_USERNAME)
+
+            page.locator('input[type="password"]').fill(SEED_PASSWORD)
+
+            page.locator('button[type="submit"]').click()
+
+        login_response = login_response_info.value
+
+        # ------------------------------------------------------------------
+        # Step 3a — Assert POST /api/auth/login HTTP 200
+        # ------------------------------------------------------------------
+        assert login_response.status == 200, (
+            f"POST /api/auth/login returned HTTP {login_response.status}, expected 200"
+        )
+
+        login_body = login_response.json()
+        access_token: str = login_body.get("access_token", "")
+
+        # Token must be non-trivially long
+        assert len(access_token) > 20, (
+            f"access_token is too short (len={len(access_token)}); got: {access_token!r}"
+        )
+
+        # Token must be a valid 3-segment JWT (header.payload.signature)
+        segments = access_token.split(".")
+        assert len(segments) == 3, (
+            f"access_token is not a valid 3-segment JWT; got {len(segments)} segment(s): {access_token!r}"
+        )
+
+        # ------------------------------------------------------------------
+        # Step 3b — Assert GET /api/auth/me returns correct user identity
+        # ------------------------------------------------------------------
+        me_response = requests.get(
+            f"{BASE_URL}/api/auth/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        assert me_response.status_code == 200, (
+            f"GET /api/auth/me returned HTTP {me_response.status_code}, expected 200"
+        )
+        me_data = me_response.json()
+        assert me_data.get("username") == "admin", (
+            f"Expected username='admin', got {me_data.get('username')!r}"
+        )
+        assert me_data.get("role") == "superadmin", (
+            f"Expected role='superadmin', got {me_data.get('role')!r}"
+        )
+
+        # ------------------------------------------------------------------
+        # Step 4 — Assert browser navigated to dashboard root
+        # ------------------------------------------------------------------
+        page.wait_for_url(f"{BASE_URL}/", timeout=10_000)
+        assert page.url == f"{BASE_URL}/", (
+            f"Expected URL '{BASE_URL}/', got '{page.url}'"
+        )
+
+        # ------------------------------------------------------------------
+        # Step 5 — Assert dashboard landmark is visible; no error element
+        # ------------------------------------------------------------------
+        # The dashboard SPA should render a main navigation / sidebar landmark.
+        # Accept common selectors: <nav>, [role="navigation"], or a sidebar element.
+        dashboard_visible = (
+            page.locator('nav, [role="navigation"], aside, [data-testid="sidebar"]').first.is_visible()
+            or page.locator('text="admin"').first.is_visible()
+        )
+        assert dashboard_visible, (
+            "Dashboard landmark (nav/sidebar/username) not visible after login redirect"
+        )
+
+        # Ensure no visible error message is on the page.
+        # Use separate locators for CSS selectors vs Playwright text selectors
+        # (mixing text= pseudo-selectors in a comma-separated CSS list is invalid).
+        css_error_locator = page.locator('[role="alert"], .error, [data-testid="error"]')
+        if css_error_locator.count() > 0:
+            assert not css_error_locator.first.is_visible(), (
+                f"An error element is visible on the dashboard: {css_error_locator.first.inner_text()}"
+            )
