@@ -104,6 +104,13 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 		return nil, isolateHost(r.cfg.Server.URL)
 	case "unisolate_host":
 		return nil, unisolateHost()
+	case "block_ip":
+		ip, _ := task.Params["ip"].(string)
+		duration, _ := task.Params["duration_seconds"].(float64)
+		if duration == 0 {
+			duration = 3600
+		}
+		return nil, blockIP(ip, int(duration))
 	default:
 		return nil, fmt.Errorf("unknown task type: %s", task.TaskType)
 	}

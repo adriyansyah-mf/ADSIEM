@@ -26,7 +26,7 @@ class PlaybookUpdate(BaseModel):
     is_enabled: Optional[bool] = None
 
 
-ACTION_TYPES = Literal['enrich_ioc', 'send_webhook', 'create_case', 'suppress_alert', 'add_note']
+ACTION_TYPES = Literal['enrich_ioc', 'send_webhook', 'create_case', 'suppress_alert', 'add_note', 'isolate_agent', 'block_ip']
 
 class ActionIn(BaseModel):
     action_type: ACTION_TYPES

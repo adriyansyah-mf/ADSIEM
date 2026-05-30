@@ -3,6 +3,7 @@ package task
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"os/exec"
@@ -55,6 +56,21 @@ func insertJumpIfMissing(chain string) {
 		return // already present
 	}
 	exec.Command("iptables", "-I", chain, "1", "-j", isolateChain).Run()
+}
+
+func blockIP(ip string, durationSeconds int) error {
+	if ip == "" {
+		return fmt.Errorf("block_ip: empty IP address")
+	}
+	if err := exec.Command("iptables", "-I", "INPUT", "-s", ip, "-j", "DROP").Run(); err != nil {
+		return fmt.Errorf("block_ip iptables INPUT: %w", err)
+	}
+	if err := exec.Command("iptables", "-I", "FORWARD", "-s", ip, "-j", "DROP").Run(); err != nil {
+		exec.Command("iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run() // rollback
+		return fmt.Errorf("block_ip iptables FORWARD: %w", err)
+	}
+	log.Printf("[task] blocked IP %s for %d seconds (manual unblock: iptables -D INPUT -s %s -j DROP)", ip, durationSeconds, ip)
+	return nil
 }
 
 func resolveSIEMIP(serverURL string) (string, error) {

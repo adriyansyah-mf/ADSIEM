@@ -164,12 +164,85 @@ async def _action_add_note(alert_id: uuid.UUID, ctx: dict, params: dict) -> None
         await db.commit()
 
 
+async def _action_isolate_agent(alert_id: uuid.UUID, ctx: dict, params: dict) -> None:
+    """Queue an isolate_host task for the agent that reported this alert."""
+    hostname = ctx.get("hostname")
+    if not hostname:
+        log.warning("soar_isolate_skipped", reason="no hostname in alert context")
+        return
+
+    async with AsyncSessionLocal() as db:
+        from worker.models import Agent, AgentTask
+        from sqlalchemy import select as _select, update as _update
+        agent_q = _select(Agent).where(Agent.hostname == hostname, Agent.status == "online")
+        agent = (await db.execute(agent_q)).scalar_one_or_none()
+        if not agent:
+            db.add(AlertNote(
+                alert_id=alert_id,
+                content=f"**SOAR Isolate** — agent `{hostname}` not found or offline. Manual isolation required."
+            ))
+            await db.commit()
+            return
+        task = AgentTask(
+            agent_id=agent.id,
+            task_type="isolate_host",
+            payload={},
+            status="pending",
+        )
+        db.add(task)
+        await db.execute(_update(Agent).where(Agent.id == agent.id).values(is_isolated=True))
+        db.add(AlertNote(
+            alert_id=alert_id,
+            content=f"**SOAR Isolate** — isolation task queued for `{hostname}` (agent_id: {agent.id})"
+        ))
+        await db.commit()
+        log.info("soar_isolate_queued", hostname=hostname, agent_id=str(agent.id))
+
+
+async def _action_block_ip(alert_id: uuid.UUID, ctx: dict, params: dict) -> None:
+    """Queue a block_ip task on the agent that reported this alert."""
+    source_ip = ctx.get("source_ip") or params.get("ip")
+    hostname = ctx.get("hostname")
+    if not source_ip:
+        log.warning("soar_block_ip_skipped", reason="no source_ip in context")
+        return
+
+    async with AsyncSessionLocal() as db:
+        from worker.models import Agent, AgentTask
+        from sqlalchemy import select as _select
+        agent_q = _select(Agent).where(Agent.hostname == hostname, Agent.status == "online")
+        agent = (await db.execute(agent_q)).scalar_one_or_none()
+        if not agent:
+            db.add(AlertNote(
+                alert_id=alert_id,
+                content=f"**SOAR Block IP** — agent `{hostname}` not found. Manual block required for `{source_ip}`."
+            ))
+            await db.commit()
+            return
+        duration = params.get("duration_seconds", 3600)
+        task = AgentTask(
+            agent_id=agent.id,
+            task_type="block_ip",
+            payload={"ip": source_ip, "duration_seconds": duration},
+            status="pending",
+        )
+        db.add(task)
+        db.add(AlertNote(
+            alert_id=alert_id,
+            content=f"**SOAR Block IP** — task queued to block `{source_ip}` on `{hostname}` for {duration}s"
+        ))
+        await db.commit()
+        log.info("soar_block_ip_queued", ip=source_ip, hostname=hostname)
+
+
 _ACTION_HANDLERS = {
     "enrich_ioc":      _action_enrich_ioc,
     "send_webhook":    _action_send_webhook,
     "create_case":     _action_create_case,
     "suppress_alert":  _action_suppress_alert,
     "add_note":        _action_add_note,
+    "isolate_agent":   _action_isolate_agent,
+    "block_ip":        _action_block_ip,
 }
 
 
