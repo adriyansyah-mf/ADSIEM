@@ -2,11 +2,12 @@
 """Weekly digest email: summary of alerts in the past 7 days."""
 import asyncio
 import html
+import json
 from datetime import datetime, timezone, timedelta
 from collections import Counter
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from worker.database import AsyncSessionLocal
 from worker.models import Alert
@@ -19,7 +20,77 @@ REPORT_INTERVAL_DAYS = 7
 CHECK_INTERVAL = 3600  # check hourly
 
 
-async def _send_digest(alerts: list) -> None:
+async def _generate_ai_narrative(alerts: list, cutoff) -> str:
+    """Ask Groq to generate an executive summary of the week's security posture."""
+    from worker.groq_client import _groq_post
+    from worker.settings_cache import get_setting
+
+    api_key = await get_setting("groq_api_key") or ""
+    if not api_key:
+        return ""
+
+    # Gather AI verdict distribution from cases created in the period
+    verdict_dist: dict = {}
+    top_mitre: list = []
+    try:
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(text("""
+                SELECT
+                    COALESCE(ioc_data->>'verdict', 'unknown') AS verdict,
+                    COUNT(*) AS cnt
+                FROM cases
+                WHERE created_at >= :cutoff
+                  AND created_by_ai = TRUE
+                GROUP BY COALESCE(ioc_data->>'verdict', 'unknown')
+            """), {"cutoff": cutoff})).mappings().all()
+            verdict_dist = {r["verdict"]: r["cnt"] for r in rows}
+
+            mitre_rows = (await db.execute(text("""
+                SELECT DISTINCT jsonb_array_elements_text(ioc_data->'mitre_techniques') AS technique
+                FROM cases
+                WHERE created_at >= :cutoff
+                  AND created_by_ai = TRUE
+                  AND ioc_data ? 'mitre_techniques'
+                LIMIT 10
+            """), {"cutoff": cutoff})).mappings().all()
+            top_mitre = [r["technique"] for r in mitre_rows]
+    except Exception as e:
+        log.warning("report_narrative_data_failed", error=str(e))
+
+    severity_counts: dict = {}
+    for a in alerts:
+        severity_counts[a.severity] = severity_counts.get(a.severity, 0) + 1
+
+    prompt = f"""You are an AI SOC analyst writing a weekly executive security report.
+
+Data for this week:
+- Total alerts: {len(alerts)}
+- Severity breakdown: {json.dumps(severity_counts)}
+- AI verdict distribution: {json.dumps(verdict_dist)}
+- MITRE ATT&CK techniques observed: {top_mitre}
+
+Write a 3-paragraph executive summary in Indonesian:
+1. Overview of the week's threat landscape
+2. Key findings (campaigns detected, top techniques, notable patterns)
+3. Recommended focus areas for the coming week
+
+Keep it concise — max 200 words total. No bullet points, pure paragraphs."""
+
+    model = await get_setting("groq_model", "llama-3.3-70b-versatile")
+    try:
+        result = await _groq_post(api_key, {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 400,
+        })
+        return result["choices"][0]["message"]["content"].strip()
+    except Exception as exc:
+        log.warning("report_narrative_failed", error=str(exc))
+        return ""
+
+
+async def _send_digest(alerts: list, cutoff) -> None:
     enabled = await get_setting("smtp_enabled", "false")
     if enabled.lower() != "true":
         return
@@ -41,6 +112,19 @@ async def _send_digest(alerts: list) -> None:
     if not recipients or not smtp_from:
         return
 
+    narrative = await _generate_ai_narrative(alerts, cutoff)
+    narrative_html = ""
+    if narrative:
+        narrative_html = (
+            '<div style="background:#0a1628;border-left:3px solid #00d4ff;'
+            'padding:16px;margin-bottom:20px;border-radius:4px">'
+            '<h3 style="color:#00d4ff;margin:0 0 8px 0;font-size:13px">'
+            '🤖 AI SOC Analyst — Weekly Summary</h3>'
+            f'<p style="color:#c8d8e8;font-size:13px;line-height:1.6;margin:0">'
+            f'{narrative.replace(chr(10), "<br>")}</p>'
+            '</div>'
+        )
+
     by_severity = Counter(a.severity for a in alerts)
     total = len(alerts)
     top_rules: list[str] = []
@@ -61,7 +145,7 @@ async def _send_digest(alerts: list) -> None:
 <div style="max-width:600px;margin:0 auto">
   <h2 style="color:#00d4ff">Weekly SIEM Digest</h2>
   <p style="color:#94a3b8">Period: last 7 days — {total} total alerts</p>
-  <h3 style="color:#94a3b8;font-size:14px">By Severity</h3>
+  {narrative_html}<h3 style="color:#94a3b8;font-size:14px">By Severity</h3>
   <table style="width:100%;border-collapse:collapse;margin-bottom:20px">{sev_rows}</table>
   <h3 style="color:#94a3b8;font-size:14px">Top Rules Triggered</h3>
   <ul style="color:#e2e8f0;padding-left:20px">{''.join(top_rules) or '<li>None</li>'}</ul>
@@ -110,7 +194,7 @@ async def report_loop(redis) -> None:
                             select(Alert).where(Alert.created_at >= cutoff)
                         )
                         alerts = result.scalars().all()
-                    await _send_digest(list(alerts))
+                    await _send_digest(list(alerts), cutoff)
                     await redis.set(REDIS_KEY, now.isoformat())
         except Exception as exc:
             log.error("report_loop_error", error=str(exc))
