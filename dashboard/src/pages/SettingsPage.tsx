@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useSettings, useUpdateSetting } from '@/hooks/useSettings'
 import type { Setting } from '@/types'
+import { api } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 
 const SETTING_LABELS: Record<string, string> = {
   groq_api_key: 'Groq API Key',
@@ -158,6 +160,106 @@ function SettingRow({ setting }: { setting: Setting }) {
   )
 }
 
+function MfaSection() {
+  const { user } = useAuthStore()
+  const [qrCode, setQrCode] = useState<string | null>(null)
+  const [secret, setSecret] = useState('')
+  const [code, setCode] = useState('')
+  const [phase, setPhase] = useState<'idle' | 'setup' | 'done' | 'error'>('idle')
+  const [msg, setMsg] = useState('')
+
+  const startSetup = async () => {
+    try {
+      const r = await api.post('/api/auth/mfa/setup')
+      setQrCode(r.data.qr_code)
+      setSecret(r.data.secret)
+      setPhase('setup')
+    } catch {
+      setMsg('Failed to generate MFA setup. Try again.')
+      setPhase('error')
+    }
+  }
+
+  const enableMfa = async () => {
+    try {
+      await api.post('/api/auth/mfa/enable', { code })
+      setPhase('done')
+      setMsg('MFA enabled! Use your authenticator app on next login.')
+      setQrCode(null)
+    } catch {
+      setMsg('Invalid code. Check your authenticator app and try again.')
+      setPhase('error')
+    }
+  }
+
+  return (
+    <div style={{ padding: '20px', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+        <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>
+          Two-Factor Authentication (TOTP)
+        </div>
+        {phase === 'done' && (
+          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(0,255,136,0.15)', color: 'var(--accent-green)', fontFamily: 'Share Tech Mono, monospace' }}>
+            ENABLED
+          </span>
+        )}
+      </div>
+      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.5 }}>
+        Protect your account with an authenticator app (Google Authenticator, Authy, 1Password, etc.)
+      </div>
+
+      {phase === 'idle' && (
+        <button
+          onClick={startSetup}
+          style={{ padding: '7px 18px', background: 'rgba(0,212,255,0.1)', border: '1px solid var(--accent-cyan)', color: 'var(--accent-cyan)', borderRadius: 4, cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}
+        >
+          ENABLE MFA
+        </button>
+      )}
+
+      {phase === 'setup' && qrCode && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            1. Scan this QR code with your authenticator app.<br />
+            2. Or enter the secret manually: <span style={{ color: 'var(--accent-cyan)' }}>{secret}</span>
+          </div>
+          <img src={qrCode} alt="MFA QR Code" style={{ width: 160, height: 160, border: '1px solid var(--border)', borderRadius: 4, background: '#fff' }} />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              value={code}
+              onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="Enter 6-digit code"
+              maxLength={6}
+              style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 12px', color: 'var(--text-primary)', fontFamily: 'Share Tech Mono, monospace', fontSize: 15, width: 160, letterSpacing: 3 }}
+            />
+            <button
+              onClick={enableMfa}
+              disabled={code.length !== 6}
+              style={{ padding: '7px 18px', background: 'rgba(0,255,136,0.1)', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', borderRadius: 4, cursor: code.length === 6 ? 'pointer' : 'not-allowed', opacity: code.length === 6 ? 1 : 0.5, fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13 }}
+            >
+              VERIFY & ENABLE
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'done' && (
+        <div style={{ color: 'var(--accent-green)', fontFamily: 'Share Tech Mono, monospace', fontSize: 12 }}>
+          ✓ {msg}
+        </div>
+      )}
+      {phase === 'error' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ color: 'var(--accent-red)', fontFamily: 'Share Tech Mono, monospace', fontSize: 12 }}>{msg}</div>
+          <button onClick={() => { setPhase('idle'); setMsg('') }} style={{ alignSelf: 'flex-start', padding: '5px 12px', background: 'none', border: '1px solid #1e2028', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+            Try again
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { data: settings, isLoading, error } = useSettings()
 
@@ -183,6 +285,7 @@ export default function SettingsPage() {
             Failed to load settings. You may not have permission (superadmin required).
           </div>
         )}
+        <MfaSection />
         {settings?.map(s => <SettingRow key={s.key} setting={s} />)}
       </div>
     </div>
