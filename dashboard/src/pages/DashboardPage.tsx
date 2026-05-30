@@ -89,25 +89,25 @@ export default function DashboardPage() {
   const { data: allAlerts } = useQuery({
     queryKey: ['alerts-dashboard'],
     queryFn: () => api.get('/api/alerts', { params: { page_size: 200 } }).then(r => r.data),
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   })
 
   const { data: recentAlerts } = useQuery({
     queryKey: ['alerts-recent'],
     queryFn: () => api.get('/api/alerts', { params: { page_size: 20 } }).then(r => r.data),
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   })
 
   const { data: recentEvents } = useQuery({
     queryKey: ['events-recent'],
     queryFn: () => api.get('/api/events', { params: { page_size: 10 } }).then(r => r.data),
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
   })
 
   const { data: casesData } = useQuery({
     queryKey: ['cases-dashboard'],
     queryFn: () => api.get('/api/cases', { params: { page_size: 50 } }).then(r => r.data),
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   })
 
   const { data: agentsData } = useQuery({

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import { emitToast } from '@/hooks/useToast'
 import type { Alert, PaginatedResponse } from '@/types'
 
 export function useAlerts(page = 1, pageSize = 25, status?: string, severity?: string) {
@@ -15,7 +16,11 @@ export function useUpdateAlert() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: { status?: string; assignee_id?: string } }) =>
       api.put(`/api/alerts/${id}`, data).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['alerts'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['alerts'] })
+      emitToast('Alert updated', 'success')
+    },
+    onError: () => emitToast('Failed to update alert', 'error'),
   })
 }
 
@@ -24,6 +29,10 @@ export function useAddAlertNote() {
   return useMutation({
     mutationFn: ({ id, content }: { id: string; content: string }) =>
       api.post(`/api/alerts/${id}/notes`, { content }).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['alerts'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['alerts'] })
+      emitToast('Note added', 'success')
+    },
+    onError: () => emitToast('Failed to add note', 'error'),
   })
 }

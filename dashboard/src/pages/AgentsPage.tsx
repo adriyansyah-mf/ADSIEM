@@ -166,8 +166,9 @@ sudo systemctl enable --now siem-agent`
 
 export default function AgentsPage() {
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [showInstall, setShowInstall] = useState(false)
-  const { data, isLoading } = useAgents(page)
+  const { data, isLoading } = useAgents(page, pageSize)
   const { hasRole } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -241,8 +242,9 @@ export default function AgentsPage() {
           data={data?.items ?? []}
           total={data?.total ?? 0}
           page={page}
-          pageSize={25}
+          pageSize={pageSize}
           onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }}
           onRowClick={hasRole('admin') ? (r) => navigate(`/agents/${r.id}/sources`) : undefined}
         />
       )}

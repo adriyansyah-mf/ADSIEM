@@ -119,10 +119,11 @@ function HuntButton({ alert }: { alert: Alert }) {
 
 export default function AlertsPage() {
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [selected, setSelected] = useState<Alert | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState('')
-  const { data, isLoading } = useAlerts(page, 25, statusFilter || undefined, severityFilter || undefined)
+  const { data, isLoading } = useAlerts(page, pageSize, statusFilter || undefined, severityFilter || undefined)
 
   const columns = [
     { key: 'severity', header: 'Severity', render: (r: Alert) => <SeverityBadge severity={r.severity} /> },
@@ -165,7 +166,9 @@ export default function AlertsPage() {
       </div>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
-          page={page} pageSize={25} onPageChange={setPage} onRowClick={setSelected} />
+          page={page} pageSize={pageSize} onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }}
+          onRowClick={setSelected} />
       )}
       {selected && <AlertDetailModal alert={selected} onClose={() => setSelected(null)} />}
     </div>

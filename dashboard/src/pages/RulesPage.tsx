@@ -298,7 +298,8 @@ const hintStyle: React.CSSProperties = {
 
 export default function RulesPage() {
   const [page, setPage] = useState(1)
-  const { data, isLoading } = useRules(page)
+  const [pageSize, setPageSize] = useState(25)
+  const { data, isLoading } = useRules(page, pageSize)
   const createRule = useCreateRule()
   const updateRule = useUpdateRule()
   const deleteRule = useDeleteRule()
@@ -374,7 +375,8 @@ export default function RulesPage() {
       </div>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
-          page={page} pageSize={25} onPageChange={setPage} />
+          page={page} pageSize={pageSize} onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }} />
       )}
       {(editing || creating) && (
         <YamlEditor

@@ -7,7 +7,8 @@ import type { User } from '@/types'
 
 export default function UsersPage() {
   const [page, setPage] = useState(1)
-  const { data, isLoading } = useUsers(page)
+  const [pageSize, setPageSize] = useState(25)
+  const { data, isLoading } = useUsers(page, pageSize)
   const createUser = useCreateUser()
   const deleteUser = useDeleteUser()
   const [showForm, setShowForm] = useState(false)
@@ -70,7 +71,8 @@ export default function UsersPage() {
       )}
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
-          page={page} pageSize={25} onPageChange={setPage} />
+          page={page} pageSize={pageSize} onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }} />
       )}
     </div>
   )

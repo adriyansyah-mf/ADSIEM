@@ -7,7 +7,8 @@ import type { Webhook } from '@/types'
 
 export default function WebhooksPage() {
   const [page, setPage] = useState(1)
-  const { data, isLoading } = useWebhooks(page)
+  const [pageSize, setPageSize] = useState(25)
+  const { data, isLoading } = useWebhooks(page, pageSize)
   const createWebhook = useCreateWebhook()
   const deleteWebhook = useDeleteWebhook()
   const [showForm, setShowForm] = useState(false)
@@ -56,7 +57,8 @@ export default function WebhooksPage() {
       )}
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
-          page={page} pageSize={25} onPageChange={setPage} />
+          page={page} pageSize={pageSize} onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }} />
       )}
     </div>
   )

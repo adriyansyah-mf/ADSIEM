@@ -6,8 +6,9 @@ import type { RawLog } from '@/types'
 
 export default function LogsPage() {
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const [search, setSearch] = useState('')
-  const { data, isLoading } = useLogs(page, 25, search || undefined)
+  const { data, isLoading } = useLogs(page, pageSize, search || undefined)
 
   const columns = [
     { key: 'time', header: 'Time', render: (r: RawLog) => format(new Date(r.received_at), 'yyyy-MM-dd HH:mm:ss') },
@@ -22,7 +23,8 @@ export default function LogsPage() {
       <h1 className="text-xl font-bold mb-6">Raw Logs</h1>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
-          page={page} pageSize={25} onPageChange={setPage}
+          page={page} pageSize={pageSize} onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }}
           onSearch={(q) => { setSearch(q); setPage(1) }} searchPlaceholder="Search logs..." />
       )}
     </div>
