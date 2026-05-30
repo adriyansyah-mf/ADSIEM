@@ -60,13 +60,15 @@ func main() {
 	}
 	mgr.Update(initialSources)
 
-	// fsnotify for bootstrap fields only
-	config.Watch(*configPath, func(newCfg *config.Config) {
+	// fsnotify for bootstrap fields only (agent.name, agent.group, server.url)
+	if err := config.Watch(*configPath, func(newCfg *config.Config) {
 		cfg.Agent.Name = newCfg.Agent.Name
 		cfg.Agent.Group = newCfg.Agent.Group
 		cfg.Server.URL = newCfg.Server.URL
 		c.BaseURL = newCfg.Server.URL
-	})
+	}); err != nil {
+		slog.Warn("config watcher failed to start", "err", err)
+	}
 
 	// IT hygiene collection loop
 	hygiene.Start(cfg, c)
