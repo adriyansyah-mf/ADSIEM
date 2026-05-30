@@ -124,19 +124,20 @@ CREATE TABLE decoders (
 );
 
 CREATE TABLE alerts (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title       VARCHAR(255) NOT NULL,
-    severity    VARCHAR(20) NOT NULL DEFAULT 'medium',
-    status      VARCHAR(30) NOT NULL DEFAULT 'new',
-    rule_id     UUID REFERENCES rules(id) ON DELETE SET NULL,
-    event_id    UUID REFERENCES events(id) ON DELETE SET NULL,
-    agent_id    UUID REFERENCES agents(id) ON DELETE SET NULL,
-    group_id    VARCHAR(100) NOT NULL DEFAULT 'default',
-    source_ip   VARCHAR(45),
-    hostname    VARCHAR(255),
-    assignee_id UUID REFERENCES users(id) ON DELETE SET NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title            VARCHAR(255) NOT NULL,
+    severity         VARCHAR(20) NOT NULL DEFAULT 'medium',
+    status           VARCHAR(30) NOT NULL DEFAULT 'new',
+    rule_id          UUID REFERENCES rules(id) ON DELETE SET NULL,
+    event_id         UUID REFERENCES events(id) ON DELETE SET NULL,
+    agent_id         UUID REFERENCES agents(id) ON DELETE SET NULL,
+    group_id         VARCHAR(100) NOT NULL DEFAULT 'default',
+    source_ip        VARCHAR(45),
+    hostname         VARCHAR(255),
+    assignee_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+    duplicate_count  INTEGER NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_alerts_status ON alerts(status);

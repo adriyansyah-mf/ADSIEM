@@ -62,7 +62,7 @@ class SigmaEngine:
                     continue
 
             if rule.suppression:
-                sup_key = f"sigma:sup:{rule.id}:{event.get('source.ip', '_')}"
+                sup_key = f"siem:suppress:{rule.id}:{event.get('source.ip', '_')}"
                 sup_window = rule.suppression.get("timewindow", 3600)
                 if not await self._acquire_suppression(sup_key, sup_window):
                     continue
