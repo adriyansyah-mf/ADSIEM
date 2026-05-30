@@ -11,8 +11,19 @@ from app.core.deps import get_current_user, require_permission, get_scoped_group
 from app.models.models import Case, CaseNote, User
 from app.schemas.schemas import CaseOut, CaseCreate, CaseUpdate, CaseNoteCreate, CaseNoteOut, PaginatedResponse
 from app.services.audit import audit_log
+from app.core.config import settings
+import redis.asyncio as aioredis
 
 router = APIRouter(tags=["cases"])
+
+async def _push_rag_reindex(case_id: str) -> None:
+    """Push case_id to Redis reindex queue so worker indexes it immediately."""
+    try:
+        redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        await redis.rpush("siem:rag:reindex", case_id)
+        await redis.aclose()
+    except Exception:
+        pass  # non-critical: hourly loop will catch it
 
 def _case_q(group_filter):
     q = select(Case).options(selectinload(Case.notes))
@@ -81,6 +92,8 @@ async def update_case(
     await db.commit()
     await db.refresh(case)
     background.add_task(audit_log, db, current_user.id, "case_updated", "case", str(case_id))
+    if body.status in ("resolved", "closed"):
+        background.add_task(_push_rag_reindex, str(case_id))
     return CaseOut.model_validate(case)
 
 @router.post("/api/cases/{case_id}/escalate", response_model=CaseOut)
