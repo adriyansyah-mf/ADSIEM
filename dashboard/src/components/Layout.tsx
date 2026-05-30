@@ -8,7 +8,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Package, Server, BookOpen, Wrench, Shield,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
-  GitMerge, BookMarked, ArrowRightLeft, Webhook, ClipboardList,
+  GitMerge, Webhook, ClipboardList,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -55,13 +55,6 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/decoders', label: 'Decoders', icon: Wrench },
       { to: '/correlation', label: 'Correlation', icon: GitMerge },
       { to: '/soar', label: 'SOAR', icon: Shield },
-    ],
-  },
-  {
-    label: 'SOC Tools',
-    items: [
-      { to: '/sop', label: 'SOP Docs', icon: BookMarked, minRole: 'analyst' },
-      { to: '/handover', label: 'Handover', icon: ArrowRightLeft, minRole: 'analyst' },
     ],
   },
 ]
