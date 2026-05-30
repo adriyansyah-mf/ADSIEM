@@ -92,6 +92,70 @@ function ActionBtn({ label, onClick, color, loading, disabled }: { label: string
   )
 }
 
+function AttackTimeline({ items }: { items: any[] }) {
+  if (!items || items.length === 0) {
+    return (
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', padding: '8px 0' }}>
+        No related events found in ±24h window.
+      </div>
+    )
+  }
+  const sevColor = (s: string): string =>
+    ({ critical: '#ff2244', high: '#ff6b00', medium: '#ffd700', low: '#00ff88' } as Record<string, string>)[s] ?? '#00d4ff'
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {items.map((item, idx) => (
+        <div key={item.id} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          {/* Vertical timeline connector */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{
+              width: 10, height: 10, borderRadius: '50%', marginTop: 4, flexShrink: 0,
+              background: item.type === 'alert' ? sevColor(item.severity) : '#64748b',
+              boxShadow: item.is_this_case ? `0 0 8px ${sevColor(item.severity)}` : 'none',
+              border: item.is_this_case ? `2px solid ${sevColor(item.severity)}` : '2px solid transparent',
+            }} />
+            {idx < items.length - 1 && (
+              <div style={{ width: 1, flex: 1, minHeight: 16, background: '#1e2028', margin: '2px 0' }} />
+            )}
+          </div>
+          {/* Event content */}
+          <div style={{ flex: 1, paddingBottom: 10 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                {new Date(item.ts).toLocaleString('en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+              </span>
+              {item.type === 'alert' && (
+                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: `${sevColor(item.severity)}22`, color: sevColor(item.severity), fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase' }}>
+                  {item.severity}
+                </span>
+              )}
+              {item.type === 'note' && (
+                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: 'rgba(100,116,139,0.15)', color: '#64748b', fontFamily: 'Share Tech Mono, monospace' }}>
+                  NOTE
+                </span>
+              )}
+              {item.is_this_case && (
+                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: 'rgba(0,212,255,0.15)', color: '#00d4ff', fontFamily: 'Share Tech Mono, monospace' }}>
+                  THIS CASE
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-primary)', marginTop: 2, lineHeight: 1.4 }}>
+              {item.title}
+            </div>
+            {item.source_ip && (
+              <div style={{ fontSize: 10, fontFamily: 'Share Tech Mono, monospace', color: 'var(--accent-cyan)', marginTop: 1 }}>
+                {item.source_ip}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function CaseDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -107,6 +171,13 @@ export default function CaseDetailPage() {
     queryKey: ['alert', caseData?.alert_id],
     queryFn: () => api.get(`/api/alerts/${caseData!.alert_id}`).then(r => r.data),
     enabled: !!caseData?.alert_id,
+  })
+
+  const { data: timeline } = useQuery({
+    queryKey: ['case-timeline', id],
+    queryFn: () => api.get(`/api/cases/${id}/timeline`).then(r => r.data),
+    enabled: !!id,
+    refetchInterval: 30_000,
   })
 
   const handleAddNote = () => {
@@ -421,6 +492,10 @@ export default function CaseDetailPage() {
                 {addNote.isPending ? '...' : 'ADD NOTE'}
               </button>
             </div>
+          </Box>
+
+          <Box title={`Attack Timeline (${timeline?.items?.length ?? 0} events)`}>
+            <AttackTimeline items={timeline?.items ?? []} />
           </Box>
         </div>
 
