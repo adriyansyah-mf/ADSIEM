@@ -75,7 +75,7 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 
 async def health_probe_loop():
-    """Periodically check postgres and redis; update _health_state for the sync handler."""
+    """Periodically check postgres/redis health and update Prometheus gauges."""
     import sqlalchemy
     while True:
         redis = await get_redis()
@@ -88,10 +88,28 @@ async def health_probe_loop():
             pg_status = "error"
         try:
             await redis.ping()
+            # Update queue lag gauge from the Redis stream pending count
+            try:
+                info = await redis.xinfo_groups(REDIS_STREAM_KEY)
+                lag = sum(g.get("pending", 0) for g in info)
+                queue_lag_gauge.set(lag)
+            except Exception:
+                pass
         except Exception:
             rd_status = "error"
         _health_state["postgres"] = pg_status
         _health_state["redis"] = rd_status
+
+        # Update active agents gauge from DB
+        try:
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select, func
+                from worker.models import Agent
+                result = await db.execute(select(func.count()).where(Agent.status == "online"))
+                active_agents_gauge.set(result.scalar() or 0)
+        except Exception:
+            pass
+
         await asyncio.sleep(30)
 
 

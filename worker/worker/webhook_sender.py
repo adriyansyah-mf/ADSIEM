@@ -104,7 +104,8 @@ async def _deliver(delivery: WebhookDelivery, config: WebhookConfig) -> None:
         except Exception as exc:
             new_attempts = delivery.attempts + 1
             status = "failed" if new_attempts >= MAX_WEBHOOK_ATTEMPTS else "pending"
-            webhook_deliveries_total.labels(status=status).inc()
+            metric_status = "failed" if status == "failed" else "retry"
+            webhook_deliveries_total.labels(status=metric_status).inc()
             log.warning("webhook_failed", delivery_id=str(delivery.id), attempts=new_attempts, error=str(exc))
 
         from sqlalchemy import update

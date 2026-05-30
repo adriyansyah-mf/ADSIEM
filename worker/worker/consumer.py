@@ -77,6 +77,8 @@ async def process_message(
         decoded = dec_engine.decode(log_type, raw_message)
         if not decoded:
             decode_failures.inc()
+        else:
+            events_decoded.inc()
 
         event = Event(
             raw_log_id=raw_log.id,
@@ -93,7 +95,6 @@ async def process_message(
         await db.refresh(event)
 
     logs_ingested.inc()
-    events_decoded.inc()
 
     flat_event = {**decoded, "group_id": group_id, "hostname": hostname}
     rule_matches = await sig_engine.evaluate(flat_event)

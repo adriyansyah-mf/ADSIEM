@@ -24,6 +24,8 @@ class Settings(BaseSettings):
                 "JWT_SECRET must be set to a strong random value via environment variable; "
                 "generate one with: openssl rand -hex 32"
             )
+        if len(v) < 32:
+            raise ValueError("JWT_SECRET must be at least 32 characters")
         return v
 
 settings = Settings()

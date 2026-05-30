@@ -55,6 +55,7 @@ export default function DataTable<T extends { id: string }>({
     setDateFrom(from)
     setDateTo(to)
     onDateRange?.(from, to)
+    onPageChange(1)
   }
 
   const SortIcon = ({ col }: { col: Column<T> }) => {
