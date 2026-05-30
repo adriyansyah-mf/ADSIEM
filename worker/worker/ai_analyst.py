@@ -324,6 +324,12 @@ async def analyze_and_maybe_create_case(
     if enabled.lower() == "false":
         return
 
+    _threshold_str = await get_setting("ai_confidence_threshold", "0.0")
+    try:
+        _confidence_threshold = float(_threshold_str)
+    except (ValueError, TypeError):
+        _confidence_threshold = 0.0
+
     # ── 1. TI enrichment (best-effort) ──────────────────────────────────────
     text_blob = "\n".join(filter(None, [title, source_ip, hostname,
                                         json.dumps(decoded_fields, default=str)[:800]]))
@@ -375,6 +381,12 @@ async def analyze_and_maybe_create_case(
     confidence = analysis.get("confidence", 0.0)
     actions = analysis.get("immediate_actions", [])
     search_queries = analysis.get("search_queries", [])
+
+    if confidence < _confidence_threshold and verdict not in ("monitor", "false_positive"):
+        log.info("ai_low_confidence_downgrade",
+                 alert_id=alert_id, confidence=confidence,
+                 threshold=_confidence_threshold, original_verdict=verdict)
+        verdict = "monitor"
 
     log.info("ai_l1_triage_done",
              alert_id=alert_id,

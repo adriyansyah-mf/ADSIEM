@@ -41,6 +41,7 @@ _DEFAULT_SETTINGS = [
     ("groq_api_key",       "",                          True,  "Groq API key for AI analyst (console.groq.com)"),
     ("groq_model",         "llama-3.3-70b-versatile",   False, "Groq model ID"),
     ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
+    ("ai_confidence_threshold","0.0",                    False, "Minimum AI confidence (0.0-1.0) to create/escalate a case — notes always written regardless"),
     ("searxng_url",        "http://searxng:8080",        False, "Internal URL of SearXNG instance used for threat intel search"),
     ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
