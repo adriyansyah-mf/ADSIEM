@@ -7,15 +7,48 @@ from worker.rag import index_case, index_sop_document
 
 log = structlog.get_logger()
 INDEX_INTERVAL = 3600  # once per hour
+REINDEX_QUEUE = "siem:rag:reindex"  # Redis list for immediate re-index requests
 
 
 async def rag_index_loop() -> None:
+    from worker.redis_client import get_redis
     await asyncio.sleep(60)  # let server start first
+    redis = await get_redis()
     while True:
         try:
+            # ── Drain immediate re-index queue first ──────────────────────────
+            while True:
+                item = await redis.lpop(REINDEX_QUEUE)
+                if not item:
+                    break
+                case_id = item.decode() if isinstance(item, bytes) else item
+                try:
+                    async with AsyncSessionLocal() as db:
+                        row = (await db.execute(text("""
+                            SELECT c.id::text, c.title, c.description,
+                                   COALESCE(c.ioc_data->>'verdict', c.status) AS verdict,
+                                   c.group_id
+                            FROM cases c
+                            WHERE c.id = :case_id::uuid
+                        """), {"case_id": case_id})).mappings().first()
+                    if row:
+                        await index_case(
+                            case_id=row["id"],
+                            title=row["title"],
+                            description=row["description"],
+                            verdict=row["verdict"],
+                            group_id=row["group_id"],
+                        )
+                        log.info("rag_reindex_immediate", case_id=case_id, verdict=row["verdict"])
+                except Exception as e:
+                    log.error("rag_reindex_item_error", case_id=case_id, error=str(e))
+
+            # ── Batch poll for unindexed resolved/closed cases ────────────────
             async with AsyncSessionLocal() as db:
                 rows = (await db.execute(text("""
-                    SELECT c.id::text, c.title, c.description, c.status, c.group_id
+                    SELECT c.id::text, c.title, c.description,
+                           COALESCE(c.ioc_data->>'verdict', c.status) AS verdict,
+                           c.group_id
                     FROM cases c
                     LEFT JOIN case_embeddings ce ON ce.case_id = c.id
                     WHERE c.status IN ('resolved', 'closed')
@@ -31,7 +64,7 @@ async def rag_index_loop() -> None:
                         case_id=row["id"],
                         title=row["title"],
                         description=row["description"],
-                        verdict=row["status"],
+                        verdict=row["verdict"],
                         group_id=row["group_id"],
                     )
         except asyncio.CancelledError:
