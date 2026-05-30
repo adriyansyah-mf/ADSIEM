@@ -1,7 +1,8 @@
 # server-api/app/api/routes/ueba.py
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 
@@ -86,3 +87,41 @@ async def get_status(
         user_snapshot_count=user_count,
         ip_snapshot_count=ip_count,
     )
+
+
+@router.get("/api/ueba/{entity_type}/{entity_value}/history")
+async def entity_risk_history(
+    entity_type: str,
+    entity_value: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_permission("alerts:read"))],
+    days: int = Query(default=30, le=90),
+):
+    """Return daily risk score history for a UEBA entity."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    daily_q = (
+        select(
+            cast(UebaAnomaly.detected_at, Date).label("day"),
+            func.max(UebaAnomaly.risk_score).label("max_risk"),
+            func.count().label("anomaly_count"),
+        )
+        .where(
+            UebaAnomaly.entity_type == entity_type,
+            UebaAnomaly.entity_value == entity_value,
+            UebaAnomaly.detected_at >= since,
+        )
+        .group_by(cast(UebaAnomaly.detected_at, Date))
+        .order_by(cast(UebaAnomaly.detected_at, Date).asc())
+    )
+    rows = (await db.execute(daily_q)).all()
+
+    return {
+        "entity_type": entity_type,
+        "entity_value": entity_value,
+        "days": days,
+        "history": [
+            {"day": str(r.day), "max_risk": round(r.max_risk, 1), "anomaly_count": r.anomaly_count}
+            for r in rows
+        ],
+    }
