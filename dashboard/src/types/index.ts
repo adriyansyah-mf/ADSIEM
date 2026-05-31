@@ -6,6 +6,7 @@ export interface User {
   group_id: string
   is_active: boolean
   created_at: string
+  mfa_enabled: boolean
 }
 
 export interface AgentPackage {

@@ -23,6 +23,7 @@ class UserMe(BaseModel):
     email: str
     role: str
     group_id: str
+    mfa_enabled: bool = False
     model_config = {"from_attributes": True}
 
 # ─── Users ───────────────────────────────────────────────────────
