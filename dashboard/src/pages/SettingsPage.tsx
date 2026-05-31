@@ -161,18 +161,28 @@ function SettingRow({ setting }: { setting: Setting }) {
 }
 
 function MfaSection() {
-  const { user } = useAuthStore()
+  const { user, setUser } = useAuthStore()
+  const isEnabled = user?.mfa_enabled ?? false
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [secret, setSecret] = useState('')
   const [code, setCode] = useState('')
-  const [phase, setPhase] = useState<'idle' | 'setup' | 'done' | 'error'>('idle')
+  const [phase, setPhase] = useState<'idle' | 'setup' | 'disable' | 'error'>('idle')
   const [msg, setMsg] = useState('')
 
+  const refreshUser = async () => {
+    try {
+      const me = await api.get('/api/auth/me')
+      setUser(me.data)
+    } catch {}
+  }
+
   const startSetup = async () => {
+    setMsg('')
     try {
       const r = await api.post('/api/auth/mfa/setup')
       setQrCode(r.data.qr_code)
       setSecret(r.data.secret)
+      setCode('')
       setPhase('setup')
     } catch {
       setMsg('Failed to generate MFA setup. Try again.')
@@ -183,11 +193,26 @@ function MfaSection() {
   const enableMfa = async () => {
     try {
       await api.post('/api/auth/mfa/enable', { code })
-      setPhase('done')
-      setMsg('MFA enabled! Use your authenticator app on next login.')
+      await refreshUser()
+      setPhase('idle')
       setQrCode(null)
+      setCode('')
+      setMsg('MFA enabled. Authenticator required on next login.')
     } catch {
       setMsg('Invalid code. Check your authenticator app and try again.')
+      setPhase('error')
+    }
+  }
+
+  const disableMfa = async () => {
+    try {
+      await api.post('/api/auth/mfa/disable', { code })
+      await refreshUser()
+      setPhase('idle')
+      setCode('')
+      setMsg('MFA disabled.')
+    } catch {
+      setMsg('Invalid code. MFA not disabled.')
       setPhase('error')
     }
   }
@@ -198,23 +223,31 @@ function MfaSection() {
         <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>
           Two-Factor Authentication (TOTP)
         </div>
-        {phase === 'done' && (
-          <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: 'rgba(0,255,136,0.15)', color: 'var(--accent-green)', fontFamily: 'Share Tech Mono, monospace' }}>
-            ENABLED
-          </span>
-        )}
+        <span style={{
+          fontSize: 10, padding: '2px 7px', borderRadius: 3, fontFamily: 'Share Tech Mono, monospace',
+          background: isEnabled ? 'rgba(0,255,136,0.15)' : 'rgba(100,116,139,0.15)',
+          color: isEnabled ? 'var(--accent-green)' : 'var(--text-muted)',
+        }}>
+          {isEnabled ? 'ACTIVE' : 'INACTIVE'}
+        </span>
       </div>
       <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.5 }}>
         Protect your account with an authenticator app (Google Authenticator, Authy, 1Password, etc.)
       </div>
 
-      {phase === 'idle' && (
-        <button
-          onClick={startSetup}
-          style={{ padding: '7px 18px', background: 'rgba(0,212,255,0.1)', border: '1px solid var(--accent-cyan)', color: 'var(--accent-cyan)', borderRadius: 4, cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}
-        >
+      {phase === 'idle' && !isEnabled && (
+        <button onClick={startSetup} style={{ padding: '7px 18px', background: 'rgba(0,212,255,0.1)', border: '1px solid var(--accent-cyan)', color: 'var(--accent-cyan)', borderRadius: 4, cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>
           ENABLE MFA
         </button>
+      )}
+
+      {phase === 'idle' && isEnabled && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {msg && <div style={{ color: 'var(--accent-green)', fontFamily: 'Share Tech Mono, monospace', fontSize: 11 }}>✓ {msg}</div>}
+          <button onClick={() => { setCode(''); setMsg(''); setPhase('disable') }} style={{ alignSelf: 'flex-start', padding: '7px 18px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171', borderRadius: 4, cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>
+            DISABLE MFA
+          </button>
+        </div>
       )}
 
       {phase === 'setup' && qrCode && (
@@ -230,28 +263,48 @@ function MfaSection() {
               onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               placeholder="Enter 6-digit code"
               maxLength={6}
+              autoFocus
               style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 12px', color: 'var(--text-primary)', fontFamily: 'Share Tech Mono, monospace', fontSize: 15, width: 160, letterSpacing: 3 }}
             />
-            <button
-              onClick={enableMfa}
-              disabled={code.length !== 6}
-              style={{ padding: '7px 18px', background: 'rgba(0,255,136,0.1)', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', borderRadius: 4, cursor: code.length === 6 ? 'pointer' : 'not-allowed', opacity: code.length === 6 ? 1 : 0.5, fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13 }}
-            >
+            <button onClick={enableMfa} disabled={code.length !== 6}
+              style={{ padding: '7px 18px', background: 'rgba(0,255,136,0.1)', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', borderRadius: 4, cursor: code.length === 6 ? 'pointer' : 'not-allowed', opacity: code.length === 6 ? 1 : 0.5, fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13 }}>
               VERIFY & ENABLE
             </button>
           </div>
         </div>
       )}
 
-      {phase === 'done' && (
-        <div style={{ color: 'var(--accent-green)', fontFamily: 'Share Tech Mono, monospace', fontSize: 12 }}>
-          ✓ {msg}
+      {phase === 'disable' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            Enter your current TOTP code to confirm disabling MFA.
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              value={code}
+              onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="000000"
+              maxLength={6}
+              autoFocus
+              inputMode="numeric"
+              style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 12px', color: 'var(--text-primary)', fontFamily: 'Share Tech Mono, monospace', fontSize: 15, width: 120, letterSpacing: 3 }}
+            />
+            <button onClick={disableMfa} disabled={code.length !== 6}
+              style={{ padding: '7px 18px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171', borderRadius: 4, cursor: code.length === 6 ? 'pointer' : 'not-allowed', opacity: code.length === 6 ? 1 : 0.5, fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13 }}>
+              CONFIRM DISABLE
+            </button>
+            <button onClick={() => { setPhase('idle'); setCode('') }}
+              style={{ padding: '7px 12px', background: 'none', border: '1px solid #1e2028', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
+
       {phase === 'error' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ color: 'var(--accent-red)', fontFamily: 'Share Tech Mono, monospace', fontSize: 12 }}>{msg}</div>
-          <button onClick={() => { setPhase('idle'); setMsg('') }} style={{ alignSelf: 'flex-start', padding: '5px 12px', background: 'none', border: '1px solid #1e2028', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+          <button onClick={() => { setPhase(isEnabled ? 'disable' : 'setup'); setMsg('') }} style={{ alignSelf: 'flex-start', padding: '5px 12px', background: 'none', border: '1px solid #1e2028', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
             Try again
           </button>
         </div>

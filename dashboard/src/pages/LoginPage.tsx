@@ -131,6 +131,8 @@ const CORNERS: CSSProperties[] = [
 export default function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaRequired, setMfaRequired] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [errKey, setErrKey] = useState(0)
@@ -142,13 +144,24 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      const { data } = await api.post('/api/auth/login', { username, password })
+      const body: Record<string, string> = { username, password }
+      if (mfaRequired) body.mfa_code = mfaCode
+      const { data } = await api.post('/api/auth/login', body)
+      if (data.mfa_required) {
+        setMfaRequired(true)
+        setLoading(false)
+        return
+      }
       setAccessToken(data.access_token)
       const me = await api.get('/api/auth/me')
       setUser(me.data)
       navigate('/')
     } catch {
-      setError('ACCESS DENIED — Invalid credentials')
+      if (mfaRequired) {
+        setError('INVALID MFA CODE — Check your authenticator app')
+      } else {
+        setError('ACCESS DENIED — Invalid credentials')
+      }
       setErrKey(k => k + 1)
     } finally {
       setLoading(false)
@@ -328,36 +341,64 @@ export default function LoginPage() {
             {/* Form */}
             <form onSubmit={handleSubmit}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 32, marginBottom: 40 }}>
-                <div>
-                  <div style={{
-                    fontSize: 12, letterSpacing: '0.18em',
-                    color: 'rgba(6,182,212,0.7)', marginBottom: 6, textTransform: 'uppercase',
-                  }}>[ USERNAME ]</div>
-                  <input
-                    className="soc-input"
-                    value={username}
-                    onChange={e => setUsername(e.target.value)}
-                    placeholder="ENTER IDENTIFIER"
-                    required
-                    autoFocus
-                    autoComplete="username"
-                  />
-                </div>
-                <div>
-                  <div style={{
-                    fontSize: 12, letterSpacing: '0.18em',
-                    color: 'rgba(6,182,212,0.7)', marginBottom: 6, textTransform: 'uppercase',
-                  }}>[ PASSWORD ]</div>
-                  <input
-                    className="soc-input"
-                    type="password"
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••••••"
-                    required
-                    autoComplete="current-password"
-                  />
-                </div>
+                {!mfaRequired ? (
+                  <>
+                    <div>
+                      <div style={{
+                        fontSize: 12, letterSpacing: '0.18em',
+                        color: 'rgba(6,182,212,0.7)', marginBottom: 6, textTransform: 'uppercase',
+                      }}>[ USERNAME ]</div>
+                      <input
+                        className="soc-input"
+                        value={username}
+                        onChange={e => setUsername(e.target.value)}
+                        placeholder="ENTER IDENTIFIER"
+                        required
+                        autoFocus
+                        autoComplete="username"
+                      />
+                    </div>
+                    <div>
+                      <div style={{
+                        fontSize: 12, letterSpacing: '0.18em',
+                        color: 'rgba(6,182,212,0.7)', marginBottom: 6, textTransform: 'uppercase',
+                      }}>[ PASSWORD ]</div>
+                      <input
+                        className="soc-input"
+                        type="password"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        placeholder="••••••••••••"
+                        required
+                        autoComplete="current-password"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <div style={{
+                      fontSize: 11, letterSpacing: '0.14em',
+                      color: 'rgba(6,182,212,0.5)', marginBottom: 14, lineHeight: 1.6,
+                    }}>
+                      MFA REQUIRED — Enter the 6-digit code from your authenticator app.
+                    </div>
+                    <div style={{
+                      fontSize: 12, letterSpacing: '0.18em',
+                      color: 'rgba(6,182,212,0.7)', marginBottom: 6, textTransform: 'uppercase',
+                    }}>[ AUTHENTICATOR CODE ]</div>
+                    <input
+                      className="soc-input"
+                      value={mfaCode}
+                      onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      required
+                      autoFocus
+                      maxLength={6}
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                    />
+                  </div>
+                )}
               </div>
 
               {error && (
@@ -404,7 +445,7 @@ export default function LoginPage() {
                     AUTHENTICATING
                     <span style={{ animation: 'blink-cursor 0.7s step-end infinite 0.35s' }}>▮</span>
                   </span>
-                ) : 'INITIATE ACCESS'}
+                ) : mfaRequired ? 'VERIFY CODE' : 'INITIATE ACCESS'}
               </button>
             </form>
 
