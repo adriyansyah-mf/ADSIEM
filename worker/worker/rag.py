@@ -88,13 +88,13 @@ async def retrieve_similar_cases(
                     c.title,
                     c.description,
                     c.status,
-                    1 - (ce.embedding <=> :embedding::vector)           AS similarity
+                    1 - (ce.embedding <=> CAST(:embedding AS vector))           AS similarity
                 FROM case_embeddings ce
                 JOIN cases c ON c.id = ce.case_id
                 WHERE ce.group_id = :group_id
                   AND c.status IN ('resolved', 'closed')
-                  AND 1 - (ce.embedding <=> :embedding::vector) >= :min_score
-                ORDER BY ce.embedding <=> :embedding::vector
+                  AND 1 - (ce.embedding <=> CAST(:embedding AS vector)) >= :min_score
+                ORDER BY ce.embedding <=> CAST(:embedding AS vector)
                 LIMIT :top_k
             """), {
                 "embedding": str(vector),
@@ -201,13 +201,13 @@ async def retrieve_sop_context(
                 SELECT
                     sc.chunk_text,
                     sd.filename,
-                    1 - (sc.embedding <=> :embedding::vector) AS similarity
+                    1 - (sc.embedding <=> CAST(:embedding AS vector)) AS similarity
                 FROM sop_chunks sc
                 JOIN sop_documents sd ON sd.id = sc.document_id
                 WHERE sc.group_id = :group_id
                   AND sd.status = 'indexed'
-                  AND 1 - (sc.embedding <=> :embedding::vector) >= :min_score
-                ORDER BY sc.embedding <=> :embedding::vector
+                  AND 1 - (sc.embedding <=> CAST(:embedding AS vector)) >= :min_score
+                ORDER BY sc.embedding <=> CAST(:embedding AS vector)
                 LIMIT :top_k
             """), {
                 "embedding": str(vector),
