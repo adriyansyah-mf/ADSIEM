@@ -196,7 +196,7 @@ export default function YaraPage() {
                   <button onClick={() => openForm(rule)} className="p-1 rounded hover:bg-muted transition-colors">
                     <Edit2 size={14} />
                   </button>
-                  <button onClick={() => deleteRule.mutate(rule.id)} className="p-1 rounded hover:bg-muted text-destructive transition-colors">
+                  <button onClick={() => { if (window.confirm(`Delete rule "${rule.name}"?`)) deleteRule.mutate(rule.id) }} className="p-1 rounded hover:bg-muted text-destructive transition-colors">
                     <Trash2 size={14} />
                   </button>
                 </div>

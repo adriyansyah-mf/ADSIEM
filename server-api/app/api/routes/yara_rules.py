@@ -6,7 +6,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_scoped_group
 from app.models.models import Agent, AgentTask, YaraRule
 from app.schemas.schemas import YaraRuleCreate, YaraRuleOut, YaraScanRequest, AgentTaskOut
 
@@ -123,10 +123,13 @@ async def trigger_scan(
     body: YaraScanRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     user=Depends(get_current_user),
+    group_filter: str | None = Depends(get_scoped_group),
 ):
     agent = (await db.execute(select(Agent).where(Agent.id == body.agent_id))).scalar_one_or_none()
     if not agent:
         raise HTTPException(404, "Agent not found")
+    if group_filter and agent.group_id != group_filter:
+        raise HTTPException(403, "Agent not in your group")
 
     if body.rule_ids:
         rules = (await db.execute(select(YaraRule).where(YaraRule.id.in_(body.rule_ids), YaraRule.is_enabled == True))).scalars().all()

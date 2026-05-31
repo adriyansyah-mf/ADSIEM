@@ -3,6 +3,7 @@ package task
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -196,20 +197,18 @@ func evalCondition(condition string, results map[string]bool) bool {
 		}
 		return len(results) > 0
 	case strings.Contains(cond, " of them"):
-		// e.g. "2 of them"
-		var n int
-		if _, err := strings.NewReader(cond).Read([]byte{}); err == nil {
-			// simple: count matches
-			count := 0
-			for _, v := range results {
-				if v {
-					count++
-				}
+		count := 0
+		for _, v := range results {
+			if v {
+				count++
 			}
-			return count > 0 // fallback: any
 		}
-		_ = n
-		return false
+		// parse N from "2 of them", "3 of them", etc.
+		var n int
+		if _, err := fmt.Sscanf(cond, "%d of them", &n); err == nil && n > 0 {
+			return count >= n
+		}
+		return count > 0
 	default:
 		// evaluate as "any of them" fallback
 		for _, v := range results {
