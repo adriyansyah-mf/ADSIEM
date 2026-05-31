@@ -69,10 +69,11 @@ async def get_case(
     case_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
     result = await db.execute(select(Case).options(selectinload(Case.notes)).where(Case.id == case_id))
     case = result.scalar_one_or_none()
-    if not case:
+    if not case or (group_filter and case.group_id != group_filter):
         raise HTTPException(status_code=404, detail="Case not found")
     return CaseOut.model_validate(case)
 

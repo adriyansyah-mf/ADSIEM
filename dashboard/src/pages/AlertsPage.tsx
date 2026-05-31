@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import DataTable from '@/components/DataTable'
 import SeverityBadge from '@/components/SeverityBadge'
 import StatusBadge from '@/components/StatusBadge'
@@ -118,11 +118,19 @@ function HuntButton({ alert }: { alert: Alert }) {
 }
 
 export default function AlertsPage() {
+  const [searchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [selected, setSelected] = useState<Alert | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
-  const [severityFilter, setSeverityFilter] = useState('')
+  const [severityFilter, setSeverityFilter] = useState(() => searchParams.get('severity') ?? '')
+
+  // Sync URL params on first mount (e.g. from dashboard severity clicks)
+  useEffect(() => {
+    const sv = searchParams.get('severity')
+    if (sv) setSeverityFilter(sv)
+  }, [])
+
   const { data, isLoading } = useAlerts(page, pageSize, statusFilter || undefined, severityFilter || undefined)
 
   const columns = [

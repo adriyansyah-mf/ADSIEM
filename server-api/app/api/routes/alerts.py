@@ -25,7 +25,7 @@ async def list_alerts(
     _=Depends(require_permission("alerts:read")),
     page: int = 1, page_size: int = 25,
     status: str | None = None, severity: str | None = None,
-    assignee_id: UUID | None = None,
+    assignee_id: UUID | None = None, source_ip: str | None = None,
 ):
     q = select(Alert).options(selectinload(Alert.notes)).order_by(Alert.created_at.desc())
     if group_filter:
@@ -36,6 +36,8 @@ async def list_alerts(
         q = q.where(Alert.severity == severity)
     if assignee_id:
         q = q.where(Alert.assignee_id == assignee_id)
+    if source_ip:
+        q = q.where(Alert.source_ip == source_ip)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
     return PaginatedResponse(total=total, page=page, page_size=page_size,

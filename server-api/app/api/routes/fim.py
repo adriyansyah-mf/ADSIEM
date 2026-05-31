@@ -7,7 +7,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_agent, get_current_user
+from app.core.deps import get_agent, get_current_user, get_scoped_group
 from app.models.models import Agent, FimEvent, FimWatchPath, User
 from app.schemas.schemas import FimEventIn, FimEventOut, FimWatchPathCreate, FimWatchPathOut
 
@@ -104,12 +104,15 @@ async def ingest_fim(
 async def list_fim_events(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
     agent_id: str | None = Query(default=None),
     event_type: str | None = Query(default=None),
     path_prefix: str | None = Query(default=None),
     limit: int = Query(default=200, le=1000),
 ):
     q = select(FimEvent).order_by(desc(FimEvent.detected_at)).limit(limit)
+    if group_filter:
+        q = q.where(FimEvent.group_id == group_filter)
     if agent_id:
         q = q.where(FimEvent.agent_id == UUID(agent_id))
     if event_type:

@@ -6,7 +6,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_scoped_group
 from app.models.models import Alert, ThreatHunt, User
 from app.schemas.schemas import ThreatHuntCreate, ThreatHuntOut
 
@@ -58,11 +58,13 @@ async def create_hunt(
 async def list_hunts(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
     limit: int = Query(default=50, le=200),
 ):
-    result = await db.execute(
-        select(ThreatHunt).order_by(desc(ThreatHunt.created_at)).limit(limit)
-    )
+    q = select(ThreatHunt).order_by(desc(ThreatHunt.created_at)).limit(limit)
+    if group_filter:
+        q = q.where(ThreatHunt.group_id == group_filter)
+    result = await db.execute(q)
     return result.scalars().all()
 
 
