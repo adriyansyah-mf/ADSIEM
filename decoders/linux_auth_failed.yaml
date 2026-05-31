@@ -3,7 +3,7 @@ log_type: linux_auth
 type: regex
 priority: 10
 enabled: true
-pattern: 'Failed password for (?P<user>\S+) from (?P<src_ip>\S+) port (?P<port>\d+)'
+pattern: 'Failed password for (?:invalid user )?(?P<user>\S+) from (?P<src_ip>\S+) port (?P<port>\d+)'
 fields:
   event.category: authentication
   event.action: login_failed

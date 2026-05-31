@@ -132,7 +132,7 @@ async def main():
 
     async def _consume():
         while True:
-            await consume_loop(state["dec_engine"], state["sig_engine"])
+            await consume_loop(state)
 
     redis = await get_redis()
 

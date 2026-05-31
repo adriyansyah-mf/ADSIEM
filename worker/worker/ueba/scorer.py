@@ -64,22 +64,27 @@ async def _upsert_entity_score(
 ) -> None:
     now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as db:
-        existing = await db.get(UebaEntityScore, (entity_type, entity_value))
-        if existing:
-            existing.risk_score   = new_risk
-            existing.last_seen_at = now
-            existing.updated_at   = now
-            if is_anomaly:
-                existing.anomaly_count   += 1
-                existing.last_anomaly_at  = now
-        else:
-            db.add(UebaEntityScore(
-                entity_type=entity_type, entity_value=entity_value,
-                group_id=group_id, risk_score=new_risk,
-                anomaly_count=1 if is_anomaly else 0,
-                last_anomaly_at=now if is_anomaly else None,
-                last_seen_at=now,
-            ))
+        stmt = pg_insert(UebaEntityScore).values(
+            entity_type=entity_type,
+            entity_value=entity_value,
+            group_id=group_id,
+            risk_score=new_risk,
+            anomaly_count=1 if is_anomaly else 0,
+            last_anomaly_at=now if is_anomaly else None,
+            last_seen_at=now,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["entity_type", "entity_value"],
+            set_={
+                "risk_score":      stmt.excluded.risk_score,
+                "last_seen_at":    stmt.excluded.last_seen_at,
+                "updated_at":      now,
+                "anomaly_count":   UebaEntityScore.anomaly_count + (1 if is_anomaly else 0),
+                "last_anomaly_at": stmt.excluded.last_anomaly_at if is_anomaly
+                                   else UebaEntityScore.last_anomaly_at,
+            },
+        )
+        await db.execute(stmt)
         await db.commit()
 
 

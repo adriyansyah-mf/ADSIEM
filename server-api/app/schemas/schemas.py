@@ -127,6 +127,13 @@ class LogIngestRequest(BaseModel):
     received_at: datetime
     hostname: str
 
+    @field_validator("log_type", "raw_message")
+    @classmethod
+    def not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("must not be empty")
+        return v
+
 # ─── Logs & Events ───────────────────────────────────────────────
 
 class RawLogOut(BaseModel):

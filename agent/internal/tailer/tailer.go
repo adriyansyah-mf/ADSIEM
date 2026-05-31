@@ -12,7 +12,7 @@ import (
 
 // Tail reads new lines from path and pushes them to buf.
 // Seeks to end of file on first open (tail -f behavior).
-// Retries if file is not found (handles log rotation).
+// Handles log rotation by detecting inode change on EOF.
 // Stops when stopCh is closed.
 func Tail(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{}) {
 	var missCount int
@@ -25,12 +25,11 @@ func Tail(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{}) {
 
 		f, err := os.Open(path)
 		if err != nil {
-			// Log once per 5-minute window to avoid spam when file doesn't exist yet.
 			if missCount == 0 {
 				slog.Warn("cannot open log file, will retry silently", "path", path, "err", err)
 			}
 			missCount++
-			if missCount >= 60 { // reset every 5 min (60 × 5s)
+			if missCount >= 60 {
 				missCount = 0
 			}
 			time.Sleep(5 * time.Second)
@@ -43,7 +42,10 @@ func Tail(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{}) {
 			continue
 		}
 		slog.Info("tailing", "path", path, "type", logType)
-		scanner := bufio.NewScanner(f)
+
+		openedFi, _ := f.Stat()
+		reader := bufio.NewReaderSize(f, 65536)
+
 		for {
 			select {
 			case <-stopCh:
@@ -51,18 +53,32 @@ func Tail(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{}) {
 				return
 			default:
 			}
-			if scanner.Scan() {
-				line := scanner.Text()
+
+			line, err := reader.ReadString('\n')
+			if len(line) > 0 {
+				// Strip trailing newline/carriage return
+				for len(line) > 0 && (line[len(line)-1] == '\n' || line[len(line)-1] == '\r') {
+					line = line[:len(line)-1]
+				}
 				if line != "" {
 					buf.Push(encode(logType, line))
 				}
-			} else {
-				if scanner.Err() != nil {
-					slog.Error("scanner error", "path", path, "err", scanner.Err())
+			}
+			if err == nil {
+				continue
+			}
+			if err != io.EOF {
+				slog.Error("reader error", "path", path, "err", err)
+				break
+			}
+			// EOF — check for log rotation before sleeping
+			if pathFi, statErr := os.Stat(path); statErr == nil && openedFi != nil {
+				if !os.SameFile(openedFi, pathFi) {
+					slog.Info("log rotation detected, reopening", "path", path)
 					break
 				}
-				time.Sleep(200 * time.Millisecond)
 			}
+			time.Sleep(200 * time.Millisecond)
 		}
 		f.Close()
 	}

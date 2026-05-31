@@ -56,11 +56,15 @@ async def process_message(
     sig_engine: SigmaEngine,
 ) -> None:
     agent_id_str = data.get("agent_id")
-    log_type = data.get("log_type", "")
-    raw_message = data.get("raw_message", "")
+    log_type = data.get("log_type", "").strip()
+    raw_message = data.get("raw_message", "").strip()
     received_at_str = data.get("received_at", "")
     hostname = data.get("hostname", "unknown")
     group_id = data.get("group_id", "default")
+
+    if not raw_message:
+        log.warning("skipping_empty_message", agent_id=agent_id_str, log_type=log_type)
+        return
 
     try:
         received_at = datetime.fromisoformat(received_at_str)
@@ -70,6 +74,11 @@ async def process_message(
     agent_id = uuid.UUID(agent_id_str) if agent_id_str else None
 
     async with AsyncSessionLocal() as db:
+        if agent_id is not None:
+            from worker.models import Agent as AgentModel
+            if not await db.get(AgentModel, agent_id):
+                agent_id = None
+
         raw_log = RawLog(agent_id=agent_id, log_type=log_type, raw_message=raw_message, received_at=received_at)
         db.add(raw_log)
         await db.flush()
@@ -118,7 +127,7 @@ async def process_message(
     except Exception as _ueba_exc:
         log.warning("ueba_score_error", error=str(_ueba_exc))
 
-async def consume_loop(dec_engine: DecoderEngine, sig_engine: SigmaEngine) -> None:
+async def consume_loop(state: dict) -> None:
     redis = await get_redis()
     await ensure_stream_group(redis)
 
@@ -133,7 +142,7 @@ async def consume_loop(dec_engine: DecoderEngine, sig_engine: SigmaEngine) -> No
             for _stream, entries in messages:
                 for msg_id, data in entries:
                     try:
-                        await process_message(data, dec_engine, sig_engine)
+                        await process_message(data, state["dec_engine"], state["sig_engine"])
                         await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
                     except Exception as exc:
                         log.error("message_processing_failed", msg_id=msg_id, error=str(exc))
