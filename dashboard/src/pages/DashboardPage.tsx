@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { format, isToday } from 'date-fns'
+import { format } from 'date-fns'
 import { Search, Loader2 } from 'lucide-react'
 import type { Alert, Agent, Case, Event } from '@/types'
 
@@ -149,13 +149,14 @@ export default function DashboardPage() {
   const onlineAgentCount = agents.filter((a: Agent) => a.status === 'online').length
 
   const alerts: Alert[] = allAlerts?.items ?? []
-  const todayAlerts = alerts.filter(a => isToday(new Date(a.created_at)))
+  const cutoff24h = Date.now() - 24 * 60 * 60 * 1000
+  const todayAlerts = alerts.filter(a => new Date(a.created_at).getTime() >= cutoff24h)
 
   const severityCounts = {
-    critical: todayAlerts.filter(a => a.severity === 'critical').length,
-    high: todayAlerts.filter(a => a.severity === 'high').length,
-    medium: todayAlerts.filter(a => a.severity === 'medium').length,
-    low: todayAlerts.filter(a => a.severity === 'low').length,
+    critical: alerts.filter(a => a.severity === 'critical').length,
+    high: alerts.filter(a => a.severity === 'high').length,
+    medium: alerts.filter(a => a.severity === 'medium').length,
+    low: alerts.filter(a => a.severity === 'low').length,
   }
 
   // Top 5 source IPs
@@ -186,7 +187,7 @@ export default function DashboardPage() {
           <StatRow label="Medium" value={severityCounts.medium} color="#ffd700" />
           <StatRow label="Low" value={severityCounts.low} color="#00ff88" />
           <div style={{ marginTop: '6px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
-            TODAY: {todayAlerts.length} TOTAL
+            LAST 24H: {todayAlerts.length} TOTAL
           </div>
         </SectionCard>
 
