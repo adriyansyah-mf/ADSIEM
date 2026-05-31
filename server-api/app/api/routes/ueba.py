@@ -81,11 +81,17 @@ async def get_status(
         .where(UebaFeatureSnapshot.entity_type == "ip")
     )).scalar_one()
 
+    host_count = (await db.execute(
+        select(func.count()).select_from(UebaFeatureSnapshot)
+        .where(UebaFeatureSnapshot.entity_type == "host")
+    )).scalar_one()
+
     return UebaStatusOut(
         status=status,
         trained_at=trained_at,
         user_snapshot_count=user_count,
         ip_snapshot_count=ip_count,
+        host_snapshot_count=host_count,
     )
 
 
