@@ -12,12 +12,12 @@ search:
       - html
       - json
 
+
 server:
   port: 8080
   bind_address: "0.0.0.0"
   secret_key: "${SEARXNG_SECRET}"
   public_instance: false
-  limiter: false
 
 ui:
   static_use_hash: true
