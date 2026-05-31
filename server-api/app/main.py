@@ -322,7 +322,6 @@ async def _migrate_mfa_columns() -> None:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
 
-@asynccontextmanager
 async def _ws_redis_listener():
     """Subscribe to Redis ws:alerts channel and broadcast to WebSocket clients."""
     import asyncio
