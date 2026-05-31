@@ -514,12 +514,17 @@ export default function DashboardPage() {
         <SectionCard title="Analyst Workload">
           {workload.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No analysts assigned</div>
-          ) : workload.slice(0, 6).map((w) => (
+          ) : workload.slice(0, 7).map((w) => {
+            const isPool = w.user_id === 'unassigned'
+            return (
             <div key={w.user_id} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '5px 0', borderBottom: '1px solid var(--border)',
+              padding: '5px 4px', borderBottom: '1px solid var(--border)',
+              background: isPool ? 'rgba(255,107,0,0.06)' : 'transparent',
+              borderRadius: isPool ? 3 : 0,
+              marginBottom: isPool ? 2 : 0,
             }}>
-              <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '11px', color: 'var(--text-primary)' }}>
+              <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '11px', color: isPool ? '#ff6b00' : 'var(--text-primary)', fontStyle: isPool ? 'italic' : 'normal' }}>
                 {w.username}
               </span>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -529,12 +534,12 @@ export default function DashboardPage() {
                 <span title="Open cases" style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: '#00d4ff' }}>
                   {w.open_cases}C
                 </span>
-                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', fontWeight: 700, color: isPool ? '#ff6b00' : 'var(--text-secondary)' }}>
                   {w.total}
                 </span>
               </div>
             </div>
-          ))}
+          )})}
         </SectionCard>
       </div>
     </div>

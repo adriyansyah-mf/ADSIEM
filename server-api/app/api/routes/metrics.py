@@ -83,7 +83,31 @@ async def analyst_workload(
         user_q = user_q.where(User.group_id == group_filter)
     users = (await db.execute(user_q)).scalars().all()
 
+    # Unassigned pool — always show at top so analysts know what needs picking up
+    unassigned_alert_q = select(func.count()).select_from(Alert).where(
+        Alert.assignee_id == None,
+        Alert.status.in_(["new", "in_progress"])
+    )
+    unassigned_case_q = select(func.count()).select_from(Case).where(
+        Case.assignee_id == None,
+        Case.status.in_(["open", "in_review"])
+    )
+    if group_filter:
+        unassigned_alert_q = unassigned_alert_q.where(Alert.group_id == group_filter)
+        unassigned_case_q  = unassigned_case_q.where(Case.group_id == group_filter)
+    pool_alerts = (await db.execute(unassigned_alert_q)).scalar() or 0
+    pool_cases  = (await db.execute(unassigned_case_q)).scalar()  or 0
+
     result = []
+    if pool_alerts + pool_cases > 0:
+        result.append({
+            "user_id":     "unassigned",
+            "username":    "— unassigned —",
+            "open_alerts": pool_alerts,
+            "open_cases":  pool_cases,
+            "total":       pool_alerts + pool_cases,
+        })
+
     for u in users:
         alert_q = select(func.count()).select_from(Alert).where(
             Alert.assignee_id == u.id,
@@ -93,6 +117,9 @@ async def analyst_workload(
             Case.assignee_id == u.id,
             Case.status.in_(["open", "in_review"])
         )
+        if group_filter:
+            alert_q = alert_q.where(Alert.group_id == group_filter)
+            case_q  = case_q.where(Case.group_id == group_filter)
         open_alerts = (await db.execute(alert_q)).scalar() or 0
         open_cases  = (await db.execute(case_q)).scalar()  or 0
         result.append({
@@ -103,8 +130,11 @@ async def analyst_workload(
             "total":       open_alerts + open_cases,
         })
 
-    result.sort(key=lambda x: x["total"], reverse=True)
-    return result
+    # Sort assigned users by total descending; pool stays at top
+    assigned = sorted(result[1:] if result and result[0]["user_id"] == "unassigned" else result,
+                      key=lambda x: x["total"], reverse=True)
+    pool_row = [result[0]] if result and result[0]["user_id"] == "unassigned" else []
+    return pool_row + assigned
 
 
 @router.get("/ti/quick")
