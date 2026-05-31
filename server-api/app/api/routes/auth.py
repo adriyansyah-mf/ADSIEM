@@ -87,6 +87,7 @@ async def me(current_user: Annotated[User, Depends(get_current_user)]):
         email=current_user.email,
         role=current_user.role.name,
         group_id=current_user.group_id,
+        mfa_enabled=current_user.mfa_enabled or False,
     )
 
 
@@ -96,6 +97,8 @@ async def mfa_setup(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Generate a TOTP secret and QR code PNG for the current user (not yet enabled)."""
+    if current_user.mfa_enabled:
+        raise HTTPException(status_code=400, detail="MFA is already enabled. Disable it first before re-configuring.")
     secret = pyotp.random_base32()
     totp = pyotp.TOTP(secret)
     uri = totp.provisioning_uri(name=current_user.username, issuer_name="SIEM Platform")

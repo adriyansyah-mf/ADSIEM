@@ -159,6 +159,7 @@ export default function LoginPage() {
     } catch {
       if (mfaRequired) {
         setError('INVALID MFA CODE — Check your authenticator app')
+        setMfaCode('')
       } else {
         setError('ACCESS DENIED — Invalid credentials')
       }
