@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { format } from 'date-fns'
 import { Search, Loader2 } from 'lucide-react'
+import AlertDetailModal from '@/components/AlertDetailModal'
 import type { Alert, Agent, Case, Event } from '@/types'
 
 interface WorkloadItem { user_id: string; username: string; open_alerts: number; open_cases: number; total: number }
@@ -67,25 +69,35 @@ function SectionCard({ title, children }: { title: string; children: React.React
   )
 }
 
-function StatRow({ label, value, color }: { label: string; value: number; color: string }) {
+function StatRow({ label, value, color, onClick }: { label: string; value: number; color: string; onClick?: () => void }) {
+  const [hovered, setHovered] = useState(false)
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '5px 0',
-      borderBottom: '1px solid var(--border)',
-    }}>
-      <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '12px', color: 'var(--text-secondary)' }}>{label}</span>
-      <span style={{
-        fontFamily: 'Share Tech Mono, monospace',
-        fontSize: '14px',
-        fontWeight: 700,
-        color,
-      }}>{value}</span>
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '6px 4px',
+        borderBottom: '1px solid var(--border)',
+        cursor: onClick ? 'pointer' : 'default',
+        borderRadius: 3,
+        background: hovered && onClick ? 'rgba(255,255,255,0.04)' : 'transparent',
+        transition: 'background 0.12s',
+      }}
+    >
+      <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '12px', color: hovered && onClick ? color : 'var(--text-secondary)', transition: 'color 0.12s' }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '14px', fontWeight: 700, color }}>{value}</span>
+        {onClick && <span style={{ color: 'var(--text-muted)', fontSize: 10, opacity: hovered ? 1 : 0, transition: 'opacity 0.12s' }}>→</span>}
+      </div>
     </div>
   )
 }
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
+  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null)
   const { data: allAlerts } = useQuery({
     queryKey: ['alerts-dashboard'],
     queryFn: () => api.get('/api/alerts', { params: { page_size: 200 } }).then(r => r.data),
@@ -178,14 +190,15 @@ export default function DashboardPage() {
   cases.forEach(c => { if (c.alert_id) caseByAlertId[c.alert_id] = c })
 
   return (
+    <>
     <div style={{ display: 'flex', gap: '12px', height: '100%', minHeight: 0 }}>
       {/* LEFT COLUMN */}
       <div style={{ width: '220px', flexShrink: 0, overflowY: 'auto' }}>
         <SectionCard title="Alert Statistics">
-          <StatRow label="Critical" value={severityCounts.critical} color="#ff2244" />
-          <StatRow label="High" value={severityCounts.high} color="#ff6b00" />
-          <StatRow label="Medium" value={severityCounts.medium} color="#ffd700" />
-          <StatRow label="Low" value={severityCounts.low} color="#00ff88" />
+          <StatRow label="Critical" value={severityCounts.critical} color="#ff2244" onClick={() => navigate('/alerts?severity=critical')} />
+          <StatRow label="High" value={severityCounts.high} color="#ff6b00" onClick={() => navigate('/alerts?severity=high')} />
+          <StatRow label="Medium" value={severityCounts.medium} color="#ffd700" onClick={() => navigate('/alerts?severity=medium')} />
+          <StatRow label="Low" value={severityCounts.low} color="#00ff88" onClick={() => navigate('/alerts?severity=low')} />
           <div style={{ marginTop: '6px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
             LAST 24H: {todayAlerts.length} TOTAL
           </div>
@@ -195,13 +208,24 @@ export default function DashboardPage() {
           {topIPs.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No data</div>
           ) : topIPs.map(([ip, count]) => (
-            <div key={ip} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '4px 0',
-              borderBottom: '1px solid var(--border)',
-            }}>
+            <div key={ip}
+              onClick={() => navigate(`/alerts?source_ip=${ip}`)}
+              style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '5px 4px',
+                borderBottom: '1px solid var(--border)',
+                cursor: 'pointer',
+                borderRadius: 3,
+                transition: 'background 0.12s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+            >
               <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)' }}>{ip}</span>
-              <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '13px', color: 'var(--accent-orange)' }}>{count}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '13px', color: 'var(--accent-orange)' }}>{count}</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>→</span>
+              </div>
             </div>
           ))}
         </SectionCard>
@@ -335,13 +359,16 @@ export default function DashboardPage() {
                   const linkedCase = caseByAlertId[alert.id]
                   const reasoning = linkedCase?.ai_reasoning ?? 'Pending AI analysis'
                   return (
-                    <tr key={alert.id} style={{
+                    <tr key={alert.id}
+                    onClick={() => setSelectedAlert(alert)}
+                    style={{
                       borderBottom: '1px solid var(--border)',
                       background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)',
                       transition: 'background 0.1s',
+                      cursor: 'pointer',
                     }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)')}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderLeft = '2px solid rgba(0,212,255,0.3)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)'; e.currentTarget.style.borderLeft = '' }}
                     >
                       <td style={{ padding: '8px 12px', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         {format(new Date(alert.created_at), 'MM-dd HH:mm')}
@@ -511,5 +538,7 @@ export default function DashboardPage() {
         </SectionCard>
       </div>
     </div>
+    {selectedAlert && <AlertDetailModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} />}
+    </>
   )
 }

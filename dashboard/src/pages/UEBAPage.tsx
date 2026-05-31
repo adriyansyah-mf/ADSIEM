@@ -25,17 +25,20 @@ function RiskBar({ score }: { score: number }) {
 }
 
 function EntityRow({ entity, selected, onClick }: { entity: UebaEntityScore; selected: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false)
   return (
     <div
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        display: 'grid', gridTemplateColumns: '1fr auto',
+        display: 'grid', gridTemplateColumns: '1fr auto auto',
         alignItems: 'center', gap: '10px',
         padding: '8px 12px',
-        background: selected ? 'rgba(0,212,255,0.08)' : 'transparent',
-        borderLeft: `2px solid ${selected ? 'var(--accent-cyan)' : 'transparent'}`,
+        background: selected ? 'rgba(0,212,255,0.08)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
+        borderLeft: `2px solid ${selected ? 'var(--accent-cyan)' : hovered ? 'rgba(0,212,255,0.3)' : 'transparent'}`,
         cursor: 'pointer',
-        transition: 'background 0.15s',
+        transition: 'background 0.12s, border-color 0.12s',
       }}
     >
       <div>
@@ -50,6 +53,9 @@ function EntityRow({ entity, selected, onClick }: { entity: UebaEntityScore; sel
       </div>
       <div style={{ width: '80px' }}>
         <RiskBar score={entity.risk_score} />
+      </div>
+      <div style={{ width: 14, color: selected ? 'var(--accent-cyan)' : 'var(--text-muted)', fontSize: 10, transition: 'color 0.12s, transform 0.12s', transform: selected ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+        ›
       </div>
     </div>
   )

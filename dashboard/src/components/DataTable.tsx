@@ -125,7 +125,7 @@ export default function DataTable<T extends { id: string }>({
               <tr
                 key={row.id}
                 onClick={() => onRowClick?.(row)}
-                className={`border-t border-border hover:bg-muted/50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+                className={`border-t border-border transition-colors ${onRowClick ? 'cursor-pointer hover:bg-white/[0.06] hover:border-l-2 hover:border-l-cyan-500/40' : 'hover:bg-white/[0.03]'}`}
               >
                 {columns.map((col) => (
                   <td key={col.key} className="px-4 py-2">{col.render(row)}</td>
