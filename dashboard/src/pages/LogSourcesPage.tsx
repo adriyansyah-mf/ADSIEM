@@ -1,20 +1,10 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAgent, useLogSources, useAddLogSource, useUpdateLogSource, useDeleteLogSource } from '@/hooks/useAgents'
+import { useDecoders } from '@/hooks/useDecoders'
 import StatusBadge from '@/components/StatusBadge'
 import { Trash2, Plus, ArrowLeft, ToggleLeft, ToggleRight } from 'lucide-react'
 import type { LogSource } from '@/types'
-
-const LOG_TYPES = [
-  { value: 'linux_auth', label: 'linux_auth — SSH / PAM / sudo' },
-  { value: 'syslog', label: 'syslog — General system log' },
-  { value: 'nginx_access', label: 'nginx_access — Nginx access log' },
-  { value: 'nginx_error', label: 'nginx_error — Nginx error log' },
-  { value: 'apache_access', label: 'apache_access — Apache access log' },
-  { value: 'apache_error', label: 'apache_error — Apache error log' },
-  { value: 'windows_event', label: 'windows_event — Windows Event Log' },
-  { value: 'custom', label: 'custom — Other / raw' },
-]
 
 export default function LogSourcesPage() {
   const { id } = useParams<{ id: string }>()
@@ -24,6 +14,19 @@ export default function LogSourcesPage() {
   const addSource = useAddLogSource(id!)
   const updateSource = useUpdateLogSource(id!)
   const deleteSource = useDeleteLogSource(id!)
+
+  // Build log type list dynamically from active decoders
+  const { data: decoderPages } = useDecoders(1, 200)
+  const LOG_TYPES = useMemo(() => {
+    const fromDecoders = (decoderPages?.items ?? [])
+      .filter(d => d.is_enabled)
+      .map(d => ({ value: d.log_type, label: d.log_type }))
+    const seen = new Set<string>()
+    const unique = fromDecoders.filter(t => seen.has(t.value) ? false : (seen.add(t.value), true))
+    unique.sort((a, b) => a.value.localeCompare(b.value))
+    unique.push({ value: 'custom', label: 'custom — type manually' })
+    return unique
+  }, [decoderPages])
 
   const [path, setPath] = useState('')
   const [logType, setLogType] = useState('')
@@ -73,7 +76,7 @@ export default function LogSourcesPage() {
             value={path}
             onChange={(e) => setPath(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="/var/log/nginx/access.log"
+            placeholder="/var/log/auth.log  or  /opt/device/*.log"
             className="w-full px-3 py-2 rounded border border-border bg-background text-sm font-mono"
           />
           <div className="flex gap-2">
@@ -159,6 +162,7 @@ export default function LogSourcesPage() {
 
       <p className="mt-6 text-xs text-muted-foreground">
         Changes are picked up by the agent on the next heartbeat (default every 30 s).
+        Glob patterns are supported, e.g. <span className="font-mono">/opt/device/*.log</span> for daily-rotating files.
       </p>
     </div>
   )
