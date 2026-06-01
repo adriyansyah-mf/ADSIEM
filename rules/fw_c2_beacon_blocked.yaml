@@ -1,0 +1,29 @@
+title: Possible C2 Beacon Blocked by Firewall
+id: rule-fw-c2-beacon
+description: Repeated timed-out outbound connections to the same external destination — characteristic of C2 beaconing being blocked
+logsource:
+  product: firewall
+detection:
+  selection:
+    event.dataset: fortigate.traffic
+    event.action: timeout
+    destination.geo.country_name|contains:
+      - Canada
+      - Russia
+      - China
+      - Netherlands
+      - Germany
+      - United States
+      - Singapore
+  condition: selection
+threshold:
+  count: 10
+  timewindow: 300
+  group_by: destination.ip
+suppression:
+  timewindow: 1800
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1071
+  - attack.t1095

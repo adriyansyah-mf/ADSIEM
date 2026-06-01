@@ -1,0 +1,28 @@
+title: Outbound Connection to Dangerous Service
+id: rule-fw-outbound-dangerous
+description: Firewall log shows outbound traffic to inherently dangerous services — RSH, Telnet, raw syslog — possible C2 or data exfiltration
+logsource:
+  product: firewall
+detection:
+  by_app:
+    event.dataset: fortigate.traffic
+    network.application:
+      - RSH
+      - Telnet
+      - TELNET
+  by_port:
+    event.dataset: fortigate.traffic
+    destination.port:
+      - "23"
+      - "514"
+      - "4444"
+      - "4445"
+      - "1337"
+      - "31337"
+  condition: by_app or by_port
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1071
+  - attack.exfiltration
+  - attack.t1048

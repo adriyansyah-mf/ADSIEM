@@ -1,0 +1,24 @@
+title: Internal Lateral Movement Detected by Firewall
+id: rule-fw-lateral-movement
+description: Many firewall-denied connections between internal hosts from the same source — possible lateral movement or internal scan
+logsource:
+  product: firewall
+detection:
+  selection:
+    event.dataset: fortigate.traffic
+    event.action: deny
+    source.geo.country_name: Reserved
+    destination.geo.country_name: Reserved
+  condition: selection
+threshold:
+  count: 15
+  timewindow: 120
+  group_by: source.ip
+suppression:
+  timewindow: 900
+level: high
+tags:
+  - attack.lateral_movement
+  - attack.t1021
+  - attack.discovery
+  - attack.t1046

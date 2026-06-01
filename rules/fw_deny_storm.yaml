@@ -1,0 +1,21 @@
+title: Firewall Deny Storm — Port Scan / Flood
+id: rule-fw-deny-storm
+description: Many firewall-denied connections from the same source IP — likely port scan or flood attack
+logsource:
+  product: firewall
+detection:
+  selection:
+    event.dataset: fortigate.traffic
+    event.action: deny
+  condition: selection
+threshold:
+  count: 20
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 600
+level: high
+tags:
+  - attack.discovery
+  - attack.t1046
+  - attack.reconnaissance
