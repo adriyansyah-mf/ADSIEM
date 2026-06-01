@@ -84,16 +84,14 @@ async def delete_decoder(
 @router.post("/test", response_model=DecoderTestResponse)
 async def test_decoder(body: DecoderTestRequest, _=Depends(require_permission("decoders:create"))):
     try:
+        from worker.decoder_engine import DecoderEngine
+        engine = DecoderEngine()
+        engine.load_from_yaml_list([body.content])
         decoder_def = yaml.safe_load(body.content)
-        pattern = decoder_def.get("pattern", "")
-        match = re.search(pattern, body.raw_message)
-        if not match:
+        log_type = decoder_def.get("log_type", "")
+        decoded = engine.decode(log_type, body.raw_message)
+        if not decoded:
             return DecoderTestResponse(matched=False)
-        groups = match.groupdict()
-        fields_map = decoder_def.get("fields", {})
-        decoded = {}
-        for field_name, source in fields_map.items():
-            decoded[field_name] = groups.get(source, source)
         return DecoderTestResponse(matched=True, decoded_fields=decoded)
     except Exception as e:
         return DecoderTestResponse(matched=False, error=str(e))
@@ -103,8 +101,11 @@ def _validate_decoder_yaml(content: str):
         parsed = yaml.safe_load(content)
         if not isinstance(parsed, dict):
             raise ValueError("Decoder must be a YAML mapping")
-        if "pattern" not in parsed:
+        decoder_type = parsed.get("type", "regex")
+        if decoder_type == "regex" and "pattern" not in parsed:
             raise ValueError("Decoder must have a 'pattern' field")
+        if decoder_type not in ("regex", "kv"):
+            raise ValueError(f"Unsupported decoder type '{decoder_type}'; use 'regex' or 'kv'")
     except yaml.YAMLError as e:
         raise HTTPException(status_code=422, detail=f"Invalid YAML: {e}")
     except ValueError as e:

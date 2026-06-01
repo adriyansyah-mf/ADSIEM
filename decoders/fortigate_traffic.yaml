@@ -1,0 +1,28 @@
+name: fortigate_traffic
+log_type: fortigate_traffic
+type: kv
+priority: 10
+enabled: true
+match: 'type="traffic"'
+fields:
+  source.ip: srcip
+  source.port: srcport
+  source.interface: srcintf
+  source.geo.country_name: srccountry
+  destination.ip: dstip
+  destination.port: dstport
+  destination.interface: dstintf
+  destination.geo.country_name: dstcountry
+  event.action: action
+  network.application: app
+  network.protocol: service
+  network.iana_number: proto
+  network.bytes_sent: sentbyte
+  network.bytes_received: rcvdbyte
+  observer.hostname: devname
+  observer.serial_number: devid
+  event.type: subtype
+  log.level: level
+static_fields:
+  event.category: network
+  event.dataset: fortigate.traffic
