@@ -49,10 +49,14 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: bash packaging/build-deb.sh
 
+      # rpmbuild doesn't reliably cross-package a foreign-arch binary on an
+      # x86_64 runner without a mock/QEMU chroot, so .rpm is only produced
+      # for the runner's native arch. arm64 still gets a .deb and raw binary.
       - name: Build .rpm
+        if: matrix.arch == 'amd64'
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          ARCH: ${{ matrix.arch == 'amd64' && 'x86_64' || 'aarch64' }}
+          ARCH: x86_64
         run: bash packaging/build-rpm.sh
 
       - name: Build raw binary

@@ -39,7 +39,6 @@ rpmbuild -bb \
   --define "_build_arch ${ARCH}" \
   --define "_topdir ${RPMBUILD_ROOT}" \
   --define "debug_package %{nil}" \
-  --target "${ARCH}-linux" \
   "${RPMBUILD_ROOT}/SPECS/siem-agent.spec"
 
 echo "==> Copying output"
