@@ -9,8 +9,11 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
-from app.models.models import Alert, AlertNote, User
-from app.schemas.schemas import AlertNoteCreate, AlertNoteOut, AlertOut, AlertUpdate, PaginatedResponse
+from app.models.models import Alert, AlertNote, Event, RawLog, User
+from app.schemas.schemas import (
+    AlertNoteCreate, AlertNoteOut, AlertOut, AlertSourceLogOut, AlertUpdate,
+    EventOut, PaginatedResponse, RawLogOut,
+)
 from app.services.audit import audit_log
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
@@ -58,6 +61,36 @@ async def get_alert(
     if not alert or (group_filter and alert.group_id != group_filter):
         raise HTTPException(status_code=404, detail="Alert not found")
     return AlertOut.model_validate(alert)
+
+
+@router.get("/{alert_id}/source-log", response_model=AlertSourceLogOut)
+async def get_alert_source_log(
+    alert_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(require_permission("alerts:read")),
+):
+    """The raw log line (and decoded event) that triggered this alert, so an
+    analyst can verify the detection against the original source data."""
+    alert = (await db.execute(select(Alert).where(Alert.id == alert_id))).scalar_one_or_none()
+    if not alert or (group_filter and alert.group_id != group_filter):
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    if not alert.event_id:
+        return AlertSourceLogOut(event=None, raw_log=None)
+
+    event = (await db.execute(select(Event).where(Event.id == alert.event_id))).scalar_one_or_none()
+    if not event:
+        return AlertSourceLogOut(event=None, raw_log=None)
+
+    raw_log = None
+    if event.raw_log_id:
+        raw_log = (await db.execute(select(RawLog).where(RawLog.id == event.raw_log_id))).scalar_one_or_none()
+
+    return AlertSourceLogOut(
+        event=EventOut.model_validate(event),
+        raw_log=RawLogOut.model_validate(raw_log) if raw_log else None,
+    )
 
 
 @router.put("/{alert_id}")

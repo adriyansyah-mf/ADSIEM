@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import type { Alert } from '@/types'
+import type { Alert, Event, RawLog } from '@/types'
 import SeverityBadge from './SeverityBadge'
 import StatusBadge from './StatusBadge'
 import { useUpdateAlert, useAddAlertNote } from '@/hooks/useAlerts'
 import { format } from 'date-fns'
-import { X, ShieldOff, CheckCircle } from 'lucide-react'
+import { X, ShieldOff, CheckCircle, FileText } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import MarkdownNote from './MarkdownNote'
@@ -12,6 +12,39 @@ import MarkdownNote from './MarkdownNote'
 interface Props { alert: Alert; onClose: () => void }
 
 const STATUS_OPTIONS = ['new', 'in_progress', 'resolved', 'false_positive']
+
+function SourceLogPanel({ alertId }: { alertId: string }) {
+  const { data, isLoading } = useQuery<{ event: Event | null; raw_log: RawLog | null }>({
+    queryKey: ['alert-source-log', alertId],
+    queryFn: () => api.get(`/api/alerts/${alertId}/source-log`).then(r => r.data),
+  })
+
+  if (isLoading) return <div className="text-xs text-muted-foreground">Loading source log…</div>
+
+  if (!data?.raw_log && !data?.event) {
+    return <div className="text-xs text-muted-foreground">No source log linked to this alert.</div>
+  }
+
+  return (
+    <div className="space-y-2">
+      {data.raw_log && (
+        <pre className="text-xs font-mono bg-muted/20 p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap break-all">
+          {data.raw_log.raw_message}
+        </pre>
+      )}
+      {data.event && Object.keys(data.event.decoded_fields ?? {}).length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+            Decoded fields
+          </summary>
+          <pre className="text-xs font-mono bg-muted/20 p-2 mt-2 rounded max-h-40 overflow-auto whitespace-pre-wrap break-all">
+            {JSON.stringify(data.event.decoded_fields, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
+  )
+}
 
 export default function AlertDetailModal({ alert, onClose }: Props) {
   const qc = useQueryClient()
@@ -138,6 +171,13 @@ export default function AlertDetailModal({ alert, onClose }: Props) {
             <CheckCircle size={13} /> Suppression rule created.
           </div>
         )}
+
+        <div className="mb-4">
+          <h3 className="text-sm font-medium mb-2 flex items-center gap-1.5">
+            <FileText size={14} /> Source Log
+          </h3>
+          <SourceLogPanel alertId={alert.id} />
+        </div>
 
         <div className="mb-4">
           <h3 className="text-sm font-medium mb-2">Notes ({alert.notes.length})</h3>

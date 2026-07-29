@@ -82,7 +82,7 @@ async def _run_ai_searches(
 
     # Susun catatan dari hasil pencarian
     lines = ["## 🔎 AI Web Research (SearXNG)"]
-    lines.append("*Query ditentukan oleh AI berdasarkan konteks alert.*\n")
+    lines.append("*Query chosen by the AI based on alert context.*\n")
     for query, results in all_results:
         lines.append(f"**Query:** `{query}`")
         for r in results[:3]:
@@ -196,9 +196,9 @@ async def _add_note_to_existing_case(
             case_id=uuid.UUID(case_id),
             author_id=None,
             content=(
-                f"**[AI L1] Alert baru terkait case ini**\n\n"
+                f"**[AI L1] New alert linked to this case**\n\n"
                 f"Alert: {title} | Severity: {severity}\n\n"
-                f"**Catatan triage:**\n{triage_notes}"
+                f"**Triage notes:**\n{triage_notes}"
             ),
             is_ai_generated=True,
         )
@@ -243,8 +243,8 @@ async def _create_case_from_verdict(
         if enrichment.overall_risk > 0:
             search_intel["ti_risk"] = enrichment.overall_risk
 
-    # Prefix berbeda untuk escalate vs create_case
-    prefix = "🚨 [ESKALASI]" if verdict == "escalate" else "[AI]"
+    # Different prefix for escalate vs create_case
+    prefix = "🚨 [ESCALATED]" if verdict == "escalate" else "[AI]"
     case_status = "open"
 
     async with AsyncSessionLocal() as db:
@@ -283,16 +283,16 @@ async def _create_case_from_verdict(
 
         actions_section = ""
         if actions:
-            actions_section = "\n\n**Aksi Segera:**\n" + "\n".join(f"- {a}" for a in actions)
+            actions_section = "\n\n**Immediate Actions:**\n" + "\n".join(f"- {a}" for a in actions)
 
-        verdict_label = "🚨 ESKALASI — Butuh perhatian L2 SEGERA" if verdict == "escalate" else "📋 Case dibuat untuk review L2"
+        verdict_label = "🚨 ESCALATED — Needs L2 attention NOW" if verdict == "escalate" else "📋 Case created for L2 review"
 
         note_content = (
-            f"## AI SOC L1 Analyst — Laporan Triage\n\n"
+            f"## AI SOC L1 Analyst — Triage Report\n\n"
             f"**Verdict:** {verdict_label}\n"
             f"**Confidence:** {confidence:.0%}\n"
             f"**Threat Type:** {threat_type}\n\n"
-            f"**Catatan Investigasi:**\n{triage_notes}"
+            f"**Investigation Notes:**\n{triage_notes}"
             f"{ti_section}{mitre_section}{actions_section}"
         )
 
@@ -428,11 +428,11 @@ async def analyze_and_maybe_create_case(
              confidence=confidence)
 
     # ── 4. Tulis triage notes ke alert (selalu, apapun verdictnya) ──────────
-    actions_str = ("\n\n**Aksi Segera:**\n" + "\n".join(f"- {a}" for a in actions)) if actions else ""
+    actions_str = ("\n\n**Immediate Actions:**\n" + "\n".join(f"- {a}" for a in actions)) if actions else ""
     note_content = (
         f"## 🤖 AI L1 Triage — {verdict.upper()}\n\n"
         f"**Confidence:** {confidence:.0%}\n\n"
-        f"**Catatan Investigasi:**\n{triage_notes}"
+        f"**Investigation Notes:**\n{triage_notes}"
         f"{actions_str}"
     )
     await _write_alert_note(alert_id, note_content)
@@ -461,20 +461,22 @@ async def analyze_and_maybe_create_case(
         except Exception as exc:
             log.warning("ai_soar_dispatch_failed", alert_id=alert_id, error=str(exc))
 
-    # ── 4b. AI-driven web research (background, case_id belum ada di sini) ──
-    # Search langsung dijalankan; case_id akan di-pass dari langkah 7 jika ada
-    if search_queries:
-        asyncio.ensure_future(_run_ai_searches(alert_id, None, search_queries))
-
     # ── 5. Update alert status berdasarkan verdict ───────────────────────────
+    # Verdicts that end here never reach a case, so this is the only place
+    # web research runs for them (avoids the double-run that create_case/
+    # escalate get further down once the case_id is known).
     if verdict == "false_positive":
-        fp_reason = analysis.get("false_positive_reason", "Ditentukan oleh AI L1")
+        fp_reason = analysis.get("false_positive_reason", "Determined by AI L1")
         await _update_alert_status(alert_id, "closed")
+        if search_queries:
+            asyncio.ensure_future(_run_ai_searches(alert_id, None, search_queries))
         log.info("alert_closed_as_fp", alert_id=alert_id, reason=fp_reason)
         return
 
     if verdict == "monitor":
         await _update_alert_status(alert_id, "acknowledged")
+        if search_queries:
+            asyncio.ensure_future(_run_ai_searches(alert_id, None, search_queries))
         return
 
     # verdict == "create_case" atau "escalate"
@@ -526,7 +528,7 @@ async def analyze_and_maybe_create_case(
     try:
         await dispatch_case_webhooks(
             case_id=case_id,
-            title=f"{'🚨 ESKALASI' if verdict == 'escalate' else '[AI]'} {title}",
+            title=f"{'🚨 ESCALATED' if verdict == 'escalate' else '[AI]'} {title}",
             severity=effective_severity,
             description=triage_notes[:500] if triage_notes else "",
             group_id=group_id,

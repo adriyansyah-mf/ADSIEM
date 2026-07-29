@@ -274,6 +274,10 @@ class AlertOut(BaseModel):
     notes: list[AlertNoteOut] = []
     model_config = {"from_attributes": True}
 
+class AlertSourceLogOut(BaseModel):
+    event: EventOut | None
+    raw_log: RawLogOut | None
+
 # ─── Webhooks ────────────────────────────────────────────────────
 
 class WebhookCreate(BaseModel):
