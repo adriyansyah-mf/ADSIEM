@@ -20,6 +20,7 @@ jobs:
       run:
         working-directory: agent
     strategy:
+      fail-fast: false
       matrix:
         arch: [amd64, arm64]
     steps:
