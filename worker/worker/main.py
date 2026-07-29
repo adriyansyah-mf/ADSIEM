@@ -24,6 +24,7 @@ from worker.maintenance import maintenance_loop
 from worker.report_sender import report_loop
 from worker.hunt_scheduler import hunt_scheduler_loop
 from worker.rag_indexer import rag_index_loop, sop_index_loop
+from worker.es_client import ensure_index as ensure_es_index
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -123,6 +124,7 @@ async def main():
     start_health_server()
 
     await seed_if_empty()
+    await ensure_es_index()
 
     async with AsyncSessionLocal() as db:
         dec_engine, sig_engine = await load_engines(db)

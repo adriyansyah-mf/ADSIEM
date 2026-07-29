@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "info"
     REDIS_STREAM_KEY: str = "siem:logs"
     REDIS_CONSUMER_GROUP: str = "siem-workers"
+    ELASTICSEARCH_URL: str = "http://elasticsearch:9200"
 
     @field_validator("JWT_SECRET")
     @classmethod

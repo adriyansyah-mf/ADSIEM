@@ -9,7 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
-from app.models.models import Alert, AlertNote, Event, RawLog, User
+from app.core.es_client import get_log as es_get_log
+from app.models.models import Alert, AlertNote, User
 from app.schemas.schemas import (
     AlertNoteCreate, AlertNoteOut, AlertOut, AlertSourceLogOut, AlertUpdate,
     EventOut, PaginatedResponse, RawLogOut,
@@ -79,17 +80,29 @@ async def get_alert_source_log(
     if not alert.event_id:
         return AlertSourceLogOut(event=None, raw_log=None)
 
-    event = (await db.execute(select(Event).where(Event.id == alert.event_id))).scalar_one_or_none()
-    if not event:
+    doc = await es_get_log(str(alert.event_id))
+    if not doc:
         return AlertSourceLogOut(event=None, raw_log=None)
 
-    raw_log = None
-    if event.raw_log_id:
-        raw_log = (await db.execute(select(RawLog).where(RawLog.id == event.raw_log_id))).scalar_one_or_none()
-
     return AlertSourceLogOut(
-        event=EventOut.model_validate(event),
-        raw_log=RawLogOut.model_validate(raw_log) if raw_log else None,
+        event=EventOut(
+            id=doc["id"],
+            agent_id=doc.get("agent_id"),
+            group_id=doc.get("group_id", "default"),
+            decoded_fields=doc.get("decoded_fields") or {},
+            event_category=doc.get("event_category"),
+            event_action=doc.get("event_action"),
+            source_ip=doc.get("source_ip"),
+            user_name=doc.get("user_name"),
+            created_at=doc["created_at"],
+        ),
+        raw_log=RawLogOut(
+            id=doc["id"],
+            agent_id=doc.get("agent_id"),
+            log_type=doc.get("log_type"),
+            raw_message=doc.get("raw_message", ""),
+            received_at=doc["created_at"],
+        ),
     )
 
 

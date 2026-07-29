@@ -10,10 +10,11 @@ from sqlalchemy import select, desc, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from worker.database import AsyncSessionLocal
-from worker.models import Alert, Event, ThreatHunt
+from worker.models import Alert, ThreatHunt
 from worker.settings_cache import get_setting
 from worker.config import GROQ_API_KEY
 from worker.groq_client import _groq_post
+from worker.es_client import search as es_search
 
 log = structlog.get_logger()
 
@@ -78,9 +79,14 @@ async def _search_alerts(db: AsyncSession, ioc_type: str, ioc_value: str) -> lis
     elif ioc_type == "hostname":
         q = select(Alert).where(Alert.hostname == ioc_value)
     elif ioc_type == "user":
-        # need to join via events — query events first
-        eq = select(Event.id).where(Event.user_name == ioc_value)
-        ev_ids = (await db.execute(eq)).scalars().all()
+        # need to join via events (ES) — query matching events first
+        ev_hits = await es_search(
+            {"term": {"user_name": ioc_value}}, size=200,
+            sort=[{"created_at": "desc"}],
+        )
+        ev_ids = [uuid.UUID(h["id"]) for h in ev_hits]
+        if not ev_ids:
+            return []
         q = select(Alert).where(Alert.event_id.in_(ev_ids))
     elif ioc_type == "hash":
         # FIM SHA256 — find via raw text match in fim_events
@@ -99,21 +105,20 @@ async def _search_alerts(db: AsyncSession, ioc_type: str, ioc_value: str) -> lis
     return result.scalars().all()
 
 
-async def _search_events(db: AsyncSession, ioc_type: str, ioc_value: str) -> list[Event]:
-    """Find events matching this IoC."""
+async def _search_events(ioc_type: str, ioc_value: str) -> list[dict]:
+    """Find events (ES) matching this IoC."""
     if ioc_type == "ip":
-        q = select(Event).where(Event.source_ip == ioc_value)
+        query = {"term": {"source_ip": ioc_value}}
     elif ioc_type == "hostname":
-        q = select(Event).where(Event.decoded_fields["hostname"].astext == ioc_value)
+        query = {"term": {"decoded_fields.hostname.keyword": ioc_value}}
     elif ioc_type == "user":
-        q = select(Event).where(Event.user_name == ioc_value)
+        query = {"term": {"user_name": ioc_value}}
     else:
         return []
-    result = await db.execute(q.order_by(desc(Event.created_at)).limit(100))
-    return result.scalars().all()
+    return await es_search(query, size=100, sort=[{"created_at": "desc"}])
 
 
-def _build_timeline(alerts: list[Alert], events: list[Event]) -> list[dict]:
+def _build_timeline(alerts: list[Alert], events: list[dict]) -> list[dict]:
     """Merge alerts and events into a unified sorted timeline."""
     entries = []
     for a in alerts:
@@ -128,13 +133,13 @@ def _build_timeline(alerts: list[Alert], events: list[Event]) -> list[dict]:
         })
     for e in events:
         entries.append({
-            "time": e.created_at.isoformat() if e.created_at else None,
+            "time": e.get("created_at"),
             "type": "event",
-            "category": e.event_category,
-            "action": e.event_action,
-            "source_ip": e.source_ip,
-            "user": e.user_name,
-            "id": str(e.id),
+            "category": e.get("event_category"),
+            "action": e.get("event_action"),
+            "source_ip": e.get("source_ip"),
+            "user": e.get("user_name"),
+            "id": e.get("id"),
         })
     entries.sort(key=lambda x: x.get("time") or "")
     return entries
@@ -163,7 +168,7 @@ async def run_hunt(hunt_id: str) -> None:
 
         try:
             alerts = await _search_alerts(db, hunt.ioc_type, hunt.ioc_value)
-            events = await _search_events(db, hunt.ioc_type, hunt.ioc_value)
+            events = await _search_events(hunt.ioc_type, hunt.ioc_value)
 
             # FIM count for hash IoCs
             fim_count = 0

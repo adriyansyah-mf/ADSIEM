@@ -14,6 +14,15 @@ services:
         limits:
           memory: 256m
 
+  elasticsearch:
+    environment:
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '1.0'
+
   server-api:
     deploy:
       replicas: 2

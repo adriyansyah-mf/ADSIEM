@@ -9,6 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.database import engine, Base
+from app.core.es_client import ensure_index as ensure_es_index
 import app.models.models  # noqa: F401 — ensure all models are registered before create_all
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
 from app.api.routes.cases import router as cases_router
@@ -354,6 +355,7 @@ async def lifespan(app: FastAPI):
     await _migrate_soar_tables()
     await _migrate_webhook_payload_format()
     await _migrate_mfa_columns()
+    await ensure_es_index()
     import asyncio
     _listener_task = asyncio.create_task(_ws_redis_listener())
     yield

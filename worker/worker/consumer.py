@@ -11,11 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from worker.config import REDIS_CONSUMER_GROUP, REDIS_STREAM_KEY
 from worker.database import AsyncSessionLocal
 from worker.decoder_engine import DecoderEngine
-from worker.models import Event, RawLog
 from worker.redis_client import get_redis
 from worker.sigma_engine import SigmaEngine
 from worker.alert_manager import create_alert
 from worker.ueba.scorer import score_event as ueba_score_event
+from worker.es_client import index_log
 
 log = structlog.get_logger()
 CONSUMER_NAME = f"worker-{socket.gethostname()}"
@@ -73,35 +73,31 @@ async def process_message(
 
     agent_id = uuid.UUID(agent_id_str) if agent_id_str else None
 
-    async with AsyncSessionLocal() as db:
-        if agent_id is not None:
+    if agent_id is not None:
+        async with AsyncSessionLocal() as db:
             from worker.models import Agent as AgentModel
             if not await db.get(AgentModel, agent_id):
                 agent_id = None
 
-        raw_log = RawLog(agent_id=agent_id, log_type=log_type, raw_message=raw_message, received_at=received_at)
-        db.add(raw_log)
-        await db.flush()
+    decoded = dec_engine.decode(log_type, raw_message)
+    if not decoded:
+        decode_failures.inc()
+    else:
+        events_decoded.inc()
 
-        decoded = dec_engine.decode(log_type, raw_message)
-        if not decoded:
-            decode_failures.inc()
-        else:
-            events_decoded.inc()
-
-        event = Event(
-            raw_log_id=raw_log.id,
-            agent_id=agent_id,
-            group_id=group_id,
-            decoded_fields=decoded,
-            event_category=decoded.get("event.category"),
-            event_action=decoded.get("event.action"),
-            source_ip=decoded.get("source.ip"),
-            user_name=decoded.get("user.name"),
-        )
-        db.add(event)
-        await db.commit()
-        await db.refresh(event)
+    event_id = uuid.uuid4()
+    await index_log(str(event_id), {
+        "agent_id": str(agent_id) if agent_id else None,
+        "group_id": group_id,
+        "log_type": log_type,
+        "raw_message": raw_message,
+        "decoded_fields": decoded,
+        "event_category": decoded.get("event.category"),
+        "event_action": decoded.get("event.action"),
+        "source_ip": decoded.get("source.ip"),
+        "user_name": decoded.get("user.name"),
+        "created_at": received_at.isoformat(),
+    })
 
     logs_ingested.inc()
 
@@ -112,7 +108,7 @@ async def process_message(
         alerts_total.labels(severity=match["level"], rule_id=match["id"]).inc()
         await create_alert(
             rule_match=match,
-            event_id=event.id,
+            event_id=event_id,
             agent_id=agent_id,
             group_id=group_id,
             source_ip=decoded.get("source.ip"),

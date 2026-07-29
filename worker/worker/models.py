@@ -20,27 +20,6 @@ class Agent(Base):
     status       = Column(String(30), nullable=False, default="online")
     last_seen_at = Column(DateTime(timezone=True))
 
-class RawLog(Base):
-    __tablename__ = "raw_logs"
-    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    agent_id    = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"))
-    log_type    = Column(String(100))
-    raw_message = Column(Text, nullable=False)
-    received_at = Column(DateTime(timezone=True), default=now_utc)
-
-class Event(Base):
-    __tablename__ = "events"
-    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    raw_log_id     = Column(UUID(as_uuid=True), ForeignKey("raw_logs.id", ondelete="SET NULL"))
-    agent_id       = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"))
-    group_id       = Column(String(100), nullable=False, default="default")
-    decoded_fields = Column(JSONB, nullable=False, default=dict)
-    event_category = Column(String(100))
-    event_action   = Column(String(100))
-    source_ip      = Column(String(45))
-    user_name      = Column(String(255))
-    created_at     = Column(DateTime(timezone=True), default=now_utc)
-
 class Rule(Base):
     __tablename__ = "rules"
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -69,7 +48,7 @@ class Alert(Base):
     severity         = Column(String(20), nullable=False, default="medium")
     status           = Column(String(30), nullable=False, default="new")
     rule_id          = Column(UUID(as_uuid=True), ForeignKey("rules.id", ondelete="SET NULL"))
-    event_id         = Column(UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL"))
+    event_id         = Column(UUID(as_uuid=True))  # pointer into Elasticsearch `logs` index _id, no FK
     agent_id         = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"))
     group_id         = Column(String(100), nullable=False, default="default")
     source_ip        = Column(String(45))
