@@ -2,6 +2,7 @@
 """Thin Elasticsearch REST client — raw_logs + events live here now instead of
 Postgres. One document per ingested log line: raw_message + decoded_fields
 together, since they're always 1:1 and always queried together."""
+import json
 import httpx
 import structlog
 from worker.config import ELASTICSEARCH_URL
@@ -54,6 +55,33 @@ async def index_log(doc_id: str, doc: dict) -> None:
     client = _get_client()
     resp = await client.put(f"/{LOGS_INDEX}/_doc/{doc_id}", json=doc)
     resp.raise_for_status()
+
+
+async def bulk_index(docs: list[tuple[str, dict]]) -> int:
+    """Bulk-index (doc_id, doc) pairs in one request. Returns count of items
+    that errored (logged, not raised — a handful of bad rows shouldn't sink
+    a multi-hour backfill)."""
+    if not docs:
+        return 0
+    client = _get_client()
+    lines = []
+    for doc_id, doc in docs:
+        lines.append(json.dumps({"index": {"_index": LOGS_INDEX, "_id": doc_id}}))
+        lines.append(json.dumps(doc, default=str))
+    body = "\n".join(lines) + "\n"
+    resp = await client.post(
+        "/_bulk", content=body, headers={"Content-Type": "application/x-ndjson"}, timeout=60,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    errors = 0
+    if result.get("errors"):
+        for item in result["items"]:
+            err = item.get("index", {}).get("error")
+            if err:
+                errors += 1
+                log.warning("es_bulk_item_failed", error=err)
+    return errors
 
 
 async def search(query: dict, size: int = 100, sort: list | None = None) -> list[dict]:
