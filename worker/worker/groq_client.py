@@ -16,6 +16,14 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 _groq_semaphore = asyncio.Semaphore(3)
 
 
+_MAX_RATE_LIMIT_WAIT = 20.0  # seconds — cap even if the server asks for longer,
+# so one rate-limited alert can't stall the single-consumer queue for the
+# 15-25min "retry-after" Groq sends back once the daily quota is exhausted.
+# A quota-exhausted key won't recover within a short wait either way; better
+# to fail fast to the fallback verdict and let the hourly backfill loop
+# (worker/ai_consumer.py) retry the alert once the key resets.
+
+
 async def _groq_post(api_key: str, payload: dict, max_retries: int = 4) -> dict:
     """POST ke Groq dengan retry exponential backoff saat kena 429."""
     delay = 5.0
@@ -31,9 +39,9 @@ async def _groq_post(api_key: str, payload: dict, max_retries: int = 4) -> dict:
                     )
                     if resp.status_code == 429:
                         retry_after = float(resp.headers.get("retry-after", delay))
-                        wait = max(retry_after, delay)
+                        wait = min(max(retry_after, delay), _MAX_RATE_LIMIT_WAIT)
                         log.warning("groq_rate_limited", attempt=attempt + 1,
-                                    wait_seconds=wait)
+                                    wait_seconds=wait, server_requested=retry_after)
                         await asyncio.sleep(wait)
                         delay = min(delay * 2, 60)
                         continue

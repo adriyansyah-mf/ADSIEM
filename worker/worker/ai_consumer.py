@@ -8,7 +8,30 @@ from worker.ai_analyst import analyze_and_maybe_create_case
 
 log = structlog.get_logger()
 
+async def _analyze_one(data: dict) -> None:
+    try:
+        await analyze_and_maybe_create_case(
+            alert_id=data.get("alert_id", ""),
+            title=data.get("title", ""),
+            severity=data.get("severity", "medium"),
+            source_ip=data.get("source_ip"),
+            hostname=data.get("hostname"),
+            decoded_fields=data.get("decoded_fields", {}),
+            group_id=data.get("group_id", "default"),
+        )
+    except Exception as e:
+        log.error("ai_consumer_item_failed", alert_id=data.get("alert_id"), error=str(e))
+
+
 async def ai_analysis_loop() -> None:
+    """Pop alerts off the AI queue and analyse them concurrently.
+
+    Each alert is dispatched as its own task rather than awaited in-line —
+    Groq calls are already capped at 3 concurrent (see groq_client.py's
+    semaphore), but a single item awaited here would otherwise let one
+    rate-limited or slow alert block every alert queued behind it,
+    regardless of severity.
+    """
     redis = await get_redis()
     log.info("ai_consumer_started", queue=AI_ANALYSIS_QUEUE)
     while True:
@@ -19,15 +42,7 @@ async def ai_analysis_loop() -> None:
                 continue
             _, raw = item
             data = json.loads(raw)
-            await analyze_and_maybe_create_case(
-                alert_id=data.get("alert_id", ""),
-                title=data.get("title", ""),
-                severity=data.get("severity", "medium"),
-                source_ip=data.get("source_ip"),
-                hostname=data.get("hostname"),
-                decoded_fields=data.get("decoded_fields", {}),
-                group_id=data.get("group_id", "default"),
-            )
+            asyncio.ensure_future(_analyze_one(data))
         except asyncio.CancelledError:
             break
         except Exception as e:
