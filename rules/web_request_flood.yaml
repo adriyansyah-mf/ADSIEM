@@ -1,0 +1,19 @@
+title: High-Volume Request Flood from Single Source
+id: rule-web-request-flood
+description: A single source IP generating an abnormally high number of HTTP requests in a short window — indicates aggressive crawling, scraping, or a scanning tool, regardless of response status
+logsource:
+  product: webserver
+detection:
+  selection:
+    event.category: web
+  condition: selection
+threshold:
+  count: 200
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1595

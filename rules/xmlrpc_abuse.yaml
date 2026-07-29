@@ -1,0 +1,20 @@
+title: WordPress XML-RPC Abuse
+id: rule-xmlrpc-abuse
+description: Repeated requests to xmlrpc.php — used for pingback DDoS amplification or brute-force via system.multicall, bypassing normal login rate limits
+logsource:
+  product: nginx
+detection:
+  selection:
+    url.path|contains: "xmlrpc.php"
+  condition: selection
+threshold:
+  count: 5
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1110
+  - attack.t1498

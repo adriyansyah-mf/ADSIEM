@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -99,6 +100,15 @@ func main() {
 	// sender loop
 	go senderLoop(buf, c, cfg)
 
+	// periodic buffer diagnostics
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			length, pushed, popped := buf.Stats()
+			slog.Info("buffer stats", "len", length, "pushed", pushed, "popped", popped)
+		}
+	}()
+
 	// signal handler
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -132,12 +142,16 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 				resp.Body.Close()
 			}
 			buf.Push(entry) // re-queue
-			slog.Warn("send failed, backing off", "backoff", backoff)
+			slog.Warn("send failed, backing off", "backoff", backoff, "err", err)
 			time.Sleep(backoff)
 			if backoff < 60*time.Second {
 				backoff *= 2
 			}
 			continue
+		}
+		if resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+			slog.Error("log rejected by server, dropping entry", "status", resp.StatusCode, "body", string(body), "log_type", logType)
 		}
 		resp.Body.Close()
 		backoff = time.Second

@@ -5,7 +5,9 @@ logsource:
   product: nginx
 detection:
   selection:
-    url.path|contains: "wp-admin"
+    url.path|contains:
+      - "wp-admin"
+      - "wp-login"
   condition: selection
 threshold:
   count: 10

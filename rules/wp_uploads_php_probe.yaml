@@ -1,0 +1,13 @@
+title: PHP Execution Probe in WordPress Uploads Directory
+id: rule-wp-uploads-php-probe
+description: Request for a PHP file inside wp-content/uploads — this directory should only ever contain media, so any .php request here is either a check for a previously-planted web shell or an attempt to execute one
+logsource:
+  product: nginx
+detection:
+  selection:
+    url.path|re: '(?i)/wp-content/uploads/.*\.php'
+  condition: selection
+level: high
+tags:
+  - attack.persistence
+  - attack.t1505.003

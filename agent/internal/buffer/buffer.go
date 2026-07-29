@@ -7,6 +7,8 @@ type Buffer struct {
 	items   []string
 	cap     int
 	dropped int64
+	pushed  int64
+	popped  int64
 }
 
 func New(capacity int) *Buffer {
@@ -21,6 +23,14 @@ func (b *Buffer) Push(item string) {
 		b.dropped++
 	}
 	b.items = append(b.items, item)
+	b.pushed++
+}
+
+// Stats returns (current length, total pushed, total popped) for diagnostics.
+func (b *Buffer) Stats() (int, int64, int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.items), b.pushed, b.popped
 }
 
 func (b *Buffer) Pop() (string, bool) {
@@ -31,6 +41,7 @@ func (b *Buffer) Pop() (string, bool) {
 	}
 	item := b.items[0]
 	b.items = b.items[1:]
+	b.popped++
 	return item, true
 }
 

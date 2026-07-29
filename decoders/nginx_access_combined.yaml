@@ -1,5 +1,5 @@
 name: nginx_access_combined
-log_type: nginx_access
+log_type: nginx_access_combined
 type: regex
 priority: 5
 enabled: true
