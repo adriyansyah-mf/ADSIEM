@@ -95,8 +95,43 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
   }
   const yForNote = () => padT + (lanes.indexOf('Notes')) * laneH + laneH / 2
 
-  const visibleAlerts = alerts.filter(a => filters[a.severity || 'info'])
-  const visibleNotes = notes.filter(() => filters.note)
+  const filteredAlerts = alerts.filter(a => filters[a.severity || 'info'])
+  const filteredNotes = notes.filter(() => filters.note)
+
+  // replay — steps chronologically through whatever passes the current severity filters
+  const [replayIndex, setReplayIndex] = useState<number | null>(null)
+  const replayTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isReplaying = replayIndex !== null
+
+  const replaySequence = useMemo(
+    () => [...filteredAlerts, ...filteredNotes].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredAlerts, filteredNotes]
+  )
+
+  function startReplay() {
+    if (isReplaying || replaySequence.length === 0) return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    setReplayIndex(0)
+  }
+
+  useEffect(() => {
+    if (replayIndex === null) return
+    if (replayIndex >= replaySequence.length) {
+      replayTimer.current = setTimeout(() => setReplayIndex(null), 500)
+    } else {
+      replayTimer.current = setTimeout(() => setReplayIndex(i => (i === null ? null : i + 1)), 650)
+    }
+    return () => { if (replayTimer.current) clearTimeout(replayTimer.current) }
+  }, [replayIndex, replaySequence.length])
+
+  const revealedIds = useMemo(
+    () => (replayIndex === null ? null : new Set(replaySequence.slice(0, replayIndex + 1).map(e => e.id))),
+    [replayIndex, replaySequence]
+  )
+  const visibleAlerts = revealedIds ? filteredAlerts.filter(a => revealedIds.has(a.id)) : filteredAlerts
+  const visibleNotes = revealedIds ? filteredNotes.filter(n => revealedIds.has(n.id)) : filteredNotes
+  const playheadX = isReplaying && replayIndex! < replaySequence.length ? xFor(replaySequence[replayIndex!].ts) : null
 
   const entityLabel = useMemo(() => {
     const ip = alerts.find(a => a.source_ip)?.source_ip
@@ -116,6 +151,22 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
     return d
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleAlerts, lanes])
+
+  // stagger node title labels that would otherwise sit on top of each other
+  // when two alerts in the same lane land close together on the time axis
+  const labelDy = useMemo(() => {
+    const lastXByLane: Record<string, number> = {}
+    const out: Record<string, number> = {}
+    for (const a of visibleAlerts) {
+      const stage = a.kill_chain_stage || 'Unknown'
+      const x = xFor(a.ts)
+      const prev = lastXByLane[stage]
+      out[a.id] = prev !== undefined && Math.abs(x - prev) < 72 ? 36 : 22
+      lastXByLane[stage] = x
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleAlerts, domain])
 
   // pan (drag) + wheel zoom — native listeners so preventDefault actually works on wheel
   useEffect(() => {
@@ -181,6 +232,19 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
           })}
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            onClick={startReplay}
+            disabled={isReplaying}
+            style={{
+              ...zoomBtnStyle, width: 'auto', padding: '0 12px', display: 'flex', alignItems: 'center', gap: 6,
+              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 11, letterSpacing: '1px',
+              color: isReplaying ? 'var(--accent-orange)' : 'var(--text-secondary)',
+              borderColor: isReplaying ? 'var(--accent-orange)' : 'var(--border)',
+              cursor: isReplaying ? 'default' : 'pointer',
+            }}
+          >
+            {isReplaying ? '■ PLAYING' : '▶ REPLAY'}
+          </button>
           <button onClick={() => setZoom(z => Math.max(0.6, z - 0.15))} style={zoomBtnStyle}>−</button>
           <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 10, color: 'var(--text-muted)', width: 34, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
           <button onClick={() => setZoom(z => Math.min(2.4, z + 0.15))} style={zoomBtnStyle}>+</button>
@@ -195,7 +259,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
       )}
 
       {/* canvas */}
-      <div style={{ position: 'relative', background: 'var(--bg-base)', borderRadius: 6, border: '1px solid var(--border)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-base)', borderRadius: 6, border: '1px solid var(--border)', overflow: 'hidden' }}>
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
@@ -217,6 +281,12 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
               )
             })}
             <line x1={0} y1={padT + lanes.length * laneH} x2={W} y2={padT + lanes.length * laneH} stroke="var(--border)" strokeWidth={1} />
+
+            {/* replay playhead */}
+            {playheadX !== null && (
+              <line x1={playheadX} y1={padT} x2={playheadX} y2={padT + lanes.length * laneH}
+                    stroke="var(--accent-yellow)" strokeWidth={1} strokeDasharray="3 3" />
+            )}
 
             {/* connecting path */}
             {pathD && (
@@ -252,7 +322,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                   <text x={x} y={y - 16} textAnchor="middle" style={{ font: '8.5px "Share Tech Mono", monospace', fill: 'var(--text-muted)' } as React.CSSProperties}>
                     {fmtShort(a.ts)}
                   </text>
-                  <text x={x > W - 200 ? x - 10 : x + 10} y={y + 22} textAnchor={x > W - 200 ? 'end' : 'start'}
+                  <text x={x > W - 200 ? x - 10 : x + 10} y={y + (labelDy[a.id] ?? 22)} textAnchor={x > W - 200 ? 'end' : 'start'}
                         style={{ font: '600 10.5px Rajdhani, sans-serif', fill: 'var(--text-primary)' } as React.CSSProperties}>
                     {truncate(a.title, 30)}
                   </text>
@@ -262,21 +332,25 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
           </g>
         </svg>
 
-        {/* legend */}
+        {/* legend — normal flow below the canvas so it never sits on top of lane content */}
         <div style={{
-          position: 'absolute', left: 10, bottom: 8, display: 'flex', gap: 10, flexWrap: 'wrap',
-          padding: '5px 9px', background: 'rgba(8,14,26,.85)', border: '1px solid var(--border)', borderRadius: 5,
-          fontFamily: 'Share Tech Mono, monospace', fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap',
+          padding: '6px 10px', borderTop: '1px solid var(--border)', background: 'var(--bg-panel)',
         }}>
-          {CHIPS.map(c => (
-            <span key={c.key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 7, height: 7, borderRadius: c.key === 'note' ? 0 : '50%', background: c.color }} />
-              {c.label}
-            </span>
-          ))}
-        </div>
-        <div style={{ position: 'absolute', right: 10, bottom: 8, fontFamily: 'Share Tech Mono, monospace', fontSize: 9, color: 'var(--text-muted)' }}>
-          drag to pan · scroll to zoom
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {CHIPS.map(c => (
+              <span key={c.key} style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                fontFamily: 'Share Tech Mono, monospace', fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase',
+              }}>
+                <span style={{ width: 7, height: 7, borderRadius: c.key === 'note' ? 0 : '50%', background: c.color }} />
+                {c.label}
+              </span>
+            ))}
+          </div>
+          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 9, color: 'var(--text-muted)' }}>
+            drag to pan · scroll to zoom
+          </div>
         </div>
       </div>
 
