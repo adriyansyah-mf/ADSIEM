@@ -193,7 +193,7 @@ export default function HuntsPage() {
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <p className="text-xs text-muted-foreground">
-          AI akan menelusuri seluruh riwayat alerts dan events yang terkait IoC ini, lalu menganalisa pola serangan.
+          AI will trace the full alert/event history related to this IoC, then analyze the attack pattern.
         </p>
       </div>
 
@@ -204,7 +204,7 @@ export default function HuntsPage() {
         {isLoading && <div className="text-muted-foreground text-sm">Loading…</div>}
         {!isLoading && hunts.length === 0 && (
           <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground text-sm">
-            Belum ada hunt. Masukkan IoC di atas untuk memulai.
+            No hunts yet. Enter an IoC above to get started.
           </div>
         )}
         {hunts.map(h => <HuntCard key={h.id} hunt={h} />)}
@@ -253,16 +253,16 @@ function HuntCard({ hunt }: { hunt: ThreatHunt }) {
           {hunt.status === 'pending' || hunt.status === 'running' ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 size={14} className="animate-spin" />
-              {hunt.status === 'pending' ? 'Menunggu giliran…' : 'AI sedang menelusuri…'}
+              {hunt.status === 'pending' ? 'Waiting in queue…' : 'AI is tracing…'}
             </div>
           ) : hunt.status === 'failed' ? (
-            <p className="text-sm text-destructive">{analysis?.attack_narrative ?? 'Hunt gagal.'}</p>
+            <p className="text-sm text-destructive">{analysis?.attack_narrative ?? 'Hunt failed.'}</p>
           ) : (
             <>
               {/* AI Narrative */}
               {analysis?.attack_narrative && (
                 <div className="rounded bg-muted/30 border border-border p-3 space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase font-medium">Analisa AI</p>
+                  <p className="text-xs text-muted-foreground uppercase font-medium">AI Analysis</p>
                   <MarkdownNote content={analysis.attack_narrative} className="text-sm" />
                 </div>
               )}
@@ -294,7 +294,7 @@ function HuntCard({ hunt }: { hunt: ThreatHunt }) {
               {/* Recommended actions */}
               {analysis?.recommended_actions?.length > 0 && (
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Rekomendasi</p>
+                  <p className="text-xs text-muted-foreground uppercase font-medium mb-1">Recommended Actions</p>
                   <ul className="text-sm space-y-0.5">
                     {analysis.recommended_actions.map((a: string, i: number) => (
                       <li key={i} className="flex gap-2"><span className="text-muted-foreground">•</span>{a}</li>
@@ -326,7 +326,7 @@ function HuntCard({ hunt }: { hunt: ThreatHunt }) {
               )}
 
               {(hunt.alert_count === 0 && hunt.event_count === 0) && (
-                <p className="text-sm text-muted-foreground">Tidak ditemukan riwayat IoC ini di alerts/events.</p>
+                <p className="text-sm text-muted-foreground">No history found for this IoC in alerts/events.</p>
               )}
             </>
           )}
