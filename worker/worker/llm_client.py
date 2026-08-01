@@ -179,7 +179,11 @@ Perform triage and provide your verdict as an L1 analyst."""
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.15,
-            "max_tokens": 700,
+            # 9router's combo model is a reasoning model that spends part of its
+            # budget on hidden "reasoning_content" before writing the actual JSON
+            # answer — 700 wasn't enough headroom and routinely got cut off
+            # mid-answer (finish_reason "length"), so this needs real slack.
+            "max_tokens": 2500,
         })
         content = result["choices"][0]["message"]["content"].strip()
         if content.startswith("```"):
@@ -312,7 +316,7 @@ Analyze this as a complete attack campaign. What is the full story?"""
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.2,
-            "max_tokens": 1024,
+            "max_tokens": 3000,  # see analyze_alert_with_ai — reasoning model needs real headroom
         })
         content = result["choices"][0]["message"]["content"].strip()
         if content.startswith("```"):

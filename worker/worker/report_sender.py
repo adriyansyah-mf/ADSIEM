@@ -82,7 +82,7 @@ Keep it concise — max 200 words total. No bullet points, pure paragraphs."""
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
-            "max_tokens": 400,
+            "max_tokens": 1500,  # reasoning model — see llm_client.analyze_alert_with_ai
         })
         return result["choices"][0]["message"]["content"].strip()
     except Exception as exc:

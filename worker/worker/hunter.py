@@ -59,7 +59,7 @@ Analyze this IoC's historical footprint and determine the attack pattern."""
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.15,
-            "max_tokens": 700,
+            "max_tokens": 2500,  # reasoning model — see llm_client.analyze_alert_with_ai
         })
         content = result["choices"][0]["message"]["content"].strip()
         if content.startswith("```"):
