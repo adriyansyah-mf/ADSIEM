@@ -132,6 +132,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
   const visibleAlerts = revealedIds ? filteredAlerts.filter(a => revealedIds.has(a.id)) : filteredAlerts
   const visibleNotes = revealedIds ? filteredNotes.filter(n => revealedIds.has(n.id)) : filteredNotes
   const playheadX = isReplaying && replayIndex! < replaySequence.length ? xFor(replaySequence[replayIndex!].ts) : null
+  const currentStepId = isReplaying && replayIndex! < replaySequence.length ? replaySequence[replayIndex!].id : null
 
   const entityLabel = useMemo(() => {
     const ip = alerts.find(a => a.source_ip)?.source_ip
@@ -140,26 +141,21 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
   }, [alerts])
 
   // Declutter bursts of near-simultaneous alerts in the same lane: nudge dot
-  // x-positions apart so they're not literally stacked (and unclickable), and
-  // hide the title label for any node too close to the previous one in its
-  // lane — a hidden label still appears on hover/select, it just isn't drawn
-  // by default when it would otherwise overlap its neighbor.
+  // x-positions apart so they're not literally stacked on top of each other
+  // (and unclickable). Title labels are handled separately — see showLabel
+  // below: only one label is ever on screen at a time, so there's nothing
+  // left for the layout pass to collision-check.
   const nodeLayout = useMemo(() => {
     const MIN_DOT_GAP = 16
-    const MIN_LABEL_GAP = 88
     const lastDotXByLane: Record<string, number> = {}
-    const lastLabelXByLane: Record<string, number> = {}
-    const out: Record<string, { x: number; showLabel: boolean }> = {}
+    const out: Record<string, { x: number }> = {}
     for (const a of visibleAlerts) {
       const stage = a.kill_chain_stage || 'Unknown'
       const rawX = xFor(a.ts)
       const prevDotX = lastDotXByLane[stage]
       const x = prevDotX !== undefined && rawX - prevDotX < MIN_DOT_GAP ? prevDotX + MIN_DOT_GAP : rawX
-      const prevLabelX = lastLabelXByLane[stage]
-      const showLabel = prevLabelX === undefined || x - prevLabelX >= MIN_LABEL_GAP
       lastDotXByLane[stage] = x
-      if (showLabel) lastLabelXByLane[stage] = x
-      out[a.id] = { x, showLabel }
+      out[a.id] = { x }
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -326,7 +322,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
               const dim = hovered && hovered !== a.id
               const isSel = selected?.id === a.id
               const isHovered = hovered === a.id
-              const showLabel = (layout?.showLabel ?? true) || isHovered || isSel
+              const showLabel = isHovered || isSel || currentStepId === a.id
               return (
                 <g key={a.id} style={{ cursor: 'pointer', opacity: dim ? 0.25 : 1 }}
                    onClick={() => setSelected(a)}
