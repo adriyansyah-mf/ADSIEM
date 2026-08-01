@@ -16,7 +16,7 @@ from sqlalchemy import select, or_
 
 from worker.database import AsyncSessionLocal
 from worker.models import Alert, CaseNote, UebaAnomaly
-from worker.groq_client import analyze_campaign_with_groq
+from worker.llm_client import analyze_campaign_with_ai
 
 log = structlog.get_logger()
 
@@ -113,7 +113,7 @@ async def _run(
                  source_ip=source_ip,
                  hostname=hostname)
 
-        analysis = await analyze_campaign_with_groq(
+        analysis = await analyze_campaign_with_ai(
             source_ip=source_ip,
             hostname=hostname,
             timeline=timeline,

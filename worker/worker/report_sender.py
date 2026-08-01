@@ -21,11 +21,11 @@ CHECK_INTERVAL = 3600  # check hourly
 
 
 async def _generate_ai_narrative(alerts: list, cutoff) -> str:
-    """Ask Groq to generate an executive summary of the week's security posture."""
-    from worker.groq_client import _groq_post
+    """Ask the AI analyst LLM to generate an executive summary of the week's security posture."""
+    from worker.llm_client import _llm_post
     from worker.settings_cache import get_setting
 
-    api_key = await get_setting("groq_api_key") or ""
+    api_key = await get_setting("ninerouter_api_key") or ""
     if not api_key:
         return ""
 
@@ -76,9 +76,9 @@ Write a 3-paragraph executive summary in English:
 
 Keep it concise — max 200 words total. No bullet points, pure paragraphs."""
 
-    model = await get_setting("groq_model", "llama-3.3-70b-versatile")
+    model = await get_setting("ninerouter_model", "combo")
     try:
-        result = await _groq_post(api_key, {
+        result = await _llm_post(api_key, {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,

@@ -5,8 +5,8 @@ import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
 const SETTING_LABELS: Record<string, string> = {
-  groq_api_key: 'Groq API Key',
-  groq_model: 'Groq Model',
+  ninerouter_api_key: '9router API Key',
+  ninerouter_model: '9router Combo',
   searxng_url: 'SearXNG URL',
   ai_analyst_enabled: 'AI Analyst',
   virustotal_api_key: 'VirusTotal API Key',
@@ -29,8 +29,8 @@ const SETTING_LABELS: Record<string, string> = {
 }
 
 const SETTING_HINTS: Record<string, string> = {
-  groq_api_key: 'Get your key at console.groq.com',
-  groq_model: 'e.g. llama-3.3-70b-versatile',
+  ninerouter_api_key: 'Generated once via the 9router dashboard API (POST /api/keys) — see docs/PROJECT_OVERVIEW.md',
+  ninerouter_model: 'Combo name created in the 9router dashboard, e.g. "combo"',
   searxng_url: 'Internal URL of your SearXNG instance',
   ai_analyst_enabled: 'Enable or disable automated AI triage (true / false)',
   virustotal_api_key: 'Free tier: 500 req/day — virustotal.com/gui/my-apikey',

@@ -225,7 +225,7 @@ Platform ini memiliki tiga lapisan kecerdasan AI yang berjalan secara otonom tan
 
 ### AI SOC L1 Analyst (Auto-triage)
 
-**File:** `worker/worker/ai_analyst.py`, `worker/worker/ai_consumer.py`, `worker/worker/groq_client.py`
+**File:** `worker/worker/ai_analyst.py`, `worker/worker/ai_consumer.py`, `worker/worker/llm_client.py`
 
 Setiap alert yang dibuat oleh Sigma engine secara otomatis dikirim ke antrian AI (`siem:ai_analysis` Redis list). Worker `ai_analysis_loop` mengonsumsi antrian ini dan menjalankan pipeline berikut:
 
@@ -352,13 +352,34 @@ Semua setting AI bisa diubah live dari dashboard (Settings) tanpa restart:
 | Setting | Default | Keterangan |
 |---------|---------|------------|
 | `ai_analyst_enabled` | `true` | Toggle seluruh pipeline AI |
-| `groq_api_key` | env var | API key Groq |
-| `groq_model` | `llama-3.3-70b-versatile` | Model LLM yang dipakai |
+| `ninerouter_api_key` | env var | API key 9router — di-generate sekali per environment (lihat "Setup 9router" di bawah) |
+| `ninerouter_model` | `combo` | Nama combo 9router yang dipakai untuk routing model AI |
 | `virustotal_api_key` | — | VirusTotal API key |
 | `abuseipdb_api_key` | — | AbuseIPDB API key |
 | `otx_api_key` | — | OTX AlienVault API key |
 | `greynoise_api_key` | — | GreyNoise API key |
 | `searxng_url` | `http://searxng:8080` | URL SearXNG instance |
+
+#### Setup 9router (sekali per environment)
+
+AI analyst di-serve lewat [9router](https://github.com/decolua/9router) (local AI model router dengan dashboard combo), bukan langsung ke satu provider. Setelah container `9router` jalan (lihat `docker-compose.yml`), provisioning combo + API key dilakukan lewat API dashboard-nya sendiri — tidak perlu buka browser:
+
+```bash
+# 1. Login, ambil session cookie
+curl -sS -c cookies.txt -X POST http://<host>:<port>/api/auth/login \
+  -H "Content-Type: application/json" -d '{"password":"<NINEROUTER_INITIAL_PASSWORD>"}'
+
+# 2. Buat combo (sekali saja — akan error "already exists" kalau diulang, aman diabaikan)
+curl -sS -b cookies.txt -X POST http://<host>:<port>/api/combos \
+  -H "Content-Type: application/json" \
+  -d '{"name":"combo","models":["opencode/deepseek-v4-flash-free"]}'
+
+# 3. Generate API key (simpan hasilnya — cuma ditampilkan sekali)
+curl -sS -b cookies.txt -X POST http://<host>:<port>/api/keys \
+  -H "Content-Type: application/json" -d '{"name":"adsiem-worker"}'
+```
+
+Simpan `key` dari langkah 3 ke `platform_settings.ninerouter_api_key` (lewat dashboard Settings atau langsung `UPDATE platform_settings SET value=... WHERE key='ninerouter_api_key'`). Provider yang dipakai di combo (`opencode/*`) adalah "OpenCode Free" — gratis, headless, tanpa perlu login/API key tambahan.
 
 ---
 

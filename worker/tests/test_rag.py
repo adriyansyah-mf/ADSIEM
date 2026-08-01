@@ -54,8 +54,8 @@ def test_rag_indexer_module_importable():
 
 def test_analyze_alert_accepts_similar_cases_param():
     import inspect
-    from worker.groq_client import analyze_alert_with_groq
-    sig = inspect.signature(analyze_alert_with_groq)
+    from worker.llm_client import analyze_alert_with_ai
+    sig = inspect.signature(analyze_alert_with_ai)
     assert "similar_cases" in sig.parameters
 
 
@@ -99,6 +99,6 @@ def test_retrieve_sop_context_returns_list():
 
 def test_analyze_alert_accepts_sop_context_param():
     import inspect
-    from worker.groq_client import analyze_alert_with_groq
-    sig = inspect.signature(analyze_alert_with_groq)
+    from worker.llm_client import analyze_alert_with_ai
+    sig = inspect.signature(analyze_alert_with_ai)
     assert "sop_context" in sig.parameters

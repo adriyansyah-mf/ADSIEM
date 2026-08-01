@@ -52,6 +52,28 @@ services:
     networks:
       - siem-net
 
+  9router:
+    image: decolua/9router:latest
+    restart: unless-stopped
+    environment:
+      PORT: "20128"
+      JWT_SECRET: ${NINEROUTER_JWT_SECRET:-change-me-ninerouter-jwt-secret}
+      INITIAL_PASSWORD: ${NINEROUTER_INITIAL_PASSWORD:-change-me-ninerouter-password}
+      API_KEY_SECRET: ${NINEROUTER_API_KEY_SECRET:-change-me-ninerouter-secret}
+      REQUIRE_API_KEY: "false"
+    volumes:
+      - ninerouter_data:/app/data
+    ports:
+      - "127.0.0.1:20129:20128"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:20128/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - siem-net
+
   package-builder:
     build:
       context: ./agent
@@ -118,7 +140,9 @@ services:
       DECODERS_DIR: /app/decoders
       RULES_DIR: /app/rules
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      NINEROUTER_BASE_URL: ${NINEROUTER_BASE_URL:-http://9router:20128/v1}
+      NINEROUTER_API_KEY: ${NINEROUTER_API_KEY:-}
+      NINEROUTER_MODEL: ${NINEROUTER_MODEL:-combo}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       RELOAD_INTERVAL: ${RELOAD_INTERVAL:-60}
       WEBHOOK_RETRY_INTERVAL: ${WEBHOOK_RETRY_INTERVAL:-30}
@@ -133,6 +157,8 @@ services:
       redis:
         condition: service_healthy
       elasticsearch:
+        condition: service_healthy
+      9router:
         condition: service_healthy
       server-api:
         condition: service_healthy
@@ -207,6 +233,7 @@ volumes:
   postgres_data:
   redis_data:
   es_data:
+  ninerouter_data:
   agent_packages:
 
 networks:

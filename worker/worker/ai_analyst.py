@@ -23,7 +23,7 @@ from sqlalchemy import select, update
 
 from worker.database import AsyncSessionLocal
 from worker.models import Alert, AlertNote, Case, CaseNote, ThreatHunt
-from worker.groq_client import analyze_alert_with_groq
+from worker.llm_client import analyze_alert_with_ai
 from worker.alert_manager import dispatch_case_webhooks
 from worker.settings_cache import get_setting
 from worker.ti.config import TIConfig
@@ -397,7 +397,7 @@ async def analyze_and_maybe_create_case(
         log.info("rag_sop_found", alert_id=alert_id, chunks=len(sop_context))
 
     # ── 3. Groq L1 triage — selalu dijalankan ───────────────────────────────
-    analysis = await analyze_alert_with_groq(
+    analysis = await analyze_alert_with_ai(
         title=title,
         severity=effective_severity,
         source_ip=source_ip,

@@ -23,6 +23,13 @@ services:
           memory: 2g
           cpus: '1.0'
 
+  9router:
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
   server-api:
     deploy:
       replicas: 2

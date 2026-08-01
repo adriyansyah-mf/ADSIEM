@@ -45,8 +45,8 @@ structlog.configure(
 )
 
 _DEFAULT_SETTINGS = [
-    ("groq_api_key",       "",                          True,  "Groq API key for AI analyst (console.groq.com)"),
-    ("groq_model",         "llama-3.3-70b-versatile",   False, "Groq model ID"),
+    ("ninerouter_api_key", "",                          True,  "9router API key for AI analyst — generate via POST /api/keys against the 9router dashboard API (see docs/PROJECT_OVERVIEW.md)"),
+    ("ninerouter_model",   "combo",                      False, "9router combo name to route AI analyst requests through"),
     ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
     ("ai_confidence_threshold","0.0",                    False, "Minimum AI confidence (0.0-1.0) to create/escalate a case — notes always written regardless"),
     ("searxng_url",        "http://searxng:8080",        False, "Internal URL of SearXNG instance used for threat intel search"),
@@ -54,8 +54,8 @@ _DEFAULT_SETTINGS = [
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
     ("otx_api_key",        "",                          True,  "AlienVault OTX API key — free (otx.alienvault.com)"),
     ("greynoise_api_key",  "",                          True,  "GreyNoise API key — optional, community endpoint used if empty"),
-    ("anthropic_api_key",   "",        True,  "Anthropic Claude API key — fallback LLM when Groq fails (optional)"),
-    ("fallback_llm",        "false",   False, "Use Claude as fallback when Groq fails (true/false)"),
+    ("anthropic_api_key",   "",        True,  "Anthropic Claude API key — fallback LLM when 9router fails (optional)"),
+    ("fallback_llm",        "false",   False, "Use Claude as fallback when 9router fails (true/false)"),
     ("smtp_enabled",      "false",     False, "Enable email alert notifications (true/false)"),
     ("smtp_host",         "",          False, "SMTP server hostname (e.g. smtp.gmail.com)"),
     ("smtp_port",         "587",       False, "SMTP port (587=STARTTLS, 465=SSL, 25=plain)"),

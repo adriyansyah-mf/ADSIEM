@@ -27,7 +27,7 @@ async def ai_analysis_loop() -> None:
     """Pop alerts off the AI queue and analyse them concurrently.
 
     Each alert is dispatched as its own task rather than awaited in-line —
-    Groq calls are already capped at 3 concurrent (see groq_client.py's
+    LLM calls are already capped at 3 concurrent (see llm_client.py's
     semaphore), but a single item awaited here would otherwise let one
     rate-limited or slow alert block every alert queued behind it,
     regardless of severity.

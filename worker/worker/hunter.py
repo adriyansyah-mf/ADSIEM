@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from worker.database import AsyncSessionLocal
 from worker.models import Alert, ThreatHunt
 from worker.settings_cache import get_setting
-from worker.config import GROQ_API_KEY
-from worker.groq_client import _groq_post
+from worker.config import NINEROUTER_API_KEY, NINEROUTER_MODEL
+from worker.llm_client import _llm_post
 from worker.es_client import search as es_search
 
 log = structlog.get_logger()
@@ -38,9 +38,9 @@ Respond ONLY in valid JSON:
 }"""
 
 
-async def _call_groq(ioc_type: str, ioc_value: str, timeline_text: str) -> dict:
-    api_key = await get_setting("groq_api_key") or GROQ_API_KEY
-    model = await get_setting("groq_model", "llama-3.3-70b-versatile")
+async def _call_llm(ioc_type: str, ioc_value: str, timeline_text: str) -> dict:
+    api_key = await get_setting("ninerouter_api_key") or NINEROUTER_API_KEY
+    model = await get_setting("ninerouter_model", NINEROUTER_MODEL)
     if not api_key:
         return {"risk_level": "unknown", "attack_narrative": "AI not configured", "confidence": 0.0}
 
@@ -52,7 +52,7 @@ Timeline of appearances ({len(timeline_text.splitlines())} entries):
 Analyze this IoC's historical footprint and determine the attack pattern."""
 
     try:
-        result = await _groq_post(api_key, {
+        result = await _llm_post(api_key, {
             "model": model,
             "messages": [
                 {"role": "system", "content": _HUNT_SYSTEM_PROMPT},
@@ -182,7 +182,7 @@ async def run_hunt(hunt_id: str) -> None:
             timeline = _build_timeline(alerts, events)
             timeline_text = _timeline_to_text(hunt.ioc_type, hunt.ioc_value, timeline)
 
-            analysis = await _call_groq(hunt.ioc_type, hunt.ioc_value, timeline_text)
+            analysis = await _call_llm(hunt.ioc_type, hunt.ioc_value, timeline_text)
 
             hunt.status = "done"
             hunt.alert_count = len(alerts)

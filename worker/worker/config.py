@@ -11,7 +11,14 @@ LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "info")
 RELOAD_INTERVAL: int = int(os.environ.get("RELOAD_INTERVAL", "60"))
 WEBHOOK_RETRY_INTERVAL: int = int(os.environ.get("WEBHOOK_RETRY_INTERVAL", "30"))
 MAX_WEBHOOK_ATTEMPTS: int = int(os.environ.get("MAX_WEBHOOK_ATTEMPTS", "5"))
-GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
+NINEROUTER_BASE_URL: str = os.environ.get("NINEROUTER_BASE_URL", "http://9router:20128/v1")
+# 9router always requires a real generated key for /v1/chat/completions (REQUIRE_API_KEY
+# only affects other things, not this check) — there's no valid fixed/placeholder value.
+# The key is generated once per environment via POST /api/keys against the 9router
+# dashboard API (see docs/PROJECT_OVERVIEW.md) and stored in platform_settings, which
+# always takes priority over this env var fallback.
+NINEROUTER_API_KEY: str = os.environ.get("NINEROUTER_API_KEY", "")
+NINEROUTER_MODEL: str = os.environ.get("NINEROUTER_MODEL", "combo")
 SEARXNG_URL: str = os.environ.get("SEARXNG_URL", "http://searxng:8080")
 AI_ANALYSIS_QUEUE: str = os.environ.get("AI_ANALYSIS_QUEUE", "siem:ai-analysis")
 ELASTICSEARCH_URL: str = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch:9200")
