@@ -13,8 +13,18 @@ from worker.ai_queue import mark_queued
 from worker.correlation_engine import check_correlation
 from worker.soar_engine import run_soar_playbooks
 from worker.email_sender import send_alert_email
+from worker.settings_cache import get_setting
 
 log = structlog.get_logger()
+
+_SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
+
+
+def _severity_gte(sev: str, minimum: str) -> bool:
+    try:
+        return _SEVERITY_ORDER.index(sev) >= _SEVERITY_ORDER.index(minimum)
+    except ValueError:
+        return False
 
 
 async def _get_entity_risk_max(source_ip: str | None, hostname: str | None) -> float:
@@ -33,17 +43,9 @@ async def _get_entity_risk_max(source_ip: str | None, hostname: str | None) -> f
     return max(scores) if scores else 0.0
 
 
-def _should_ai_investigate(risk: float, severity: str) -> bool:
-    # high/critical selalu diinvestigasi — sesuai peran AI sebagai L1 analyst aktif
-    if severity in ("critical", "high"):
-        return True
-    # medium: investigasi jika ada sinyal UEBA
-    if severity == "medium" and risk >= 40:
-        return True
-    # low/info: hanya jika UEBA sangat yakin
-    if risk >= 70:
-        return True
-    return False
+async def _should_ai_investigate(severity: str) -> bool:
+    min_sev = await get_setting("ai_min_severity", "high")
+    return _severity_gte(severity, min_sev)
 
 
 async def _is_suppressed(
@@ -177,11 +179,11 @@ async def create_alert(
     except Exception:
         pass
 
-    # Push to AI analysis queue — gated by ML entity risk score
+    # Push to AI analysis queue — gated by the configurable ai_min_severity setting
     try:
         redis = await get_redis()
         risk = await _get_entity_risk_max(source_ip, hostname)
-        if _should_ai_investigate(risk, rule_match["level"]):
+        if await _should_ai_investigate(rule_match["level"]):
             await mark_queued(redis, str(alert_id))
             await redis.rpush(AI_ANALYSIS_QUEUE, json.dumps({
                 "alert_id": str(alert_id),
