@@ -228,6 +228,7 @@ export interface PaginatedResponse<T> {
   page: number
   page_size: number
   items: T[]
+  next_after?: string | null
 }
 
 export type Role = 'superadmin' | 'admin' | 'analyst' | 'viewer'

@@ -54,18 +54,29 @@ async def get_log(doc_id: str) -> dict | None:
 
 async def search(
     query: dict,
-    from_: int = 0,
     size: int = 25,
     sort: list | None = None,
-) -> tuple[list[dict], int]:
-    """Returns (hits as [{id, **_source}], total_count)."""
+    search_after: list | None = None,
+) -> tuple[list[dict], int, list | None]:
+    """Returns (hits as [{id, **_source}], total_count, next_search_after_cursor).
+
+    Uses search_after instead of from/size — Elasticsearch hard-rejects from+size
+    past its default 10,000-result window, which a few hundred pages of real log
+    volume (millions of docs) reaches almost immediately. search_after has no such
+    depth limit. A tiebreaker (_seq_no — unique per doc, doc-values enabled by
+    default, unlike _id which ES refuses to sort on without fielddata) is appended
+    so the cursor is stable even when many docs share the same sort value (e.g.
+    created_at, which easily collides across docs during bursty ingestion).
+    """
     client = _get_client()
-    body: dict = {"query": query, "from": from_, "size": size, "track_total_hits": True}
-    if sort:
-        body["sort"] = sort
+    effective_sort = (sort or [{"created_at": "desc"}]) + [{"_seq_no": "asc"}]
+    body: dict = {"query": query, "size": size, "sort": effective_sort, "track_total_hits": True}
+    if search_after:
+        body["search_after"] = search_after
     resp = await client.post(f"/{LOGS_INDEX}/_search", json=body)
     resp.raise_for_status()
     result = resp.json()
     hits = result["hits"]["hits"]
     total = result["hits"]["total"]["value"]
-    return [{"id": h["_id"], **h["_source"]} for h in hits], total
+    next_cursor = hits[-1]["sort"] if len(hits) == size else None
+    return [{"id": h["_id"], **h["_source"]} for h in hits], total, next_cursor

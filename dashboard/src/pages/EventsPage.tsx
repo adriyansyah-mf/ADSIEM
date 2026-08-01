@@ -1,13 +1,15 @@
-import { useState } from 'react'
+import { useEffect } from 'react'
 import DataTable from '@/components/DataTable'
 import { useEvents } from '@/hooks/useEvents'
+import { useCursorPagination } from '@/hooks/useCursorPagination'
 import { format } from 'date-fns'
 import type { Event } from '@/types'
 
 export default function EventsPage() {
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
-  const { data, isLoading } = useEvents(page, pageSize)
+  const { page, pageSize, after, goToPage, onPageData, changePageSize } = useCursorPagination(25)
+  const { data, isLoading } = useEvents(pageSize, after)
+
+  useEffect(() => { onPageData(data?.next_after) }, [data?.next_after, onPageData])
 
   const columns = [
     { key: 'time', header: 'Time', render: (r: Event) => format(new Date(r.created_at), 'yyyy-MM-dd HH:mm:ss') },
@@ -22,8 +24,8 @@ export default function EventsPage() {
       <h1 className="text-xl font-bold mb-6">Events</h1>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
-          page={page} pageSize={pageSize} onPageChange={setPage}
-          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }} />
+          page={page} pageSize={pageSize} onPageChange={goToPage}
+          onPageSizeChange={changePageSize} />
       )}
     </div>
   )

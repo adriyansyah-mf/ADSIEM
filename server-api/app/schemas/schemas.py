@@ -358,6 +358,11 @@ class PaginatedResponse(BaseModel):
     page: int
     page_size: int
     items: list[Any]
+    # Cursor for the next page when the source is Elasticsearch (search_after-based —
+    # ES's offset pagination hard-fails past 10,000 results, which real log/event
+    # volume blows through quickly). None once there are no more pages. Postgres-backed
+    # endpoints leave this unset and keep using page/page_size as before.
+    next_after: str | None = None
 
 # ─── Platform Settings ───────────────────────────────────────────
 

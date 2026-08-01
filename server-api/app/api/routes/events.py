@@ -1,4 +1,5 @@
 # server-api/app/api/routes/events.py
+import json
 from typing import Annotated
 from fastapi import APIRouter, Depends
 
@@ -13,7 +14,8 @@ Perm = require_permission("logs:read")
 async def list_events(
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(Perm),
-    page: int = 1, page_size: int = 25,
+    page_size: int = 25,
+    after: str | None = None,
     source_ip: str | None = None, event_action: str | None = None,
 ):
     filters: list[dict] = []
@@ -25,11 +27,12 @@ async def list_events(
         filters.append({"term": {"event_action": event_action}})
     query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
 
-    hits, total = await es_search(
+    search_after = json.loads(after) if after else None
+    hits, total, next_cursor = await es_search(
         query,
-        from_=(page - 1) * page_size,
         size=page_size,
         sort=[{"created_at": "desc"}],
+        search_after=search_after,
     )
     items = [
         EventOut(
@@ -45,4 +48,7 @@ async def list_events(
         )
         for h in hits
     ]
-    return PaginatedResponse(total=total, page=page, page_size=page_size, items=items)
+    return PaginatedResponse(
+        total=total, page=1, page_size=page_size, items=items,
+        next_after=json.dumps(next_cursor) if next_cursor else None,
+    )

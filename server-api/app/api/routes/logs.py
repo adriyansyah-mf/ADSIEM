@@ -1,4 +1,5 @@
 # server-api/app/api/routes/logs.py
+import json
 from fastapi import APIRouter, Depends
 
 from app.core.deps import require_permission
@@ -11,7 +12,8 @@ Perm = require_permission("logs:read")
 @router.get("", response_model=PaginatedResponse)
 async def list_logs(
     _=Depends(Perm),
-    page: int = 1, page_size: int = 25,
+    page_size: int = 25,
+    after: str | None = None,
     log_type: str | None = None, search: str | None = None,
 ):
     filters: list[dict] = []
@@ -21,11 +23,12 @@ async def list_logs(
         filters.append({"match": {"raw_message": search}})
     query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
 
-    hits, total = await es_search(
+    search_after = json.loads(after) if after else None
+    hits, total, next_cursor = await es_search(
         query,
-        from_=(page - 1) * page_size,
         size=page_size,
         sort=[{"created_at": "desc"}],
+        search_after=search_after,
     )
     items = [
         RawLogOut(
@@ -37,4 +40,7 @@ async def list_logs(
         )
         for h in hits
     ]
-    return PaginatedResponse(total=total, page=page, page_size=page_size, items=items)
+    return PaginatedResponse(
+        total=total, page=1, page_size=page_size, items=items,
+        next_after=json.dumps(next_cursor) if next_cursor else None,
+    )
