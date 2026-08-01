@@ -57,6 +57,8 @@ class Alert(Base):
     duplicate_count  = Column(Integer, nullable=False, default=0)
     acknowledged_at  = Column(DateTime(timezone=True))
     resolved_at      = Column(DateTime(timezone=True))
+    mitre_techniques = Column(JSONB, nullable=False, default=list)
+    kill_chain_stage = Column(String(50))
     created_at       = Column(DateTime(timezone=True), default=now_utc)
     updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 

@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { Alert } from '@/types'
 import MarkdownNote from '@/components/MarkdownNote'
+import AttackGraph from '@/components/AttackGraph'
 
 const severityColors = {
   critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
@@ -39,7 +40,7 @@ function SeverityBadge({ severity }: { severity: string }) {
   )
 }
 
-function Box({ title, children }: { title: string; children: React.ReactNode }) {
+function Box({ title, children, actions }: { title: string; children: React.ReactNode; actions?: React.ReactNode }) {
   return (
     <div style={{
       borderRadius: '6px',
@@ -49,15 +50,23 @@ function Box({ title, children }: { title: string; children: React.ReactNode }) 
       marginBottom: '12px',
     }}>
       <div style={{
-        fontFamily: 'Rajdhani, sans-serif',
-        fontSize: '11px',
-        fontWeight: 700,
-        letterSpacing: '2px',
-        textTransform: 'uppercase',
-        color: 'var(--accent-cyan)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '10px',
         marginBottom: '12px',
       }}>
-        {title}
+        <div style={{
+          fontFamily: 'Rajdhani, sans-serif',
+          fontSize: '11px',
+          fontWeight: 700,
+          letterSpacing: '2px',
+          textTransform: 'uppercase',
+          color: 'var(--accent-cyan)',
+        }}>
+          {title}
+        </div>
+        {actions}
       </div>
       {children}
     </div>
@@ -161,6 +170,7 @@ export default function CaseDetailPage() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
   const [noteText, setNoteText] = useState('')
+  const [timelineView, setTimelineView] = useState<'graph' | 'linear'>('graph')
 
   const { data: caseData, isLoading } = useCase(id!)
   const update = useUpdateCase(id!)
@@ -494,8 +504,37 @@ export default function CaseDetailPage() {
             </div>
           </Box>
 
-          <Box title={`Attack Timeline (${timeline?.items?.length ?? 0} events)`}>
-            <AttackTimeline items={timeline?.items ?? []} />
+          <Box
+            title={`Attack Timeline (${timeline?.items?.length ?? 0} events)`}
+            actions={
+              <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+                {(['graph', 'linear'] as const).map(v => (
+                  <button
+                    key={v}
+                    onClick={() => setTimelineView(v)}
+                    style={{
+                      appearance: 'none',
+                      border: 0,
+                      borderLeft: v === 'linear' ? '1px solid var(--border)' : 'none',
+                      background: timelineView === v ? 'rgba(0,212,255,0.12)' : 'transparent',
+                      color: timelineView === v ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                      fontFamily: 'Rajdhani, sans-serif',
+                      fontWeight: 700,
+                      fontSize: '11px',
+                      letterSpacing: '1px',
+                      padding: '5px 12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {v.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            {timelineView === 'graph'
+              ? <AttackGraph items={timeline?.items ?? []} />
+              : <AttackTimeline items={timeline?.items ?? []} />}
           </Box>
         </div>
 

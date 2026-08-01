@@ -136,6 +136,8 @@ CREATE TABLE alerts (
     hostname         VARCHAR(255),
     assignee_id      UUID REFERENCES users(id) ON DELETE SET NULL,
     duplicate_count  INTEGER NOT NULL DEFAULT 0,
+    mitre_techniques JSONB NOT NULL DEFAULT '[]'::jsonb,
+    kill_chain_stage VARCHAR(50),
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

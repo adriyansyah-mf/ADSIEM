@@ -28,7 +28,7 @@ from worker.alert_manager import dispatch_case_webhooks
 from worker.settings_cache import get_setting
 from worker.ti.config import TIConfig
 from worker.ti.aggregator import EnrichmentAggregator
-from worker.ti.mitre import suggest_mitre
+from worker.ti.mitre import suggest_mitre, stage_for_techniques
 from worker.campaign_analyzer import analyze_campaign
 from worker.searxng_client import search_threat_intel
 from worker.rag import retrieve_similar_cases, retrieve_sop_context
@@ -137,6 +137,26 @@ async def _write_alert_note(alert_id: str, content: str) -> None:
             await db.commit()
     except Exception as exc:
         log.warning("alert_note_write_failed", alert_id=alert_id, error=str(exc))
+
+
+async def _tag_alert_with_mitre(alert_id: str, mitre_techniques: list[str]) -> None:
+    """Persist AI-derived MITRE techniques + kill-chain stage onto the alert row.
+
+    Written for every triage verdict (not just case-creating ones) so the
+    case attack-graph timeline can place every related alert in its lane,
+    including ones that ended up monitor/false_positive.
+    """
+    if not alert_id or not mitre_techniques:
+        return
+    try:
+        async with AsyncSessionLocal() as db:
+            alert = await db.get(Alert, uuid.UUID(alert_id))
+            if alert:
+                alert.mitre_techniques = mitre_techniques
+                alert.kill_chain_stage = stage_for_techniques(mitre_techniques)
+                await db.commit()
+    except Exception as exc:
+        log.warning("alert_mitre_tag_failed", alert_id=alert_id, error=str(exc))
 
 
 async def _update_alert_status(alert_id: str, status: str) -> None:
@@ -436,6 +456,7 @@ async def analyze_and_maybe_create_case(
         f"{actions_str}"
     )
     await _write_alert_note(alert_id, note_content)
+    await _tag_alert_with_mitre(alert_id, analysis.get("mitre_techniques", []))
 
     # ── 4c. Fire SOAR playbooks with AI context (fire-and-forget) ───────────
     if alert_id:

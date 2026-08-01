@@ -197,6 +197,8 @@ async def case_timeline(
                 "source_ip": a.source_ip,
                 "hostname": a.hostname,
                 "is_this_case": bool(case.alert_id and str(a.id) == str(case.alert_id)),
+                "mitre_techniques": a.mitre_techniques or [],
+                "kill_chain_stage": a.kill_chain_stage,
             })
 
     # Case notes linked to the triggering alert
