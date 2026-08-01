@@ -67,9 +67,24 @@ async def _action_enrich_ioc(alert_id: uuid.UUID, ctx: dict, params: dict) -> No
     try:
         from worker.ti.aggregator import EnrichmentAggregator
         from worker.ti.config import TIConfig
-        result = await EnrichmentAggregator(TIConfig()).enrich(source_ip)
-        note_content = f"**SOAR TI Enrichment** for `{source_ip}`:\n\n{result.summary or 'No significant findings.'}"
+        from worker.settings_cache import get_setting
+        cfg = TIConfig(
+            virustotal_api_key=await get_setting("virustotal_api_key"),
+            abuseipdb_api_key=await get_setting("abuseipdb_api_key"),
+            otx_api_key=await get_setting("otx_api_key"),
+            greynoise_api_key=await get_setting("greynoise_api_key"),
+            searxng_url=await get_setting("searxng_url", "http://searxng:8080"),
+        )
+        result = await EnrichmentAggregator(cfg).enrich(source_ip)
+        if result.provider_bullets:
+            summary = "\n".join(f"- {b}" for b in result.provider_bullets)
+        else:
+            summary = "No significant findings."
+        if result.overall_risk > 0:
+            summary += f"\n\n**Risk score:** {result.overall_risk:.2f}"
+        note_content = f"**SOAR TI Enrichment** for `{source_ip}`:\n\n{summary}"
     except Exception as exc:
+        log.warning("soar_ti_enrichment_failed", source_ip=source_ip, error=str(exc))
         note_content = f"**SOAR TI Enrichment** failed for `{source_ip}`: {exc}"
 
     async with AsyncSessionLocal() as db:
