@@ -134,10 +134,14 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
   const playheadX = isReplaying && replayIndex! < replaySequence.length ? xFor(replaySequence[replayIndex!].ts) : null
   const currentStepId = isReplaying && replayIndex! < replaySequence.length ? replaySequence[replayIndex!].id : null
 
+  // A campaign can involve more than one source IP against the same host
+  // (e.g. brute force from one IP, then operational access from another) —
+  // list every distinct one rather than silently showing just the first.
   const entityLabel = useMemo(() => {
-    const ip = alerts.find(a => a.source_ip)?.source_ip
-    const host = alerts.find(a => a.hostname)?.hostname
-    return [ip, host].filter(Boolean).join(' → ')
+    const ips = Array.from(new Set(alerts.map(a => a.source_ip).filter((v): v is string => !!v)))
+    const hosts = Array.from(new Set(alerts.map(a => a.hostname).filter((v): v is string => !!v)))
+    const fmt = (vals: string[]) => vals.length > 3 ? `${vals.slice(0, 3).join(', ')} +${vals.length - 3} more` : vals.join(', ')
+    return [fmt(ips), fmt(hosts)].filter(Boolean).join(' → ')
   }, [alerts])
 
   // Declutter bursts of near-simultaneous alerts in the same lane: nudge dot
