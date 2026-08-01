@@ -205,9 +205,30 @@ async def run_hunt(hunt_id: str) -> None:
             await db.commit()
 
 
+async def _recover_stale_hunts() -> None:
+    """Reset any hunt still marked 'running' back to 'pending' on startup.
+
+    A hunt only stays 'running' if the worker process was killed mid-flight
+    (deploy, OOM, crash) — run_hunt()'s own try/except already turns any
+    in-process failure into 'failed', so a stuck 'running' row can only mean
+    the process died before that finally ran. Since this is a fresh process,
+    nothing is genuinely in-flight, so these are always safe to requeue.
+    """
+    from worker.models import ThreatHunt
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(ThreatHunt).where(ThreatHunt.status == "running"))
+        stale = result.scalars().all()
+        for hunt in stale:
+            hunt.status = "pending"
+        if stale:
+            await db.commit()
+            log.info("hunt_stale_recovered", count=len(stale))
+
+
 async def hunt_loop() -> None:
     """Poll for pending hunts and run them."""
     from worker.models import ThreatHunt
+    await _recover_stale_hunts()
     while True:
         try:
             async with AsyncSessionLocal() as db:
