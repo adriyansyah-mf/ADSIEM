@@ -75,7 +75,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
 
   const W = 980
   const padL = 132, padR = 28, padT = 14, padB = 34
-  const laneH = 58
+  const laneH = 64
   const H = padT + padB + lanes.length * laneH
 
   const domain = useMemo(() => {
@@ -139,34 +139,45 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
     return [ip, host].filter(Boolean).join(' → ')
   }, [alerts])
 
+  // Declutter bursts of near-simultaneous alerts in the same lane: nudge dot
+  // x-positions apart so they're not literally stacked (and unclickable), and
+  // hide the title label for any node too close to the previous one in its
+  // lane — a hidden label still appears on hover/select, it just isn't drawn
+  // by default when it would otherwise overlap its neighbor.
+  const nodeLayout = useMemo(() => {
+    const MIN_DOT_GAP = 16
+    const MIN_LABEL_GAP = 88
+    const lastDotXByLane: Record<string, number> = {}
+    const lastLabelXByLane: Record<string, number> = {}
+    const out: Record<string, { x: number; showLabel: boolean }> = {}
+    for (const a of visibleAlerts) {
+      const stage = a.kill_chain_stage || 'Unknown'
+      const rawX = xFor(a.ts)
+      const prevDotX = lastDotXByLane[stage]
+      const x = prevDotX !== undefined && rawX - prevDotX < MIN_DOT_GAP ? prevDotX + MIN_DOT_GAP : rawX
+      const prevLabelX = lastLabelXByLane[stage]
+      const showLabel = prevLabelX === undefined || x - prevLabelX >= MIN_LABEL_GAP
+      lastDotXByLane[stage] = x
+      if (showLabel) lastLabelXByLane[stage] = x
+      out[a.id] = { x, showLabel }
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleAlerts, domain])
+
   const pathD = useMemo(() => {
     if (visibleAlerts.length < 2) return ''
-    let d = `M ${xFor(visibleAlerts[0].ts)} ${yFor(visibleAlerts[0].kill_chain_stage)}`
+    const px = (a: TimelineItem) => nodeLayout[a.id]?.x ?? xFor(a.ts)
+    let d = `M ${px(visibleAlerts[0])} ${yFor(visibleAlerts[0].kill_chain_stage)}`
     for (let i = 1; i < visibleAlerts.length; i++) {
-      const x0 = xFor(visibleAlerts[i - 1].ts), y0 = yFor(visibleAlerts[i - 1].kill_chain_stage)
-      const x1 = xFor(visibleAlerts[i].ts), y1 = yFor(visibleAlerts[i].kill_chain_stage)
+      const x0 = px(visibleAlerts[i - 1]), y0 = yFor(visibleAlerts[i - 1].kill_chain_stage)
+      const x1 = px(visibleAlerts[i]), y1 = yFor(visibleAlerts[i].kill_chain_stage)
       const mx = (x0 + x1) / 2
       d += ` C ${mx} ${y0}, ${mx} ${y1}, ${x1} ${y1}`
     }
     return d
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleAlerts, lanes])
-
-  // stagger node title labels that would otherwise sit on top of each other
-  // when two alerts in the same lane land close together on the time axis
-  const labelDy = useMemo(() => {
-    const lastXByLane: Record<string, number> = {}
-    const out: Record<string, number> = {}
-    for (const a of visibleAlerts) {
-      const stage = a.kill_chain_stage || 'Unknown'
-      const x = xFor(a.ts)
-      const prev = lastXByLane[stage]
-      out[a.id] = prev !== undefined && Math.abs(x - prev) < 72 ? 36 : 22
-      lastXByLane[stage] = x
-    }
-    return out
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleAlerts, domain])
+  }, [visibleAlerts, lanes, nodeLayout])
 
   // pan (drag) + wheel zoom — native listeners so preventDefault actually works on wheel
   useEffect(() => {
@@ -263,7 +274,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
         <svg
           ref={svgRef}
           viewBox={`0 0 ${W} ${H}`}
-          style={{ display: 'block', width: '100%', height: Math.min(420, H), cursor: dragRef.current ? 'grabbing' : 'grab' }}
+          style={{ display: 'block', width: '100%', height: H, maxHeight: 480, cursor: dragRef.current ? 'grabbing' : 'grab' }}
           onMouseDown={e => { dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y } }}
         >
           <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
@@ -309,23 +320,30 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
 
             {/* alert nodes */}
             {visibleAlerts.map(a => {
-              const x = xFor(a.ts), y = yFor(a.kill_chain_stage)
+              const layout = nodeLayout[a.id]
+              const x = layout?.x ?? xFor(a.ts), y = yFor(a.kill_chain_stage)
               const color = SEV_COLOR[a.severity || 'info'] || SEV_COLOR.info
               const dim = hovered && hovered !== a.id
               const isSel = selected?.id === a.id
+              const isHovered = hovered === a.id
+              const showLabel = (layout?.showLabel ?? true) || isHovered || isSel
               return (
                 <g key={a.id} style={{ cursor: 'pointer', opacity: dim ? 0.25 : 1 }}
                    onClick={() => setSelected(a)}
                    onMouseEnter={() => setHovered(a.id)} onMouseLeave={() => setHovered(null)}>
                   <circle cx={x} cy={y} r={13} fill={color} opacity={0.15} />
                   <circle cx={x} cy={y} r={isSel ? 9 : 6.5} fill={color} stroke="var(--bg-base)" strokeWidth={2} />
-                  <text x={x} y={y - 16} textAnchor="middle" style={{ font: '8.5px "Share Tech Mono", monospace', fill: 'var(--text-muted)' } as React.CSSProperties}>
-                    {fmtShort(a.ts)}
-                  </text>
-                  <text x={x > W - 200 ? x - 10 : x + 10} y={y + (labelDy[a.id] ?? 22)} textAnchor={x > W - 200 ? 'end' : 'start'}
-                        style={{ font: '600 10.5px Rajdhani, sans-serif', fill: 'var(--text-primary)' } as React.CSSProperties}>
-                    {truncate(a.title, 30)}
-                  </text>
+                  {showLabel && (
+                    <>
+                      <text x={x} y={y - 16} textAnchor="middle" style={{ font: '8.5px "Share Tech Mono", monospace', fill: 'var(--text-muted)' } as React.CSSProperties}>
+                        {fmtShort(a.ts)}
+                      </text>
+                      <text x={x > W - 200 ? x - 10 : x + 10} y={y + 22} textAnchor={x > W - 200 ? 'end' : 'start'}
+                            style={{ font: '600 10.5px Rajdhani, sans-serif', fill: 'var(--text-primary)' } as React.CSSProperties}>
+                        {truncate(a.title, 30)}
+                      </text>
+                    </>
+                  )}
                 </g>
               )
             })}
