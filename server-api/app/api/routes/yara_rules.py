@@ -16,7 +16,7 @@ BUILTIN_RULES = [
     {
         "name": "eicar_test",
         "description": "EICAR antivirus test signature",
-        "content": "rule eicar_test {\n    meta:\n        description = \"EICAR test file\"\n    strings:\n        $a = \"X5O!P%@AP[4\\\\PZX54(P^)7CC)7}$EICAR\"\n    condition:\n        $a\n}",
+        "content": "rule eicar_test {\n    meta:\n        description = \"EICAR test file\"\n    strings:\n        $a = \"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR\"\n    condition:\n        $a\n}",
     },
     {
         "name": "crypto_miner",
