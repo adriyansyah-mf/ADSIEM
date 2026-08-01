@@ -31,6 +31,8 @@ from worker.ti.aggregator import EnrichmentAggregator
 from worker.ti.mitre import suggest_mitre, stage_for_techniques
 from worker.campaign_analyzer import analyze_campaign
 from worker.searxng_client import search_threat_intel
+from worker.web_fetch import fetch_page_text
+from worker.fleet_correlation import check_fleet_spread, LOOKBACK_HOURS as FLEET_LOOKBACK_HOURS
 from worker.rag import retrieve_similar_cases, retrieve_sop_context
 from worker.soar_engine import run_soar_playbooks
 
@@ -85,10 +87,17 @@ async def _run_ai_searches(
     lines.append("*Query chosen by the AI based on alert context.*\n")
     for query, results in all_results:
         lines.append(f"**Query:** `{query}`")
-        for r in results[:3]:
+        for idx, r in enumerate(results[:3]):
             title = r.get("title", "")
-            content = r.get("content", "")[:250]
             url = r.get("url", "")
+            content = r.get("content", "")[:250]
+            # Actually browse the top result instead of relying on the
+            # search engine's short snippet — gives the analyst (and the
+            # RAG index, via case notes) the real advisory/bulletin text.
+            if idx == 0 and url:
+                page_text = await fetch_page_text(url)
+                if page_text:
+                    content = page_text
             lines.append(f"- **{title}**")
             if content:
                 lines.append(f"  {content}")
@@ -201,6 +210,40 @@ async def _find_existing_open_case(
             if hostname and ioc.get("hostname") == hostname:
                 return str(case.id)
     return None
+
+
+async def _check_and_note_fleet_spread(
+    case_id: str,
+    title: str,
+    group_id: str,
+    hostname: Optional[str],
+) -> None:
+    """Check if this same alert also fired on other hosts recently, and if
+    so, write a note so the analyst knows this isn't an isolated incident."""
+    try:
+        spread = await check_fleet_spread(title, group_id, hostname)
+        if not spread:
+            return
+        hosts_list = "\n".join(f"- {h}" for h in spread["hostnames"])
+        remainder = spread["host_count"] - len(spread["hostnames"])
+        if remainder > 0:
+            hosts_list += f"\n- …and {remainder} more"
+        verdict_line = (
+            "This looks like a coordinated or automated campaign across the fleet, not an isolated incident."
+            if spread["host_count"] >= 3
+            else "Worth checking whether these hosts share a common cause (same exposed service, same leaked credentials, etc)."
+        )
+        note_content = (
+            f"## 🌐 Fleet-Wide Check\n\n"
+            f"This same alert (**{title}**) also fired on **{spread['host_count']} other host(s)** "
+            f"in the last {FLEET_LOOKBACK_HOURS}h:\n\n{hosts_list}\n\n{verdict_line}"
+        )
+        async with AsyncSessionLocal() as db:
+            db.add(CaseNote(case_id=uuid.UUID(case_id), author_id=None, content=note_content, is_ai_generated=True))
+            await db.commit()
+        log.info("fleet_spread_detected", case_id=case_id, title=title, host_count=spread["host_count"])
+    except Exception as exc:
+        log.warning("fleet_spread_check_failed", case_id=case_id, error=str(exc))
 
 
 async def _add_note_to_existing_case(
@@ -516,6 +559,7 @@ async def analyze_and_maybe_create_case(
             group_id=group_id,
             case_id=existing_case_id,
         ))
+        asyncio.ensure_future(_check_and_note_fleet_spread(existing_case_id, title, group_id, hostname))
         if search_queries:
             asyncio.ensure_future(_run_ai_searches(alert_id, existing_case_id, search_queries))
         return
@@ -534,7 +578,7 @@ async def analyze_and_maybe_create_case(
     if not case_id:
         return
 
-    # ── 8. Campaign analyzer + search results ke case (background) ─────────
+    # ── 8. Campaign analyzer + fleet-wide check + search results (background) ─
     asyncio.ensure_future(analyze_campaign(
         trigger_alert_id=alert_id,
         source_ip=source_ip,
@@ -542,6 +586,7 @@ async def analyze_and_maybe_create_case(
         group_id=group_id,
         case_id=case_id,
     ))
+    asyncio.ensure_future(_check_and_note_fleet_spread(case_id, title, group_id, hostname))
     if search_queries:
         asyncio.ensure_future(_run_ai_searches(alert_id, case_id, search_queries))
 
