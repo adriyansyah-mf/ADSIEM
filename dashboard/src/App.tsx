@@ -23,6 +23,7 @@ import HygienePage from '@/pages/HygienePage'
 import UEBAPage from '@/pages/UEBAPage'
 import FimPage from '@/pages/FimPage'
 import HuntsPage from '@/pages/HuntsPage'
+import ReportsPage from '@/pages/ReportsPage'
 import LiveResponsePage from '@/pages/LiveResponsePage'
 import ArtifactsPage from '@/pages/ArtifactsPage'
 import YaraPage from '@/pages/YaraPage'
@@ -62,6 +63,7 @@ export default function App() {
             <Route path="/ueba" element={<UEBAPage />} />
             <Route path="/fim" element={<FimPage />} />
             <Route path="/hunts" element={<HuntsPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
             <Route path="/live-response" element={<LiveResponsePage />} />
             <Route path="/artifacts" element={<ArtifactsPage />} />
             <Route path="/yara" element={<YaraPage />} />

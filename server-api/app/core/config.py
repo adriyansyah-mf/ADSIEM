@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     REDIS_STREAM_KEY: str = "siem:logs"
     REDIS_CONSUMER_GROUP: str = "siem-workers"
     ELASTICSEARCH_URL: str = "http://elasticsearch:9200"
+    NINEROUTER_BASE_URL: str = "http://9router:20128/v1"
 
     @field_validator("JWT_SECRET")
     @classmethod

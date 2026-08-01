@@ -32,6 +32,7 @@ from app.api.routes.hunt_schedules import router as hunt_schedules_router
 from app.api.routes.sop import router as sop_router
 from app.api.routes.soar import router as soar_router
 from app.api.routes.search import router as search_router
+from app.api.routes.reports import router as reports_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
 
 structlog.configure(
@@ -45,6 +46,7 @@ structlog.configure(
 )
 
 _DEFAULT_SETTINGS = [
+    ("org_name",           "",                          False, "Organization name shown on generated PDF reports"),
     ("ninerouter_api_key", "",                          True,  "9router API key for AI analyst — generate via POST /api/keys against the 9router dashboard API (see docs/PROJECT_OVERVIEW.md)"),
     ("ninerouter_model",   "combo",                      False, "9router combo name to route AI analyst requests through"),
     ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
@@ -382,6 +384,6 @@ for router in [
     enrollment_tokens_router, correlation_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
-    ws_router,
+    reports_router, ws_router,
 ]:
     app.include_router(router)

@@ -8,7 +8,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Package, Server, BookOpen, Wrench, Shield,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
-  GitMerge, Webhook, ClipboardList,
+  GitMerge, Webhook, ClipboardList, FileBarChart,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -38,6 +38,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/fim', label: 'FIM', icon: Lock },
       { to: '/yara', label: 'YARA', icon: ScanLine },
       { to: '/hunts', label: 'Threat Hunt', icon: Crosshair },
+      { to: '/reports', label: 'Reports', icon: FileBarChart },
     ],
   },
   {

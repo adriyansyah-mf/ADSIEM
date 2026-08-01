@@ -1,6 +1,6 @@
 # server-api/app/schemas/schemas.py
 from __future__ import annotations
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -623,6 +623,13 @@ class YaraScanRequest(BaseModel):
     path: str
     recursive: bool = False
     rule_ids: list[UUID] | None = None  # None = all enabled rules
+
+# ─── Reports ──────────────────────────────────────────────────────
+
+class ReportGenerateRequest(BaseModel):
+    date_from: date
+    date_to: date
+    language: str = "English"
 
 # ─── Enrollment Tokens ───────────────────────────────────────────
 

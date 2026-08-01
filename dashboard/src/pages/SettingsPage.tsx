@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
 const SETTING_LABELS: Record<string, string> = {
+  org_name: 'Organization Name',
   ninerouter_api_key: '9router API Key',
   ninerouter_model: '9router Combo',
   searxng_url: 'SearXNG URL',
@@ -29,6 +30,7 @@ const SETTING_LABELS: Record<string, string> = {
 }
 
 const SETTING_HINTS: Record<string, string> = {
+  org_name: 'Shown as the title on generated PDF reports (Reports page)',
   ninerouter_api_key: 'Generated once via the 9router dashboard API (POST /api/keys) — see docs/PROJECT_OVERVIEW.md',
   ninerouter_model: 'Combo name created in the 9router dashboard, e.g. "combo"',
   searxng_url: 'Internal URL of your SearXNG instance',
