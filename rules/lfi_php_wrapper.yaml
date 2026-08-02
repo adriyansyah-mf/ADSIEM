@@ -1,0 +1,16 @@
+title: Local File Inclusion via PHP Stream Wrapper
+id: rule-lfi-php-wrapper
+description: HTTP request uses a PHP stream wrapper (php://filter, php://input, expect://, data://, zip://, phar://) in a URL parameter — classic LFI-to-RCE technique that plain "../" traversal rules miss (A03)
+logsource:
+  product: webserver
+detection:
+  wrapper_scheme:
+    url.path|re: '(?i)(?:[?&][^=]+=)(?:php://(?:filter|input|memory|temp)|expect://|zip://|phar://|data://text/plain)'
+  filter_convert_chain:
+    url.path|contains: "php://filter/convert.base64-encode"
+  condition: wrapper_scheme or filter_convert_chain
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a03

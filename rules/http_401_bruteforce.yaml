@@ -1,0 +1,21 @@
+title: Repeated HTTP 401 Unauthorized (Web Auth Brute Force)
+id: rule-http-401-bruteforce
+description: High rate of HTTP 401 responses from a single IP — brute forcing HTTP Basic Auth or an API's bearer/token check, distinct from the 4xx scanning-noise storm which is dominated by 403/404 (A07)
+logsource:
+  product: webserver
+detection:
+  selection:
+    event.category: web
+    http.response.status_code: "401"
+  condition: selection
+threshold:
+  count: 10
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1110
+  - owasp.a07

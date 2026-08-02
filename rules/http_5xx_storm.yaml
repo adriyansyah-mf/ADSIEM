@@ -1,0 +1,21 @@
+title: HTTP 5xx Error Storm (Possible Active Exploitation)
+id: rule-http-5xx-storm
+description: High rate of HTTP 5xx server errors from a single IP — unlike 4xx scanning noise, repeated 5xx often means an exploit attempt is actually crashing the application or backend (A05)
+logsource:
+  product: webserver
+detection:
+  selection:
+    event.category: web
+    http.response.status_code|startswith: "5"
+  condition: selection
+threshold:
+  count: 10
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: high
+tags:
+  - attack.impact
+  - attack.t1499
+  - owasp.a05
