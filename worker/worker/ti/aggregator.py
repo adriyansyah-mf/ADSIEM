@@ -13,8 +13,17 @@ from worker.ti.iocs import IOC, IOCType
 from worker.ti.models import EnrichmentSummary, IOCReputationScore
 from worker.ti.providers import (
     AbuseIPDBProvider, GeoIPProvider, GreyNoiseProvider,
-    OTXProvider, URLhausProvider, VirusTotalProvider, WhoisLookupProvider,
+    OTXProvider, ShodanProvider, URLhausProvider, VirusTotalProvider, WhoisLookupProvider,
 )
+
+# Ports whose mere exposure to the internet is itself a finding — remote
+# admin protocols and databases/caches that are routinely left unauthenticated.
+_RISKY_PORTS: dict[int, str] = {
+    21: "ftp", 23: "telnet", 445: "smb", 1433: "mssql", 1521: "oracle-listener",
+    3306: "mysql", 3389: "rdp", 5432: "postgres", 5900: "vnc", 5984: "couchdb",
+    6379: "redis", 9042: "cassandra", 9200: "elasticsearch", 11211: "memcached",
+    27017: "mongodb",
+}
 
 
 def _bullet(name: str, text: str) -> str:
@@ -97,6 +106,33 @@ def _ripe_bullet(d: dict[str, Any]) -> str | None:
     return _bullet("whois(ip)", s.strip()[:420]) if isinstance(s, str) and s.strip() else None
 
 
+def _shodan_bullet(d: dict[str, Any]) -> tuple[str | None, float]:
+    """Returns (bullet text, risk contribution 0.0-1.0)."""
+    if d.get("skipped") or d.get("not_found"):
+        return None, 0.0
+    ports = d.get("ports") or []
+    vulns = d.get("vulns") or []
+    org = d.get("org") or ""
+    risky = sorted({_RISKY_PORTS[p] for p in ports if p in _RISKY_PORTS})
+    parts = []
+    if ports:
+        parts.append(f"open_ports={','.join(str(p) for p in sorted(ports)[:15])}")
+    if risky:
+        parts.append(f"exposed_services={','.join(risky)}")
+    if vulns:
+        parts.append(f"known_vulns={','.join(sorted(vulns)[:8])}")
+    if org:
+        parts.append(f"org={org}")
+    if not parts:
+        return None, 0.0
+    risk = 0.0
+    if vulns:
+        risk = 0.85
+    elif risky:
+        risk = 0.55
+    return _bullet("shodan", " ".join(parts)), risk
+
+
 def _geoip_bullet(d: dict[str, Any]) -> str | None:
     if d.get("status") != "success":
         return None
@@ -116,6 +152,7 @@ class EnrichmentAggregator:
         self._whois = WhoisLookupProvider(cfg)
         self._geo = GeoIPProvider(cfg)
         self._gn = GreyNoiseProvider(cfg)
+        self._shodan = ShodanProvider(cfg)
 
     async def enrich(self, text: str, alert_title: str = "") -> EnrichmentSummary:
         iocs = extract_iocs(text)
@@ -133,7 +170,7 @@ class EnrichmentAggregator:
                 ipaddress.ip_address(ip.strip())
             except ValueError:
                 return
-            abuse, vt, otx, uh, geo, who, gn = await asyncio.gather(
+            abuse, vt, otx, uh, geo, who, gn, shodan = await asyncio.gather(
                 self._abuse.lookup_ip(ip),
                 self._vt.lookup_ip(ip),
                 self._otx.lookup_ip(ip),
@@ -141,6 +178,7 @@ class EnrichmentAggregator:
                 self._geo.lookup_ip(ip),
                 self._whois.lookup_ip(ip),
                 self._gn.lookup_ip(ip),
+                self._shodan.lookup_ip(ip),
             )
             if s := _abuseipdb_summary(abuse):
                 bullets.append(_bullet("abuseipdb", s))
@@ -172,6 +210,11 @@ class EnrichmentAggregator:
                     risk_samples.append(0.82)
             if s := _geoip_bullet(geo):
                 bullets.append(s)
+            shodan_bullet, shodan_risk = _shodan_bullet(shodan)
+            if shodan_bullet:
+                bullets.append(shodan_bullet)
+            if shodan_risk:
+                risk_samples.append(shodan_risk)
 
         async def ingest_domain(dom: str) -> None:
             vt, otx, uh, who = await asyncio.gather(

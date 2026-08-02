@@ -57,6 +57,7 @@ async def _build_ti_config() -> TIConfig:
         abuseipdb_api_key=await get_setting("abuseipdb_api_key"),
         otx_api_key=await get_setting("otx_api_key"),
         greynoise_api_key=await get_setting("greynoise_api_key"),
+        shodan_api_key=await get_setting("shodan_api_key"),
         searxng_url=await get_setting("searxng_url", "http://searxng:8080"),
     )
 

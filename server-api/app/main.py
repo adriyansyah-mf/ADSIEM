@@ -57,6 +57,7 @@ _DEFAULT_SETTINGS = [
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
     ("otx_api_key",        "",                          True,  "AlienVault OTX API key — free (otx.alienvault.com)"),
     ("greynoise_api_key",  "",                          True,  "GreyNoise API key — optional, community endpoint used if empty"),
+    ("shodan_api_key",     "",                          True,  "Shodan API key — enables exposed-port/CVE lookup for IPs seen in alerts (shodan.io/product/api)"),
     ("smtp_enabled",      "false",     False, "Enable email alert notifications (true/false)"),
     ("smtp_host",         "",          False, "SMTP server hostname (e.g. smtp.gmail.com)"),
     ("smtp_port",         "587",       False, "SMTP port (587=STARTTLS, 465=SSL, 25=plain)"),
