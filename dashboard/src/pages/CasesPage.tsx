@@ -214,14 +214,22 @@ function ActionBtn({ label, onClick, color, loading }: { label: string; onClick:
   )
 }
 
+const PAGE_SIZE = 25
+
 export default function CasesPage() {
   const [activeTab, setActiveTab] = useState('All')
-  const [page] = useState(1)
+  const [page, setPage] = useState(1)
   const statusFilter = TAB_TO_API[activeTab]
   const { data, isLoading } = useCases(page, statusFilter)
 
   const cases: Case[] = data?.items ?? []
   const total = data?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  const switchTab = (tab: string) => {
+    setActiveTab(tab)
+    setPage(1)
+  }
 
   const openCount = cases.filter(c => c.status === 'open').length
   const escalatedCount = cases.filter(c => c.status === 'escalated').length
@@ -271,7 +279,7 @@ export default function CasesPage() {
           return (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => switchTab(tab)}
               style={{
                 padding: '7px 16px',
                 border: 'none',
@@ -304,6 +312,41 @@ export default function CasesPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {cases.map(c => <CaseCard key={c.id} c={c} />)}
+        </div>
+      )}
+
+      {!isLoading && total > PAGE_SIZE && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px',
+          marginTop: '18px', padding: '10px 0',
+        }}>
+          <button
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            style={{
+              padding: '6px 14px', borderRadius: '4px', border: '1px solid var(--border)',
+              background: 'transparent', color: page <= 1 ? 'var(--text-muted)' : 'var(--text-secondary)',
+              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
+              cursor: page <= 1 ? 'not-allowed' : 'pointer',
+            }}
+          >
+            ← PREV
+          </button>
+          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)' }}>
+            PAGE {page} / {totalPages}
+          </span>
+          <button
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            style={{
+              padding: '6px 14px', borderRadius: '4px', border: '1px solid var(--border)',
+              background: 'transparent', color: page >= totalPages ? 'var(--text-muted)' : 'var(--text-secondary)',
+              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
+              cursor: page >= totalPages ? 'not-allowed' : 'pointer',
+            }}
+          >
+            NEXT →
+          </button>
         </div>
       )}
     </div>
