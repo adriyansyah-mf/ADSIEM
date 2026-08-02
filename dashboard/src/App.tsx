@@ -25,7 +25,6 @@ import FimPage from '@/pages/FimPage'
 import HuntsPage from '@/pages/HuntsPage'
 import ReportsPage from '@/pages/ReportsPage'
 import LiveResponsePage from '@/pages/LiveResponsePage'
-import ArtifactsPage from '@/pages/ArtifactsPage'
 import YaraPage from '@/pages/YaraPage'
 import CorrelationPage from '@/pages/CorrelationPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
@@ -65,7 +64,7 @@ export default function App() {
             <Route path="/hunts" element={<HuntsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/live-response" element={<LiveResponsePage />} />
-            <Route path="/artifacts" element={<ArtifactsPage />} />
+            <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />
             <Route path="/yara" element={<YaraPage />} />
             <Route path="/correlation" element={<CorrelationPage />} />
             <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />

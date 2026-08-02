@@ -1,21 +1,17 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
-import { Terminal, Play, RefreshCw, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react'
+import { Terminal, Play, Users, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { useTasks, useCreateTask } from '@/hooks/useTasks'
+import { useTasks, useCreateTask, useFleetHunts, useCreateFleetHunt } from '@/hooks/useTasks'
+import { useBuiltinArtifacts } from '@/hooks/useArtifacts'
 import type { Agent, AgentTask } from '@/types'
 
-const TASK_TYPES = [
-  { type: 'process_list', label: 'Process List', icon: '⚙️', params: {} },
-  { type: 'netstat', label: 'Network Connections', icon: '🌐', params: {} },
-  { type: 'persistence_check', label: 'Persistence Check', icon: '🔩', params: {} },
-  { type: 'users_list', label: 'User Accounts', icon: '👤', params: {} },
-  { type: 'open_files', label: 'Open Files', icon: '📂', params: { limit: 100 } },
-  { type: 'dmesg_tail', label: 'Kernel Log', icon: '📟', params: { lines: 100 } },
-  { type: 'file_list', label: 'File List', icon: '🗂️', params: { path: '/tmp', max_depth: 2 } },
-  { type: 'file_get', label: 'File Acquisition', icon: '💾', params: { path: '' } },
-]
+const TASK_ICONS: Record<string, string> = {
+  process_list: '⚙️', netstat: '🌐', persistence_check: '🔩',
+  users_list: '👤', dmesg_tail: '📟', open_files: '📂',
+  file_list: '🗂️', file_get: '💾', yara_scan: '🔍',
+}
 
 function StatusIcon({ status }: { status: string }) {
   if (status === 'done') return <CheckCircle size={13} className="text-emerald-400" />
@@ -167,7 +163,7 @@ function TaskResult({ task }: { task: AgentTask }) {
     )
   }
 
-  // generic JSON fallback
+  // generic JSON fallback (also covers yara_scan)
   return <pre className="text-xs font-mono bg-muted/20 p-2 rounded max-h-60 overflow-auto">{JSON.stringify(result, null, 2)}</pre>
 }
 
@@ -200,18 +196,34 @@ export default function LiveResponsePage() {
     queryKey: ['agents-all'],
     queryFn: () => api.get('/api/agents', { params: { page_size: 100 } }).then(r => r.data.items),
   })
+  const { data: builtins = [] } = useBuiltinArtifacts()
   const [selectedAgent, setSelectedAgent] = useState<string>('')
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, string>>>({})
   const { data: tasks = [] } = useTasks(selectedAgent || undefined)
   const createTask = useCreateTask()
+  const { data: fleetHunts = [] } = useFleetHunts()
+  const createFleet = useCreateFleetHunt()
+  const [fleetName, setFleetName] = useState('')
+  const [fleetType, setFleetType] = useState('')
+  const [justRan, setJustRan] = useState<string | null>(null)
 
+  const onlineAgents = agents.filter(a => a.status === 'online')
   const agentTasks = tasks.filter(t => !selectedAgent || t.agent_id === selectedAgent)
 
-  const dispatch = (tt: typeof TASK_TYPES[0]) => {
-    if (!selectedAgent) return
-    const overrides = paramOverrides[tt.type] ?? {}
-    const params = { ...tt.params, ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== '')) }
-    createTask.mutate({ agent_id: selectedAgent, task_type: tt.type, params })
+  const dispatch = (art: typeof builtins[0]) => {
+    const targets = selectedAgent ? [selectedAgent] : onlineAgents.map(a => a.id)
+    if (targets.length === 0) return
+    const overrides = paramOverrides[art.task_type] ?? {}
+    const params = { ...art.default_params, ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== '')) }
+    targets.forEach(agent_id => createTask.mutate({ agent_id, task_type: art.task_type, params }))
+    setJustRan(art.task_type)
+    setTimeout(() => setJustRan(null), 2000)
+  }
+
+  const handleFleetHunt = () => {
+    if (!fleetType || !fleetName) return
+    createFleet.mutate({ name: fleetName, task_type: fleetType, params: {} })
+    setFleetName('')
   }
 
   return (
@@ -221,51 +233,88 @@ export default function LiveResponsePage() {
         <h1 className="text-xl font-bold">Live Response</h1>
       </div>
 
-      {/* Agent selector */}
+      {/* Target selector — one specific agent, or every online agent */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <p className="text-xs text-muted-foreground uppercase font-semibold">Target Agent</p>
+        <p className="text-xs text-muted-foreground uppercase font-semibold">Target</p>
         <select value={selectedAgent} onChange={e => setSelectedAgent(e.target.value)}
-          className="w-full bg-muted border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-          <option value="">— Select agent —</option>
+          className="w-full bg-muted border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary sm:max-w-xs">
+          <option value="">All online agents ({onlineAgents.length})</option>
           {agents.map(a => (
             <option key={a.id} value={a.id}>{a.hostname} ({a.status})</option>
           ))}
         </select>
       </div>
 
-      {/* Collection buttons */}
-      {selectedAgent && (
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-          <p className="text-xs text-muted-foreground uppercase font-semibold">Collections</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {TASK_TYPES.map(tt => (
-              <div key={tt.type} className="space-y-1">
-                {/* param inputs for tasks that need them */}
-                {(tt.type === 'file_list' || tt.type === 'file_get') && (
-                  <input
-                    placeholder={tt.type === 'file_get' ? '/etc/passwd' : '/tmp'}
-                    value={paramOverrides[tt.type]?.path ?? ''}
-                    onChange={e => setParamOverrides(p => ({ ...p, [tt.type]: { ...p[tt.type], path: e.target.value } }))}
-                    className="w-full text-xs bg-muted border border-border rounded px-2 py-1 font-mono focus:outline-none"
-                  />
-                )}
-                <button
-                  onClick={() => dispatch(tt)}
-                  disabled={createTask.isPending}
-                  className="w-full flex items-center gap-1.5 px-3 py-2 rounded border border-border hover:border-primary hover:text-primary transition-colors text-sm disabled:opacity-50"
-                >
-                  <span>{tt.icon}</span>
-                  <span className="truncate">{tt.label}</span>
-                </button>
+      {/* Collections */}
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <p className="text-xs text-muted-foreground uppercase font-semibold">Collections</p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {builtins.map(art => (
+            <div key={art.task_type} className="space-y-1">
+              {/* param inputs for tasks that need them */}
+              {(art.task_type === 'file_list' || art.task_type === 'file_get') && (
+                <input
+                  placeholder={art.task_type === 'file_get' ? '/etc/passwd' : '/tmp'}
+                  value={paramOverrides[art.task_type]?.path ?? ''}
+                  onChange={e => setParamOverrides(p => ({ ...p, [art.task_type]: { ...p[art.task_type], path: e.target.value } }))}
+                  className="w-full text-xs bg-muted border border-border rounded px-2 py-1 font-mono focus:outline-none"
+                />
+              )}
+              <button
+                onClick={() => dispatch(art)}
+                disabled={createTask.isPending}
+                title={art.description}
+                className="w-full flex items-center gap-1.5 px-3 py-2 rounded border border-border hover:border-primary hover:text-primary transition-colors text-sm disabled:opacity-50"
+              >
+                <span>{TASK_ICONS[art.task_type] ?? '📋'}</span>
+                <span className="truncate">{art.name}</span>
+                {justRan === art.task_type && <CheckCircle size={12} className="text-emerald-400 ml-auto shrink-0" />}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Fleet Hunt — named, tracked runs across all online agents */}
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Users size={14} />
+          <p className="text-xs text-muted-foreground uppercase font-semibold">Fleet Hunt — Tracked Run on All Online Agents</p>
+        </div>
+        <div className="flex gap-3 flex-wrap">
+          <input value={fleetName} onChange={e => setFleetName(e.target.value)} placeholder="Hunt name…"
+            className="bg-muted border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary min-w-[160px]" />
+          <select value={fleetType} onChange={e => setFleetType(e.target.value)}
+            className="bg-muted border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+            <option value="">Select artifact…</option>
+            {builtins.map(a => <option key={a.task_type} value={a.task_type}>{a.name}</option>)}
+          </select>
+          <button onClick={handleFleetHunt} disabled={!fleetName || !fleetType || createFleet.isPending}
+            className="flex items-center gap-1.5 px-4 py-2 rounded bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50">
+            {createFleet.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+            Launch Fleet Hunt
+          </button>
+        </div>
+
+        {fleetHunts.length > 0 && (
+          <div className="space-y-2 mt-2">
+            {fleetHunts.map(fh => (
+              <div key={fh.id} className="flex items-center gap-3 text-sm rounded border border-border px-3 py-2">
+                <span className={`w-2 h-2 rounded-full ${fh.status === 'done' ? 'bg-emerald-400' : fh.status === 'running' ? 'bg-blue-400 animate-pulse' : 'bg-muted-foreground'}`} />
+                <span className="font-medium">{fh.name}</span>
+                <span className="text-muted-foreground text-xs font-mono">{fh.task_type}</span>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  {fh.completed_agents}/{fh.total_agents} agents · {format(new Date(fh.created_at), 'MM-dd HH:mm')}
+                </span>
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Task results */}
       <div className="space-y-2">
-        {agentTasks.length === 0 && selectedAgent && (
+        {agentTasks.length === 0 && (
           <div className="text-sm text-muted-foreground text-center py-8">
             No tasks yet. Dispatch a collection above.
           </div>
