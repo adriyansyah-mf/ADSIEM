@@ -5,6 +5,7 @@ it has no HTTP access and no import path to settings/users/webhooks, so it
 cannot read or touch those regardless of what a prompt asks it to do."""
 from __future__ import annotations
 import json
+import re
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +31,7 @@ PROTOCOL: Respond with ONLY ONE JSON object per turn, no markdown fences, no pro
 - To call a tool: {{"action": "tool", "tool": "<name>", "args": {{...}}}}
 - To answer the analyst: {{"action": "final", "message": "<answer in plain text, concise, no markdown headers>"}}
 
-Call tools as needed to answer accurately — don't guess at data. Once you have enough information, respond with "final". If a tool returns an error or empty results, say so plainly rather than making something up."""
+Call tools as needed to answer accurately — don't guess at data. Once you have enough information, respond with "final". If a tool returns an error or empty results, say so plainly rather than making something up. Keep the final message under 150 words — this is a chat reply, not a report."""
 
 
 async def _get_setting(db: AsyncSession, key: str, default: str = "") -> str:
@@ -48,6 +49,19 @@ def _parse_action(raw: str) -> dict | None:
         return json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+def _salvage_truncated_message(raw: str) -> str | None:
+    """The model sometimes gets cut off mid-answer (max_tokens hit while
+    writing the "message" string) — rather than show the analyst a raw,
+    broken JSON fragment, pull out whatever text made it into the message
+    field before the cutoff."""
+    m = re.search(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)', raw, re.DOTALL)
+    if not m:
+        return None
+    text = m.group(1)
+    text = text.replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+    return text.strip() or None
 
 
 async def run_assistant_chat(
@@ -70,14 +84,16 @@ async def run_assistant_chat(
 
     tools_used: list[str] = []
     for _ in range(_MAX_TOOL_ROUNDS):
-        raw = await generate_chat(api_key, model, messages, max_tokens=1200)
+        raw = await generate_chat(api_key, model, messages, max_tokens=2200)
         if not raw:
             return {"reply": "The AI assistant is unavailable right now — try again in a moment.", "tools_used": tools_used}
 
         action = _parse_action(raw)
         if not action or action.get("action") not in ("tool", "final"):
-            # model didn't follow protocol — treat its raw text as the final answer
-            return {"reply": raw[:2000], "tools_used": tools_used}
+            # Malformed or truncated JSON (e.g. max_tokens hit mid-answer) —
+            # try to salvage the message text before falling back to raw output.
+            salvaged = _salvage_truncated_message(raw)
+            return {"reply": salvaged or raw[:2000], "tools_used": tools_used}
 
         if action["action"] == "final":
             return {"reply": str(action.get("message", ""))[:2000], "tools_used": tools_used}
