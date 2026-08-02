@@ -15,7 +15,7 @@ const generateId = (): string => {
 
 const TRIGGER_FIELDS = ['severity', 'rule_title', 'source_ip', 'hostname', 'user_name', 'tags', 'mitre_tags']
 const OPERATORS = ['eq', 'neq', 'contains', 'in', 'not_null']
-const ACTION_TYPES = ['enrich_ioc', 'send_webhook', 'create_case', 'suppress_alert', 'add_note']
+const ACTION_TYPES = ['enrich_ioc', 'send_webhook', 'create_case', 'suppress_alert', 'add_note', 'isolate_agent', 'block_ip']
 
 interface Condition {
   id: string
@@ -104,6 +104,7 @@ function ActionRow({
     create_case: ['title_template', 'description_template'],
     suppress_alert: ['entity_type', 'reason'],
     add_note: ['content'],
+    block_ip: ['duration_seconds'],
   }
   const keys = paramKeys[action.action_type] || []
 
