@@ -1,0 +1,20 @@
+title: PHP PATH_INFO / ACME-Challenge WAF Bypass Probe
+id: rule-php-pathinfo-bypass
+description: >-
+  Request appends extra path segments after a .php script (PATH_INFO) —
+  commonly used to smuggle a PHP request past reverse-proxy/WAF rules that
+  allowlist paths such as .well-known/acme-challenge/, or to probe for
+  PHP-FPM PATH_INFO misconfiguration that lets an attacker execute an
+  unintended script. Observed live against socwaf.solusi247.com:
+  /adminfuns.php/.well-known/acme-challenge/file.php
+logsource:
+  product: webserver
+detection:
+  selection:
+    url.path|re: '(?i)\.php/(?:\.well-known/acme-challenge/|[^?]+\.(?:php|phtml|php5))'
+  condition: selection
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1190
+  - owasp.a05
