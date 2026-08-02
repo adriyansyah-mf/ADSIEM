@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import AssistantWidget from '@/components/AssistantWidget'
 import {
   LayoutDashboard, FileText, Activity, Bell, FolderOpen,
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
@@ -505,6 +506,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <AssistantWidget />
     </div>
   )
 }

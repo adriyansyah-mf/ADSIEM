@@ -717,3 +717,17 @@ class SopDocumentOut(BaseModel):
     uploaded_by: UUID | None
     created_at: datetime
     model_config = {"from_attributes": True}
+
+# ─── SOC Assistant (read-only chat) ──────────────────────────────
+
+class AssistantChatMessage(BaseModel):
+    role: str
+    content: str
+
+class AssistantChatRequest(BaseModel):
+    message: str
+    history: list[AssistantChatMessage] = []
+
+class AssistantChatResponse(BaseModel):
+    reply: str
+    tools_used: list[str]

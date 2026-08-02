@@ -33,6 +33,7 @@ from app.api.routes.sop import router as sop_router
 from app.api.routes.soar import router as soar_router
 from app.api.routes.search import router as search_router
 from app.api.routes.reports import router as reports_router
+from app.api.routes.assistant import router as assistant_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
 
 structlog.configure(
@@ -384,6 +385,6 @@ for router in [
     enrollment_tokens_router, correlation_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
-    reports_router, ws_router,
+    reports_router, assistant_router, ws_router,
 ]:
     app.include_router(router)

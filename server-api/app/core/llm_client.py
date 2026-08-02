@@ -39,3 +39,30 @@ async def generate_text(api_key: str, model: str, prompt: str, max_tokens: int =
     except Exception as exc:
         log.warning("report_narrative_failed", error=str(exc))
         return ""
+
+
+async def generate_chat(api_key: str, model: str, messages: list[dict], max_tokens: int = 1200) -> str:
+    """Multi-turn variant of generate_text — takes a full messages list
+    (system/user/assistant) instead of a single prompt. Returns "" on any
+    failure, same contract as generate_text."""
+    if not api_key:
+        return ""
+    url = f"{settings.NINEROUTER_BASE_URL.rstrip('/')}/chat/completions"
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "temperature": 0.2,
+                    "max_tokens": max_tokens,
+                },
+            )
+            resp.raise_for_status()
+            obj, _ = json.JSONDecoder().raw_decode(resp.text)
+            return obj["choices"][0]["message"]["content"].strip()
+    except Exception as exc:
+        log.warning("assistant_chat_failed", error=str(exc))
+        return ""
