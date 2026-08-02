@@ -16,6 +16,7 @@ import (
 	"github.com/siem-platform/agent/internal/fim"
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
+	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/tailer"
 )
@@ -79,6 +80,14 @@ func main() {
 
 	// Task runner for live response / Velociraptor-style artifacts
 	taskRunner := task.NewRunner(cfg, c)
+
+	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
+	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
+	if procMon, err := procexec.Start(buf); err != nil {
+		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
+	} else {
+		defer procMon.Stop()
+	}
 
 	// heartbeat loop — drives log source + FIM path updates + task dispatch
 	go heartbeat.Loop(cfg, buf, c,

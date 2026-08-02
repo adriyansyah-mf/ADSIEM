@@ -1,0 +1,17 @@
+name: linux_process_exec
+log_type: linux_process_exec
+type: kv
+priority: 10
+enabled: true
+fields:
+  Image: Image
+  CommandLine: CommandLine
+  ParentImage: ParentImage
+  ParentCommandLine: ParentCommandLine
+  ProcessId: PID
+  ParentProcessId: PPID
+  User: User
+  OriginalFileName: Comm
+static_fields:
+  event.category: process
+  event.action: process_created

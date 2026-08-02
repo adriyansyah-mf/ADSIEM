@@ -1,1 +1,2 @@
 dist/packages/
+internal/procexec/bpf/*.bpf.o
