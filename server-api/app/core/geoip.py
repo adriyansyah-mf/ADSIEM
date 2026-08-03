@@ -28,14 +28,14 @@ def _get_reader() -> geoip2.database.Reader | None:
 
 
 def lookup_country(ip: str | None) -> str | None:
-    """Returns the ISO country code (e.g. "US") for an IP, or None if the
-    IP is missing, private/reserved, or the .mmdb isn't mounted."""
+    """Returns the full country name (e.g. "United States") for an IP, or
+    None if the IP is missing, private/reserved, or the .mmdb isn't mounted."""
     if not ip:
         return None
     reader = _get_reader()
     if reader is None:
         return None
     try:
-        return reader.city(ip).country.iso_code
+        return reader.city(ip).country.name
     except (geoip2.errors.AddressNotFoundError, ValueError):
         return None

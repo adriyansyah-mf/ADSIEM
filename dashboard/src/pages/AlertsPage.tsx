@@ -150,15 +150,8 @@ export default function AlertsPage() {
     { key: 'severity', header: 'Severity', render: (r: Alert) => <SeverityBadge severity={r.severity} /> },
     { key: 'title', header: 'Title', render: (r: Alert) => <span className="font-medium">{r.title}</span> },
     { key: 'status', header: 'Status', render: (r: Alert) => <StatusBadge status={r.status} /> },
-    {
-      key: 'source_ip', header: 'Source IP',
-      render: (r: Alert) => r.source_ip
-        ? <span className="inline-flex items-center gap-1.5">
-            {r.source_ip}
-            {r.source_ip_country && <span className="text-[10px] font-mono text-muted-foreground">{r.source_ip_country}</span>}
-          </span>
-        : '—',
-    },
+    { key: 'source_ip', header: 'Source IP', render: (r: Alert) => r.source_ip ?? '—' },
+    { key: 'country', header: 'Country', render: (r: Alert) => r.source_ip_country ?? '—' },
     { key: 'hostname', header: 'Hostname', render: (r: Alert) => r.hostname ?? '—' },
     { key: 'time', header: 'Time', render: (r: Alert) => format(new Date(r.created_at), 'yyyy-MM-dd HH:mm:ss') },
     { key: 'hunt', header: '', render: (r: Alert) => <HuntButton alert={r} /> },
