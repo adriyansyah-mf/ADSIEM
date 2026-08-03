@@ -77,11 +77,18 @@ async def list_agents(
     current_user: Annotated[User, Depends(get_current_user)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
     page: int = 1, page_size: int = 25,
+    search: str | None = None,
+    status: str | None = None,
 ):
-    from sqlalchemy import func
+    from sqlalchemy import func, or_
     q = select(Agent).options(selectinload(Agent.log_sources))
     if group_filter:
         q = q.where(Agent.group_id == group_filter)
+    if search:
+        like = f"%{search}%"
+        q = q.where(or_(Agent.name.ilike(like), Agent.hostname.ilike(like)))
+    if status:
+        q = q.where(Agent.status == status)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
     agents = result.scalars().all()

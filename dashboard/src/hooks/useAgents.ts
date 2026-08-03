@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { Agent, LogSource, PaginatedResponse } from '@/types'
 
-export function useAgents(page = 1, pageSize = 25) {
+export function useAgents(page = 1, pageSize = 25, search = '', status = '') {
   return useQuery<PaginatedResponse<Agent>>({
-    queryKey: ['agents', page, pageSize],
-    queryFn: () => api.get('/api/agents', { params: { page, page_size: pageSize } }).then(r => r.data),
+    queryKey: ['agents', page, pageSize, search, status],
+    queryFn: () => api.get('/api/agents', {
+      params: { page, page_size: pageSize, search: search || undefined, status: status || undefined },
+    }).then(r => r.data),
     refetchInterval: 30_000,
   })
 }

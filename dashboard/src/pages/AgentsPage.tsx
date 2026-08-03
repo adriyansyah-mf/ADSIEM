@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, X, Plus, ShieldOff, ShieldCheck } from 'lucide-react'
@@ -168,7 +168,15 @@ export default function AgentsPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [showInstall, setShowInstall] = useState(false)
-  const { data, isLoading } = useAgents(page, pageSize)
+  const [searchInput, setSearchInput] = useState('')
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const { data, isLoading } = useAgents(page, pageSize, search, statusFilter)
+
+  useEffect(() => {
+    const t = setTimeout(() => { setSearch(searchInput); setPage(1) }, 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
   const { hasRole } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -226,12 +234,27 @@ export default function AgentsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold">Agents</h1>
-        <button
-          onClick={() => setShowInstall(true)}
-          className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm"
-        >
-          <Plus size={14} /> Install Agent
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            placeholder="Search name or hostname..."
+            className="px-3 py-1.5 rounded border border-border bg-background text-sm"
+          />
+          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+            className="px-3 py-1.5 rounded border border-border bg-background text-sm">
+            <option value="">All statuses</option>
+            <option value="online">Online</option>
+            <option value="offline">Offline</option>
+          </select>
+          <button
+            onClick={() => setShowInstall(true)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm"
+          >
+            <Plus size={14} /> Install Agent
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
