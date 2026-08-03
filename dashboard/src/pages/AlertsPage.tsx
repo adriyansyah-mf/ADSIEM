@@ -10,7 +10,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { format } from 'date-fns'
 import { Crosshair, Download, Search, ShieldOff, X } from 'lucide-react'
-import { TimeRangeSelect, presetToStartTime } from '@/components/TimeRangeSelect'
+import { TimeRangeFilter, type TimeRange } from '@/components/TimeRangeSelect'
 import type { Alert } from '@/types'
 
 interface Suppression { id: string; entity_type: string; entity_value: string; reason: string | null; is_active: boolean }
@@ -128,7 +128,7 @@ export default function AlertsPage() {
   const [hostnameFilter, setHostnameFilter] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
-  const [timeRange, setTimeRange] = useState('')
+  const [timeFilter, setTimeFilter] = useState<TimeRange>({})
 
   // Sync URL params on first mount (e.g. from dashboard severity clicks)
   useEffect(() => {
@@ -147,7 +147,8 @@ export default function AlertsPage() {
     severity: severityFilter || undefined,
     hostname: hostnameFilter || undefined,
     search: searchFilter || undefined,
-    start_time: presetToStartTime(timeRange),
+    start_time: timeFilter.start_time,
+    end_time: timeFilter.end_time,
   })
 
   // Deep link from the global search dropdown (?open=<alert_id>) — fetched
@@ -211,8 +212,12 @@ export default function AlertsPage() {
           <option value="resolved">Resolved</option>
           <option value="false_positive">False Positive</option>
         </select>
-        <TimeRangeSelect value={timeRange} onChange={v => { setTimeRange(v); setPage(1) }}
-          className="px-3 py-1.5 rounded border border-border bg-background text-sm" />
+        <TimeRangeFilter
+          value={timeFilter}
+          onChange={r => { setTimeFilter(r); setPage(1) }}
+          selectClassName="px-3 py-1.5 rounded border border-border bg-background text-sm"
+          inputClassName="px-2 py-1 rounded border border-border bg-background text-xs"
+        />
       </div>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}

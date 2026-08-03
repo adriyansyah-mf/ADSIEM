@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { useCases, useUpdateCase, useEscalateCase } from '@/hooks/useCases'
 import { useAuthStore } from '@/stores/auth'
-import { TimeRangeSelect, presetToStartTime } from '@/components/TimeRangeSelect'
+import { TimeRangeFilter, type TimeRange } from '@/components/TimeRangeSelect'
 import type { Case } from '@/types'
 
 const filterInputStyle: React.CSSProperties = {
@@ -236,7 +236,7 @@ export default function CasesPage() {
   const [hostnameFilter, setHostnameFilter] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
-  const [timeRange, setTimeRange] = useState('')
+  const [timeFilter, setTimeFilter] = useState<TimeRange>({})
 
   useEffect(() => {
     const t = setTimeout(() => { setSearchFilter(searchInput); setPage(1) }, 400)
@@ -248,7 +248,8 @@ export default function CasesPage() {
     severity: severityFilter || undefined,
     hostname: hostnameFilter || undefined,
     search: searchFilter || undefined,
-    start_time: presetToStartTime(timeRange),
+    start_time: timeFilter.start_time,
+    end_time: timeFilter.end_time,
   })
 
   const cases: Case[] = data?.items ?? []
@@ -355,7 +356,12 @@ export default function CasesPage() {
           <option value="low">Low</option>
           <option value="info">Info</option>
         </select>
-        <TimeRangeSelect value={timeRange} onChange={v => { setTimeRange(v); setPage(1) }} style={filterInputStyle} />
+        <TimeRangeFilter
+          value={timeFilter}
+          onChange={r => { setTimeFilter(r); setPage(1) }}
+          selectStyle={filterInputStyle}
+          inputStyle={filterInputStyle}
+        />
       </div>
 
       {/* Cases list */}
