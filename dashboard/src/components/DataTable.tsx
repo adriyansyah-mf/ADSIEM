@@ -97,7 +97,7 @@ export default function DataTable<T extends { id: string }>({
         )}
       </div>
 
-      <div className="rounded border border-border overflow-auto">
+      <div className="rounded border border-border bg-card overflow-auto shadow-[0_0_0_1px_hsl(var(--primary)/0.06)]">
         <table className="w-full text-sm">
           <thead className="bg-muted text-muted-foreground">
             <tr>
@@ -105,7 +105,7 @@ export default function DataTable<T extends { id: string }>({
                 <th
                   key={col.key}
                   onClick={() => handleSort(col)}
-                  className={`px-4 py-2 text-left font-medium whitespace-nowrap select-none
+                  className={`px-4 py-2 text-left font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap select-none
                     ${col.sortable ? 'cursor-pointer hover:text-foreground' : ''}`}
                 >
                   {col.header}
@@ -138,7 +138,7 @@ export default function DataTable<T extends { id: string }>({
 
       {/* Pagination footer */}
       <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 font-mono tabular-nums">
           <span>{total} total</span>
           {onPageSizeChange && (
             <select
