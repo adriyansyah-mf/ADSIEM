@@ -217,6 +217,7 @@ services:
       context: ./agent
       dockerfile: Dockerfile
     restart: unless-stopped
+    hostname: agent-demo
     environment:
       AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-bootstrap-token}
     volumes:
