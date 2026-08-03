@@ -64,7 +64,7 @@ services:
     volumes:
       - ninerouter_data:/app/data
     ports:
-      - "127.0.0.1:20129:20128"
+      - "20129:20128"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:20128/ >/dev/null 2>&1 || exit 1"]
       interval: 15s
