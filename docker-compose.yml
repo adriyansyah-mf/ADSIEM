@@ -148,9 +148,11 @@ services:
       WEBHOOK_RETRY_INTERVAL: ${WEBHOOK_RETRY_INTERVAL:-30}
       MAX_WEBHOOK_ATTEMPTS: ${MAX_WEBHOOK_ATTEMPTS:-5}
       ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      GEOIP_DIR: /app/mmdb
     volumes:
       - ./decoders:/app/decoders:ro
       - ./rules:/app/rules:ro
+      - ./mmdb:/app/mmdb:ro
     depends_on:
       postgres:
         condition: service_healthy

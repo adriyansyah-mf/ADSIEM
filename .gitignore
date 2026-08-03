@@ -16,3 +16,6 @@ ad-agentic-dashboard.html
 prompt.md
 claude.md
 .gstack/
+
+# MaxMind GeoLite2 databases — large binaries, EULA prohibits redistribution
+/mmdb/*.mmdb
