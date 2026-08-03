@@ -55,36 +55,36 @@ export default function AuditLogsPage() {
       ) : logs.length === 0 ? (
         <div className="text-sm text-muted-foreground">No audit log entries found.</div>
       ) : (
-        <div className="border border-border rounded overflow-hidden">
+        <div className="rounded border border-border bg-card overflow-auto shadow-[0_0_0_1px_hsl(var(--primary)/0.06)]">
           <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
+            <thead className="bg-muted text-muted-foreground">
               <tr>
-                <th className="text-left px-3 py-2">Time</th>
-                <th className="text-left px-3 py-2">Action</th>
-                <th className="text-left px-3 py-2">Resource</th>
-                <th className="text-left px-3 py-2">Actor</th>
-                <th className="text-left px-3 py-2">Detail</th>
+                <th className="text-left px-4 py-2 font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Time</th>
+                <th className="text-left px-4 py-2 font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Action</th>
+                <th className="text-left px-4 py-2 font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Resource</th>
+                <th className="text-left px-4 py-2 font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Actor</th>
+                <th className="text-left px-4 py-2 font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Detail</th>
               </tr>
             </thead>
             <tbody>
               {logs.map((log: AuditLog) => (
-                <tr key={log.id} className="border-t border-border hover:bg-muted/30">
-                  <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">
+                <tr key={log.id} className="border-t border-border transition-colors hover:bg-white/[0.03]">
+                  <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">
                     {format(new Date(log.created_at), 'yyyy-MM-dd HH:mm:ss')}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-4 py-2">
                     <span className={`px-1.5 py-0.5 rounded text-xs ${actionColor(log.action)}`}>
                       {log.action}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground">
+                  <td className="px-4 py-2 text-muted-foreground">
                     {log.resource_type}
                     {log.resource_id && <span className="ml-1 opacity-60 text-xs">#{log.resource_id.slice(0, 8)}</span>}
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground text-xs font-mono">
+                  <td className="px-4 py-2 text-muted-foreground text-xs font-mono">
                     {log.actor_id ? log.actor_id.slice(0, 8) : '—'}
                   </td>
-                  <td className="px-3 py-2 text-muted-foreground text-xs max-w-xs truncate">
+                  <td className="px-4 py-2 text-muted-foreground text-xs max-w-xs truncate">
                     {Object.keys(log.detail).length > 0 ? JSON.stringify(log.detail) : '—'}
                   </td>
                 </tr>

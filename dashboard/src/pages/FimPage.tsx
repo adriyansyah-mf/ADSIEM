@@ -153,15 +153,15 @@ export default function FimPage() {
       </div>
 
       {/* Event table */}
-      <div className="rounded-lg border border-border overflow-hidden">
+      <div className="rounded border border-border bg-card overflow-auto shadow-[0_0_0_1px_hsl(var(--primary)/0.06)]">
         <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs text-muted-foreground uppercase">
+          <thead className="bg-muted text-muted-foreground">
             <tr>
-              <th className="px-4 py-2 text-left">Time</th>
-              <th className="px-4 py-2 text-left">Type</th>
-              <th className="px-4 py-2 text-left">Path</th>
-              <th className="px-4 py-2 text-left">SHA-256</th>
-              <th className="px-4 py-2 text-right">Size</th>
+              <th className="px-4 py-2 text-left font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Time</th>
+              <th className="px-4 py-2 text-left font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Type</th>
+              <th className="px-4 py-2 text-left font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Path</th>
+              <th className="px-4 py-2 text-left font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">SHA-256</th>
+              <th className="px-4 py-2 text-right font-semibold uppercase tracking-wider text-[11px] whitespace-nowrap">Size</th>
             </tr>
           </thead>
           <tbody>
@@ -185,7 +185,7 @@ function FimRow({ ev }: { ev: FimEvent }) {
   const [expanded, setExpanded] = useState(false)
   return (
     <>
-      <tr className="border-t border-border hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => setExpanded(x => !x)}>
+      <tr className="border-t border-border transition-colors cursor-pointer hover:bg-white/[0.06] hover:border-l-2 hover:border-l-cyan-500/40" onClick={() => setExpanded(x => !x)}>
         <td className="px-4 py-2 font-mono text-xs text-muted-foreground whitespace-nowrap">
           {format(new Date(ev.detected_at), 'MM-dd HH:mm:ss')}
         </td>
