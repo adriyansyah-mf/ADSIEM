@@ -9,7 +9,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Server, BookOpen, Wrench, Shield,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
-  GitMerge, Webhook, ClipboardList, FileBarChart, Grid3x3,
+  GitMerge, Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -113,6 +113,7 @@ export default function Layout() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<{ alerts: any[]; cases: any[] } | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false)
 
   const handleSearch = async (q: string) => {
     if (q.length < 2) { setSearchResults(null); return }
@@ -236,60 +237,6 @@ export default function Layout() {
             )
           })}
 
-          {/* Admin */}
-          {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
-            <div style={{ marginTop: 4 }}>
-              {!collapsed && (
-                <div style={{
-                  padding: '12px 16px 4px',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: '0.08em',
-                  color: '#64748b',
-                  textTransform: 'uppercase',
-                }}>
-                  Administration
-                </div>
-              )}
-              {collapsed && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
-              {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).map(item => {
-                const active = isActive(item.to)
-                const Icon = item.icon
-                return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    title={collapsed ? item.label : undefined}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: collapsed ? '8px 0' : '7px 16px',
-                      justifyContent: collapsed ? 'center' : 'flex-start',
-                      textDecoration: 'none',
-                      background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
-                      borderLeft: active ? '2px solid #3b82f6' : '2px solid transparent',
-                      color: active ? '#93c5fd' : '#64748b',
-                      transition: 'color 0.12s, background 0.12s',
-                    }}
-                  >
-                    <Icon size={15} strokeWidth={active ? 2 : 1.75} style={{ flexShrink: 0 }} />
-                    {!collapsed && (
-                      <span style={{
-                        fontSize: 13,
-                        fontWeight: active ? 500 : 400,
-                        color: active ? '#e2e8f0' : '#94a3b8',
-                        whiteSpace: 'nowrap',
-                        letterSpacing: '0.01em',
-                      }}>
-                        {item.label}
-                      </span>
-                    )}
-                  </Link>
-                )
-              })}
-            </div>
-          )}
         </nav>
 
         {/* Bottom: agent count + collapse */}
@@ -442,6 +389,57 @@ export default function Layout() {
                 {clock.toLocaleTimeString('en-US', { hour12: false })}
               </div>
             </div>
+            {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={() => setAdminMenuOpen(o => !o)}
+                  onBlur={() => setTimeout(() => setAdminMenuOpen(false), 150)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    padding: '5px 12px',
+                    borderRadius: 5,
+                    border: '1px solid #1e2028',
+                    background: adminMenuOpen ? '#1e2028' : 'transparent',
+                    color: '#94a3b8',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Admin <ChevronDown size={13} />
+                </button>
+                {adminMenuOpen && (
+                  <div style={{
+                    position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                    background: '#111318', border: '1px solid #1e2028', borderRadius: 6,
+                    zIndex: 1000, overflow: 'hidden', minWidth: 160,
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                  }}>
+                    {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).map(item => {
+                      const Icon = item.icon
+                      const active = isActive(item.to)
+                      return (
+                        <Link
+                          key={item.to}
+                          to={item.to}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '8px 14px',
+                            textDecoration: 'none',
+                            background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
+                            color: active ? '#93c5fd' : '#cbd5e1',
+                            fontSize: 12.5,
+                          }}
+                        >
+                          <Icon size={14} strokeWidth={active ? 2 : 1.75} />
+                          {item.label}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               onClick={logout}
               className="sign-out-btn"
