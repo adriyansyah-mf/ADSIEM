@@ -3,11 +3,12 @@ import asyncio
 import structlog
 from sqlalchemy import text
 from worker.database import AsyncSessionLocal
-from worker.rag import index_case, index_sop_document
+from worker.rag import index_case, index_sop_document, index_feedback
 
 log = structlog.get_logger()
 INDEX_INTERVAL = 3600  # once per hour
 REINDEX_QUEUE = "siem:rag:reindex"  # Redis list for immediate re-index requests
+FEEDBACK_REINDEX_QUEUE = "siem:rag:feedback-reindex"
 
 
 async def rag_index_loop() -> None:
@@ -42,6 +43,30 @@ async def rag_index_loop() -> None:
                         log.info("rag_reindex_immediate", case_id=case_id, verdict=row["verdict"])
                 except Exception as e:
                     log.error("rag_reindex_item_error", case_id=case_id, error=str(e))
+
+            # ── Drain feedback re-index queue ──────────────────────────────────
+            while True:
+                item = await redis.lpop(FEEDBACK_REINDEX_QUEUE)
+                if not item:
+                    break
+                feedback_id = item.decode() if isinstance(item, bytes) else item
+                try:
+                    async with AsyncSessionLocal() as db:
+                        row = (await db.execute(text("""
+                            SELECT id::text, context_text, rating, group_id
+                            FROM ai_feedback
+                            WHERE id = :feedback_id::uuid
+                        """), {"feedback_id": feedback_id})).mappings().first()
+                    if row:
+                        await index_feedback(
+                            feedback_id=row["id"],
+                            context_text=row["context_text"],
+                            rating=row["rating"],
+                            group_id=row["group_id"],
+                        )
+                        log.info("rag_feedback_reindex_immediate", feedback_id=feedback_id)
+                except Exception as e:
+                    log.error("rag_feedback_reindex_item_error", feedback_id=feedback_id, error=str(e))
 
             # ── Batch poll for unindexed resolved/closed cases ────────────────
             async with AsyncSessionLocal() as db:

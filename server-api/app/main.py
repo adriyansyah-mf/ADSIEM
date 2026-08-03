@@ -161,7 +161,8 @@ async def _migrate_alerts_columns() -> None:
             ALTER TABLE alerts
             ADD COLUMN IF NOT EXISTS duplicate_count INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ,
-            ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ
+            ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS ai_verdict VARCHAR(50)
         """))
         await conn.execute(text("""
             ALTER TABLE cases
@@ -278,6 +279,28 @@ async def _migrate_alerts_columns() -> None:
         await conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_sop_chunks_ivfflat
             ON sop_chunks
+            USING ivfflat (embedding vector_cosine_ops)
+            WITH (lists = 10)
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS feedback_embeddings (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                feedback_id  UUID NOT NULL REFERENCES ai_feedback(id) ON DELETE CASCADE,
+                group_id     VARCHAR(100) NOT NULL DEFAULT 'default',
+                embedding    vector(384) NOT NULL,
+                rating       VARCHAR(20) NOT NULL,
+                summary_text TEXT NOT NULL,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CONSTRAINT uq_feedback_embeddings_feedback_id UNIQUE (feedback_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_feedback_embeddings_group
+            ON feedback_embeddings(group_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_feedback_embeddings_ivfflat
+            ON feedback_embeddings
             USING ivfflat (embedding vector_cosine_ops)
             WITH (lists = 10)
         """))

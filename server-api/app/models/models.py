@@ -121,6 +121,7 @@ class Alert(Base):
     resolved_at      = Column(DateTime(timezone=True))
     mitre_techniques = Column(JSONB, nullable=False, default=list)
     kill_chain_stage = Column(String(50))
+    ai_verdict       = Column(String(50))  # escalate/create_case/monitor/false_positive from AI L1 triage
     created_at       = Column(DateTime(timezone=True), default=now_utc)
     updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     notes            = relationship("AlertNote", back_populates="alert", cascade="all, delete-orphan")
@@ -447,6 +448,24 @@ class SopChunk(Base):
     chunk_index  = Column(Integer, nullable=False)
     chunk_text   = Column(Text, nullable=False)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class AiFeedback(Base):
+    """Analyst rating of an AI triage verdict (alert or case). Feeds the RAG
+    index (see worker/worker/rag.py index_feedback/retrieve_feedback_context)
+    so future triage prompts surface past corrections instead of repeating
+    them — retrieval-based adaptation rather than model fine-tuning."""
+    __tablename__ = "ai_feedback"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type     = Column(String(20), nullable=False)   # "alert" | "case"
+    entity_id       = Column(UUID(as_uuid=True), nullable=False)
+    context_text    = Column(Text, nullable=False)         # title/description snapshot, embedded for retrieval
+    ai_verdict      = Column(String(50))
+    rating          = Column(String(20), nullable=False)   # "correct" | "incorrect"
+    correct_verdict = Column(String(50))
+    note            = Column(Text)
+    group_id        = Column(String(100), nullable=False, default="default")
+    created_by      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at      = Column(DateTime(timezone=True), default=now_utc)
 
 class SoarPlaybook(Base):
     __tablename__ = "soar_playbooks"

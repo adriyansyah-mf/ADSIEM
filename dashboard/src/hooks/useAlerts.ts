@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
-import type { Alert, PaginatedResponse } from '@/types'
+import type { AiFeedback, Alert, PaginatedResponse } from '@/types'
 
 export interface AlertFilters {
   status?: string
@@ -46,5 +46,25 @@ export function useAddAlertNote() {
       emitToast('Note added', 'success')
     },
     onError: () => emitToast('Failed to add note', 'error'),
+  })
+}
+
+export function useAlertFeedback(alertId: string) {
+  return useQuery<AiFeedback[]>({
+    queryKey: ['alert-feedback', alertId],
+    queryFn: () => api.get(`/api/alerts/${alertId}/feedback`).then(r => r.data),
+  })
+}
+
+export function useSubmitAlertFeedback(alertId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { rating: 'correct' | 'incorrect'; correct_verdict?: string; note?: string }) =>
+      api.post(`/api/alerts/${alertId}/feedback`, body).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['alert-feedback', alertId] })
+      emitToast('Feedback recorded — thanks!', 'success')
+    },
+    onError: () => emitToast('Failed to submit feedback', 'error'),
   })
 }

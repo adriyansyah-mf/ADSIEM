@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
-import { useCase, useUpdateCase, useEscalateCase, useAddCaseNote } from '@/hooks/useCases'
+import { useCase, useUpdateCase, useEscalateCase, useAddCaseNote, useCaseFeedback, useSubmitCaseFeedback } from '@/hooks/useCases'
 import { useBlockIp, useTasks } from '@/hooks/useTasks'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
@@ -10,6 +10,7 @@ import type { Alert } from '@/types'
 import MarkdownNote from '@/components/MarkdownNote'
 import AttackGraph from '@/components/AttackGraph'
 import AlertDetailModal from '@/components/AlertDetailModal'
+import AiFeedbackWidget from '@/components/AiFeedbackWidget'
 
 const severityColors = {
   critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
@@ -181,6 +182,8 @@ export default function CaseDetailPage() {
   const update = useUpdateCase(id!)
   const escalate = useEscalateCase(id!)
   const addNote = useAddCaseNote(id!)
+  const { data: caseFeedback, isLoading: caseFeedbackLoading } = useCaseFeedback(id!)
+  const submitCaseFeedback = useSubmitCaseFeedback(id!)
   const blockIp = useBlockIp()
 
   const { data: alertData } = useQuery<Alert>({
@@ -350,6 +353,15 @@ export default function CaseDetailPage() {
                     </div>
                   )
                 })()}
+                {caseData.created_by_ai && (
+                  <AiFeedbackWidget
+                    aiVerdict={(caseData.ioc_data?.verdict as string) ?? null}
+                    feedback={caseFeedback}
+                    isLoading={caseFeedbackLoading}
+                    onSubmit={body => submitCaseFeedback.mutate(body)}
+                    isSubmitting={submitCaseFeedback.isPending}
+                  />
+                )}
               </div>
             ) : (
               <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>

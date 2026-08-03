@@ -219,3 +219,81 @@ async def retrieve_sop_context(
     except Exception as e:
         log.warning("sop_retrieve_failed", error=str(e))
         return []
+
+
+async def index_feedback(feedback_id: str, context_text: str, rating: str, group_id: str) -> None:
+    """Embed an analyst's AI-verdict feedback and upsert into feedback_embeddings."""
+    try:
+        vector = embed_text(context_text)
+    except Exception as e:
+        log.warning("feedback_embed_failed", feedback_id=feedback_id, error=str(e))
+        return
+
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("""
+                INSERT INTO feedback_embeddings (id, feedback_id, group_id, embedding, rating, summary_text)
+                VALUES (:id, :feedback_id, :group_id, :embedding, :rating, :summary_text)
+                ON CONFLICT (feedback_id) DO UPDATE
+                    SET embedding = EXCLUDED.embedding,
+                        rating = EXCLUDED.rating,
+                        summary_text = EXCLUDED.summary_text
+            """), {
+                "id": str(uuid.uuid4()),
+                "feedback_id": feedback_id,
+                "group_id": group_id,
+                "embedding": str(vector),
+                "rating": rating,
+                "summary_text": context_text,
+            })
+            await db.commit()
+        log.info("rag_feedback_indexed", feedback_id=feedback_id)
+    except Exception as e:
+        log.warning("feedback_index_failed", feedback_id=feedback_id, error=str(e))
+
+
+async def retrieve_feedback_context(
+    query_text: str,
+    group_id: str,
+    top_k: int = 3,
+    min_score: float = 0.60,
+) -> list[dict]:
+    """
+    Return top-k analyst feedback records most similar to query_text —
+    mostly useful for surfacing past *incorrect* AI verdicts so the same
+    mistake isn't repeated. Each result: {rating, ai_verdict, correct_verdict,
+    note, similarity}.
+    """
+    try:
+        vector = embed_text(query_text)
+    except Exception as e:
+        log.warning("feedback_embed_query_failed", error=str(e))
+        return []
+
+    try:
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(text("""
+                SELECT
+                    f.ai_verdict,
+                    f.rating,
+                    f.correct_verdict,
+                    f.note,
+                    1 - (fe.embedding <=> CAST(:embedding AS vector)) AS similarity
+                FROM feedback_embeddings fe
+                JOIN ai_feedback f ON f.id = fe.feedback_id
+                WHERE fe.group_id = :group_id
+                  AND 1 - (fe.embedding <=> CAST(:embedding AS vector)) >= :min_score
+                ORDER BY
+                    (f.rating = 'incorrect') DESC,
+                    fe.embedding <=> CAST(:embedding AS vector)
+                LIMIT :top_k
+            """), {
+                "embedding": str(vector),
+                "group_id": group_id,
+                "min_score": min_score,
+                "top_k": top_k,
+            })).mappings().all()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        log.warning("feedback_retrieve_failed", error=str(e))
+        return []

@@ -2,12 +2,13 @@ import { useState } from 'react'
 import type { Alert, Event, RawLog } from '@/types'
 import SeverityBadge from './SeverityBadge'
 import StatusBadge from './StatusBadge'
-import { useUpdateAlert, useAddAlertNote } from '@/hooks/useAlerts'
+import { useUpdateAlert, useAddAlertNote, useAlertFeedback, useSubmitAlertFeedback } from '@/hooks/useAlerts'
 import { format } from 'date-fns'
 import { X, ShieldOff, CheckCircle, FileText } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import MarkdownNote from './MarkdownNote'
+import AiFeedbackWidget from './AiFeedbackWidget'
 
 interface Props { alert: Alert; onClose: () => void }
 
@@ -54,6 +55,8 @@ export default function AlertDetailModal({ alert, onClose }: Props) {
 
   const updateAlert = useUpdateAlert()
   const addNote = useAddAlertNote()
+  const { data: feedback, isLoading: feedbackLoading } = useAlertFeedback(alert.id)
+  const submitFeedback = useSubmitAlertFeedback(alert.id)
 
   const { data: usersData } = useQuery({
     queryKey: ['users-list'],
@@ -178,6 +181,16 @@ export default function AlertDetailModal({ alert, onClose }: Props) {
           </h3>
           <SourceLogPanel alertId={alert.id} />
         </div>
+
+        {alert.ai_verdict && (
+          <AiFeedbackWidget
+            aiVerdict={alert.ai_verdict}
+            feedback={feedback}
+            isLoading={feedbackLoading}
+            onSubmit={body => submitFeedback.mutate(body)}
+            isSubmitting={submitFeedback.isPending}
+          />
+        )}
 
         <div className="mb-4">
           <h3 className="text-sm font-medium mb-2">Notes ({alert.notes.length})</h3>

@@ -7,18 +7,31 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
 from app.core.es_client import get_log as es_get_log
 from app.core.geoip import lookup_country
-from app.models.models import Alert, AlertNote, User
+from app.models.models import AiFeedback, Alert, AlertNote, User
 from app.schemas.schemas import (
-    AlertNoteCreate, AlertNoteOut, AlertOut, AlertSourceLogOut, AlertUpdate,
-    EventOut, PaginatedResponse, RawLogOut,
+    AiFeedbackCreate, AiFeedbackOut, AlertNoteCreate, AlertNoteOut, AlertOut,
+    AlertSourceLogOut, AlertUpdate, EventOut, PaginatedResponse, RawLogOut,
 )
 from app.services.audit import audit_log
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
+
+FEEDBACK_REINDEX_QUEUE = "siem:rag:feedback-reindex"
+
+async def _push_feedback_reindex(feedback_id: str) -> None:
+    """Push feedback_id to Redis queue so the worker embeds it for RAG retrieval."""
+    try:
+        import redis.asyncio as aioredis
+        redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        await redis.rpush(FEEDBACK_REINDEX_QUEUE, feedback_id)
+        await redis.aclose()
+    except Exception:
+        pass  # non-critical: feedback row is already saved regardless
 
 _RESOLVED_STATUSES = {"resolved", "closed", "false_positive"}
 
@@ -186,3 +199,46 @@ async def add_note(
     await db.commit()
     await db.refresh(note)
     return AlertNoteOut.model_validate(note)
+
+
+@router.get("/{alert_id}/feedback", response_model=list[AiFeedbackOut])
+async def list_alert_feedback(
+    alert_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _=Depends(require_permission("alerts:read")),
+):
+    result = await db.execute(
+        select(AiFeedback)
+        .where(AiFeedback.entity_type == "alert", AiFeedback.entity_id == alert_id)
+        .order_by(AiFeedback.created_at.desc())
+    )
+    return [AiFeedbackOut.model_validate(f) for f in result.scalars().all()]
+
+
+@router.post("/{alert_id}/feedback", response_model=AiFeedbackOut, status_code=201)
+async def submit_alert_feedback(
+    alert_id: UUID, body: AiFeedbackCreate,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_permission("alerts:update"))],
+):
+    alert = (await db.execute(select(Alert).where(Alert.id == alert_id))).scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    feedback = AiFeedback(
+        entity_type="alert",
+        entity_id=alert_id,
+        context_text=alert.title,
+        ai_verdict=alert.ai_verdict,
+        rating=body.rating,
+        correct_verdict=body.correct_verdict,
+        note=body.note,
+        group_id=alert.group_id,
+        created_by=current_user.id,
+    )
+    db.add(feedback)
+    await db.commit()
+    await db.refresh(feedback)
+    background.add_task(_push_feedback_reindex, str(feedback.id))
+    return AiFeedbackOut.model_validate(feedback)

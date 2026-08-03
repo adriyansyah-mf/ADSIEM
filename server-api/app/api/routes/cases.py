@@ -8,8 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_scoped_group
-from app.models.models import Alert, AlertNote, Case, CaseNote, User
-from app.schemas.schemas import CaseOut, CaseCreate, CaseUpdate, CaseNoteCreate, CaseNoteOut, PaginatedResponse
+from app.models.models import AiFeedback, Alert, AlertNote, Case, CaseNote, User
+from app.schemas.schemas import (
+    AiFeedbackCreate, AiFeedbackOut, CaseOut, CaseCreate, CaseUpdate,
+    CaseNoteCreate, CaseNoteOut, PaginatedResponse,
+)
 from app.services.audit import audit_log
 from app.core.config import settings
 import redis.asyncio as aioredis
@@ -24,6 +27,15 @@ async def _push_rag_reindex(case_id: str) -> None:
         await redis.aclose()
     except Exception:
         pass  # non-critical: hourly loop will catch it
+
+async def _push_feedback_reindex(feedback_id: str) -> None:
+    """Push feedback_id to Redis queue so the worker embeds it for RAG retrieval."""
+    try:
+        redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        await redis.rpush("siem:rag:feedback-reindex", feedback_id)
+        await redis.aclose()
+    except Exception:
+        pass  # non-critical: feedback row is already saved regardless
 
 def _case_q(group_filter):
     q = select(Case).options(selectinload(Case.notes))
@@ -144,6 +156,47 @@ async def add_note(
     await db.commit()
     await db.refresh(note)
     return CaseNoteOut.model_validate(note)
+
+@router.get("/api/cases/{case_id}/feedback", response_model=list[AiFeedbackOut])
+async def list_case_feedback(
+    case_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    result = await db.execute(
+        select(AiFeedback)
+        .where(AiFeedback.entity_type == "case", AiFeedback.entity_id == case_id)
+        .order_by(AiFeedback.created_at.desc())
+    )
+    return [AiFeedbackOut.model_validate(f) for f in result.scalars().all()]
+
+@router.post("/api/cases/{case_id}/feedback", response_model=AiFeedbackOut, status_code=201)
+async def submit_case_feedback(
+    case_id: UUID, body: AiFeedbackCreate,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    feedback = AiFeedback(
+        entity_type="case",
+        entity_id=case_id,
+        context_text=f"{case.title}\n{case.description or ''}".strip(),
+        ai_verdict=case.ioc_data.get("verdict") if case.ioc_data else None,
+        rating=body.rating,
+        correct_verdict=body.correct_verdict,
+        note=body.note,
+        group_id=case.group_id,
+        created_by=current_user.id,
+    )
+    db.add(feedback)
+    await db.commit()
+    await db.refresh(feedback)
+    background.add_task(_push_feedback_reindex, str(feedback.id))
+    return AiFeedbackOut.model_validate(feedback)
 
 @router.delete("/api/cases/{case_id}", status_code=204)
 async def delete_case(

@@ -270,9 +270,28 @@ class AlertOut(BaseModel):
     duplicate_count: int = 0
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None
+    ai_verdict: str | None = None
     created_at: datetime
     updated_at: datetime
     notes: list[AlertNoteOut] = []
+    model_config = {"from_attributes": True}
+
+# ─── AI feedback (analyst rating of an AI triage verdict) ────────
+
+class AiFeedbackCreate(BaseModel):
+    rating: Literal["correct", "incorrect"]
+    correct_verdict: str | None = None
+    note: str | None = None
+
+class AiFeedbackOut(BaseModel):
+    id: UUID
+    entity_type: str
+    entity_id: UUID
+    ai_verdict: str | None
+    rating: str
+    correct_verdict: str | None
+    note: str | None
+    created_at: datetime
     model_config = {"from_attributes": True}
 
 class AlertSourceLogOut(BaseModel):

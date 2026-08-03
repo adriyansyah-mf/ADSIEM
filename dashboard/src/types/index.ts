@@ -68,9 +68,21 @@ export interface Alert {
   source_ip_country: string | null
   hostname: string | null
   assignee_id: string | null
+  ai_verdict: string | null
   created_at: string
   updated_at: string
   notes: AlertNote[]
+}
+
+export interface AiFeedback {
+  id: string
+  entity_type: 'alert' | 'case'
+  entity_id: string
+  ai_verdict: string | null
+  rating: 'correct' | 'incorrect'
+  correct_verdict: string | null
+  note: string | null
+  created_at: string
 }
 
 export interface AlertNote {

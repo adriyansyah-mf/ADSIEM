@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { Case, PaginatedResponse } from '@/types'
+import { emitToast } from '@/hooks/useToast'
+import type { AiFeedback, Case, PaginatedResponse } from '@/types'
 
 export interface CaseFilters {
   status?: string
@@ -56,5 +57,25 @@ export function useAddCaseNote(id: string) {
   return useMutation({
     mutationFn: (content: string) => api.post(`/api/cases/${id}/notes`, { content }).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['case', id] }),
+  })
+}
+
+export function useCaseFeedback(caseId: string) {
+  return useQuery<AiFeedback[]>({
+    queryKey: ['case-feedback', caseId],
+    queryFn: () => api.get(`/api/cases/${caseId}/feedback`).then(r => r.data),
+  })
+}
+
+export function useSubmitCaseFeedback(caseId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { rating: 'correct' | 'incorrect'; correct_verdict?: string; note?: string }) =>
+      api.post(`/api/cases/${caseId}/feedback`, body).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['case-feedback', caseId] })
+      emitToast('Feedback recorded — thanks!', 'success')
+    },
+    onError: () => emitToast('Failed to submit feedback', 'error'),
   })
 }

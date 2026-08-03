@@ -34,7 +34,7 @@ from worker.searxng_client import search_threat_intel
 from worker.ninerouter_search import search_via_9router
 from worker.web_fetch import fetch_page_text
 from worker.fleet_correlation import check_fleet_spread, LOOKBACK_HOURS as FLEET_LOOKBACK_HOURS
-from worker.rag import retrieve_similar_cases, retrieve_sop_context
+from worker.rag import retrieve_similar_cases, retrieve_sop_context, retrieve_feedback_context
 from worker.soar_engine import run_soar_playbooks
 
 log = structlog.get_logger()
@@ -172,6 +172,22 @@ async def _tag_alert_with_mitre(alert_id: str, mitre_techniques: list[str]) -> N
                 await db.commit()
     except Exception as exc:
         log.warning("alert_mitre_tag_failed", alert_id=alert_id, error=str(exc))
+
+
+async def _set_alert_verdict(alert_id: str, verdict: str) -> None:
+    """Stash the AI's verdict on the alert row itself so it survives past
+    triage (used by the /feedback endpoint to know what the AI actually
+    decided when an analyst rates it later)."""
+    if not alert_id:
+        return
+    try:
+        async with AsyncSessionLocal() as db:
+            alert = await db.get(Alert, uuid.UUID(alert_id))
+            if alert:
+                alert.ai_verdict = verdict
+                await db.commit()
+    except Exception as exc:
+        log.warning("set_alert_verdict_failed", alert_id=alert_id, error=str(exc))
 
 
 async def _update_alert_status(alert_id: str, status: str) -> None:
@@ -465,6 +481,11 @@ async def analyze_and_maybe_create_case(
     if sop_context:
         log.info("rag_sop_found", alert_id=alert_id, chunks=len(sop_context))
 
+    # ── RAG — analyst feedback on past AI verdicts ───────────────────────────
+    feedback_context = await retrieve_feedback_context(query_text, group_id)
+    if feedback_context:
+        log.info("rag_feedback_found", alert_id=alert_id, count=len(feedback_context))
+
     # ── 3. Groq L1 triage — selalu dijalankan ───────────────────────────────
     analysis = await analyze_alert_with_ai(
         title=title,
@@ -476,6 +497,7 @@ async def analyze_and_maybe_create_case(
         heuristic_mitre=heuristic_mitre,
         similar_cases=similar_cases if similar_cases else None,
         sop_context=sop_context if sop_context else None,
+        feedback_context=feedback_context if feedback_context else None,
     )
 
     verdict = analysis.get("verdict", "monitor")
@@ -495,6 +517,8 @@ async def analyze_and_maybe_create_case(
              verdict=verdict,
              severity=effective_severity,
              confidence=confidence)
+    if alert_id:
+        asyncio.ensure_future(_set_alert_verdict(alert_id, verdict))
 
     # ── 4. Tulis triage notes ke alert (selalu, apapun verdictnya) ──────────
     actions_str = ("\n\n**Immediate Actions:**\n" + "\n".join(f"- {a}" for a in actions)) if actions else ""

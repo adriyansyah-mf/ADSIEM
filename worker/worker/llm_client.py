@@ -113,6 +113,7 @@ async def analyze_alert_with_ai(
     search_results: list[dict] | None = None,
     similar_cases: list[dict] | None = None,
     sop_context: list[str] | None = None,
+    feedback_context: list[dict] | None = None,
 ) -> dict:
     """L1 SOC analyst triage. Returns verdict + triage_notes + immediate_actions."""
     api_key = await get_setting("ninerouter_api_key") or NINEROUTER_API_KEY
@@ -159,12 +160,31 @@ async def analyze_alert_with_ai(
         lines = "\n\n".join(f"- {chunk}" for chunk in sop_context[:3])
         sop_section = f"\n\nCOMPANY SOP — INCIDENT RESPONSE GUIDE:\n{lines}"
 
+    feedback_section = ""
+    if feedback_context:
+        lines = []
+        for f in feedback_context[:3]:
+            sim_pct = int(float(f.get("similarity", 0)) * 100)
+            if f.get("rating") == "incorrect":
+                correction = f.get("correct_verdict") or "?"
+                note = f" — {f['note']}" if f.get("note") else ""
+                lines.append(
+                    f"⚠️ An analyst marked a similar AI triage as INCORRECT (similarity: {sim_pct}%). "
+                    f"AI said '{f.get('ai_verdict','?')}', should have been '{correction}'{note}"
+                )
+            else:
+                lines.append(
+                    f"✓ An analyst confirmed a similar AI triage was CORRECT (similarity: {sim_pct}%): "
+                    f"verdict '{f.get('ai_verdict','?')}'"
+                )
+        feedback_section = "\n\nANALYST FEEDBACK ON PAST SIMILAR TRIAGES (adjust your verdict if it applies here):\n" + "\n".join(lines)
+
     prompt = f"""ALERT TO TRIAGE:
 Title    : {title}
 Severity : {severity}
 Source IP: {source_ip or 'unknown'}
 Hostname : {hostname or 'unknown'}
-Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{similar_cases_section}{sop_section}
+Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{similar_cases_section}{sop_section}{feedback_section}
 
 Perform triage and provide your verdict as an L1 analyst."""
 
