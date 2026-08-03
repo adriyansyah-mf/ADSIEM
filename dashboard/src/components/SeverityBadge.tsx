@@ -1,13 +1,30 @@
-const map: Record<string, string> = {
-  critical: 'bg-red-600 text-white',
-  high: 'bg-orange-500 text-white',
-  medium: 'bg-yellow-500 text-black',
-  low: 'bg-blue-500 text-white',
-  info: 'bg-gray-500 text-white',
+const COLOR: Record<string, string> = {
+  critical: 'var(--accent-red)',
+  high: 'var(--accent-orange)',
+  medium: 'var(--accent-yellow)',
+  low: 'var(--accent-green)',
+  info: 'var(--accent-cyan)',
 }
+
 export default function SeverityBadge({ severity }: { severity: string }) {
+  const c = COLOR[severity] ?? 'var(--text-muted)'
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${map[severity] ?? 'bg-gray-400 text-white'}`}>
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 3,
+        border: `1px solid ${c}`,
+        background: `color-mix(in srgb, ${c} 12%, transparent)`,
+        color: c,
+        fontFamily: 'Rajdhani, sans-serif',
+        fontWeight: 700,
+        fontSize: 11,
+        letterSpacing: '0.5px',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+      }}
+    >
       {severity}
     </span>
   )

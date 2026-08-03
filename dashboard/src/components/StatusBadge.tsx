@@ -1,14 +1,31 @@
-const map: Record<string, string> = {
-  new: 'bg-blue-600 text-white',
-  in_progress: 'bg-yellow-500 text-black',
-  resolved: 'bg-green-600 text-white',
-  false_positive: 'bg-gray-500 text-white',
-  online: 'bg-green-500 text-white',
-  offline: 'bg-gray-600 text-white',
+const COLOR: Record<string, string> = {
+  new: 'var(--accent-cyan)',
+  in_progress: 'var(--accent-yellow)',
+  resolved: 'var(--accent-green)',
+  false_positive: 'var(--text-muted)',
+  online: 'var(--accent-green)',
+  offline: 'var(--text-muted)',
 }
+
 export default function StatusBadge({ status }: { status: string }) {
+  const c = COLOR[status] ?? 'var(--text-muted)'
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-semibold ${map[status] ?? 'bg-gray-400 text-white'}`}>
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 3,
+        border: `1px solid ${c}`,
+        background: `color-mix(in srgb, ${c} 12%, transparent)`,
+        color: c,
+        fontFamily: 'Rajdhani, sans-serif',
+        fontWeight: 700,
+        fontSize: 11,
+        letterSpacing: '0.5px',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+      }}
+    >
       {status.replace('_', ' ')}
     </span>
   )
