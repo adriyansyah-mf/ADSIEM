@@ -10,7 +10,6 @@ from worker.database import AsyncSessionLocal
 from worker.redis_client import get_redis
 from worker.config import AI_ANALYSIS_QUEUE
 from worker.ai_queue import mark_queued
-from worker.correlation_engine import check_correlation
 from worker.soar_engine import run_soar_playbooks
 from worker.email_sender import send_alert_email
 from worker.settings_cache import get_setting
@@ -201,17 +200,6 @@ async def create_alert(
                      severity=rule_match["level"], entity_risk=round(risk, 2))
     except Exception as exc:
         log.error("ai_queue_push_failed", alert_id=str(alert_id), error=str(exc))
-
-    try:
-        await check_correlation(
-            alert_id=alert_id,
-            source_ip=source_ip,
-            hostname=hostname,
-            group_id=group_id,
-            severity=rule_match["level"],
-        )
-    except Exception as exc:
-        log.error("correlation_check_failed", error=str(exc))
 
     try:
         await run_soar_playbooks(

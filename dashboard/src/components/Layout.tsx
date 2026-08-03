@@ -9,7 +9,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Server, BookOpen, Wrench, Shield,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
-  GitMerge, Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown,
+  Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -55,7 +55,6 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/agents', label: 'Agents', icon: Server },
       { to: '/rules', label: 'Rules', icon: BookOpen },
       { to: '/decoders', label: 'Decoders', icon: Wrench },
-      { to: '/correlation', label: 'Correlation', icon: GitMerge },
       { to: '/soar', label: 'SOAR', icon: Shield },
     ],
   },

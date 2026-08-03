@@ -192,18 +192,6 @@ class ThreatHunt(Base):
     created_at        = Column(DateTime(timezone=True), default=now_utc)
     completed_at      = Column(DateTime(timezone=True))
 
-class CorrelationRule(Base):
-    __tablename__ = "correlation_rules"
-    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    match_field     = Column(String(100), nullable=False, default="source_ip")
-    min_count       = Column(Integer, nullable=False, default=5)
-    timewindow      = Column(Integer, nullable=False, default=300)
-    severity_filter = Column(String(20))
-    output_severity = Column(String(20), nullable=False, default="high")
-    output_title    = Column(String(255), nullable=False)
-    is_enabled      = Column(Boolean, nullable=False, default=True)
-    group_id        = Column(String(100))
-
 class AlertSuppression(Base):
     __tablename__ = "alert_suppressions"
     id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

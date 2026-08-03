@@ -22,7 +22,6 @@ from app.api.routes.tasks import router as tasks_router, fleet_router
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
-from app.api.routes.correlation import router as correlation_router
 from app.api.routes.audit_logs import router as audit_logs_router
 from app.api.routes.export import router as export_router
 from app.api.routes.suppressions import router as suppressions_router
@@ -84,26 +83,6 @@ async def _seed_settings() -> None:
             if existing is None:
                 db.add(PlatformSetting(key=key, value=default, is_secret=is_secret, description=description))
         await db.commit()
-
-async def _seed_correlation_rules() -> None:
-    from sqlalchemy import select, func
-    from app.core.database import AsyncSessionLocal
-    from app.models.models import CorrelationRule
-    async with AsyncSessionLocal() as db:
-        count = (await db.execute(select(func.count()).select_from(CorrelationRule))).scalar()
-        if count == 0:
-            db.add(CorrelationRule(
-                title="SSH Brute Force Correlation",
-                description="Multiple SSH auth failures from same IP",
-                match_field="source_ip",
-                min_count=10,
-                timewindow=300,
-                severity_filter=None,
-                output_severity="high",
-                output_title="[Correlated] {count} alerts from {match_value} in 5 min",
-                is_enabled=True,
-            ))
-            await db.commit()
 
 async def _migrate_ueba_columns() -> None:
     from sqlalchemy import text
@@ -392,7 +371,6 @@ async def lifespan(app: FastAPI):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         await _seed_settings()
-        await _seed_correlation_rules()
         await _migrate_ueba_columns()
         await _migrate_alerts_columns()
         await _migrate_soar_tables()
@@ -425,7 +403,7 @@ for router in [
     logs.router, events.router, alerts.router, rules.router,
     decoders.router, webhooks.router, system.router, cases_router, settings_router, hygiene_router, ueba_router, fim_router, hunts_router,
     tasks_router, fleet_router, artifacts_router, yara_router,
-    enrollment_tokens_router, correlation_router, audit_logs_router,
+    enrollment_tokens_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router,
