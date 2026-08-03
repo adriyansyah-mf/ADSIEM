@@ -40,7 +40,7 @@ export default function AuditLogsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ClipboardList size={20} />
-          <h1 className="text-xl font-semibold">Audit Log</h1>
+          <h1 className="text-xl font-bold">Audit Log</h1>
         </div>
         <input
           placeholder="Filter by action..."

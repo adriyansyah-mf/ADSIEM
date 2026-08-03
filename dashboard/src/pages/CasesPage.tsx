@@ -274,7 +274,7 @@ export default function CasesPage() {
             fontWeight: 700,
             fontSize: '22px',
             letterSpacing: '2px',
-            color: 'var(--text-primary)',
+            color: 'var(--accent-cyan)',
             margin: 0,
             display: 'flex',
             alignItems: 'center',

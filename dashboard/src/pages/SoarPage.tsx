@@ -50,22 +50,22 @@ interface Playbook {
 const emptyTrigger = (): TriggerConditions => ({ match: 'all', conditions: [] })
 
 const S = {
-  card: { background: '#161920', border: '1px solid #1e2028', borderRadius: 8, padding: 16, marginBottom: 12 } as React.CSSProperties,
-  label: { fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' as const, marginBottom: 4 },
+  card: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: 16, marginBottom: 12 } as React.CSSProperties,
+  label: { fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' as const, marginBottom: 4 },
   input: {
-    background: '#0d0f14', border: '1px solid #1e2028', borderRadius: 6,
-    color: '#e2e8f0', fontSize: 13, padding: '6px 10px', width: '100%', outline: 'none',
+    background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 6,
+    color: 'var(--text-primary)', fontSize: 13, padding: '6px 10px', width: '100%', outline: 'none',
   } as React.CSSProperties,
   select: {
-    background: '#0d0f14', border: '1px solid #1e2028', borderRadius: 6,
-    color: '#e2e8f0', fontSize: 13, padding: '6px 8px',
+    background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 6,
+    color: 'var(--text-primary)', fontSize: 13, padding: '6px 8px',
   } as React.CSSProperties,
-  btn: (color = '#3b82f6') => ({
+  btn: (color = 'var(--accent-cyan)') => ({
     padding: '6px 14px', borderRadius: 6, border: 'none',
     background: color, color: '#fff', fontSize: 12, fontWeight: 600,
     cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
   } as React.CSSProperties),
-  ghost: { padding: '4px 8px', borderRadius: 4, border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' } as React.CSSProperties,
+  ghost: { padding: '4px 8px', borderRadius: 4, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-secondary)' } as React.CSSProperties,
 }
 
 function ConditionRow({
@@ -112,10 +112,10 @@ function ActionRow({
     <div style={{ ...S.card, padding: 12, marginBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 11, color: '#94a3b8', background: '#1e2028', padding: '2px 8px', borderRadius: 4 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', background: 'var(--border)', padding: '2px 8px', borderRadius: 4 }}>
             #{action.order_index + 1}
           </span>
-          <span style={{ fontSize: 13, color: '#e2e8f0', fontWeight: 500 }}>{action.action_type}</span>
+          <span style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{action.action_type}</span>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {keys.length > 0 && (
@@ -207,8 +207,8 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: '#111318', border: '1px solid #1e2028', borderRadius: 10, padding: 24, width: 680, maxHeight: '90vh', overflow: 'auto' }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', marginBottom: 20 }}>
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 10, padding: 24, width: 680, maxHeight: '90vh', overflow: 'auto' }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 20 }}>
           {isNew ? 'New Playbook' : 'Edit Playbook'}
         </div>
 
@@ -223,18 +223,18 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
 
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>Trigger Conditions</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Trigger Conditions</div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 12, color: '#64748b' }}>Match</span>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Match</span>
               <select style={S.select} value={trigger.match} onChange={e => setTrigger(t => ({ ...t, match: e.target.value as 'all' | 'any' }))}>
                 <option value="all">ALL</option>
                 <option value="any">ANY</option>
               </select>
-              <button style={S.btn('#1e2028')} onClick={addCondition}><Plus size={13} /> Add</button>
+              <button style={S.btn('var(--border)')} onClick={addCondition}><Plus size={13} /> Add</button>
             </div>
           </div>
           {trigger.conditions.length === 0 && (
-            <div style={{ fontSize: 12, color: '#3f4558', fontStyle: 'italic' }}>No conditions — playbook fires on every alert</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>No conditions — playbook fires on every alert</div>
           )}
           {trigger.conditions.map((c, i) => (
             <ConditionRow
@@ -248,7 +248,7 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
 
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#94a3b8' }}>Actions</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Actions</div>
             <select
               style={S.select}
               onChange={e => { if (e.target.value) { addAction(e.target.value); e.target.value = '' } }}
@@ -259,7 +259,7 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
             </select>
           </div>
           {actions.length === 0 && (
-            <div style={{ fontSize: 12, color: '#3f4558', fontStyle: 'italic' }}>No actions defined</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>No actions defined</div>
           )}
           {actions.map((act, i) => (
             <ActionRow
@@ -272,7 +272,7 @@ function PlaybookEditor({ playbook, onClose }: { playbook: Playbook | null; onCl
         </div>
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button style={{ ...S.btn('#1e2028'), color: '#94a3b8' }} onClick={onClose}>Cancel</button>
+          <button style={{ ...S.btn('var(--border)'), color: 'var(--text-secondary)' }} onClick={onClose}>Cancel</button>
           <button style={S.btn()} onClick={() => savePlaybook.mutate()} disabled={!name.trim()}>
             {savePlaybook.isPending ? 'Saving...' : 'Save Playbook'}
           </button>
@@ -310,8 +310,8 @@ export default function SoarPage() {
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#e2e8f0' }}>SOAR Playbooks</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+          <h1 style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '20px', color: 'var(--accent-cyan)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>SOAR Playbooks</h1>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
             Define trigger conditions and automated response actions
           </div>
         </div>
@@ -320,13 +320,13 @@ export default function SoarPage() {
         </button>
       </div>
 
-      {isLoading && <div style={{ color: '#64748b', fontSize: 13 }}>Loading...</div>}
+      {isLoading && <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Loading...</div>}
 
       {!isLoading && playbooks.length === 0 && (
         <div style={{ ...S.card, textAlign: 'center', padding: 48 }}>
-          <Shield size={32} color="#3f4558" style={{ margin: '0 auto 12px' }} />
-          <div style={{ color: '#64748b', fontSize: 14 }}>No playbooks defined yet.</div>
-          <div style={{ color: '#3f4558', fontSize: 12, marginTop: 4 }}>
+          <Shield size={32} color="var(--text-muted)" style={{ margin: '0 auto 12px' }} />
+          <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>No playbooks defined yet.</div>
+          <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 4 }}>
             Create a playbook to automate responses to alerts.
           </div>
         </div>
@@ -337,21 +337,21 @@ export default function SoarPage() {
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
             <div style={{ flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: pb.is_enabled ? '#e2e8f0' : '#475569' }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: pb.is_enabled ? 'var(--text-primary)' : 'var(--text-muted)' }}>
                   {pb.name}
                 </span>
                 <span style={{
                   fontSize: 11, padding: '1px 8px', borderRadius: 3,
-                  background: pb.is_enabled ? 'rgba(52,211,153,0.1)' : '#1e2028',
-                  color: pb.is_enabled ? '#34d399' : '#475569',
+                  background: pb.is_enabled ? 'rgba(0,255,136,0.12)' : 'var(--border)',
+                  color: pb.is_enabled ? 'var(--accent-green)' : 'var(--text-muted)',
                 }}>
                   {pb.is_enabled ? 'ENABLED' : 'DISABLED'}
                 </span>
               </div>
               {pb.description && (
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>{pb.description}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>{pb.description}</div>
               )}
-              <div style={{ display: 'flex', gap: 12, fontSize: 12, color: '#475569' }}>
+              <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-muted)' }}>
                 <span>{pb.trigger_conditions?.conditions?.length ?? 0} condition(s)</span>
                 <span>·</span>
                 <span>{pb.actions.length} action(s)</span>
@@ -362,8 +362,8 @@ export default function SoarPage() {
                 <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {pb.actions.map(a => (
                     <span key={a.id} style={{
-                      fontSize: 11, background: '#1a1f2e', border: '1px solid #2d3748',
-                      borderRadius: 4, padding: '2px 8px', color: '#7dd3fc',
+                      fontSize: 11, background: 'var(--bg-panel)', border: '1px solid var(--border)',
+                      borderRadius: 4, padding: '2px 8px', color: 'var(--accent-cyan)',
                     }}>
                       {a.action_type}
                     </span>
@@ -378,14 +378,14 @@ export default function SoarPage() {
                 onClick={() => toggle.mutate({ id: pb.id, enabled: !pb.is_enabled })}
               >
                 {pb.is_enabled
-                  ? <ToggleRight size={18} color="#34d399" />
-                  : <ToggleLeft size={18} color="#475569" />}
+                  ? <ToggleRight size={18} color="var(--accent-green)" />
+                  : <ToggleLeft size={18} color="var(--text-muted)" />}
               </button>
               <button style={S.ghost} onClick={() => setEditing(pb)}>
-                <span style={{ fontSize: 12, color: '#94a3b8' }}>Edit</span>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Edit</span>
               </button>
               <button style={S.ghost} onClick={() => { if (confirm(`Delete "${pb.name}"?`)) del.mutate(pb.id) }}>
-                <Trash2 size={14} color="#ef4444" />
+                <Trash2 size={14} color="var(--accent-red)" />
               </button>
             </div>
           </div>

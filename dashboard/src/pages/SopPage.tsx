@@ -60,7 +60,7 @@ export default function SopPage() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-        <h1 style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 700, fontSize: '20px', color: 'var(--text-primary)', margin: 0 }}>
+        <h1 style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '20px', color: 'var(--accent-cyan)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>
           SOP Documents
         </h1>
         <div>
