@@ -8,6 +8,7 @@ import { api } from '@/api/client'
 import type { Alert } from '@/types'
 import MarkdownNote from '@/components/MarkdownNote'
 import AttackGraph from '@/components/AttackGraph'
+import AlertDetailModal from '@/components/AlertDetailModal'
 
 const severityColors = {
   critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
@@ -171,6 +172,7 @@ export default function CaseDetailPage() {
   const { user } = useAuthStore()
   const [noteText, setNoteText] = useState('')
   const [timelineView, setTimelineView] = useState<'graph' | 'linear'>('graph')
+  const [showLinkedAlert, setShowLinkedAlert] = useState(false)
 
   const { data: caseData, isLoading } = useCase(id!)
   const update = useUpdateCase(id!)
@@ -399,12 +401,16 @@ export default function CaseDetailPage() {
           {/* Linked Alert */}
           {alertData && (
             <Box title="Linked Alert">
-              <div style={{
-                padding: '10px',
-                borderRadius: '4px',
-                background: 'var(--bg-panel)',
-                border: '1px solid var(--border)',
-              }}>
+              <div
+                onClick={() => setShowLinkedAlert(true)}
+                style={{
+                  padding: '10px',
+                  borderRadius: '4px',
+                  background: 'var(--bg-panel)',
+                  border: '1px solid var(--border)',
+                  cursor: 'pointer',
+                }}
+              >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{
                     display: 'inline-block',
@@ -434,6 +440,10 @@ export default function CaseDetailPage() {
                 </div>
               </div>
             </Box>
+          )}
+
+          {alertData && showLinkedAlert && (
+            <AlertDetailModal alert={alertData} onClose={() => setShowLinkedAlert(false)} />
           )}
 
           {/* Timeline / Notes */}

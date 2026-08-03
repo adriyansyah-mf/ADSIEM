@@ -1,14 +1,26 @@
 title: OS Command Injection via HTTP Request
 id: rule-os-command-injection-web
-description: URL parameters contain OS command injection metacharacters — shell command execution via web input (A03)
+description: >-
+  OS command injection metacharacters in the request URL, or a POST to a
+  known shell-out-style endpoint (ping/exec/diagnostic tools). Access logs
+  never contain the POST body, so body-only payloads (e.g. a form field like
+  DVWA's exec module) can't be pattern-matched directly — the post_exec_endpoint
+  selection is a path/method heuristic to catch that class of request anyway.
 logsource:
   product: webserver
 detection:
   shell_metachar:
     url.path|re: '[?&][^=]+=.*?(?:;|\||`|\$\()\s*(?:id|whoami|uname|cat\s|ls\s|curl\s|wget\s|bash|sh\s|python|perl|nc\s)'
+  shell_metachar_ref:
+    url.referrer|re: '[?&][^=]+=.*?(?:;|\||`|\$\()\s*(?:id|whoami|uname|cat\s|ls\s|curl\s|wget\s|bash|sh\s|python|perl|nc\s)'
   cmd_sep:
     url.path|re: '(?:%7C|%3B|%60|\|\|)\s*(?:id|whoami|cat|ls|bash|sh|uname)'
-  condition: shell_metachar or cmd_sep
+  cmd_sep_ref:
+    url.referrer|re: '(?:%7C|%3B|%60|\|\|)\s*(?:id|whoami|cat|ls|bash|sh|uname)'
+  post_exec_endpoint:
+    http.request.method: POST
+    url.path|re: '(?i)/(?:exec|ping|traceroute|nslookup|dig|diagnostic|network[-_]?tool|cmd|shell|command)s?(?:[/?]|\.php|$)'
+  condition: shell_metachar or shell_metachar_ref or cmd_sep or cmd_sep_ref or post_exec_endpoint
 level: critical
 tags:
   - attack.initial_access

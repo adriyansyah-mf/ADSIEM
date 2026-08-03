@@ -1,0 +1,26 @@
+title: Web Application Login Brute Force (Form POST)
+id: rule-http-login-bruteforce
+description: >-
+  High rate of POST requests to a login-style endpoint from a single IP.
+  Status-code-agnostic — many web apps (DVWA included) return HTTP 200 for
+  both failed and successful form logins, so http_401_bruteforce and
+  default_credentials (which only sees credentials passed as URL query
+  params) both miss this class of brute force (A07)
+logsource:
+  product: webserver
+detection:
+  selection:
+    http.request.method: POST
+    url.path|re: '(?i)^/(?:login(?:\.php)?|signin|sign-in|auth(?:\.php)?|wp-login\.php|user/login)(?:[/?]|$)'
+  condition: selection
+threshold:
+  count: 5
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1110
+  - owasp.a07

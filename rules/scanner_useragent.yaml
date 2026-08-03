@@ -19,6 +19,12 @@ detection:
       - "gobuster"
       - "nuclei"
       - "Havij"
+      - "WhatWeb"
+      - "wpscan"
+      - "dirb"
+      - "skipfish"
+      - "arachni"
+      - "netsparker"
   condition: selection
 suppression:
   timewindow: 3600
