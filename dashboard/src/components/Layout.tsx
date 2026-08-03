@@ -237,6 +237,60 @@ export default function Layout() {
             )
           })}
 
+          {/* Admin */}
+          {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              {!collapsed && (
+                <div style={{
+                  padding: '12px 16px 4px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: '0.08em',
+                  color: '#64748b',
+                  textTransform: 'uppercase',
+                }}>
+                  Administration
+                </div>
+              )}
+              {collapsed && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
+              {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).map(item => {
+                const active = isActive(item.to)
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    title={collapsed ? item.label : undefined}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: collapsed ? '8px 0' : '7px 16px',
+                      justifyContent: collapsed ? 'center' : 'flex-start',
+                      textDecoration: 'none',
+                      background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
+                      borderLeft: active ? '2px solid #3b82f6' : '2px solid transparent',
+                      color: active ? '#93c5fd' : '#64748b',
+                      transition: 'color 0.12s, background 0.12s',
+                    }}
+                  >
+                    <Icon size={15} strokeWidth={active ? 2 : 1.75} style={{ flexShrink: 0 }} />
+                    {!collapsed && (
+                      <span style={{
+                        fontSize: 13,
+                        fontWeight: active ? 500 : 400,
+                        color: active ? '#e2e8f0' : '#94a3b8',
+                        whiteSpace: 'nowrap',
+                        letterSpacing: '0.01em',
+                      }}>
+                        {item.label}
+                      </span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </nav>
 
         {/* Bottom: agent count + collapse */}
