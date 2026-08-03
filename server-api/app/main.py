@@ -50,6 +50,7 @@ _DEFAULT_SETTINGS = [
     ("org_name",           "",                          False, "Organization name shown on generated PDF reports"),
     ("ninerouter_api_key", "",                          True,  "9router API key for AI analyst — generate via POST /api/keys against the 9router dashboard API (see docs/PROJECT_OVERVIEW.md)"),
     ("ninerouter_model",   "combo",                      False, "9router combo name to route AI analyst requests through"),
+    ("ninerouter_search_provider", "searxng",            False, "9router /v1/search provider/combo for AI research queries (searxng, tavily, or a dashboard search-combo for multi-provider auto-fallback)"),
     ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
     ("ai_confidence_threshold","0.0",                    False, "Minimum AI confidence (0.0-1.0) to create/escalate a case — notes always written regardless"),
     ("ai_min_severity",    "high",                      False, "Minimum alert severity investigated by the AI analyst (info/low/medium/high/critical)"),

@@ -31,6 +31,7 @@ from worker.ti.aggregator import EnrichmentAggregator
 from worker.ti.mitre import suggest_mitre, stage_for_techniques
 from worker.campaign_analyzer import analyze_campaign
 from worker.searxng_client import search_threat_intel
+from worker.ninerouter_search import search_via_9router
 from worker.web_fetch import fetch_page_text
 from worker.fleet_correlation import check_fleet_spread, LOOKBACK_HOURS as FLEET_LOOKBACK_HOURS
 from worker.rag import retrieve_similar_cases, retrieve_sop_context
@@ -75,7 +76,11 @@ async def _run_ai_searches(
         return
     all_results = []
     for query in search_queries[:3]:
-        results = await search_threat_intel(query, num_results=4)
+        # Prefer 9router's /v1/search (multi-provider auto-fallback if a
+        # search-combo is configured); fall back to direct SearXNG on failure.
+        results = await search_via_9router(query, num_results=4)
+        if not results:
+            results = await search_threat_intel(query, num_results=4)
         if results:
             all_results.append((query, results))
         await asyncio.sleep(0.5)
@@ -84,7 +89,7 @@ async def _run_ai_searches(
         return
 
     # Susun catatan dari hasil pencarian
-    lines = ["## 🔎 AI Web Research (SearXNG)"]
+    lines = ["## 🔎 AI Web Research"]
     lines.append("*Query chosen by the AI based on alert context.*\n")
     for query, results in all_results:
         lines.append(f"**Query:** `{query}`")

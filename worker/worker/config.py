@@ -19,6 +19,10 @@ NINEROUTER_BASE_URL: str = os.environ.get("NINEROUTER_BASE_URL", "http://9router
 # always takes priority over this env var fallback.
 NINEROUTER_API_KEY: str = os.environ.get("NINEROUTER_API_KEY", "")
 NINEROUTER_MODEL: str = os.environ.get("NINEROUTER_MODEL", "combo")
+# Provider/combo name for 9router's /v1/search — defaults to "searxng" (works
+# out of the box, no dashboard setup needed). Switch to a "search-combo"
+# configured in the 9router dashboard for multi-provider auto-fallback.
+NINEROUTER_SEARCH_PROVIDER: str = os.environ.get("NINEROUTER_SEARCH_PROVIDER", "searxng")
 SEARXNG_URL: str = os.environ.get("SEARXNG_URL", "http://searxng:8080")
 AI_ANALYSIS_QUEUE: str = os.environ.get("AI_ANALYSIS_QUEUE", "siem:ai-analysis")
 ELASTICSEARCH_URL: str = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch:9200")
