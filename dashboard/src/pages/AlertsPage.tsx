@@ -133,6 +133,19 @@ export default function AlertsPage() {
 
   const { data, isLoading } = useAlerts(page, pageSize, statusFilter || undefined, severityFilter || undefined)
 
+  // Deep link from the global search dropdown (?open=<alert_id>) — fetched
+  // directly rather than found in the current page's rows, since the
+  // matching alert may not be on whatever page/filter is currently shown.
+  const openId = searchParams.get('open')
+  const { data: deepLinkedAlert } = useQuery<Alert>({
+    queryKey: ['alert', openId],
+    queryFn: () => api.get(`/api/alerts/${openId}`).then(r => r.data),
+    enabled: !!openId,
+  })
+  useEffect(() => {
+    if (deepLinkedAlert) setSelected(deepLinkedAlert)
+  }, [deepLinkedAlert])
+
   const columns = [
     { key: 'severity', header: 'Severity', render: (r: Alert) => <SeverityBadge severity={r.severity} /> },
     { key: 'title', header: 'Title', render: (r: Alert) => <span className="font-medium">{r.title}</span> },

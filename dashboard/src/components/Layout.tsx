@@ -405,7 +405,7 @@ export default function Layout() {
                 {searchResults.alerts.map((a: any) => (
                   <div
                     key={a.id}
-                    onMouseDown={() => { navigate('/alerts'); setSearchOpen(false); setSearchQuery('') }}
+                    onMouseDown={() => { navigate(`/alerts?open=${a.id}`); setSearchOpen(false); setSearchQuery('') }}
                     style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid #1e2028', display: 'flex', gap: 8, alignItems: 'center' }}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1e2028' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
