@@ -68,19 +68,10 @@ const ADMIN_ITEMS: NavItem[] = [
   { to: '/users', label: 'Users', icon: Users, minRole: 'superadmin' },
 ]
 
-type OpMode = 'MANUAL' | 'OBSERVER' | 'OPERATOR'
-
-const MODE_COLOR: Record<OpMode, string> = {
-  MANUAL:   '#f59e0b',
-  OBSERVER: '#38bdf8',
-  OPERATOR: '#34d399',
-}
-
 export default function Layout() {
   const { pathname } = useLocation()
   const { user, logout, hasRole, accessToken } = useAuthStore()
   const queryClient = useQueryClient()
-  const [opMode, setOpMode] = useState<OpMode>('OBSERVER')
   const [clock, setClock] = useState(new Date())
   const [collapsed, setCollapsed] = useState(false)
   const [wsConnected, setWsConnected] = useState(false)
@@ -437,36 +428,6 @@ export default function Layout() {
                 ))}
               </div>
             )}
-          </div>
-
-          {/* Op mode */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 1, background: '#0d0f14', borderRadius: 6, padding: 2 }}>
-            {(['MANUAL', 'OBSERVER', 'OPERATOR'] as OpMode[]).map(mode => (
-              <button
-                key={mode}
-                onClick={() => setOpMode(mode)}
-                title={
-                  mode === 'MANUAL'   ? 'Manual: all AI automation disabled — analyst drives everything' :
-                  mode === 'OBSERVER' ? 'Observer: AI monitors and annotates, no automatic actions' :
-                                       'Operator: AI-assisted response — automation rules execute automatically'
-                }
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: 4,
-                  border: 'none',
-                  minHeight: 32,
-                  background: opMode === mode ? '#1e2028' : 'transparent',
-                  color: opMode === mode ? MODE_COLOR[mode] : '#475569',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  letterSpacing: '0.04em',
-                  cursor: 'pointer',
-                  transition: 'all 0.12s',
-                }}
-              >
-                {mode}
-              </button>
-            ))}
           </div>
 
           <div style={{ width: 1, height: 24, background: '#1e2028' }} />
