@@ -240,11 +240,9 @@ export default function LoginPage() {
               border: '1px solid rgba(6,182,212,0.45)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               boxShadow: '0 0 32px rgba(6,182,212,0.2), inset 0 0 24px rgba(6,182,212,0.08)',
+              overflow: 'hidden',
             }}>
-              <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                <path d="M9 12l2 2 4-4" />
-              </svg>
+              <img src="/favicon.jpeg" alt="AD-SIEM" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
           </div>
 
@@ -252,13 +250,13 @@ export default function LoginPage() {
           <div style={{ textAlign: 'center', animation: 'fade-up 0.9s ease-out both', position: 'relative', zIndex: 1 }}>
             <div style={{
               fontFamily: "'Rajdhani', sans-serif",
-              fontSize: 52,
+              fontSize: 44,
               fontWeight: 900,
               color: '#06b6d4',
-              letterSpacing: '0.14em',
+              letterSpacing: '0.1em',
               textShadow: '0 0 25px rgba(6,182,212,0.55), 0 0 60px rgba(6,182,212,0.2)',
               lineHeight: 1,
-            }}>SIEM</div>
+            }}>AD-SIEM</div>
             <div style={{
               fontFamily: "'Rajdhani', sans-serif",
               fontSize: 13,

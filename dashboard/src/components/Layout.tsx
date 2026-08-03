@@ -9,7 +9,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Server, BookOpen, Wrench, Shield,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
-  GitMerge, Webhook, ClipboardList, FileBarChart,
+  GitMerge, Webhook, ClipboardList, FileBarChart, Grid3x3,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -39,6 +39,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/fim', label: 'FIM', icon: Lock },
       { to: '/yara', label: 'YARA', icon: ScanLine },
       { to: '/hunts', label: 'Threat Hunt', icon: Crosshair },
+      { to: '/mitre-heatmap', label: 'MITRE Heatmap', icon: Grid3x3 },
       { to: '/reports', label: 'Reports', icon: FileBarChart },
     ],
   },
@@ -135,7 +136,7 @@ export default function Layout() {
   const isActive = (to: string) => to === '/' ? pathname === '/' : pathname.startsWith(to)
 
   const allItems = [...NAV_GROUPS.flatMap(g => g.items), ...ADMIN_ITEMS]
-  const currentLabel = allItems.find(i => isActive(i.to))?.label ?? 'SIEM'
+  const currentLabel = allItems.find(i => isActive(i.to))?.label ?? 'AD-SIEM'
 
   const sidebarW = collapsed ? 56 : 216
 
@@ -164,20 +165,18 @@ export default function Layout() {
           borderBottom: '1px solid #1e2028',
           flexShrink: 0,
         }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 6,
-            background: 'linear-gradient(135deg, #1d4ed8, #7c3aed)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            </svg>
-          </div>
+          <img
+            src="/favicon.jpeg"
+            alt="AD-SIEM"
+            style={{
+              width: 28, height: 28, borderRadius: 6,
+              objectFit: 'cover', flexShrink: 0,
+            }}
+          />
           {!collapsed && (
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.02em', lineHeight: 1.1 }}>
-                SIEM Platform
+                AD-SIEM
               </div>
               <div style={{ fontSize: 10, color: '#64748b', letterSpacing: '0.04em' }}>
                 Security Operations

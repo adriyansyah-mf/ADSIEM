@@ -29,6 +29,7 @@ import YaraPage from '@/pages/YaraPage'
 import CorrelationPage from '@/pages/CorrelationPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
 import SoarPage from '@/pages/SoarPage'
+import MitreHeatmapPage from '@/pages/MitreHeatmapPage'
 
 export default function App() {
   const { accessToken, setUser, logout } = useAuthStore()
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/fim" element={<FimPage />} />
             <Route path="/hunts" element={<HuntsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/mitre-heatmap" element={<MitreHeatmapPage />} />
             <Route path="/live-response" element={<LiveResponsePage />} />
             <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />
             <Route path="/yara" element={<YaraPage />} />
