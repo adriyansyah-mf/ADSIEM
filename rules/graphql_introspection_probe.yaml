@@ -1,0 +1,24 @@
+title: GraphQL Endpoint / Introspection Probe
+id: rule-graphql-introspection-probe
+description: >-
+  Request to a common GraphQL endpoint path — recon for an API that may
+  allow introspection (schema disclosure) or lack query depth/rate limiting
+  (API3:2023 Excessive Data Exposure, API4:2023 Unrestricted Resource Consumption)
+logsource:
+  product: webserver
+detection:
+  selection:
+    url.path|re: '(?i)^/(?:graphql|graphiql|v1/graphql|api/graphql|gql)(?:[/?]|$)'
+  condition: selection
+threshold:
+  count: 3
+  timewindow: 60
+  group_by: source.ip
+suppression:
+  timewindow: 1800
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1595
+  - owasp.api3
+  - owasp.api4

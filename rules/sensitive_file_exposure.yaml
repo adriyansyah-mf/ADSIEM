@@ -23,7 +23,11 @@ detection:
       - "/WEB-INF/web.xml"
       - "/server-status"
       - "/server-info"
-  condition: vcs_exposure or backup_files or info_files or ds_store
+  private_keys:
+    url.path|re: '(?i)(?:\.ppk|id_rsa(?:\.pub)?|id_ed25519(?:\.pub)?|id_ecdsa(?:\.pub)?|\.pem|etcd-client\.key)(?:[?#]|$)'
+  app_config_exposure:
+    url.path|re: '(?i)(?:/|^)(?:auth\.json|docker-compose(?:[.\-][\w.]+)?\.ya?ml|appsettings\.json|log4j\.properties|sqlnet\.log)(?:[?#]|$)'
+  condition: vcs_exposure or backup_files or info_files or ds_store or private_keys or app_config_exposure
 level: medium
 tags:
   - attack.discovery

@@ -1,0 +1,22 @@
+title: Out-of-Band Interaction Domain Reference (Blind Vuln Probe)
+id: rule-oob-interaction-domain
+description: >-
+  Request parameter references a known OOB/collaborator callback domain
+  (interact.sh, oast.*, Burp Collaborator, dnslog.cn, ceye.io, webhook.site,
+  requestbin) — used by vulnerability scanners and attackers to confirm
+  blind SSRF, RCE, XXE, or SSTI when the response body gives no direct
+  feedback. Seeing this domain in a request means something on this host
+  was told to reach out to an attacker-controlled listener (A10)
+logsource:
+  product: webserver
+detection:
+  selection:
+    url.path|re: '(?i)(?:interact\.sh|oast\.(?:pro|fun|me|live|site|online)|burpcollaborator\.net|dnslog\.cn|\.dnslog\.cn|ceye\.io|webhook\.site|requestbin\.(?:net|com)|canarytokens\.com|\.oastify\.com)'
+  condition: selection
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - attack.exfiltration
+  - attack.t1567
+  - owasp.a10
