@@ -1,6 +1,10 @@
 title: System Log Clearing
 id: rule-log-clearing
-description: Attempt to clear system logs or shell history — anti-forensics / defense evasion
+description: >-
+  Attempt to clear system logs (/var/log), the systemd journal, or shell
+  history — anti-forensics / defense evasion (T1070.002, T1070.003). Covers
+  both process.command_line (sudo/cron/Sysmon-sourced logs) and the eBPF
+  process-exec fields, since this is usually run directly as root, not via sudo
 logsource:
   product: linux
 detection:
@@ -14,7 +18,20 @@ detection:
       - "history -w /dev/null"
       - "unset HISTFILE"
       - "HISTSIZE=0"
-  condition: rm_logs or truncate_logs or history_clear
+  rm_logs_ebpf:
+    CommandLine|re: '(?i)(?:rm|shred)\s+.*(?:-[a-z]*f[a-z]*\s.*)?/var/log(?:/\S+)?'
+  truncate_logs_ebpf:
+    CommandLine|re: '(?i)truncate\s+.*-s\s*0.*/var/log|>\s*/var/log/\S+'
+  journal_clear_ebpf:
+    Image|re: '(?i)/journalctl$'
+    CommandLine|re: '(?i)--vacuum-(?:time|size|files)|--rotate'
+  history_clear_ebpf:
+    CommandLine|contains:
+      - "history -c"
+      - "history -w /dev/null"
+      - "unset HISTFILE"
+      - "HISTSIZE=0"
+  condition: rm_logs or truncate_logs or history_clear or rm_logs_ebpf or truncate_logs_ebpf or journal_clear_ebpf or history_clear_ebpf
 level: high
 tags:
   - attack.defense_evasion

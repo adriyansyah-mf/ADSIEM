@@ -1,6 +1,10 @@
 title: Security Tool Disabled
 id: rule-disable-security-tools
-description: SELinux disabled or security service stopped — attacker removing defensive controls
+description: >-
+  SELinux/AppArmor disabled, auditd or another security/EDR service stopped
+  or killed — attacker removing defensive controls (T1562.001). Covers both
+  process.command_line (sudo/cron/Sysmon-sourced logs) and the eBPF
+  process-exec fields, since this is usually run directly as root, not via sudo
 logsource:
   product: linux
 detection:
@@ -10,7 +14,17 @@ detection:
       - "setenforce Permissive"
   disable_fw:
     process.command_line|re: 'systemctl\s+(?:stop|disable)\s+(?:ufw|firewalld|iptables|fail2ban|apparmor|auditd|aide)'
-  condition: selinux_off or disable_fw
+  selinux_off_ebpf:
+    CommandLine|contains:
+      - "setenforce 0"
+      - "setenforce Permissive"
+  service_stop_ebpf:
+    Image|re: '(?i)/(?:systemctl|service)$'
+    CommandLine|re: '(?i)\b(?:stop|disable|mask)\b.*\b(?:ufw|firewalld|iptables|fail2ban|apparmor|auditd|aide|falcon|falcond|crowdstrike|sentinelone|wazuh|osqueryd|siem-agent)\b'
+  kill_security_proc_ebpf:
+    Image|re: '(?i)/(?:kill|pkill|killall)$'
+    CommandLine|re: '(?i)\b(?:auditd|apparmor|falcon|falcond|crowdstrike|sentinelone|wazuh|osqueryd|siem-agent)\b'
+  condition: selinux_off or disable_fw or selinux_off_ebpf or service_stop_ebpf or kill_security_proc_ebpf
 level: high
 tags:
   - attack.defense_evasion

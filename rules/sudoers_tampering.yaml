@@ -1,0 +1,23 @@
+title: Sudoers Configuration Tampering
+id: rule-sudoers-tampering
+description: >-
+  Direct edit of /etc/sudoers or /etc/sudoers.d/, use of visudo, or a
+  NOPASSWD:ALL grant — a common privilege-escalation persistence technique
+  once an attacker has any sudo-capable foothold (T1548.003)
+logsource:
+  product: linux
+detection:
+  sudoers_file_ref:
+    CommandLine|contains:
+      - "/etc/sudoers"
+      - "/etc/sudoers.d/"
+  visudo_exec:
+    Image|re: '(?i)/visudo$'
+  nopasswd_grant:
+    CommandLine|re: '(?i)NOPASSWD\s*:\s*ALL'
+  condition: sudoers_file_ref or visudo_exec or nopasswd_grant
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.persistence
+  - attack.t1548.003

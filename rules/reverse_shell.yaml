@@ -1,6 +1,11 @@
 title: Reverse Shell Attempt
 id: rule-reverse-shell
-description: Command line contains reverse shell indicators — bash /dev/tcp, netcat listener, or similar
+description: >-
+  Command line contains reverse/bind shell indicators — bash /dev/tcp,
+  netcat/ncat -e or listener flags, or socat exec:/system: piped to a shell.
+  Matches both process.command_line (sudo/cron/Sysmon-sourced logs) and the
+  eBPF process-exec event fields (Image/CommandLine/ParentImage), since a
+  reverse shell is usually exec'd directly, not via sudo
 logsource:
   product: linux
 detection:
@@ -8,7 +13,15 @@ detection:
     process.command_line|contains: "/dev/tcp/"
   netcat_exec:
     process.command_line|re: 'nc\s+.*-[el]'
-  condition: bash_tcp or netcat_exec
+  bash_tcp_ebpf:
+    CommandLine|contains: "/dev/tcp/"
+  netcat_exec_ebpf:
+    Image|re: '(?i)/(?:nc|ncat|netcat)$'
+    CommandLine|re: '(?i)-[a-z]*[el][a-z]*\s|-e\s+/bin/(?:ba)?sh'
+  socat_exec_ebpf:
+    Image|re: '(?i)/socat$'
+    CommandLine|re: '(?i)(?:exec|system):.*(?:sh|bash)'
+  condition: bash_tcp or netcat_exec or bash_tcp_ebpf or netcat_exec_ebpf or socat_exec_ebpf
 level: critical
 tags:
   - attack.execution

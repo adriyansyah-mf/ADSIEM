@@ -1,0 +1,24 @@
+title: Linux Web Server Spawning Interactive Shell
+id: rule-webserver-spawn-shell
+description: >-
+  A web server / app runtime process (apache2, nginx, php-fpm, tomcat/java,
+  node) directly spawned a shell — the single strongest signal of a live
+  webshell or RCE exploit, since a web server has no legitimate reason to
+  exec bash/sh/dash/zsh. Sourced from the agent's eBPF process-exec monitor
+  (sys_enter_execve), so it fires on the direct child process, not just
+  commands logged via sudo/cron (T1505.003 / T1059.004)
+logsource:
+  product: linux
+detection:
+  webserver_parent:
+    ParentImage|re: '(?i)/(?:apache2|httpd|nginx|php-fpm\d*(?:\.\d+)?|php\d*|tomcat\d*|java|node|gunicorn|uwsgi)$'
+  shell_child:
+    Image|re: '(?i)/(?:bash|sh|dash|zsh|ash|ksh)$'
+  condition: webserver_parent and shell_child
+level: critical
+tags:
+  - attack.execution
+  - attack.t1059.004
+  - attack.persistence
+  - attack.t1505.003
+  - owasp.a03
