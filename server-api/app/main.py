@@ -373,16 +373,34 @@ async def _ws_redis_listener():
         await redis.aclose()
 
 
+_STARTUP_LOCK_KEY = 727501001  # arbitrary fixed key for the session-level advisory lock below
+
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    await _seed_settings()
-    await _seed_correlation_rules()
-    await _migrate_ueba_columns()
-    await _migrate_alerts_columns()
-    await _migrate_soar_tables()
-    await _migrate_webhook_payload_format()
-    await _migrate_mfa_columns()
+    from sqlalchemy import text
+    # Multiple server-api replicas start concurrently (docker compose recreates
+    # both at once). Without this lock they'd all run create_all + the
+    # _migrate_* ALTER TABLE statements at the same time, and Postgres
+    # serializes concurrent ALTER TABLE on the same relation — with enough
+    # migration functions this chain of AccessExclusiveLock waits can stall
+    # for a very long time (observed: 70s+, health check timing out and the
+    # container never becoming ready). A session-level advisory lock makes
+    # only one replica run migrations at a time; the rest wait briefly, then
+    # find everything already exists via IF NOT EXISTS and proceed instantly.
+    lock_conn = await engine.connect()
+    await lock_conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": _STARTUP_LOCK_KEY})
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed_settings()
+        await _seed_correlation_rules()
+        await _migrate_ueba_columns()
+        await _migrate_alerts_columns()
+        await _migrate_soar_tables()
+        await _migrate_webhook_payload_format()
+        await _migrate_mfa_columns()
+    finally:
+        await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
+        await lock_conn.close()
     await ensure_es_index()
     import asyncio
     _listener_task = asyncio.create_task(_ws_redis_listener())
