@@ -213,7 +213,7 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
         q = select(HygieneSnapshot).where(HygieneSnapshot.hostname.ilike(f"%{args['hostname']}%"))
         if group_filter:
             q = q.where(HygieneSnapshot.group_id == group_filter)
-        q = q.order_by(HygieneSnapshot.created_at.desc()).limit(1)
+        q = q.order_by(HygieneSnapshot.collected_at.desc()).limit(1)
         h = (await db.execute(q)).scalar_one_or_none()
         if not h:
             return {"error": "no hygiene snapshot found for that hostname"}
