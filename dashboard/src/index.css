@@ -66,6 +66,28 @@ html, body {
   line-height: 1.5;
 }
 
+/* Page-title consistency: several pages (Alerts, Hunts, YARA, FIM, Live
+   Response, Reports, Decoders, Webhooks, Users, Logs, Audit Log, Log
+   Sources, Handover, MITRE Heatmap) render a bare `<h1 className="text-xl
+   font-bold">` with no font override, while Cases/Dashboard/Settings/etc.
+   set Rajdhani + uppercase + letter-spacing inline. Tailwind's utility
+   classes never set font-family/text-transform/letter-spacing, so this
+   rule fills that gap for every plain h1 without touching each page —
+   and has zero effect on headings that already set their own inline
+   font-family (inline styles win over this stylesheet rule). */
+main h1 {
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Tabular numerals for counters, timers, and table cells with changing
+   numbers — keeps digit widths stable instead of jittering. */
+main :is(td, .tabular-nums) {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Grid line background */
 body::before {
   content: '';
