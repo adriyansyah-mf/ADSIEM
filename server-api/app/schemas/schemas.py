@@ -264,6 +264,7 @@ class AlertOut(BaseModel):
     agent_id: UUID | None
     group_id: str
     source_ip: str | None
+    source_ip_country: str | None = None
     hostname: str | None
     assignee_id: UUID | None
     duplicate_count: int = 0

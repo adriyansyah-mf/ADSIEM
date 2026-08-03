@@ -97,8 +97,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
       ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      GEOIP_DIR: /app/mmdb
     volumes:
       - agent_packages:/app/packages:ro
+      - ./mmdb:/app/mmdb:ro
     depends_on:
       package-builder:
         condition: service_completed_successfully

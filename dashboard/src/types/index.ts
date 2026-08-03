@@ -65,6 +65,7 @@ export interface Alert {
   agent_id: string | null
   group_id: string
   source_ip: string | null
+  source_ip_country: string | null
   hostname: string | null
   assignee_id: string | null
   created_at: string

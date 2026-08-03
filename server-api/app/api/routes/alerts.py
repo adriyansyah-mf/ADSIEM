@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
 from app.core.es_client import get_log as es_get_log
+from app.core.geoip import lookup_country
 from app.models.models import Alert, AlertNote, User
 from app.schemas.schemas import (
     AlertNoteCreate, AlertNoteOut, AlertOut, AlertSourceLogOut, AlertUpdate,
@@ -44,8 +45,12 @@ async def list_alerts(
         q = q.where(Alert.source_ip == source_ip)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
-    return PaginatedResponse(total=total, page=page, page_size=page_size,
-                             items=[AlertOut.model_validate(a) for a in result.scalars().all()])
+    items = []
+    for a in result.scalars().all():
+        out = AlertOut.model_validate(a)
+        out.source_ip_country = lookup_country(a.source_ip)
+        items.append(out)
+    return PaginatedResponse(total=total, page=page, page_size=page_size, items=items)
 
 
 @router.get("/{alert_id}", response_model=AlertOut)
@@ -61,7 +66,9 @@ async def get_alert(
     alert = result.scalar_one_or_none()
     if not alert or (group_filter and alert.group_id != group_filter):
         raise HTTPException(status_code=404, detail="Alert not found")
-    return AlertOut.model_validate(alert)
+    out = AlertOut.model_validate(alert)
+    out.source_ip_country = lookup_country(alert.source_ip)
+    return out
 
 
 @router.get("/{alert_id}/source-log", response_model=AlertSourceLogOut)

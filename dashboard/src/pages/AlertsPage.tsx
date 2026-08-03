@@ -14,6 +14,13 @@ import type { Alert } from '@/types'
 
 interface Suppression { id: string; entity_type: string; entity_value: string; reason: string | null; is_active: boolean }
 
+// ISO 3166-1 alpha-2 -> flag emoji (regional indicator symbols)
+function countryFlag(iso: string): string {
+  if (!/^[A-Za-z]{2}$/.test(iso)) return ''
+  const codePoints = [...iso.toUpperCase()].map(c => 0x1f1e6 + c.charCodeAt(0) - 65)
+  return String.fromCodePoint(...codePoints)
+}
+
 function SuppressionPanel() {
   const qc = useQueryClient()
   const [form, setForm] = useState({ entity_type: 'ip', entity_value: '', reason: '' })
@@ -150,7 +157,15 @@ export default function AlertsPage() {
     { key: 'severity', header: 'Severity', render: (r: Alert) => <SeverityBadge severity={r.severity} /> },
     { key: 'title', header: 'Title', render: (r: Alert) => <span className="font-medium">{r.title}</span> },
     { key: 'status', header: 'Status', render: (r: Alert) => <StatusBadge status={r.status} /> },
-    { key: 'source_ip', header: 'Source IP', render: (r: Alert) => r.source_ip ?? '—' },
+    {
+      key: 'source_ip', header: 'Source IP',
+      render: (r: Alert) => r.source_ip
+        ? <span className="inline-flex items-center gap-1.5">
+            {r.source_ip_country && <span title={r.source_ip_country}>{countryFlag(r.source_ip_country)}</span>}
+            {r.source_ip}
+          </span>
+        : '—',
+    },
     { key: 'hostname', header: 'Hostname', render: (r: Alert) => r.hostname ?? '—' },
     { key: 'time', header: 'Time', render: (r: Alert) => format(new Date(r.created_at), 'yyyy-MM-dd HH:mm:ss') },
     { key: 'hunt', header: '', render: (r: Alert) => <HuntButton alert={r} /> },
