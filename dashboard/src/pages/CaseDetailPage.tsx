@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { useCase, useUpdateCase, useEscalateCase, useAddCaseNote } from '@/hooks/useCases'
+import { useBlockIp, useTasks } from '@/hooks/useTasks'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -173,17 +174,39 @@ export default function CaseDetailPage() {
   const [noteText, setNoteText] = useState('')
   const [timelineView, setTimelineView] = useState<'graph' | 'linear'>('graph')
   const [showLinkedAlert, setShowLinkedAlert] = useState(false)
+  const [blockIpValue, setBlockIpValue] = useState('')
+  const [blockDuration, setBlockDuration] = useState(3600)
 
   const { data: caseData, isLoading } = useCase(id!)
   const update = useUpdateCase(id!)
   const escalate = useEscalateCase(id!)
   const addNote = useAddCaseNote(id!)
+  const blockIp = useBlockIp()
 
   const { data: alertData } = useQuery<Alert>({
     queryKey: ['alert', caseData?.alert_id],
     queryFn: () => api.get(`/api/alerts/${caseData!.alert_id}`).then(r => r.data),
     enabled: !!caseData?.alert_id,
   })
+
+  const targetAgentId = alertData?.agent_id ?? null
+  const { data: agentTasks = [] } = useTasks(targetAgentId ?? undefined)
+  const recentBlocks = agentTasks
+    .filter(t => t.task_type === 'block_ip')
+    .slice(0, 3)
+
+  // Prefill the block-IP field with the linked alert's source IP once it loads
+  useEffect(() => {
+    if (alertData?.source_ip && !blockIpValue) {
+      setBlockIpValue(alertData.source_ip)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alertData?.source_ip])
+
+  const handleBlockIp = () => {
+    if (!targetAgentId || !blockIpValue.trim()) return
+    blockIp.mutate({ agent_id: targetAgentId, ip: blockIpValue.trim(), duration_seconds: blockDuration })
+  }
 
   const { data: timeline } = useQuery({
     queryKey: ['case-timeline', id],
@@ -618,6 +641,94 @@ export default function CaseDetailPage() {
               loading={update.isPending}
               disabled={caseData.status === 'closed'}
             />
+          </Box>
+
+          {/* Remediations */}
+          <Box title="Remediations">
+            {!targetAgentId ? (
+              <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', lineHeight: 1.5 }}>
+                No agent linked to this case — remediation actions need a linked alert with a known host.
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '4px' }}>
+                  TARGET HOST
+                </div>
+                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-primary)', marginBottom: '10px' }}>
+                  {alertData?.hostname ?? targetAgentId.slice(0, 8)}
+                </div>
+
+                <input
+                  value={blockIpValue}
+                  onChange={e => setBlockIpValue(e.target.value)}
+                  placeholder="IP address to block"
+                  style={{
+                    width: '100%',
+                    background: 'var(--bg-panel)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '4px',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'Share Tech Mono, monospace',
+                    fontSize: '12px',
+                    padding: '7px 10px',
+                    marginBottom: '6px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <select
+                  value={blockDuration}
+                  onChange={e => setBlockDuration(Number(e.target.value))}
+                  style={{
+                    width: '100%',
+                    background: 'var(--bg-panel)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '4px',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'Share Tech Mono, monospace',
+                    fontSize: '12px',
+                    padding: '7px 10px',
+                    marginBottom: '8px',
+                    outline: 'none',
+                  }}
+                >
+                  <option value={3600}>1 hour</option>
+                  <option value={86400}>24 hours</option>
+                  <option value={604800}>7 days</option>
+                </select>
+
+                <ActionBtn
+                  label="BLOCK IP ON HOST"
+                  onClick={handleBlockIp}
+                  color="var(--accent-red)"
+                  loading={blockIp.isPending}
+                  disabled={!blockIpValue.trim()}
+                />
+
+                {recentBlocks.length > 0 && (
+                  <div style={{ marginTop: '10px' }}>
+                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+                      RECENT BLOCKS
+                    </div>
+                    {recentBlocks.map(t => (
+                      <div key={t.id} style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '5px 0', borderBottom: '1px solid var(--border)',
+                        fontFamily: 'Share Tech Mono, monospace', fontSize: '11px',
+                      }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>{String((t.params as Record<string, unknown>)?.ip ?? '')}</span>
+                        <span style={{
+                          color: t.status === 'done' ? 'var(--accent-green)' : t.status === 'failed' ? 'var(--accent-red)' : 'var(--accent-yellow)',
+                          textTransform: 'uppercase',
+                        }}>
+                          {t.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </Box>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import { emitToast } from '@/hooks/useToast'
 import type { AgentTask, FleetHunt } from '@/types'
 
 export function useTasks(agentId?: string, status?: string) {
@@ -27,6 +28,23 @@ export function useCreateTask() {
     mutationFn: (data: { agent_id: string; task_type: string; params?: Record<string, unknown> }) =>
       api.post('/api/tasks', data).then(r => r.data as AgentTask),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+  })
+}
+
+export function useBlockIp() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { agent_id: string; ip: string; duration_seconds?: number }) =>
+      api.post('/api/tasks', {
+        agent_id: data.agent_id,
+        task_type: 'block_ip',
+        params: { ip: data.ip, duration_seconds: data.duration_seconds ?? 3600 },
+      }).then(r => r.data as AgentTask),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      emitToast('Block IP task sent to agent', 'success')
+    },
+    onError: () => emitToast('Failed to send block IP task', 'error'),
   })
 }
 
