@@ -5,7 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import timezone
+from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_scoped_group
 from app.models.models import Alert, AlertNote, Case, CaseNote, User
@@ -37,12 +37,26 @@ async def list_cases(
     current_user: Annotated[User, Depends(get_current_user)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
     page: int = 1, page_size: int = 25,
-    status: str | None = None,
+    status: str | None = None, severity: str | None = None,
+    hostname: str | None = None, search: str | None = None,
+    start_time: datetime | None = None, end_time: datetime | None = None,
 ):
     from sqlalchemy import func
     q = _case_q(group_filter)
     if status:
         q = q.where(Case.status == status)
+    if severity:
+        q = q.where(Case.severity == severity)
+    if hostname:
+        q = q.where(Case.alert_id.in_(
+            select(Alert.id).where(Alert.hostname.ilike(f"%{hostname}%"))
+        ))
+    if search:
+        q = q.where(or_(Case.title.ilike(f"%{search}%"), Case.description.ilike(f"%{search}%")))
+    if start_time:
+        q = q.where(Case.created_at >= start_time)
+    if end_time:
+        q = q.where(Case.created_at <= end_time)
     q = q.order_by(Case.created_at.desc())
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))

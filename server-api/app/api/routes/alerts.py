@@ -31,6 +31,8 @@ async def list_alerts(
     page: int = 1, page_size: int = 25,
     status: str | None = None, severity: str | None = None,
     assignee_id: UUID | None = None, source_ip: str | None = None,
+    hostname: str | None = None, search: str | None = None,
+    start_time: datetime | None = None, end_time: datetime | None = None,
 ):
     q = select(Alert).options(selectinload(Alert.notes)).order_by(Alert.created_at.desc())
     if group_filter:
@@ -43,6 +45,14 @@ async def list_alerts(
         q = q.where(Alert.assignee_id == assignee_id)
     if source_ip:
         q = q.where(Alert.source_ip == source_ip)
+    if hostname:
+        q = q.where(Alert.hostname.ilike(f"%{hostname}%"))
+    if search:
+        q = q.where(Alert.title.ilike(f"%{search}%"))
+    if start_time:
+        q = q.where(Alert.created_at >= start_time)
+    if end_time:
+        q = q.where(Alert.created_at <= end_time)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
     items = []

@@ -2,10 +2,22 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { Case, PaginatedResponse } from '@/types'
 
-export function useCases(page = 1, status?: string) {
+export interface CaseFilters {
+  status?: string
+  severity?: string
+  hostname?: string
+  search?: string
+  start_time?: string
+  end_time?: string
+}
+
+export function useCases(page = 1, filters: CaseFilters = {}) {
+  const { status, severity, hostname, search, start_time, end_time } = filters
   return useQuery<PaginatedResponse<Case>>({
-    queryKey: ['cases', page, status],
-    queryFn: () => api.get('/api/cases', { params: { page, page_size: 25, status } }).then(r => r.data),
+    queryKey: ['cases', page, status, severity, hostname, search, start_time, end_time],
+    queryFn: () => api.get('/api/cases', {
+      params: { page, page_size: 25, status, severity, hostname, search, start_time, end_time },
+    }).then(r => r.data),
     refetchInterval: 15_000,
   })
 }

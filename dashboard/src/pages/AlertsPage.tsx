@@ -9,7 +9,8 @@ import { useStartHunt } from '@/hooks/useHunts'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { format } from 'date-fns'
-import { Crosshair, Download, ShieldOff, X } from 'lucide-react'
+import { Crosshair, Download, Search, ShieldOff, X } from 'lucide-react'
+import { TimeRangeSelect, presetToStartTime } from '@/components/TimeRangeSelect'
 import type { Alert } from '@/types'
 
 interface Suppression { id: string; entity_type: string; entity_value: string; reason: string | null; is_active: boolean }
@@ -124,6 +125,10 @@ export default function AlertsPage() {
   const [selected, setSelected] = useState<Alert | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState(() => searchParams.get('severity') ?? '')
+  const [hostnameFilter, setHostnameFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchFilter, setSearchFilter] = useState('')
+  const [timeRange, setTimeRange] = useState('')
 
   // Sync URL params on first mount (e.g. from dashboard severity clicks)
   useEffect(() => {
@@ -131,7 +136,19 @@ export default function AlertsPage() {
     if (sv) setSeverityFilter(sv)
   }, [])
 
-  const { data, isLoading } = useAlerts(page, pageSize, statusFilter || undefined, severityFilter || undefined)
+  // Debounce the free-text search box so we don't refetch on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => { setSearchFilter(searchInput); setPage(1) }, 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  const { data, isLoading } = useAlerts(page, pageSize, {
+    status: statusFilter || undefined,
+    severity: severityFilter || undefined,
+    hostname: hostnameFilter || undefined,
+    search: searchFilter || undefined,
+    start_time: presetToStartTime(timeRange),
+  })
 
   // Deep link from the global search dropdown (?open=<alert_id>) — fetched
   // directly rather than found in the current page's rows, since the
@@ -160,31 +177,42 @@ export default function AlertsPage() {
   return (
     <div>
       <SuppressionPanel />
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold">Alerts</h1>
-        <div className="flex items-center gap-2">
-          <select value={severityFilter} onChange={(e) => { setSeverityFilter(e.target.value); setPage(1) }}
-            className="px-3 py-1.5 rounded border border-border bg-background text-sm">
-            <option value="">All severities</option>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-            <option value="info">Info</option>
-          </select>
-          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
-            className="px-3 py-1.5 rounded border border-border bg-background text-sm">
-            <option value="">All statuses</option>
-            <option value="new">New</option>
-            <option value="in_progress">In Progress</option>
-            <option value="resolved">Resolved</option>
-            <option value="false_positive">False Positive</option>
-          </select>
-          <button onClick={() => downloadFile('/api/export/alerts/csv', 'alerts.csv')}
-            className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
-            <Download size={13} /> CSV
-          </button>
+        <button onClick={() => downloadFile('/api/export/alerts/csv', 'alerts.csv')}
+          className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
+          <Download size={13} /> CSV
+        </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 mb-6">
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
+            placeholder="Search title…"
+            className="pl-8 pr-3 py-1.5 rounded border border-border bg-background text-sm w-48" />
         </div>
+        <input value={hostnameFilter} onChange={e => { setHostnameFilter(e.target.value); setPage(1) }}
+          placeholder="Hostname…"
+          className="px-3 py-1.5 rounded border border-border bg-background text-sm w-36" />
+        <select value={severityFilter} onChange={(e) => { setSeverityFilter(e.target.value); setPage(1) }}
+          className="px-3 py-1.5 rounded border border-border bg-background text-sm">
+          <option value="">All severities</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+          <option value="info">Info</option>
+        </select>
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}
+          className="px-3 py-1.5 rounded border border-border bg-background text-sm">
+          <option value="">All statuses</option>
+          <option value="new">New</option>
+          <option value="in_progress">In Progress</option>
+          <option value="resolved">Resolved</option>
+          <option value="false_positive">False Positive</option>
+        </select>
+        <TimeRangeSelect value={timeRange} onChange={v => { setTimeRange(v); setPage(1) }}
+          className="px-3 py-1.5 rounded border border-border bg-background text-sm" />
       </div>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}

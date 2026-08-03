@@ -1,9 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { useCases, useUpdateCase, useEscalateCase } from '@/hooks/useCases'
 import { useAuthStore } from '@/stores/auth'
+import { TimeRangeSelect, presetToStartTime } from '@/components/TimeRangeSelect'
 import type { Case } from '@/types'
+
+const filterInputStyle: React.CSSProperties = {
+  padding: '6px 10px',
+  borderRadius: '4px',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-card)',
+  color: 'var(--text-primary)',
+  fontFamily: 'Share Tech Mono, monospace',
+  fontSize: '12px',
+  outline: 'none',
+}
 
 const severityColors = {
   critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
@@ -220,7 +232,24 @@ export default function CasesPage() {
   const [activeTab, setActiveTab] = useState('All')
   const [page, setPage] = useState(1)
   const statusFilter = TAB_TO_API[activeTab]
-  const { data, isLoading } = useCases(page, statusFilter)
+  const [severityFilter, setSeverityFilter] = useState('')
+  const [hostnameFilter, setHostnameFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchFilter, setSearchFilter] = useState('')
+  const [timeRange, setTimeRange] = useState('')
+
+  useEffect(() => {
+    const t = setTimeout(() => { setSearchFilter(searchInput); setPage(1) }, 400)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  const { data, isLoading } = useCases(page, {
+    status: statusFilter,
+    severity: severityFilter || undefined,
+    hostname: hostnameFilter || undefined,
+    search: searchFilter || undefined,
+    start_time: presetToStartTime(timeRange),
+  })
 
   const cases: Case[] = data?.items ?? []
   const total = data?.total ?? 0
@@ -298,6 +327,35 @@ export default function CasesPage() {
             </button>
           )
         })}
+      </div>
+
+      {/* Filter bar */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+        <input
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          placeholder="Search title/description…"
+          style={{ ...filterInputStyle, width: '220px' }}
+        />
+        <input
+          value={hostnameFilter}
+          onChange={e => { setHostnameFilter(e.target.value); setPage(1) }}
+          placeholder="Hostname…"
+          style={{ ...filterInputStyle, width: '150px' }}
+        />
+        <select
+          value={severityFilter}
+          onChange={e => { setSeverityFilter(e.target.value); setPage(1) }}
+          style={filterInputStyle}
+        >
+          <option value="">All severities</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+          <option value="info">Info</option>
+        </select>
+        <TimeRangeSelect value={timeRange} onChange={v => { setTimeRange(v); setPage(1) }} style={filterInputStyle} />
       </div>
 
       {/* Cases list */}

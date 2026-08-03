@@ -3,10 +3,22 @@ import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 import type { Alert, PaginatedResponse } from '@/types'
 
-export function useAlerts(page = 1, pageSize = 25, status?: string, severity?: string) {
+export interface AlertFilters {
+  status?: string
+  severity?: string
+  hostname?: string
+  search?: string
+  start_time?: string
+  end_time?: string
+}
+
+export function useAlerts(page = 1, pageSize = 25, filters: AlertFilters = {}) {
+  const { status, severity, hostname, search, start_time, end_time } = filters
   return useQuery<PaginatedResponse<Alert>>({
-    queryKey: ['alerts', page, pageSize, status, severity],
-    queryFn: () => api.get('/api/alerts', { params: { page, page_size: pageSize, status, severity } }).then(r => r.data),
+    queryKey: ['alerts', page, pageSize, status, severity, hostname, search, start_time, end_time],
+    queryFn: () => api.get('/api/alerts', {
+      params: { page, page_size: pageSize, status, severity, hostname, search, start_time, end_time },
+    }).then(r => r.data),
     refetchInterval: 15_000,
   })
 }
