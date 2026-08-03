@@ -8,6 +8,14 @@ from worker.ai_analyst import analyze_and_maybe_create_case
 
 log = structlog.get_logger()
 
+# Gap between dispatching successive alerts to the AI queue. Without this,
+# a burst of alerts (e.g. a scanner flood) gets ensure_future'd back to
+# back with zero spacing — the 3-concurrent semaphore in llm_client.py caps
+# how many run *at once*, but refills a freed slot instantly, so the LLM
+# router gets hammered continuously and burns through provider rate/token
+# limits (and paid-credit balances) in seconds.
+DISPATCH_GAP_SECONDS = 3
+
 async def _analyze_one(data: dict) -> None:
     try:
         await analyze_and_maybe_create_case(
@@ -43,6 +51,7 @@ async def ai_analysis_loop() -> None:
             _, raw = item
             data = json.loads(raw)
             asyncio.ensure_future(_analyze_one(data))
+            await asyncio.sleep(DISPATCH_GAP_SECONDS)
         except asyncio.CancelledError:
             break
         except Exception as e:
