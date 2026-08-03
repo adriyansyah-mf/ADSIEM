@@ -48,6 +48,18 @@ struct {
 	__type(value, char[MAX_FILENAME_LEN]);
 } pid_image_cache SEC(".maps");
 
+// Per-CPU scratch space for staging a MAX_FILENAME_LEN value before a
+// map_update_elem call. A char[MAX_FILENAME_LEN] stack local blows the
+// 512-byte BPF stack limit (clang refuses to even emit it); a map_lookup'd
+// buffer lives outside the stack and its pointer type (map_value) is one
+// the verifier accepts for map_update_elem's value argument.
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, char[MAX_FILENAME_LEN]);
+} scratch_buf SEC(".maps");
+
 // Matches the kernel's tracepoint/syscalls/sys_enter_execve format:
 // args[0] = const char *filename, args[1] = const char *const *argv.
 struct trace_event_raw_sys_enter_execve {
@@ -64,12 +76,22 @@ int handle_execve(struct trace_event_raw_sys_enter_execve *ctx)
 	__u64 pid_tgid = bpf_get_current_pid_tgid();
 	__u32 pid = pid_tgid >> 32;
 
+	// Resolved into stack variables (not the ringbuf record) because the
+	// verifier requires map_lookup_elem's key to be a stack/packet/map
+	// pointer — a pointer into bpf_ringbuf_reserve()'d memory (PTR_TO_MEM)
+	// is rejected: "R2 type=alloc_mem expected=fp, pkt, pkt_meta, map_key,
+	// map_value". Only reproduces on stricter/backported verifiers (e.g.
+	// RHEL9 5.14), not the kernel this was originally built/tested against.
+	task = (struct task_struct *)bpf_get_current_task();
+	__u32 ppid = BPF_CORE_READ(task, real_parent, tgid);
+
 	ev = bpf_ringbuf_reserve(&events, sizeof(*ev), 0);
 	if (!ev)
 		return 0;
 
 	ev->timestamp_ns = bpf_ktime_get_ns();
 	ev->pid = pid;
+	ev->ppid = ppid;
 
 	__u64 uid_gid = bpf_get_current_uid_gid();
 	ev->uid = (__u32)uid_gid;
@@ -77,20 +99,27 @@ int handle_execve(struct trace_event_raw_sys_enter_execve *ctx)
 
 	bpf_get_current_comm(&ev->comm, sizeof(ev->comm));
 
-	task = (struct task_struct *)bpf_get_current_task();
-	ev->ppid = BPF_CORE_READ(task, real_parent, tgid);
-
 	const char *filename_ptr = (const char *)ctx->args[0];
 	if (bpf_probe_read_user_str(&ev->filename, sizeof(ev->filename), filename_ptr) < 0)
 		ev->filename[0] = 0;
 
-	char *cached = bpf_map_lookup_elem(&pid_image_cache, &ev->ppid);
+	char *cached = bpf_map_lookup_elem(&pid_image_cache, &ppid);
 	if (cached)
 		__builtin_memcpy(ev->parent_filename, cached, sizeof(ev->parent_filename));
 	else
 		ev->parent_filename[0] = 0;
 
-	bpf_map_update_elem(&pid_image_cache, &pid, &ev->filename, BPF_ANY);
+	// map_update_elem's value arg has the same restriction as the key arg
+	// above: a pointer into ringbuf-reserved memory (PTR_TO_MEM) is
+	// rejected on this verifier ("R3 type=alloc_mem expected=... map_value").
+	// A stack buffer would fix that but blows the 512-byte BPF stack limit,
+	// so stage the value in the scratch per-CPU map instead.
+	__u32 zero = 0;
+	char *fname_buf = bpf_map_lookup_elem(&scratch_buf, &zero);
+	if (fname_buf) {
+		__builtin_memcpy(fname_buf, ev->filename, MAX_FILENAME_LEN);
+		bpf_map_update_elem(&pid_image_cache, &pid, fname_buf, BPF_ANY);
+	}
 
 	const char *const *argv = (const char *const *)ctx->args[1];
 	__u32 off = 0;
