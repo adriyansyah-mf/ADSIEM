@@ -16,7 +16,7 @@ from app.services.assistant_tools import TOOLS, run_tool
 
 log = structlog.get_logger()
 
-_MAX_TOOL_ROUNDS = 5
+_MAX_TOOL_ROUNDS = 8
 
 _SYSTEM_PROMPT = f"""You are the SOC Assistant embedded in a SIEM platform, helping an analyst by answering questions using live platform data.
 
@@ -83,7 +83,17 @@ async def run_assistant_chat(
     messages.append({"role": "user", "content": user_message[:2000]})
 
     tools_used: list[str] = []
-    for _ in range(_MAX_TOOL_ROUNDS):
+    for i in range(_MAX_TOOL_ROUNDS):
+        if i == _MAX_TOOL_ROUNDS - 1:
+            # Last round — force a wrap-up instead of another tool call so a
+            # busy entity (e.g. an IP with hundreds of alerts) still gets a
+            # real answer instead of the generic "couldn't conclude" bailout.
+            messages.append({"role": "user", "content": (
+                "You're out of tool calls for this turn. Respond now with "
+                '{"action": "final", "message": "..."}, summarizing what '
+                "you've found so far even if the investigation feels incomplete — "
+                "don't call another tool."
+            )})
         raw = await generate_chat(api_key, model, messages, max_tokens=2200)
         if not raw:
             return {"reply": "The AI assistant is unavailable right now — try again in a moment.", "tools_used": tools_used}
