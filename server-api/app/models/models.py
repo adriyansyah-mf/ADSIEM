@@ -470,3 +470,57 @@ class SoarAction(Base):
     order_index = Column(Integer, nullable=False, default=0)
     params      = Column(JSONB, nullable=False, default=dict)
     created_at  = Column(DateTime(timezone=True), default=now_utc)
+
+class SoarWorkflow(Base):
+    __tablename__ = "soar_workflows"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(255), nullable=False)
+    description = Column(Text)
+    is_enabled  = Column(Boolean, nullable=False, default=True)
+    group_id    = Column(String(100), nullable=False, default="default")
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class SoarNode(Base):
+    __tablename__ = "soar_nodes"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("soar_workflows.id", ondelete="CASCADE"), nullable=False)
+    node_type   = Column(String(50), nullable=False)
+    name        = Column(String(255), nullable=False)
+    config      = Column(JSONB, nullable=False, default=dict)
+    pos_x       = Column(Float, nullable=False, default=0)
+    pos_y       = Column(Float, nullable=False, default=0)
+
+class SoarEdge(Base):
+    __tablename__ = "soar_edges"
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id    = Column(UUID(as_uuid=True), ForeignKey("soar_workflows.id", ondelete="CASCADE"), nullable=False)
+    source_node_id = Column(UUID(as_uuid=True), ForeignKey("soar_nodes.id", ondelete="CASCADE"), nullable=False)
+    source_handle  = Column(String(50), nullable=False, default="out")
+    target_node_id = Column(UUID(as_uuid=True), ForeignKey("soar_nodes.id", ondelete="CASCADE"), nullable=False)
+
+class SoarRun(Base):
+    __tablename__ = "soar_runs"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id     = Column(UUID(as_uuid=True), ForeignKey("soar_workflows.id", ondelete="CASCADE"), nullable=False)
+    status          = Column(String(20), nullable=False, default="pending")
+    trigger_type    = Column(String(30), nullable=False)
+    trigger_ref     = Column(JSONB, nullable=False, default=dict)
+    current_node_id = Column(UUID(as_uuid=True), ForeignKey("soar_nodes.id"), nullable=True)
+    variables       = Column(JSONB, nullable=False, default=dict)
+    resume_at       = Column(DateTime(timezone=True), nullable=True)
+    group_id        = Column(String(100), nullable=False, default="default")
+    started_at      = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    finished_at     = Column(DateTime(timezone=True), nullable=True)
+
+class SoarRunStep(Base):
+    __tablename__ = "soar_run_steps"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id      = Column(UUID(as_uuid=True), ForeignKey("soar_runs.id", ondelete="CASCADE"), nullable=False)
+    node_id     = Column(UUID(as_uuid=True), ForeignKey("soar_nodes.id"), nullable=False)
+    status      = Column(String(20), nullable=False)
+    input       = Column(JSONB, nullable=True)
+    output      = Column(JSONB, nullable=True)
+    error       = Column(Text, nullable=True)
+    started_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
