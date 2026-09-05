@@ -48,7 +48,7 @@
 - Depends on Task 1 (ORM models) and Task 2 (tables must exist) — run after both are complete.
 - For every `SoarPlaybook` row (regardless of `is_enabled` — migrate everything, enabled state carries over unchanged onto the new `SoarWorkflow.is_enabled`): create one `SoarWorkflow` (same `name`, `description`, `is_enabled`, `group_id`), one `trigger` node, one `action` node per existing `SoarAction` ordered by `order_index`, and edges chaining them in sequence (`trigger → action[0] → action[1] → ... → action[n-1]`).
 - Script must be idempotent-safe to re-run against the same DB without duplicating rows on a second run (e.g., skip a playbook if a `SoarWorkflow` with the same source name already exists from a prior run — use whatever guard is simplest, but state the guard explicitly in the script's docstring since there's no unique constraint enforcing it).
-- Dry-run the script against the current dev DB (the `soar_platform` Postgres database, container `siem-platform-postgres-1` in this environment) and report actual counts: number of `SoarPlaybook` rows migrated, resulting `SoarWorkflow`/`SoarNode`/`SoarEdge` row counts. Verify per-workflow: node count = 1 + action count, edge count = node count - 1.
+- Dry-run the script against the current dev DB (the `soc_platform` Postgres database, container `siem-platform-postgres-1` in this environment) and report actual counts: number of `SoarPlaybook` rows migrated, resulting `SoarWorkflow`/`SoarNode`/`SoarEdge` row counts. Verify per-workflow: node count = 1 + action count, edge count = node count - 1.
 - Report the dry-run output (row counts, any playbooks skipped/failed and why) in the task report — this is the acceptance evidence for the task, not just "script written."
 
 ---

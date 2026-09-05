@@ -128,7 +128,7 @@ CREATE TABLE soar_run_steps (
 );
 ```
 
-`soar_playbooks`/`soar_actions` are **not dropped**. A one-time migration script (Phase 0, see plan doc) converts every existing enabled playbook into an equivalent trivial graph: one `trigger` node (`alert_match`, config = old `trigger_conditions`) fanning into the old actions re-created as `action` nodes chained in `order_index` order. Old tables are kept read-only for one release as a rollback path, then dropped in a follow-up cleanup task — never referenced by new code after cutover.
+`soar_playbooks`/`soar_actions` are **not dropped**. A one-time migration script (Phase 0, see plan doc) converts every existing playbook — regardless of `is_enabled` — into an equivalent trivial graph: one `trigger` node (`alert_match`, config = old `trigger_conditions`) fanning into the old actions re-created as `action` nodes chained in `order_index` order. `is_enabled` carries over onto the new `SoarWorkflow.is_enabled` unchanged, so disabled playbooks are preserved (not skipped) for later re-enable. Old tables are kept read-only for one release as a rollback path, then dropped in a follow-up cleanup task — never referenced by new code after cutover.
 
 ---
 

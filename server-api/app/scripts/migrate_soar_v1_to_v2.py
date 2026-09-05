@@ -22,13 +22,15 @@ Idempotency guard
 naively would duplicate every workflow on a second pass. The guard used here
 is deliberately simple, per the task brief: before creating a workflow for a
 given `SoarPlaybook`, this script checks whether a `SoarWorkflow` with that
-exact `name` already exists, and skips migrating that playbook if so. This is
-a "same source name already migrated" heuristic, not a strict identity check
-(e.g. it would also skip a *new* v2 workflow a user hand-created that happens
-to reuse a v1 playbook's name) — acceptable for a one-time cutover script
-where this is expected to run at most a handful of times against a stable
-dataset. Do not build a more general upsert/dedup mechanism here; if a
-different guard is ever needed, replace this one, don't layer on top of it.
+exact `name` AND the same `group_id` already exists (matching how
+`soar_playbooks` itself scopes by group), and skips migrating that playbook
+if so. This is a "same source name in this group already migrated"
+heuristic, not a strict identity check (e.g. it would also skip a *new* v2
+workflow a user hand-created that happens to reuse a v1 playbook's name
+within the same group) — acceptable for a one-time cutover script where this
+is expected to run at most a handful of times against a stable dataset. Do
+not build a more general upsert/dedup mechanism here; if a different guard
+is ever needed, replace this one, don't layer on top of it.
 
 Usage (see server-api Docker container, which already has the correct
 DATABASE_URL and dependencies installed):
@@ -61,7 +63,10 @@ async def migrate() -> None:
         for playbook in playbooks:
             existing = (
                 await db.execute(
-                    select(SoarWorkflow).where(SoarWorkflow.name == playbook.name)
+                    select(SoarWorkflow).where(
+                        SoarWorkflow.name == playbook.name,
+                        SoarWorkflow.group_id == playbook.group_id,
+                    )
                 )
             ).scalars().first()
             if existing is not None:
@@ -92,6 +97,8 @@ async def migrate() -> None:
                     "conditions": trigger_conditions.get("conditions", []),
                     "match": trigger_conditions.get("match", "all"),
                 },
+                pos_x=0,
+                pos_y=0,
             )
             db.add(trigger_node)
             await db.flush()  # assign trigger_node.id
@@ -106,15 +113,17 @@ async def migrate() -> None:
                 )
             ).scalars().all()
 
-            for action in actions:
+            for idx, action in enumerate(actions):
                 action_node = SoarNode(
                     workflow_id=workflow.id,
                     node_type="action",
-                    name=action.action_type,
+                    name=f"{action.action_type} #{idx + 1}",
                     config={
                         "action_type": action.action_type,
                         "params": action.params or {},
                     },
+                    pos_x=0,
+                    pos_y=len(node_chain) * 140,
                 )
                 db.add(action_node)
                 await db.flush()  # assign action_node.id

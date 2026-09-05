@@ -382,6 +382,10 @@ async def _migrate_soar_v2_tables() -> None:
             )
         """))
         await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_soar_workflows_enabled_group
+            ON soar_workflows(is_enabled, group_id)
+        """))
+        await conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_soar_nodes_workflow_id
             ON soar_nodes(workflow_id)
         """))

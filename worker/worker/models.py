@@ -280,8 +280,8 @@ class SoarWorkflow(Base):
     description = Column(Text)
     is_enabled  = Column(Boolean, nullable=False, default=True)
     group_id    = Column(String(100), nullable=False, default="default")
-    created_at  = Column(DateTime(timezone=True), default=now_utc)
-    updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
 
 class SoarNode(Base):
     __tablename__ = "soar_nodes"
