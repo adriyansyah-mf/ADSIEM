@@ -12,19 +12,44 @@
 
 ## Phase 0 — Schema + one-time data migration
 
-**Create:**
+**Global constraints for every task in this phase:**
+- Do **not** modify or drop `soar_playbooks`/`soar_actions` — SOAR v1 keeps running unmodified through this phase.
+- This repo has no Alembic/migration framework — table creation goes through hand-written `CREATE TABLE IF NOT EXISTS` SQL via `text()`, following the exact pattern already used by `_migrate_soar_tables()` in `server-api/app/main.py:288`.
+- Exact column definitions for all five new tables are in `docs/superpowers/specs/2026-09-05-soar-v2-workflow-engine-design.md` §4 — copy them verbatim, do not improvise column names or types.
+
+### Task 1: Add SOAR v2 ORM models (both codebases)
+
+**Files:**
 - `worker/worker/models.py` — add `SoarWorkflow`, `SoarNode`, `SoarEdge`, `SoarRun`, `SoarRunStep` ORM models (see spec §4 for exact columns)
 - `server-api/app/models/models.py` — same five models, API side (kept in sync with worker side, matching how `SoarPlaybook`/`SoarAction` are duplicated today)
-- `server-api/app/scripts/migrate_soar_v1_to_v2.py` — one-time script: for every `SoarPlaybook`, create a `SoarWorkflow` + one `trigger` node (`config = {"trigger_type": "alert_match", "conditions": playbook.trigger_conditions.conditions, "match": playbook.trigger_conditions.match}`) + one `action` node per `SoarAction` ordered by `order_index`, chained edges `trigger → action1 → action2 → ...`
 
-**Modify:**
+**Requirements:**
+- Column names, types, nullability, defaults, and foreign keys must match spec §4 exactly (`soar_workflows`, `soar_nodes`, `soar_edges`, `soar_runs`, `soar_run_steps`).
+- Both `models.py` files must define identical columns for all five tables — this mirrors how `SoarPlaybook`/`SoarAction` are already duplicated between the two codebases (`worker/worker/models.py:256-274`).
+- Do not add a migration/table-creation call in this task — that's Task 2.
+- Do not write the data-migration script in this task — that's Task 3.
+
+### Task 2: Add `_migrate_soar_v2_tables()`
+
+**Files:**
 - `server-api/app/main.py` — add `_migrate_soar_v2_tables()` alongside the existing `_migrate_soar_tables()` (pattern at `server-api/app/main.py:288`), call it in the lifespan startup list (`server-api/app/main.py:376`)
 
-**Tasks:**
-- [ ] Add the five new ORM models to both `models.py` files with identical column definitions
-- [ ] Write `_migrate_soar_v2_tables()` — `CREATE TABLE IF NOT EXISTS` for all five tables (follow the existing raw-SQL-via-`text()` pattern used by `_migrate_soar_tables`, not Alembic — this repo has no migration framework)
-- [ ] Write and dry-run `migrate_soar_v1_to_v2.py` against the current dev DB; verify every existing enabled `SoarPlaybook` produces an equivalent `SoarWorkflow` graph (manual check: node count = 1 + action count, edge count = node count - 1)
-- [ ] Do **not** modify or drop `soar_playbooks`/`soar_actions` in this phase
+**Requirements:**
+- `CREATE TABLE IF NOT EXISTS` for all five new tables (`soar_workflows`, `soar_nodes`, `soar_edges`, `soar_runs`, `soar_run_steps`), same raw-SQL-via-`text()` style as `_migrate_soar_tables()`.
+- Register the new function in the same startup call list that already calls `_migrate_soar_tables()` (`server-api/app/main.py:376`), added after it (new tables reference no columns from the old ones, but keeping migration order predictable matters more than it seeming to not matter here).
+- Depends on Task 1's ORM models existing (for column-definition parity) but does not import them — this is raw SQL, matching how `_migrate_soar_tables()` itself doesn't import `SoarPlaybook`.
+
+### Task 3: Write and dry-run the v1→v2 data-migration script
+
+**Files:**
+- `server-api/app/scripts/migrate_soar_v1_to_v2.py` — one-time script: for every `SoarPlaybook`, create a `SoarWorkflow` + one `trigger` node (`config = {"trigger_type": "alert_match", "conditions": playbook.trigger_conditions.conditions, "match": playbook.trigger_conditions.match}`) + one `action` node per `SoarAction` ordered by `order_index`, chained edges `trigger → action1 → action2 → ...`
+
+**Requirements:**
+- Depends on Task 1 (ORM models) and Task 2 (tables must exist) — run after both are complete.
+- For every `SoarPlaybook` row (regardless of `is_enabled` — migrate everything, enabled state carries over unchanged onto the new `SoarWorkflow.is_enabled`): create one `SoarWorkflow` (same `name`, `description`, `is_enabled`, `group_id`), one `trigger` node, one `action` node per existing `SoarAction` ordered by `order_index`, and edges chaining them in sequence (`trigger → action[0] → action[1] → ... → action[n-1]`).
+- Script must be idempotent-safe to re-run against the same DB without duplicating rows on a second run (e.g., skip a playbook if a `SoarWorkflow` with the same source name already exists from a prior run — use whatever guard is simplest, but state the guard explicitly in the script's docstring since there's no unique constraint enforcing it).
+- Dry-run the script against the current dev DB (the `soar_platform` Postgres database, container `siem-platform-postgres-1` in this environment) and report actual counts: number of `SoarPlaybook` rows migrated, resulting `SoarWorkflow`/`SoarNode`/`SoarEdge` row counts. Verify per-workflow: node count = 1 + action count, edge count = node count - 1.
+- Report the dry-run output (row counts, any playbooks skipped/failed and why) in the task report — this is the acceptance evidence for the task, not just "script written."
 
 ---
 
