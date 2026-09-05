@@ -319,6 +319,93 @@ async def _migrate_soar_tables() -> None:
             ON soar_playbooks(is_enabled, group_id)
         """))
 
+async def _migrate_soar_v2_tables() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_workflows (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name            VARCHAR(255) NOT NULL,
+                description     TEXT,
+                is_enabled      BOOLEAN NOT NULL DEFAULT true,
+                group_id        VARCHAR(100) NOT NULL DEFAULT 'default',
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_nodes (
+                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                workflow_id  UUID NOT NULL REFERENCES soar_workflows(id) ON DELETE CASCADE,
+                node_type    VARCHAR(50) NOT NULL,
+                name         VARCHAR(255) NOT NULL,
+                config       JSONB NOT NULL DEFAULT '{}'::jsonb,
+                pos_x        DOUBLE PRECISION NOT NULL DEFAULT 0,
+                pos_y        DOUBLE PRECISION NOT NULL DEFAULT 0
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_edges (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                workflow_id    UUID NOT NULL REFERENCES soar_workflows(id) ON DELETE CASCADE,
+                source_node_id UUID NOT NULL REFERENCES soar_nodes(id) ON DELETE CASCADE,
+                source_handle  VARCHAR(50) NOT NULL DEFAULT 'out',
+                target_node_id UUID NOT NULL REFERENCES soar_nodes(id) ON DELETE CASCADE
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_runs (
+                id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                workflow_id    UUID NOT NULL REFERENCES soar_workflows(id) ON DELETE CASCADE,
+                status         VARCHAR(20) NOT NULL DEFAULT 'pending',
+                trigger_type   VARCHAR(30) NOT NULL,
+                trigger_ref    JSONB NOT NULL DEFAULT '{}'::jsonb,
+                current_node_id UUID REFERENCES soar_nodes(id),
+                variables      JSONB NOT NULL DEFAULT '{}'::jsonb,
+                resume_at      TIMESTAMPTZ,
+                group_id       VARCHAR(100) NOT NULL DEFAULT 'default',
+                started_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                finished_at    TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_run_steps (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                run_id      UUID NOT NULL REFERENCES soar_runs(id) ON DELETE CASCADE,
+                node_id     UUID NOT NULL REFERENCES soar_nodes(id),
+                status      VARCHAR(20) NOT NULL,
+                input       JSONB,
+                output      JSONB,
+                error       TEXT,
+                started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                finished_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_soar_nodes_workflow_id
+            ON soar_nodes(workflow_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_soar_edges_workflow_id
+            ON soar_edges(workflow_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_soar_edges_source_node_id
+            ON soar_edges(source_node_id)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_soar_runs_workflow_status
+            ON soar_runs(workflow_id, status)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_soar_runs_status_resume
+            ON soar_runs(status, resume_at)
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_soar_run_steps_run_id
+            ON soar_run_steps(run_id)
+        """))
+
 async def _migrate_webhook_payload_format() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -374,6 +461,7 @@ async def lifespan(app: FastAPI):
         await _migrate_ueba_columns()
         await _migrate_alerts_columns()
         await _migrate_soar_tables()
+        await _migrate_soar_v2_tables()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
     finally:
