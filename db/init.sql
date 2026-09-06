@@ -273,6 +273,7 @@ INSERT INTO permissions (name) VALUES
     ('logs:read'),
     ('alerts:read'),
     ('alerts:update'),
+    ('alerts:manage'),
     ('cases:manage'),
     ('cases:view');
 
