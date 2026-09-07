@@ -110,6 +110,15 @@ async def _check_disk_capacity(db: AsyncSession, agent_id: str) -> CheckResult:
                                            f"(of {len(snap.disk_partitions)} partition(s))."}
 
 
+async def _check_capacity_monitoring(db: AsyncSession, agent_id: str) -> CheckResult:
+    snap = await _latest_snapshot(db, agent_id)
+    if not snap or not snap.mem_total_mb:
+        return {"status": "not_automated", "evidence": "No memory usage data collected yet from this host."}
+    pct = round((snap.mem_used_mb or 0) / snap.mem_total_mb * 100, 1)
+    status = "met" if pct < 85 else ("partial" if pct < 95 else "gap")
+    return {"status": status, "evidence": f"Memory usage {snap.mem_used_mb}/{snap.mem_total_mb} MB ({pct}%)."}
+
+
 async def _check_agent_monitoring_health(db: AsyncSession, agent_id: str) -> CheckResult:
     agent = await db.get(Agent, agent_id)
     if not agent:
@@ -176,15 +185,38 @@ async def _check_kernel_hardening(db: AsyncSession, agent_id: str) -> CheckResul
     return {"status": "not_automated", "evidence": "This host's agent hasn't reported kernel hardening checks yet (requires an agent update)."}
 
 
+async def _check_logging_hardening(db: AsyncSession, agent_id: str) -> CheckResult:
+    snap = await _latest_snapshot(db, agent_id)
+    if not snap:
+        return {"status": "not_automated", "evidence": "No logging hardening data collected yet from this host."}
+    aggregated = _aggregate_hardening_category(snap, "logging")
+    if aggregated is not None:
+        return aggregated
+    return {"status": "not_automated", "evidence": "This host's agent hasn't reported logging hardening checks yet (requires an agent update)."}
+
+
+async def _check_update_management(db: AsyncSession, agent_id: str) -> CheckResult:
+    snap = await _latest_snapshot(db, agent_id)
+    if not snap:
+        return {"status": "not_automated", "evidence": "No update-management data collected yet from this host."}
+    aggregated = _aggregate_hardening_category(snap, "updates")
+    if aggregated is not None:
+        return aggregated
+    return {"status": "not_automated", "evidence": "This host's agent hasn't reported update-management checks yet (requires an agent update)."}
+
+
 CHECKS: dict[str, Callable[[AsyncSession, str], Awaitable[CheckResult]]] = {
     "hygiene_posture": _check_hygiene_posture,
     "open_ports_hardening": _check_open_ports_hardening,
     "disk_capacity": _check_disk_capacity,
+    "capacity_monitoring": _check_capacity_monitoring,
     "agent_monitoring_health": _check_agent_monitoring_health,
     "file_integrity_monitoring": _check_file_integrity_monitoring,
     "local_account_hygiene": _check_local_account_hygiene,
     "ssh_hardening": _check_ssh_hardening,
     "kernel_hardening": _check_kernel_hardening,
+    "logging_hardening": _check_logging_hardening,
+    "update_management": _check_update_management,
 }
 
 FRAMEWORKS: dict[str, dict] = {
@@ -199,6 +231,9 @@ FRAMEWORKS: dict[str, dict] = {
             {"id": "A.9.2.5", "title": "Review of local user access rights", "check": "local_account_hygiene"},
             {"id": "A.8.20", "title": "SSH remote access hardening", "check": "ssh_hardening"},
             {"id": "A.8.9", "title": "Configuration hardening (kernel/filesystem)", "check": "kernel_hardening"},
+            {"id": "A.8.15", "title": "Event logging (auditd, time synchronization)", "check": "logging_hardening"},
+            {"id": "A.8.8", "title": "Management of technical vulnerabilities (patch automation)", "check": "update_management"},
+            {"id": "A.8.6", "title": "Capacity management (memory)", "check": "capacity_monitoring"},
         ],
     },
     "pci_dss": {
@@ -212,6 +247,9 @@ FRAMEWORKS: dict[str, dict] = {
             {"id": "Req 7.2", "title": "Unique accounts, no shared/root-equivalent access", "check": "local_account_hygiene"},
             {"id": "Req 2.2.7", "title": "Secure remote administrative access (SSH hardening)", "check": "ssh_hardening"},
             {"id": "Req 2.2", "title": "System configuration hardening", "check": "kernel_hardening"},
+            {"id": "Req 10.6", "title": "Time-synchronization mechanisms and audit logging active", "check": "logging_hardening"},
+            {"id": "Req 6.3.3", "title": "Security patches installed/automated within defined timelines", "check": "update_management"},
+            {"id": "Req 10.5.2", "title": "System resource capacity is monitored", "check": "capacity_monitoring"},
         ],
     },
     "soc2": {
@@ -225,6 +263,9 @@ FRAMEWORKS: dict[str, dict] = {
             {"id": "CC6.2", "title": "Periodic review of provisioned local accounts", "check": "local_account_hygiene"},
             {"id": "CC6.1b", "title": "Secure remote access configuration", "check": "ssh_hardening"},
             {"id": "CC6.8", "title": "Prevents/detects unauthorized software and configuration changes", "check": "kernel_hardening"},
+            {"id": "CC7.2c", "title": "Logging and time synchronization support anomaly detection", "check": "logging_hardening"},
+            {"id": "CC3.4", "title": "Identified deficiencies (missing patches) are remediated", "check": "update_management"},
+            {"id": "A1.2", "title": "Environmental/resource capacity is monitored", "check": "capacity_monitoring"},
         ],
     },
 }

@@ -4,6 +4,7 @@ const (
 	loginDefsPath   = "/etc/login.defs"
 	shadowPath      = "/etc/shadow"
 	passwdPath      = "/etc/passwd"
+	sudoersPath     = "/etc/sudoers"
 	sshdConfigPath  = "/etc/ssh/sshd_config"
 	ipForwardPath   = "/proc/sys/net/ipv4/ip_forward"
 	aslrPath        = "/proc/sys/kernel/randomize_va_space"
@@ -38,6 +39,11 @@ func Collect(openPorts []PortInfo) *Report {
 		checkKernelPtraceScope(ptraceScopePath),
 		checkKernelCoreDumpRestricted(suidDumpPath),
 		checkTmpNoExec(mountsPath),
+		checkSensitiveFilePermissions(shadowPath, passwdPath, sudoersPath),
+		checkSudoLogging(sudoersPath),
+		checkAuditdActive(),
+		checkTimeSyncActive(),
+		checkAutoSecurityUpdates(),
 	)
 	return r
 }

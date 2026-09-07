@@ -140,3 +140,56 @@ func checkNoDuplicateRootUID(path string) Check {
 	}
 	return Check{ID: id, Category: category, Title: title, Status: StatusPass, Detail: "only root has UID 0"}
 }
+
+func checkSensitiveFilePermissions(shadowPath, passwdPath, sudoersPath string) Check {
+	const id = "acct-sensitive-file-perms"
+	const category = "account"
+	const title = "Sensitive account files have restrictive permissions"
+
+	type target struct {
+		path    string
+		maxPerm os.FileMode
+		label   string
+	}
+	targets := []target{
+		{shadowPath, 0640, "/etc/shadow"},
+		{passwdPath, 0644, "/etc/passwd"},
+		{sudoersPath, 0440, "/etc/sudoers"},
+	}
+
+	checked := 0
+	var tooOpen []string
+	for _, t := range targets {
+		info, err := os.Stat(t.path)
+		if err != nil {
+			continue // file doesn't exist on this host — skip, don't guess
+		}
+		checked++
+		if info.Mode().Perm()&^t.maxPerm != 0 {
+			tooOpen = append(tooOpen, t.label+" ("+info.Mode().Perm().String()+")")
+		}
+	}
+	if checked == 0 {
+		return Check{ID: id, Category: category, Title: title, Status: StatusNotApplicable, Detail: "none of /etc/shadow, /etc/passwd, /etc/sudoers exist on this host"}
+	}
+	if len(tooOpen) > 0 {
+		return Check{ID: id, Category: category, Title: title, Status: StatusFail, Detail: "overly permissive: " + strings.Join(tooOpen, ", ")}
+	}
+	return Check{ID: id, Category: category, Title: title, Status: StatusPass, Detail: strconv.Itoa(checked) + " sensitive file(s) checked, all within expected permissions"}
+}
+
+func checkSudoLogging(path string) Check {
+	const id = "acct-sudo-logging"
+	const category = "account"
+	const title = "Sudo commands are logged (use_pty and/or logfile configured)"
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Check{ID: id, Category: category, Title: title, Status: StatusNotApplicable, Detail: "no /etc/sudoers on this host (sudo not installed?)"}
+	}
+	content := string(data)
+	if strings.Contains(content, "use_pty") || strings.Contains(content, "logfile") {
+		return Check{ID: id, Category: category, Title: title, Status: StatusPass, Detail: "sudoers sets use_pty and/or logfile"}
+	}
+	return Check{ID: id, Category: category, Title: title, Status: StatusFail, Detail: "sudoers has neither use_pty nor logfile configured"}
+}

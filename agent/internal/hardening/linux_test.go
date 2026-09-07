@@ -2,10 +2,10 @@ package hardening
 
 import "testing"
 
-func TestCollect_ReturnsAllSixteenChecks(t *testing.T) {
+func TestCollect_ReturnsAllTwentyOneChecks(t *testing.T) {
 	r := Collect(nil)
-	if len(r.Checks) != 16 {
-		t.Fatalf("expected 16 checks, got %d", len(r.Checks))
+	if len(r.Checks) != 21 {
+		t.Fatalf("expected 21 checks, got %d", len(r.Checks))
 	}
 	seen := make(map[string]bool)
 	for _, c := range r.Checks {

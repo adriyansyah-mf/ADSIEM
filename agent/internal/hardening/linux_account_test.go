@@ -93,3 +93,49 @@ func TestCheckNoDuplicateRootUID(t *testing.T) {
 		t.Fatalf("expected fail, got %s (%s)", c.Status, c.Detail)
 	}
 }
+
+func writeTempMode(t *testing.T, name, content string, mode os.FileMode) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+		t.Fatalf("writeTempMode: %v", err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	return path
+}
+
+func TestCheckSensitiveFilePermissions(t *testing.T) {
+	shadow := writeTempMode(t, "shadow", "root:x:::::::\n", 0640)
+	passwd := writeTempMode(t, "passwd", "root:x:0:0::/root:/bin/bash\n", 0644)
+	sudoers := writeTempMode(t, "sudoers", "root ALL=(ALL) ALL\n", 0440)
+	if c := checkSensitiveFilePermissions(shadow, passwd, sudoers); c.Status != StatusPass {
+		t.Fatalf("expected pass, got %s (%s)", c.Status, c.Detail)
+	}
+
+	openShadow := writeTempMode(t, "shadow", "root:x:::::::\n", 0644)
+	if c := checkSensitiveFilePermissions(openShadow, passwd, sudoers); c.Status != StatusFail {
+		t.Fatalf("expected fail for world-readable shadow, got %s (%s)", c.Status, c.Detail)
+	}
+
+	if c := checkSensitiveFilePermissions("/nonexistent/shadow", "/nonexistent/passwd", "/nonexistent/sudoers"); c.Status != StatusNotApplicable {
+		t.Fatalf("expected not_applicable when none exist, got %s", c.Status)
+	}
+}
+
+func TestCheckSudoLogging(t *testing.T) {
+	good := writeTemp(t, "sudoers", "Defaults use_pty\nroot ALL=(ALL) ALL\n")
+	if c := checkSudoLogging(good); c.Status != StatusPass {
+		t.Fatalf("expected pass, got %s (%s)", c.Status, c.Detail)
+	}
+
+	bad := writeTemp(t, "sudoers", "root ALL=(ALL) ALL\n")
+	if c := checkSudoLogging(bad); c.Status != StatusFail {
+		t.Fatalf("expected fail, got %s (%s)", c.Status, c.Detail)
+	}
+
+	if c := checkSudoLogging("/nonexistent/sudoers"); c.Status != StatusNotApplicable {
+		t.Fatalf("expected not_applicable, got %s", c.Status)
+	}
+}
