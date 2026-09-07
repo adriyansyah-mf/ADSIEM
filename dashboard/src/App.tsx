@@ -12,6 +12,7 @@ import LogSourcesPage from '@/pages/LogSourcesPage'
 import LogsPage from '@/pages/LogsPage'
 import EventsPage from '@/pages/EventsPage'
 import AlertsPage from '@/pages/AlertsPage'
+import AlertInvestigationPage from '@/pages/AlertInvestigationPage'
 import RulesPage from '@/pages/RulesPage'
 import DecodersPage from '@/pages/DecodersPage'
 import UsersPage from '@/pages/UsersPage'
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
+            <Route path="/alerts/:id" element={<AlertInvestigationPage />} />
             <Route path="/cases" element={<CasesPage />} />
             <Route path="/cases/:id" element={<CaseDetailPage />} />
             <Route path="/assistant" element={<AssistantPage />} />

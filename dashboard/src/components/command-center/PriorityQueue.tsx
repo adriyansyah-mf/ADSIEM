@@ -87,7 +87,7 @@ export function PriorityQueue({ alerts, workload }: { alerts: Alert[]; workload:
                   </td>
                   <td style={{ padding: '7px 10px', whiteSpace: 'nowrap' }}>
                     <button
-                      onClick={() => navigate(`/alerts?open=${a.id}`)}
+                      onClick={() => navigate(`/alerts/${a.id}`)}
                       style={{
                         fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 4,
                         border: '1px solid var(--accent-blue)', background: 'rgba(44,110,142,0.1)', color: 'var(--accent-blue)', cursor: 'pointer',

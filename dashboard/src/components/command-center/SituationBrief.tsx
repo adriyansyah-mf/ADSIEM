@@ -66,7 +66,7 @@ export function SituationBrief() {
               {data.cited_alert_ids.map(id => (
                 <button
                   key={id}
-                  onClick={() => navigate(`/alerts?open=${id}`)}
+                  onClick={() => navigate(`/alerts/${id}`)}
                   style={{
                     fontFamily: 'var(--font-mono)', fontSize: 10, padding: '2px 7px', borderRadius: 3,
                     border: '1px solid var(--border)', background: 'var(--bg-base)', color: 'var(--accent-blue)', cursor: 'pointer',

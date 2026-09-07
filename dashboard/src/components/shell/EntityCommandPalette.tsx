@@ -126,7 +126,7 @@ export function EntityCommandPalette() {
                 </button>
               ))}
               {results?.alerts.map(a => (
-                <button key={a.id} onClick={() => go(`/alerts?open=${a.id}`)} style={resultRowStyle}>
+                <button key={a.id} onClick={() => go(`/alerts/${a.id}`)} style={resultRowStyle}>
                   <span style={{ ...badgeStyle, background: 'rgba(216,57,63,0.15)', color: 'var(--accent-red)' }}>{a.severity}</span>
                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.title}</span>
                   <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>alert</span>

@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import DataTable from '@/components/DataTable'
 import SeverityBadge from '@/components/SeverityBadge'
 import StatusBadge from '@/components/StatusBadge'
-import AlertDetailModal from '@/components/AlertDetailModal'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useAlerts } from '@/hooks/useAlerts'
 import { useStartHunt } from '@/hooks/useHunts'
@@ -121,10 +120,10 @@ function HuntButton({ alert }: { alert: Alert }) {
 }
 
 export default function AlertsPage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
-  const [selected, setSelected] = useState<Alert | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState(() => searchParams.get('severity') ?? '')
   const [hostnameFilter, setHostnameFilter] = useState('')
@@ -161,18 +160,12 @@ export default function AlertsPage() {
     queryFn: () => api.get('/api/users', { params: { page_size: 100 } }).then(r => r.data),
   })
 
-  // Deep link from the global search dropdown (?open=<alert_id>) — fetched
-  // directly rather than found in the current page's rows, since the
-  // matching alert may not be on whatever page/filter is currently shown.
+  // Legacy deep link (?open=<alert_id>) from before alerts had their own
+  // investigation route — redirect straight to it so old links keep working.
   const openId = searchParams.get('open')
-  const { data: deepLinkedAlert } = useQuery<Alert>({
-    queryKey: ['alert', openId],
-    queryFn: () => api.get(`/api/alerts/${openId}`).then(r => r.data),
-    enabled: !!openId,
-  })
   useEffect(() => {
-    if (deepLinkedAlert) setSelected(deepLinkedAlert)
-  }, [deepLinkedAlert])
+    if (openId) navigate(`/alerts/${openId}`, { replace: true })
+  }, [openId, navigate])
 
   const columns = [
     { key: 'severity', header: 'Severity', render: (r: Alert) => <SeverityBadge severity={r.severity} /> },
@@ -222,8 +215,10 @@ export default function AlertsPage() {
           className="px-3 py-1.5 rounded border border-border bg-background text-sm">
           <option value="">All statuses</option>
           <option value="new">New</option>
+          <option value="acknowledged">Acknowledged</option>
           <option value="in_progress">In Progress</option>
           <option value="resolved">Resolved</option>
+          <option value="closed">Closed</option>
           <option value="false_positive">False Positive</option>
         </select>
         <select value={assigneeFilter} onChange={(e) => { setAssigneeFilter(e.target.value); setPage(1) }}
@@ -243,9 +238,8 @@ export default function AlertsPage() {
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
           page={page} pageSize={pageSize} onPageChange={setPage}
           onPageSizeChange={(s) => { setPageSize(s); setPage(1) }}
-          onRowClick={setSelected} />
+          onRowClick={(r: Alert) => navigate(`/alerts/${r.id}`)} />
       )}
-      {selected && <AlertDetailModal alert={selected} onClose={() => setSelected(null)} />}
     </div>
   )
 }
