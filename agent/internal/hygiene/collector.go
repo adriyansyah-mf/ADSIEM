@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/siem-platform/agent/internal/hardening"
 )
 
 func Collect(agentID, hostname string) (*Report, error) {
@@ -26,9 +28,25 @@ func Collect(agentID, hostname string) (*Report, error) {
 	collectPorts(r)
 	collectUsers(r)
 	collectPackages(r)
+	collectHardening(r)
 	score(r)
 
 	return r, nil
+}
+
+// collectHardening never lets a panic in the hardening collector take down
+// the rest of the hygiene report — HardeningChecks just stays nil and the
+// report still sends.
+func collectHardening(r *Report) {
+	defer func() {
+		recover()
+	}()
+	ports := make([]hardening.PortInfo, len(r.OpenPorts))
+	for i, p := range r.OpenPorts {
+		ports[i] = hardening.PortInfo{Port: p.Port, Proto: p.Proto, State: p.State}
+	}
+	hr := hardening.Collect(ports)
+	r.HardeningChecks = hr.Checks
 }
 
 func collectOS(r *Report) {
