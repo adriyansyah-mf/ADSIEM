@@ -4,15 +4,17 @@ settings, users, and webhooks — those modules are never imported or queried
 here, so there is no code path for the assistant to reach them even if a
 prompt tried to talk it into it."""
 from __future__ import annotations
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.mitre_tactics import TACTIC_ORDER, parse_technique, tactic_for_code
 from app.models.models import (
-    Agent, Alert, AlertNote, Case, CaseNote, FimEvent, HygieneSnapshot,
-    Rule, ThreatHunt, UebaEntityScore, YaraRule,
+    Agent, Alert, AlertNote, AuditLog, Case, CaseNote, FimEvent, HygieneSnapshot,
+    IocLink, IocObservation, Rule, ThreatHunt, UebaAnomaly, UebaEntityScore, YaraRule,
 )
 
 TOOLS: list[dict] = [
@@ -79,6 +81,26 @@ TOOLS: list[dict] = [
         "name": "dashboard_stats",
         "description": "Overall counts: alerts by severity/status, open cases, online agents. Good first call for broad questions.",
         "parameters": {},
+    },
+    {
+        "name": "entity_pivot",
+        "description": "Everything known about one IP, hostname, or UEBA-tracked entity: its alerts, cases, UEBA risk score, and behavioral anomalies.",
+        "parameters": {"entity_type": "ip|hostname|user|... required", "entity_value": "the IP/hostname/username itself, required"},
+    },
+    {
+        "name": "ioc_lookup",
+        "description": "Threat-intel pivot for one indicator (IP, domain, hash, or URL): every observation (source, confidence, verdict) and what it's been linked to.",
+        "parameters": {"indicator": "the IP/domain/hash/URL to look up, required"},
+    },
+    {
+        "name": "mitre_technique_coverage",
+        "description": "Which MITRE ATT&CK techniques have actually fired, ranked by frequency, over a recent period. Good for 'what techniques are we seeing' questions.",
+        "parameters": {"days": "lookback window, default 30, max 365", "limit": "max techniques returned, default 10, max 25"},
+    },
+    {
+        "name": "recent_audit_log",
+        "description": "Recent platform audit trail — who did what (logins, settings changes, rule edits, etc.) and when. No access to the raw event detail payload.",
+        "parameters": {"action": "filter by action name, e.g. login_success (optional)", "limit": "default 15, max 30"},
     },
 ]
 
@@ -272,5 +294,111 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
             "open_cases": open_cases,
             "online_agents": online_agents,
         }
+
+    if name == "entity_pivot":
+        entity_type = args.get("entity_type")
+        entity_value = args.get("entity_value")
+        if not entity_type or not entity_value:
+            return {"error": "entity_type and entity_value are required"}
+
+        alert_match_columns = {"ip": Alert.source_ip, "hostname": Alert.hostname}
+        alerts: list[Alert] = []
+        match_column = alert_match_columns.get(entity_type)
+        if match_column is not None:
+            q = select(Alert).where(match_column == entity_value)
+            if group_filter:
+                q = q.where(Alert.group_id == group_filter)
+            alerts = (await db.execute(q.order_by(Alert.created_at.desc()).limit(20))).scalars().all()
+
+        cases: list[Case] = []
+        if alerts:
+            q = select(Case).where(Case.alert_id.in_([a.id for a in alerts]))
+            if group_filter:
+                q = q.where(Case.group_id == group_filter)
+            cases = (await db.execute(q)).scalars().all()
+
+        score_q = select(UebaEntityScore).where(
+            UebaEntityScore.entity_type == entity_type, UebaEntityScore.entity_value == entity_value)
+        if group_filter:
+            score_q = score_q.where(UebaEntityScore.group_id == group_filter)
+        score = (await db.execute(score_q)).scalar_one_or_none()
+
+        anomaly_q = select(UebaAnomaly).where(
+            UebaAnomaly.entity_type == entity_type, UebaAnomaly.entity_value == entity_value)
+        if group_filter:
+            anomaly_q = anomaly_q.where(UebaAnomaly.group_id == group_filter)
+        anomalies = (await db.execute(
+            anomaly_q.order_by(UebaAnomaly.detected_at.desc()).limit(10)
+        )).scalars().all()
+
+        if not alerts and not cases and score is None and not anomalies:
+            return {"error": "no data found for that entity"}
+        return {
+            "entity_type": entity_type, "entity_value": entity_value,
+            "risk_score": score.risk_score if score else None,
+            "anomaly_count": score.anomaly_count if score else 0,
+            "alerts": [{"id": str(a.id), "title": a.title, "severity": a.severity, "status": a.status,
+                        "created_at": a.created_at.isoformat()} for a in alerts],
+            "cases": [{"id": str(c.id), "title": c.title, "status": c.status} for c in cases],
+            "anomalies": [{"anomaly_score": a.anomaly_score, "ai_narrative": (a.ai_narrative or "")[:500],
+                           "detected_at": a.detected_at.isoformat() if a.detected_at else None} for a in anomalies],
+        }
+
+    if name == "ioc_lookup":
+        indicator = args.get("indicator")
+        if not indicator:
+            return {"error": "indicator is required"}
+        q = select(IocObservation).where(IocObservation.indicator == indicator)
+        if group_filter:
+            q = q.where(IocObservation.group_id == group_filter)
+        observations = (await db.execute(q)).scalars().all()
+        if not observations:
+            return {"error": "no observations found for that indicator"}
+        link_q = select(IocLink).where(IocLink.ioc_id.in_([o.id for o in observations]))
+        if group_filter:
+            link_q = link_q.where(IocLink.group_id == group_filter)
+        links = (await db.execute(link_q)).scalars().all()
+        return {
+            "indicator": indicator,
+            "observations": [
+                {"ioc_type": o.ioc_type, "confidence": o.confidence, "verdict": o.verdict, "source": o.source,
+                 "first_seen": o.first_seen.isoformat() if o.first_seen else None,
+                 "last_seen": o.last_seen.isoformat() if o.last_seen else None}
+                for o in observations
+            ],
+            "linked_to": [{"entity_type": l.entity_type, "entity_id": l.entity_id} for l in links],
+        }
+
+    if name == "mitre_technique_coverage":
+        since = datetime.now(timezone.utc) - timedelta(days=clamp(args.get("days"), 30, 365))
+        q = select(Alert.mitre_techniques).where(Alert.created_at >= since, Alert.mitre_techniques != [])
+        if group_filter:
+            q = q.where(Alert.group_id == group_filter)
+        rows = (await db.execute(q)).scalars().all()
+        counts: dict[str, dict] = {}
+        for techniques in rows:
+            for entry in techniques or []:
+                code, tname = parse_technique(entry)
+                tactic = tactic_for_code(code)
+                if tactic == "Unknown":
+                    continue
+                slot = counts.setdefault(code, {"technique_id": code, "technique_name": tname, "tactic": tactic, "count": 0})
+                slot["count"] += 1
+        top = sorted(counts.values(), key=lambda e: e["count"], reverse=True)[:clamp(args.get("limit"), 10, limit_cap)]
+        return {"period_days": clamp(args.get("days"), 30, 365), "top_techniques": top}
+
+    if name == "recent_audit_log":
+        q = select(AuditLog)
+        if group_filter:
+            q = q.where(AuditLog.group_id == group_filter)
+        if args.get("action"):
+            q = q.where(AuditLog.action == args["action"])
+        q = q.order_by(AuditLog.created_at.desc()).limit(clamp(args.get("limit"), 15, 30))
+        rows = (await db.execute(q)).scalars().all()
+        return {"audit_entries": [
+            {"action": e.action, "actor_type": e.actor_type, "resource_type": e.resource_type,
+             "resource_id": e.resource_id, "created_at": e.created_at.isoformat() if e.created_at else None}
+            for e in rows
+        ]}
 
     return {"error": f"unknown tool: {name}"}
