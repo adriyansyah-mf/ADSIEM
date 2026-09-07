@@ -1,21 +1,26 @@
 # server-api/app/schemas/schemas.py
 from __future__ import annotations
+
 from datetime import date, datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from pydantic import BaseModel, EmailStr, field_validator
 
 # ─── Auth ────────────────────────────────────────────────────────
+
 
 class LoginRequest(BaseModel):
     username: str
     password: str
-    mfa_code: Optional[str] = None
+    mfa_code: str | None = None
+
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
-    mfa_required: Optional[bool] = None
+    mfa_required: bool | None = None
+
 
 class UserMe(BaseModel):
     id: UUID
@@ -26,7 +31,9 @@ class UserMe(BaseModel):
     mfa_enabled: bool = False
     model_config = {"from_attributes": True}
 
+
 # ─── Users ───────────────────────────────────────────────────────
+
 
 class UserCreate(BaseModel):
     username: str
@@ -35,6 +42,7 @@ class UserCreate(BaseModel):
     role_id: int
     group_id: str = "default"
 
+
 class UserUpdate(BaseModel):
     username: str | None = None
     email: EmailStr | None = None
@@ -42,6 +50,7 @@ class UserUpdate(BaseModel):
     role_id: int | None = None
     group_id: str | None = None
     is_active: bool | None = None
+
 
 class UserOut(BaseModel):
     id: UUID
@@ -58,12 +67,15 @@ class UserOut(BaseModel):
     def extract_role_name(cls, v: object) -> str:
         return v.name if hasattr(v, "name") else str(v)
 
+
 # ─── Agents ──────────────────────────────────────────────────────
+
 
 class LogSourceIn(BaseModel):
     path: str
     log_type: str
     is_enabled: bool = True
+
 
 class EnrollRequest(BaseModel):
     enrollment_token: str = ""
@@ -73,13 +85,16 @@ class EnrollRequest(BaseModel):
     name: str
     log_sources: list[LogSourceIn] = []
 
+
 class EnrollResponse(BaseModel):
     agent_id: UUID
     agent_token: str
 
+
 class AgentUpdate(BaseModel):
     name: str | None = None
     group_id: str | None = None
+
 
 class LogSourceOut(BaseModel):
     id: UUID
@@ -87,6 +102,7 @@ class LogSourceOut(BaseModel):
     log_type: str
     is_enabled: bool
     model_config = {"from_attributes": True}
+
 
 class AgentOut(BaseModel):
     id: UUID
@@ -101,16 +117,19 @@ class AgentOut(BaseModel):
     log_sources: list[LogSourceOut] = []
     model_config = {"from_attributes": True}
 
+
 class HeartbeatRequest(BaseModel):
     agent_id: UUID
     status: str = "online"
     version: str | None = None
     buffer_dropped: int = 0
 
+
 class AgentTaskDef(BaseModel):
     id: UUID
     task_type: str
     params: dict = {}
+
 
 class HeartbeatResponse(BaseModel):
     config_hash: str
@@ -118,7 +137,9 @@ class HeartbeatResponse(BaseModel):
     fim_paths: list[str] = []
     tasks: list[AgentTaskDef] = []
 
+
 # ─── Ingest ──────────────────────────────────────────────────────
+
 
 class LogIngestRequest(BaseModel):
     agent_id: UUID
@@ -134,7 +155,9 @@ class LogIngestRequest(BaseModel):
             raise ValueError("must not be empty")
         return v
 
+
 # ─── Logs & Events ───────────────────────────────────────────────
+
 
 class RawLogOut(BaseModel):
     id: UUID
@@ -143,6 +166,7 @@ class RawLogOut(BaseModel):
     raw_message: str
     received_at: datetime
     model_config = {"from_attributes": True}
+
 
 class EventOut(BaseModel):
     id: UUID
@@ -156,7 +180,9 @@ class EventOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 # ─── Rules ───────────────────────────────────────────────────────
+
 
 class RuleCreate(BaseModel):
     title: str
@@ -168,6 +194,7 @@ class RuleCreate(BaseModel):
     is_enabled: bool = True
     group_id: str | None = None
 
+
 class RuleUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
@@ -177,6 +204,7 @@ class RuleUpdate(BaseModel):
     mitre_tags: list[str] | None = None
     is_enabled: bool | None = None
     group_id: str | None = None
+
 
 class RuleOut(BaseModel):
     id: UUID
@@ -193,16 +221,20 @@ class RuleOut(BaseModel):
     updated_at: datetime
     model_config = {"from_attributes": True}
 
+
 class RuleTestRequest(BaseModel):
     content: str
     sample_event: dict[str, Any]
+
 
 class RuleTestResponse(BaseModel):
     matched: bool
     rule_title: str | None = None
     error: str | None = None
 
+
 # ─── Decoders ────────────────────────────────────────────────────
+
 
 class DecoderCreate(BaseModel):
     name: str
@@ -211,12 +243,14 @@ class DecoderCreate(BaseModel):
     priority: int = 100
     is_enabled: bool = True
 
+
 class DecoderUpdate(BaseModel):
     name: str | None = None
     log_type: str | None = None
     content: str | None = None
     priority: int | None = None
     is_enabled: bool | None = None
+
 
 class DecoderOut(BaseModel):
     id: UUID
@@ -229,23 +263,29 @@ class DecoderOut(BaseModel):
     updated_at: datetime
     model_config = {"from_attributes": True}
 
+
 class DecoderTestRequest(BaseModel):
     content: str
     raw_message: str
+
 
 class DecoderTestResponse(BaseModel):
     matched: bool
     decoded_fields: dict[str, Any] = {}
     error: str | None = None
 
+
 # ─── Alerts ──────────────────────────────────────────────────────
+
 
 class AlertUpdate(BaseModel):
     status: str | None = None
     assignee_id: UUID | None = None
 
+
 class AlertNoteCreate(BaseModel):
     content: str
+
 
 class AlertNoteOut(BaseModel):
     id: UUID
@@ -254,12 +294,16 @@ class AlertNoteOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 class AlertOut(BaseModel):
     id: UUID
     title: str
     severity: str
     status: str
     rule_id: UUID | None
+    correlation_id: str | None = None
+    correlation_key: str | None = None
+    source_event_ids: list[str] = []
     event_id: UUID | None
     agent_id: UUID | None
     group_id: str
@@ -267,6 +311,8 @@ class AlertOut(BaseModel):
     source_ip_country: str | None = None
     hostname: str | None
     assignee_id: UUID | None
+    sla_due_at: datetime | None = None
+    sla_breached: bool = False
     duplicate_count: int = 0
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None
@@ -276,12 +322,15 @@ class AlertOut(BaseModel):
     notes: list[AlertNoteOut] = []
     model_config = {"from_attributes": True}
 
+
 # ─── AI feedback (analyst rating of an AI triage verdict) ────────
+
 
 class AiFeedbackCreate(BaseModel):
     rating: Literal["correct", "incorrect"]
     correct_verdict: str | None = None
     note: str | None = None
+
 
 class AiFeedbackOut(BaseModel):
     id: UUID
@@ -294,11 +343,14 @@ class AiFeedbackOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 class AlertSourceLogOut(BaseModel):
     event: EventOut | None
     raw_log: RawLogOut | None
 
+
 # ─── Webhooks ────────────────────────────────────────────────────
+
 
 class WebhookCreate(BaseModel):
     name: str
@@ -307,12 +359,14 @@ class WebhookCreate(BaseModel):
     group_id: str | None = None
     payload_format: str = "default"
 
+
 class WebhookUpdate(BaseModel):
     name: str | None = None
     url: str | None = None
     is_enabled: bool | None = None
     group_id: str | None = None
     payload_format: str | None = None
+
 
 class WebhookOut(BaseModel):
     id: UUID
@@ -324,7 +378,37 @@ class WebhookOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
+# ─── API Keys ────────────────────────────────────────────────────
+
+
+class ApiKeyCreate(BaseModel):
+    name: str
+    permissions: list[str] = []
+    group_id: str | None = None
+    expires_at: datetime | None = None
+
+
+class ApiKeyOut(BaseModel):
+    id: UUID
+    prefix: str
+    name: str
+    group_id: str
+    permissions: list[str]
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    created_by: UUID | None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyCreated(ApiKeyOut):
+    secret: str
+
+
 # ─── Cases ───────────────────────────────────────────────────────
+
 
 class CaseNoteOut(BaseModel):
     id: UUID
@@ -335,8 +419,10 @@ class CaseNoteOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 class CaseNoteCreate(BaseModel):
     content: str
+
 
 class CaseOut(BaseModel):
     id: UUID
@@ -358,11 +444,13 @@ class CaseOut(BaseModel):
     notes: list[CaseNoteOut] = []
     model_config = {"from_attributes": True}
 
+
 class CaseCreate(BaseModel):
     title: str
     description: str | None = None
     severity: str = "medium"
     alert_id: UUID | None = None
+
 
 class CaseUpdate(BaseModel):
     title: str | None = None
@@ -371,7 +459,9 @@ class CaseUpdate(BaseModel):
     status: str | None = None
     assignee_id: UUID | None = None
 
+
 # ─── Pagination ──────────────────────────────────────────────────
+
 
 class PaginatedResponse(BaseModel):
     total: int
@@ -384,7 +474,9 @@ class PaginatedResponse(BaseModel):
     # endpoints leave this unset and keep using page/page_size as before.
     next_after: str | None = None
 
+
 # ─── Platform Settings ───────────────────────────────────────────
+
 
 class SettingOut(BaseModel):
     key: str
@@ -394,10 +486,13 @@ class SettingOut(BaseModel):
     updated_at: datetime
     model_config = {"from_attributes": True}
 
+
 class SettingUpdate(BaseModel):
     value: str
 
+
 # ─── IT Hygiene ──────────────────────────────────────────────────
+
 
 class HygieneSnapshotIn(BaseModel):
     agent_id: str
@@ -417,6 +512,7 @@ class HygieneSnapshotIn(BaseModel):
     issues: list[dict] | None = []
     packages: list[dict] | None = []
     collected_at: str | None = None
+
 
 class HygieneSnapshotOut(BaseModel):
     id: str
@@ -440,10 +536,13 @@ class HygieneSnapshotOut(BaseModel):
     collected_at: datetime
     model_config = {"from_attributes": True}
 
+
 # ─── UEBA ────────────────────────────────────────────────────────
+
 
 class UebaEntityScoreListOut(BaseModel):
     """Lightweight schema for entity list — omits feature_profile to save bandwidth."""
+
     entity_type: str
     entity_value: str
     group_id: str
@@ -454,9 +553,12 @@ class UebaEntityScoreListOut(BaseModel):
     updated_at: datetime
     model_config = {"from_attributes": True}
 
+
 class UebaEntityScoreOut(UebaEntityScoreListOut):
     """Full schema for entity detail — includes feature_profile."""
+
     feature_profile: dict
+
 
 class UebaAnomalyOut(BaseModel):
     id: UUID
@@ -479,14 +581,17 @@ class UebaAnomalyOut(BaseModel):
     detected_at: datetime
     model_config = {"from_attributes": True}
 
+
 class UebaRiskHistoryPoint(BaseModel):
     snapshot_hour: datetime
     risk_score: float
     model_config = {"from_attributes": True}
 
+
 class UebaEntityDetailOut(BaseModel):
     score: UebaEntityScoreOut
     anomalies: list[UebaAnomalyOut]
+
 
 class UebaStatusOut(BaseModel):
     status: str
@@ -495,12 +600,15 @@ class UebaStatusOut(BaseModel):
     ip_snapshot_count: int
     host_snapshot_count: int
 
+
 # ─── Threat Hunts ────────────────────────────────────────────────
 
+
 class ThreatHuntCreate(BaseModel):
-    ioc_type: str   # ip, hostname, user, hash
+    ioc_type: str  # ip, hostname, user, hash
     ioc_value: str
     alert_id: UUID | None = None  # if triggered from alert, auto-extract IoC
+
 
 class ThreatHuntOut(BaseModel):
     id: UUID
@@ -519,7 +627,9 @@ class ThreatHuntOut(BaseModel):
     completed_at: datetime | None
     model_config = {"from_attributes": True}
 
+
 # ─── FIM ─────────────────────────────────────────────────────────
+
 
 class FimWatchPathOut(BaseModel):
     id: UUID
@@ -528,8 +638,10 @@ class FimWatchPathOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 class FimWatchPathCreate(BaseModel):
     path: str
+
 
 class FimEventItem(BaseModel):
     path: str
@@ -538,9 +650,11 @@ class FimEventItem(BaseModel):
     size_bytes: int | None = None
     detected_at: str | None = None
 
+
 class FimEventIn(BaseModel):
     agent_id: str
     events: list[FimEventItem]
+
 
 class FimEventOut(BaseModel):
     id: UUID
@@ -553,12 +667,15 @@ class FimEventOut(BaseModel):
     detected_at: datetime
     model_config = {"from_attributes": True}
 
+
 # ─── Agent Tasks ─────────────────────────────────────────────────
+
 
 class AgentTaskCreate(BaseModel):
     agent_id: UUID | None = None
     task_type: str
     params: dict = {}
+
 
 class AgentTaskOut(BaseModel):
     id: UUID
@@ -573,12 +690,15 @@ class AgentTaskOut(BaseModel):
     completed_at: datetime | None
     model_config = {"from_attributes": True}
 
+
 class AgentTaskResultIn(BaseModel):
     status: str  # done | failed
     result: Any | None = None
     error: str | None = None
 
+
 # ─── Fleet Hunt ──────────────────────────────────────────────────
+
 
 class FleetHuntCreate(BaseModel):
     name: str
@@ -586,6 +706,7 @@ class FleetHuntCreate(BaseModel):
     task_type: str
     params: dict = {}
     agent_ids: list[UUID] | None = None  # None = all online agents
+
 
 class FleetHuntOut(BaseModel):
     id: UUID
@@ -600,13 +721,16 @@ class FleetHuntOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 # ─── Artifacts ───────────────────────────────────────────────────
+
 
 class ArtifactCreate(BaseModel):
     name: str
     description: str | None = None
     task_type: str
     default_params: dict = {}
+
 
 class ArtifactOut(BaseModel):
     id: UUID
@@ -618,16 +742,20 @@ class ArtifactOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 class ArtifactRunRequest(BaseModel):
     agent_ids: list[UUID] | None = None  # None = fleet
     params: dict | None = None  # override default_params
 
+
 # ─── YARA Rules ──────────────────────────────────────────────────
+
 
 class YaraRuleCreate(BaseModel):
     name: str
     description: str | None = None
     content: str
+
 
 class YaraRuleOut(BaseModel):
     id: UUID
@@ -638,25 +766,31 @@ class YaraRuleOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 class YaraScanRequest(BaseModel):
     agent_id: UUID
     path: str
     recursive: bool = False
     rule_ids: list[UUID] | None = None  # None = all enabled rules
 
+
 # ─── Reports ──────────────────────────────────────────────────────
+
 
 class ReportGenerateRequest(BaseModel):
     date_from: date
     date_to: date
     language: str = "English"
 
+
 # ─── Enrollment Tokens ───────────────────────────────────────────
+
 
 class EnrollmentTokenCreate(BaseModel):
     label: str = ""
     group_id: str = "default"
     expires_hours: int = 24  # 0 = never expires
+
 
 class EnrollmentTokenOut(BaseModel):
     id: UUID
@@ -669,10 +803,13 @@ class EnrollmentTokenOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 class EnrollmentTokenCreated(EnrollmentTokenOut):
     token: str  # raw value — shown only on creation
 
+
 # ─── Audit Logs ──────────────────────────────────────────────────
+
 
 class AuditLogOut(BaseModel):
     id: UUID
@@ -684,7 +821,9 @@ class AuditLogOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 # ─── SOP Documents ───────────────────────────────────────────────
+
 
 class SopDocumentOut(BaseModel):
     id: UUID
@@ -696,15 +835,19 @@ class SopDocumentOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 # ─── SOC Assistant (read-only chat) ──────────────────────────────
+
 
 class AssistantChatMessage(BaseModel):
     role: str
     content: str
 
+
 class AssistantChatRequest(BaseModel):
     message: str
     history: list[AssistantChatMessage] = []
+
 
 class AssistantChatResponse(BaseModel):
     reply: str

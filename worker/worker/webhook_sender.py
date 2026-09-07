@@ -1,6 +1,6 @@
 # worker/worker/webhook_sender.py
 import asyncio
-import math
+import random
 from datetime import datetime, timezone
 import httpx
 import structlog
@@ -167,6 +167,23 @@ async def _deliver(delivery: WebhookDelivery, config: WebhookConfig) -> None:
             webhook_deliveries_total.labels(status=metric_status).inc()
             log.warning("webhook_failed", delivery_id=str(delivery.id), attempts=new_attempts, error=str(exc))
 
+            from sqlalchemy import update
+            values = {
+                "status": status,
+                "attempts": new_attempts,
+                "last_attempted_at": now,
+                "updated_at": now,
+                "last_error": str(exc)[:2000],
+                "error_class": type(exc).__name__,
+            }
+            if delivery.first_failed_at is None:
+                values["first_failed_at"] = now
+            await db.execute(
+                update(WebhookDelivery).where(WebhookDelivery.id == delivery.id).values(**values)
+            )
+            await db.commit()
+            return
+
         from sqlalchemy import update
         await db.execute(
             update(WebhookDelivery)
@@ -181,4 +198,8 @@ async def _deliver(delivery: WebhookDelivery, config: WebhookConfig) -> None:
         await db.commit()
 
 def _backoff_time(attempts: int) -> float:
-    return min((attempts ** 2) * 30, 3600)
+    """Exponential backoff (capped at 1 hour) with +/-20% jitter so many
+    simultaneously-failing deliveries don't all retry in lockstep."""
+    base = min((attempts ** 2) * 30, 3600)
+    jitter = base * random.uniform(-0.2, 0.2)
+    return max(1.0, base + jitter)

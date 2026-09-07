@@ -3,14 +3,14 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
+from worker.ti.cache import get_or_fetch
 from worker.ti.config import TIConfig
 from worker.ti.extractor import extract_iocs
 from worker.ti.iocs import IOC, IOCType
-from worker.ti.models import EnrichmentSummary, IOCReputationScore
+from worker.ti.models import EnrichmentSummary
 from worker.ti.providers import (
     AbuseIPDBProvider, GeoIPProvider, GreyNoiseProvider,
     OTXProvider, ShodanProvider, URLhausProvider, VirusTotalProvider, WhoisLookupProvider,
@@ -143,8 +143,10 @@ def _geoip_bullet(d: dict[str, Any]) -> str | None:
 
 
 class EnrichmentAggregator:
-    def __init__(self, cfg: TIConfig) -> None:
+    def __init__(self, cfg: TIConfig, redis: Any = None, tenant: str = "default") -> None:
         self._cfg = cfg
+        self._redis = redis
+        self._tenant = tenant
         self._vt = VirusTotalProvider(cfg)
         self._abuse = AbuseIPDBProvider(cfg)
         self._otx = OTXProvider(cfg)
@@ -153,6 +155,18 @@ class EnrichmentAggregator:
         self._geo = GeoIPProvider(cfg)
         self._gn = GreyNoiseProvider(cfg)
         self._shodan = ShodanProvider(cfg)
+
+    async def _cached(self, provider: str, lookup_type: str, indicator: str, fetch) -> dict[str, Any]:
+        """Route a provider call through the Redis cache when a redis client
+        was supplied; otherwise call the provider directly (e.g. soar_engine's
+        simpler call site, which has no tenant/redis context readily
+        available -- caching there is a fast-follow, not a regression)."""
+        if self._redis is None:
+            return await fetch()
+        return await get_or_fetch(
+            self._redis, tenant=self._tenant, provider=provider,
+            lookup_type=lookup_type, indicator=indicator, fetch=fetch,
+        )
 
     async def enrich(self, text: str, alert_title: str = "") -> EnrichmentSummary:
         iocs = extract_iocs(text)
@@ -171,14 +185,14 @@ class EnrichmentAggregator:
             except ValueError:
                 return
             abuse, vt, otx, uh, geo, who, gn, shodan = await asyncio.gather(
-                self._abuse.lookup_ip(ip),
-                self._vt.lookup_ip(ip),
-                self._otx.lookup_ip(ip),
-                self._urlhaus.lookup_ip(ip),
-                self._geo.lookup_ip(ip),
-                self._whois.lookup_ip(ip),
-                self._gn.lookup_ip(ip),
-                self._shodan.lookup_ip(ip),
+                self._cached("abuseipdb", "ip", ip, lambda: self._abuse.lookup_ip(ip)),
+                self._cached("virustotal", "ip", ip, lambda: self._vt.lookup_ip(ip)),
+                self._cached("otx", "ip", ip, lambda: self._otx.lookup_ip(ip)),
+                self._cached("urlhaus", "ip", ip, lambda: self._urlhaus.lookup_ip(ip)),
+                self._cached("geoip", "ip", ip, lambda: self._geo.lookup_ip(ip)),
+                self._cached("whois", "ip", ip, lambda: self._whois.lookup_ip(ip)),
+                self._cached("greynoise", "ip", ip, lambda: self._gn.lookup_ip(ip)),
+                self._cached("shodan", "ip", ip, lambda: self._shodan.lookup_ip(ip)),
             )
             if s := _abuseipdb_summary(abuse):
                 bullets.append(_bullet("abuseipdb", s))
@@ -218,10 +232,10 @@ class EnrichmentAggregator:
 
         async def ingest_domain(dom: str) -> None:
             vt, otx, uh, who = await asyncio.gather(
-                self._vt.lookup_domain(dom),
-                self._otx.lookup_domain(dom),
-                self._urlhaus.lookup_domain(dom),
-                self._whois.lookup_domain(dom),
+                self._cached("virustotal", "domain", dom, lambda: self._vt.lookup_domain(dom)),
+                self._cached("otx", "domain", dom, lambda: self._otx.lookup_domain(dom)),
+                self._cached("urlhaus", "domain", dom, lambda: self._urlhaus.lookup_domain(dom)),
+                self._cached("whois", "domain", dom, lambda: self._whois.lookup_domain(dom)),
             )
             if s := _vt_summary(vt, "virustotal(domain)"):
                 bullets.append(s)
@@ -235,9 +249,9 @@ class EnrichmentAggregator:
 
         async def ingest_hash(h: str) -> None:
             vt, otx, uh = await asyncio.gather(
-                self._vt.lookup_hash(h),
-                self._otx.lookup_hash(h),
-                self._urlhaus.lookup_hash(h),
+                self._cached("virustotal", "hash", h, lambda: self._vt.lookup_hash(h)),
+                self._cached("otx", "hash", h, lambda: self._otx.lookup_hash(h)),
+                self._cached("urlhaus", "hash", h, lambda: self._urlhaus.lookup_hash(h)),
             )
             if s := _vt_summary(vt, "virustotal(hash)"):
                 bullets.append(s)
@@ -253,9 +267,9 @@ class EnrichmentAggregator:
 
         async def ingest_url(url: str) -> None:
             uh, vt, otx = await asyncio.gather(
-                self._urlhaus.lookup_url(url),
-                self._vt.lookup_url(url),
-                self._otx.lookup_url(url),
+                self._cached("urlhaus", "url", url, lambda: self._urlhaus.lookup_url(url)),
+                self._cached("virustotal", "url", url, lambda: self._vt.lookup_url(url)),
+                self._cached("otx", "url", url, lambda: self._otx.lookup_url(url)),
             )
             if s := _urlhaus_host(uh):
                 bullets.append(_bullet("urlhaus(url)", s))

@@ -41,7 +41,7 @@ async def list_suppressions(
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(get_current_user),
 ):
-    q = select(AlertSuppression).where(AlertSuppression.is_active == True)
+    q = select(AlertSuppression).where(AlertSuppression.is_active.is_(True))
     if group_filter:
         q = q.where(AlertSuppression.group_id == group_filter)
     result = await db.execute(q.order_by(AlertSuppression.created_at.desc()))
@@ -76,8 +76,12 @@ async def delete_suppression(
     suppression_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(require_permission("alerts:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    s = (await db.execute(select(AlertSuppression).where(AlertSuppression.id == suppression_id))).scalar_one_or_none()
+    query = select(AlertSuppression).where(AlertSuppression.id == suppression_id)
+    if group_filter is not None:
+        query = query.where(AlertSuppression.group_id == group_filter)
+    s = (await db.execute(query)).scalar_one_or_none()
     if not s:
         raise HTTPException(404)
     s.is_active = False

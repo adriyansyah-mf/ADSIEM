@@ -42,6 +42,13 @@ async def ensure_index() -> None:
     await client.put(f"/{LOGS_INDEX}", json=_MAPPING)
 
 
+async def count_by_query(query: dict) -> int:
+    client = _get_client()
+    resp = await client.post(f"/{LOGS_INDEX}/_count", json={"query": query})
+    resp.raise_for_status()
+    return resp.json()["count"]
+
+
 async def get_log(doc_id: str) -> dict | None:
     client = _get_client()
     resp = await client.get(f"/{LOGS_INDEX}/_doc/{doc_id}")

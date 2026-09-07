@@ -1,6 +1,5 @@
 import json
 import structlog
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
@@ -22,6 +21,14 @@ from app.api.routes.tasks import router as tasks_router, fleet_router
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
+from app.api.routes.api_keys import router as api_keys_router
+from app.api.routes.queues import router as queues_router
+from app.api.routes.sla_policies import router as sla_policies_router
+from app.api.routes.iocs import router as iocs_router
+from app.api.routes.entities import router as entities_router
+from app.api.routes.investigation import router as investigation_router
+from app.api.routes.exports import router as exports_router
+from app.api.routes.retention_policies import router as retention_policies_router
 from app.api.routes.audit_logs import router as audit_logs_router
 from app.api.routes.export import router as export_router
 from app.api.routes.suppressions import router as suppressions_router
@@ -71,10 +78,12 @@ _DEFAULT_SETTINGS = [
     ("retention_raw_logs_days",  "30",  False, "Delete raw_logs older than N days (0=disabled)"),
     ("retention_events_days",    "90",  False, "Delete events older than N days (0=disabled)"),
     ("retention_alerts_days",   "180",  False, "Delete closed alerts older than N days (0=disabled)"),
+    ("auto_assign_alerts",       "false", False, "Assign new alerts to the least-loaded active analyst"),
+    ("correlation_definitions",  "[]",    False, "JSON array of grouped sequence/threshold correlation definitions"),
+    ("soar_destructive_approval_required", "true", False, "Require approval before isolate-agent or block-IP SOAR actions"),
 ]
 
 async def _seed_settings() -> None:
-    from sqlalchemy import select
     from app.core.database import AsyncSessionLocal
     from app.models.models import PlatformSetting
     async with AsyncSessionLocal() as db:
@@ -143,6 +152,9 @@ async def _migrate_alerts_columns() -> None:
             ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS ai_verdict VARCHAR(50)
+            ,ADD COLUMN IF NOT EXISTS correlation_id VARCHAR(255)
+            ,ADD COLUMN IF NOT EXISTS correlation_key VARCHAR(512)
+            ,ADD COLUMN IF NOT EXISTS source_event_ids JSONB NOT NULL DEFAULT '[]'::jsonb
         """))
         await conn.execute(text("""
             ALTER TABLE cases
@@ -370,16 +382,50 @@ async def _migrate_soar_v2_tables() -> None:
         """))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS soar_run_steps (
-                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                run_id      UUID NOT NULL REFERENCES soar_runs(id) ON DELETE CASCADE,
-                node_id     UUID NOT NULL REFERENCES soar_nodes(id),
-                status      VARCHAR(20) NOT NULL,
-                input       JSONB,
-                output      JSONB,
-                error       TEXT,
-                started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-                finished_at TIMESTAMPTZ
+                id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                run_id              UUID NOT NULL REFERENCES soar_runs(id) ON DELETE CASCADE,
+                node_id             UUID NOT NULL REFERENCES soar_nodes(id),
+                action_type         VARCHAR(50) NOT NULL,
+                status              VARCHAR(20) NOT NULL,
+                is_destructive      BOOLEAN NOT NULL DEFAULT false,
+                is_reversible       BOOLEAN NOT NULL DEFAULT false,
+                actor_id            UUID REFERENCES users(id) ON DELETE SET NULL,
+                acted_at            TIMESTAMPTZ,
+                idempotency_key     VARCHAR(255) NOT NULL,
+                input_hash          VARCHAR(64) NOT NULL,
+                rollback_of_step_id UUID REFERENCES soar_run_steps(id) ON DELETE RESTRICT,
+                input               JSONB,
+                output              JSONB,
+                error               TEXT,
+                started_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+                finished_at         TIMESTAMPTZ
             )
+        """))
+        await conn.execute(text("""
+            ALTER TABLE soar_run_steps
+            ADD COLUMN IF NOT EXISTS action_type VARCHAR(50) NOT NULL DEFAULT 'unknown',
+            ADD COLUMN IF NOT EXISTS is_destructive BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS is_reversible BOOLEAN NOT NULL DEFAULT false,
+            ADD COLUMN IF NOT EXISTS actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            ADD COLUMN IF NOT EXISTS acted_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS input_hash VARCHAR(64),
+            ADD COLUMN IF NOT EXISTS rollback_of_step_id UUID REFERENCES soar_run_steps(id) ON DELETE RESTRICT
+        """))
+        await conn.execute(text("""
+            UPDATE soar_run_steps
+            SET idempotency_key = 'legacy-' || id::text
+            WHERE idempotency_key IS NULL
+        """))
+        await conn.execute(text("""
+            UPDATE soar_run_steps
+            SET input_hash = repeat('0', 64)
+            WHERE input_hash IS NULL
+        """))
+        await conn.execute(text("""
+            ALTER TABLE soar_run_steps
+            ALTER COLUMN idempotency_key SET NOT NULL,
+            ALTER COLUMN input_hash SET NOT NULL
         """))
         await conn.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_soar_workflows_enabled_group
@@ -409,6 +455,10 @@ async def _migrate_soar_v2_tables() -> None:
             CREATE INDEX IF NOT EXISTS idx_soar_run_steps_run_id
             ON soar_run_steps(run_id)
         """))
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_soar_run_steps_idempotency
+            ON soar_run_steps(run_id, idempotency_key)
+        """))
 
 async def _migrate_webhook_payload_format() -> None:
     from sqlalchemy import text
@@ -420,6 +470,167 @@ async def _migrate_mfa_columns() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
+
+async def _migrate_audit_chain() -> None:
+    """Add tamper-evident audit-chain columns/tables, seed audit:verify, and
+    backfill pre-existing audit_logs rows into a verifiable genesis segment.
+
+    The backfill is idempotent: it only processes rows where chain_hash IS
+    NULL, so a restart after the first successful run does no work. Rows are
+    grouped per tenant via a best-effort actor_id -> users.group_id lookup
+    (actor_id IS NULL, e.g. a failed login, falls back to the unscoped
+    "__unscoped__" chain) and hashed in chronological order using the exact
+    same canonical payload/hash functions the live append path uses, so
+    verification treats historical and newly-appended rows identically.
+    """
+    from sqlalchemy import text
+    from app.services.audit import GENESIS_HASH, UNSCOPED_GROUP, _canonical_json, _canonical_payload, _sha256_hex
+
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS actor_type VARCHAR(20) NOT NULL DEFAULT 'user'"))
+        await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"))
+        await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS request_id VARCHAR(64)"))
+        await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS payload_hash VARCHAR(64)"))
+        await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS previous_hash VARCHAR(64)"))
+        await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS chain_hash VARCHAR(64)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_audit_logs_group_id ON audit_logs(group_id)"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS audit_chain_heads (
+                group_id   VARCHAR(100) PRIMARY KEY,
+                chain_hash VARCHAR(64) NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "INSERT INTO permissions (name) VALUES ('audit:verify') ON CONFLICT (name) DO NOTHING"
+        ))
+        await conn.execute(text("""
+            INSERT INTO role_permissions (role_id, permission_id)
+            SELECT r.id, p.id FROM roles r, permissions p
+            WHERE r.name IN ('superadmin', 'admin') AND p.name = 'audit:verify'
+            ON CONFLICT DO NOTHING
+        """))
+
+        pending = (await conn.execute(text("""
+            SELECT al.id, al.actor_id, al.action, al.resource_type, al.resource_id,
+                   al.detail, al.created_at, u.group_id AS user_group_id
+            FROM audit_logs al
+            LEFT JOIN users u ON u.id = al.actor_id
+            WHERE al.chain_hash IS NULL
+            ORDER BY al.created_at ASC, al.id ASC
+        """))).mappings().all()
+
+        by_group: dict[str, list] = {}
+        for row in pending:
+            group = row["user_group_id"] or UNSCOPED_GROUP
+            by_group.setdefault(group, []).append(row)
+
+        for group_id, rows in by_group.items():
+            head = (await conn.execute(
+                text("SELECT chain_hash FROM audit_chain_heads WHERE group_id = :group_id FOR UPDATE"),
+                {"group_id": group_id},
+            )).scalar_one_or_none()
+            if head is None:
+                await conn.execute(
+                    text("INSERT INTO audit_chain_heads (group_id, chain_hash) VALUES (:group_id, :hash)"),
+                    {"group_id": group_id, "hash": GENESIS_HASH},
+                )
+                previous_hash = GENESIS_HASH
+            else:
+                previous_hash = head
+
+            for row in rows:
+                actor_type = "system" if row["actor_id"] is None else "user"
+                payload = _canonical_payload(
+                    actor_type=actor_type,
+                    actor_id=row["actor_id"],
+                    group_id=group_id,
+                    action=row["action"],
+                    resource_type=row["resource_type"],
+                    resource_id=row["resource_id"],
+                    detail=row["detail"] or {},
+                    request_id=None,
+                    created_at=row["created_at"],
+                )
+                payload_hash = _sha256_hex(_canonical_json(payload))
+                chain_hash = _sha256_hex(previous_hash + payload_hash)
+                await conn.execute(text("""
+                    UPDATE audit_logs
+                    SET actor_type = :actor_type, group_id = :group_id, request_id = NULL,
+                        payload_hash = :payload_hash, previous_hash = :previous_hash, chain_hash = :chain_hash
+                    WHERE id = :id
+                """), {
+                    "actor_type": actor_type, "group_id": group_id, "payload_hash": payload_hash,
+                    "previous_hash": previous_hash, "chain_hash": chain_hash, "id": row["id"],
+                })
+                previous_hash = chain_hash
+
+            await conn.execute(
+                text("UPDATE audit_chain_heads SET chain_hash = :hash, updated_at = NOW() WHERE group_id = :group_id"),
+                {"hash": previous_hash, "group_id": group_id},
+            )
+
+async def _migrate_webhook_dlq_columns() -> None:
+    """Add the typed dead-letter fields to webhook_deliveries and seed
+    queues:manage for existing databases (mirrors the api_keys/audit_verify
+    pattern — db/init.sql's seed block only runs once against a fresh volume)."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"))
+        await conn.execute(text("ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS last_error TEXT"))
+        await conn.execute(text("ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS error_class VARCHAR(100)"))
+        await conn.execute(text("ALTER TABLE webhook_deliveries ADD COLUMN IF NOT EXISTS first_failed_at TIMESTAMPTZ"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_group_id ON webhook_deliveries(group_id)"))
+        await conn.execute(text(
+            "INSERT INTO permissions (name) VALUES ('queues:manage') ON CONFLICT (name) DO NOTHING"
+        ))
+        await conn.execute(text("""
+            INSERT INTO role_permissions (role_id, permission_id)
+            SELECT r.id, p.id FROM roles r, permissions p
+            WHERE r.name IN ('superadmin', 'admin') AND p.name = 'queues:manage'
+            ON CONFLICT DO NOTHING
+        """))
+        # Best-effort backfill: existing rows created before group_id existed
+        # get it from their alert's group_id where resolvable.
+        await conn.execute(text("""
+            UPDATE webhook_deliveries wd
+            SET group_id = a.group_id
+            FROM alerts a
+            WHERE wd.alert_id = a.id AND wd.group_id IS NULL
+        """))
+
+async def _migrate_api_keys_permission() -> None:
+    """The `api_keys` table itself is created by Base.metadata.create_all; this only
+    seeds the api_keys:manage permission for existing databases, since db/init.sql's
+    seed block only runs once against a fresh Postgres volume."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO permissions (name) VALUES ('api_keys:manage') ON CONFLICT (name) DO NOTHING"
+        ))
+        await conn.execute(text("""
+            INSERT INTO role_permissions (role_id, permission_id)
+            SELECT r.id, p.id FROM roles r, permissions p
+            WHERE r.name IN ('superadmin', 'admin') AND p.name = 'api_keys:manage'
+            ON CONFLICT DO NOTHING
+        """))
+
+async def _migrate_ioc_tables_permission() -> None:
+    """The ioc_observations/ioc_links tables themselves are created by
+    Base.metadata.create_all; this only seeds the iocs:read permission for
+    existing databases, since db/init.sql's seed block only runs once
+    against a fresh Postgres volume."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO permissions (name) VALUES ('iocs:read') ON CONFLICT (name) DO NOTHING"
+        ))
+        await conn.execute(text("""
+            INSERT INTO role_permissions (role_id, permission_id)
+            SELECT r.id, p.id FROM roles r, permissions p
+            WHERE r.name IN ('superadmin', 'admin', 'analyst') AND p.name = 'iocs:read'
+            ON CONFLICT DO NOTHING
+        """))
 
 async def _ws_redis_listener():
     """Subscribe to Redis ws:alerts channel and broadcast to WebSocket clients."""
@@ -445,6 +656,16 @@ async def _ws_redis_listener():
 
 _STARTUP_LOCK_KEY = 727501001  # arbitrary fixed key for the session-level advisory lock below
 
+
+async def _migrate_rule_revisions() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO rule_revisions (id, rule_id, version, content, created_at) "
+            "SELECT gen_random_uuid(), id, version, content, NOW() FROM rules r "
+            "WHERE NOT EXISTS (SELECT 1 FROM rule_revisions rr WHERE rr.rule_id = r.id)"
+        ))
+
 async def lifespan(app: FastAPI):
     from sqlalchemy import text
     # Multiple server-api replicas start concurrently (docker compose recreates
@@ -461,6 +682,7 @@ async def lifespan(app: FastAPI):
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        await _migrate_rule_revisions()
         await _seed_settings()
         await _migrate_ueba_columns()
         await _migrate_alerts_columns()
@@ -468,6 +690,10 @@ async def lifespan(app: FastAPI):
         await _migrate_soar_v2_tables()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
+        await _migrate_api_keys_permission()
+        await _migrate_audit_chain()
+        await _migrate_webhook_dlq_columns()
+        await _migrate_ioc_tables_permission()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
@@ -490,6 +716,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    """Defense-in-depth security headers set at the API layer directly, for
+    any deployment or test path that talks to this app without nginx in
+    front (e.g. the dev container's exposed port, or a bare TestClient).
+    When nginx IS in front (both nginx.conf and nginx.prod.conf), it hides
+    these same headers via proxy_hide_header before adding its own —
+    nginx is the single authoritative source for the header a client
+    actually receives in every deployed configuration; this middleware never
+    competes with it.
+    """
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    )
+    if settings.ENVIRONMENT == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
 for router in [
     auth.router, users.router, agents.router, ingest.router,
     logs.router, events.router, alerts.router, rules.router,
@@ -499,5 +748,13 @@ for router in [
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router,
+    api_keys_router,
+    queues_router,
+    sla_policies_router,
+    iocs_router,
+    entities_router,
+    investigation_router,
+    exports_router,
+    retention_policies_router,
 ]:
     app.include_router(router)

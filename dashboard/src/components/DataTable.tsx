@@ -97,9 +97,9 @@ export default function DataTable<T extends { id: string }>({
         )}
       </div>
 
-      <div className="rounded border border-border bg-card overflow-auto shadow-[0_0_0_1px_hsl(var(--primary)/0.06)]">
+      <div className="overflow-auto rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg)] shadow-[0_8px_24px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-xl">
         <table className="w-full text-sm">
-          <thead className="bg-muted text-muted-foreground">
+          <thead className="border-b border-[var(--glass-border)] bg-transparent text-[var(--text-secondary)]">
             <tr>
               {columns.map((col) => (
                 <th
@@ -125,7 +125,7 @@ export default function DataTable<T extends { id: string }>({
               <tr
                 key={row.id}
                 onClick={() => onRowClick?.(row)}
-                className={`border-t border-border transition-colors ${onRowClick ? 'cursor-pointer hover:bg-white/[0.06] hover:border-l-2 hover:border-l-cyan-500/40' : 'hover:bg-white/[0.03]'}`}
+                className={`border-t border-[var(--glass-border)] transition-colors ${onRowClick ? 'cursor-pointer hover:bg-white/[0.06] hover:border-l-2 hover:border-l-[var(--accent-blue)]' : 'hover:bg-white/[0.03]'}`}
               >
                 {columns.map((col) => (
                   <td key={col.key} className="px-4 py-2">{col.render(row)}</td>

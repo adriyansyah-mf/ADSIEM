@@ -1,7 +1,7 @@
 # server-api/app/api/routes/events.py
 import json
 from typing import Annotated
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.core.deps import get_scoped_group, require_permission
 from app.core.es_client import search as es_search
@@ -11,11 +11,14 @@ from app.schemas.schemas import EventOut, PaginatedResponse
 router = APIRouter(prefix="/api/events", tags=["events"])
 Perm = require_permission("logs:read")
 
+# See logs.py's MAX_PAGE_SIZE for why this cap exists.
+MAX_PAGE_SIZE = 500
+
 @router.get("", response_model=PaginatedResponse)
 async def list_events(
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(Perm),
-    page_size: int = 25,
+    page_size: int = Query(25, ge=1, le=MAX_PAGE_SIZE),
     after: str | None = None,
     search: str | None = None,
     source_ip: str | None = None, event_action: str | None = None,

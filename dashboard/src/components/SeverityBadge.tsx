@@ -3,7 +3,7 @@ const COLOR: Record<string, string> = {
   high: 'var(--accent-orange)',
   medium: 'var(--accent-yellow)',
   low: 'var(--accent-green)',
-  info: 'var(--accent-cyan)',
+  info: 'var(--accent-blue)',
 }
 
 export default function SeverityBadge({ severity }: { severity: string }) {
@@ -13,14 +13,13 @@ export default function SeverityBadge({ severity }: { severity: string }) {
       style={{
         display: 'inline-block',
         padding: '2px 8px',
-        borderRadius: 3,
+        borderRadius: 4,
         border: `1px solid ${c}`,
         background: `color-mix(in srgb, ${c} 12%, transparent)`,
         color: c,
-        fontFamily: 'Rajdhani, sans-serif',
-        fontWeight: 700,
+        fontWeight: 600,
         fontSize: 11,
-        letterSpacing: '0.5px',
+        letterSpacing: '0.02em',
         textTransform: 'uppercase',
         whiteSpace: 'nowrap',
       }}

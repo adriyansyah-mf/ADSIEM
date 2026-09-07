@@ -1,0 +1,31 @@
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+=== Cross-tenant read (blue user -> red alert) ===
+HTTP_STATUS:404
+{"detail":"Alert not found"}
+=== Same-tenant read (blue user -> blue alert) ===
+HTTP_STATUS:200
+{"id":"a440beea-01c7-4d37-9eac-f24cd2d46884","title":"manual-qa blue alert","severity":"low","status":"new","rule_id":null,"correlation_id":null,"correlation_key":null,"source_event_ids":[],"event_id":null,"agent_id":null,"group_id":"blue","source_ip":null,"source_ip_country":null,"hostname":null,"assignee_id":null,"sla_due_at":"2026-09-07T12:55:37.917831Z","sla_breached":false,"duplicate_count":0,"acknowledged_at":null,"resolved_at":null,"ai_verdict":null,"created_at":"2026-09-06T12:55:37.917831Z","updated_at":"2026-09-06T12:55:37.917831Z","notes":[]}
+DELETE 2
+DELETE 1
+DELETE 1
+DELETE 1
+cleanup done
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+=== Cross-tenant delete (blue user -> red webhook) ===
+HTTP_STATUS:404
+{"detail":"Webhook not found"}
+=== Verify webhook still exists after failed cross-tenant delete ===
+(The verification sub-shell in the mutate script hung on an incorrect `docker compose exec` argument
+form and was terminated; verified directly instead:)
+$ docker compose exec -T postgres env PGPASSWORD=*** psql -At -U soc -d soc_platform \
+    -c "SELECT id, name, group_id FROM webhook_configs WHERE name LIKE 'manual-qa%';"
+9b1a7839-9862-4c5b-9b4f-b3774f400263|manual-qa red webhook|red
+-> Webhook was NOT deleted by the blue-tenant caller's DELETE request; the 404 reflects a genuine
+   authorization boundary, not a false-negative from a broken query.
+Manual cleanup performed directly afterward (webhook, test user, test role removed).

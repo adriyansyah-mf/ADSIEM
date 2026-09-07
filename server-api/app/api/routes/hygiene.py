@@ -6,7 +6,7 @@ from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_agent, get_current_user, require_permission
+from app.core.deps import get_agent, get_current_user
 from app.models.models import Agent, HygieneSnapshot, User
 from app.schemas.schemas import HygieneSnapshotIn, HygieneSnapshotOut
 

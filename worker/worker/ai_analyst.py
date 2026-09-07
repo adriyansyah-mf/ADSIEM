@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from worker.database import AsyncSessionLocal
 from worker.models import Alert, AlertNote, Case, CaseNote, ThreatHunt
@@ -35,6 +35,7 @@ from worker.ninerouter_search import search_via_9router
 from worker.web_fetch import fetch_page_text
 from worker.fleet_correlation import check_fleet_spread, LOOKBACK_HOURS as FLEET_LOOKBACK_HOURS
 from worker.rag import retrieve_similar_cases, retrieve_sop_context, retrieve_feedback_context
+from worker.ioc_store import record_enrichment_iocs
 from worker.soar_engine import run_soar_playbooks
 
 log = structlog.get_logger()
@@ -433,6 +434,7 @@ async def analyze_and_maybe_create_case(
     hostname: Optional[str],
     decoded_fields: dict,
     group_id: str,
+    sigma_rule: dict | None = None,
 ) -> None:
     enabled = await get_setting("ai_analyst_enabled", "true")
     if enabled.lower() == "false":
@@ -448,13 +450,26 @@ async def analyze_and_maybe_create_case(
     text_blob = "\n".join(filter(None, [title, source_ip, hostname,
                                         json.dumps(decoded_fields, default=str)[:800]]))
     cfg = await _build_ti_config()
-    aggregator = EnrichmentAggregator(cfg)
+    from worker.redis_client import get_redis
+    ti_redis = await get_redis()
+    aggregator = EnrichmentAggregator(cfg, redis=ti_redis, tenant=group_id)
 
     try:
         enrichment = await aggregator.enrich(text_blob, alert_title=title)
     except Exception as e:
         log.warning("enrichment_failed", error=str(e))
         enrichment = None
+
+    # ── 1b. Persist observed IOCs and link them to this alert (best-effort) ──
+    if enrichment and enrichment.iocs:
+        try:
+            async with AsyncSessionLocal() as ioc_db:
+                await record_enrichment_iocs(
+                    ioc_db, group_id=group_id, alert_id=alert_id,
+                    iocs=enrichment.iocs, reputation=enrichment.reputation,
+                )
+        except Exception as e:
+            log.warning("ioc_persist_failed", error=str(e))
 
     # ── 2. Eskalasi severity dari TI ────────────────────────────────────────
     effective_severity = severity
@@ -493,6 +508,7 @@ async def analyze_and_maybe_create_case(
         source_ip=source_ip,
         hostname=hostname,
         decoded_fields=decoded_fields,
+        sigma_context=sigma_rule,
         enrichment=enrichment,
         heuristic_mitre=heuristic_mitre,
         similar_cases=similar_cases if similar_cases else None,

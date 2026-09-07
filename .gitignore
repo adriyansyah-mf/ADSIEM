@@ -19,3 +19,19 @@ claude.md
 
 # MaxMind GeoLite2 databases — large binaries, EULA prohibits redistribution
 /mmdb/*.mmdb
+
+# TLS private key material — self-signed cert/key generated locally per deployment,
+# regenerate with `openssl req -x509 ...` (see docs/IMPLEMENTATION_STATUS.md); never commit
+/nginx/certs/
+
+# Orphaned private key found in the working tree, unreferenced by any code — never commit
+/private_key.der
+
+# Runtime backup artifacts (real Postgres/Elasticsearch data) — regenerate via ops/backup/, never commit
+/backups/
+
+# Unrelated scratch files, not part of the product
+/.debug-journal.md
+/enterprise_siem_dashboard.html
+/landing-page.html
+/images/

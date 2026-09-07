@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_scoped_group, require_permission
+from app.core.deps import get_scoped_group, require_permission
 from app.core.es_client import get_log as es_get_log
 from app.core.geoip import lookup_country
 from app.models.models import AiFeedback, Alert, AlertNote, User
@@ -34,6 +34,15 @@ async def _push_feedback_reindex(feedback_id: str) -> None:
         pass  # non-critical: feedback row is already saved regardless
 
 _RESOLVED_STATUSES = {"resolved", "closed", "false_positive"}
+_SLA_MINUTES = {"critical": 15, "high": 60, "medium": 240, "low": 1440, "info": 2880}
+
+
+def _apply_sla(out: AlertOut, created_at: datetime, severity: str, status: str) -> AlertOut:
+    from datetime import timedelta
+    due_at = created_at + timedelta(minutes=_SLA_MINUTES.get(severity, 240))
+    out.sla_due_at = due_at
+    out.sla_breached = status not in _RESOLVED_STATUSES and datetime.now(timezone.utc) > due_at
+    return out
 
 
 @router.get("", response_model=PaginatedResponse)
@@ -43,7 +52,7 @@ async def list_alerts(
     _=Depends(require_permission("alerts:read")),
     page: int = 1, page_size: int = 25,
     status: str | None = None, severity: str | None = None,
-    assignee_id: UUID | None = None, source_ip: str | None = None,
+    assignee_id: str | None = None, source_ip: str | None = None,
     hostname: str | None = None, search: str | None = None,
     start_time: datetime | None = None, end_time: datetime | None = None,
 ):
@@ -54,8 +63,13 @@ async def list_alerts(
         q = q.where(Alert.status == status)
     if severity:
         q = q.where(Alert.severity == severity)
-    if assignee_id:
-        q = q.where(Alert.assignee_id == assignee_id)
+    if assignee_id == "unassigned":
+        q = q.where(Alert.assignee_id.is_(None))
+    elif assignee_id:
+        try:
+            q = q.where(Alert.assignee_id == UUID(assignee_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="Invalid assignee ID") from exc
     if source_ip:
         q = q.where(Alert.source_ip == source_ip)
     if hostname:
@@ -70,7 +84,7 @@ async def list_alerts(
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
     items = []
     for a in result.scalars().all():
-        out = AlertOut.model_validate(a)
+        out = _apply_sla(AlertOut.model_validate(a), a.created_at, a.severity, a.status)
         out.source_ip_country = lookup_country(a.source_ip)
         items.append(out)
     return PaginatedResponse(total=total, page=page, page_size=page_size, items=items)
@@ -89,7 +103,7 @@ async def get_alert(
     alert = result.scalar_one_or_none()
     if not alert or (group_filter and alert.group_id != group_filter):
         raise HTTPException(status_code=404, detail="Alert not found")
-    out = AlertOut.model_validate(alert)
+    out = _apply_sla(AlertOut.model_validate(alert), alert.created_at, alert.severity, alert.status)
     out.source_ip_country = lookup_country(alert.source_ip)
     return out
 
@@ -142,10 +156,12 @@ async def update_alert(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("alerts:update"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(
-        select(Alert).options(selectinload(Alert.notes)).where(Alert.id == alert_id)
-    )
+    query = select(Alert).options(selectinload(Alert.notes)).where(Alert.id == alert_id)
+    if group_filter is not None:
+        query = query.where(Alert.group_id == group_filter)
+    result = await db.execute(query)
     alert = result.scalar_one_or_none()
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -165,10 +181,10 @@ async def update_alert(
 
     await db.commit()
     await db.refresh(alert)
-    background.add_task(audit_log, db, current_user.id, "alert_updated", "alert", str(alert_id),
+    background.add_task(audit_log, db, current_user, "alert_updated", "alert", str(alert_id),
                         {"status": body.status})
 
-    out = AlertOut.model_validate(alert)
+    out = _apply_sla(AlertOut.model_validate(alert), alert.created_at, alert.severity, alert.status)
     response: dict = out.model_dump()
 
     # FP suggestion: if marking as false_positive, hint a suppression target
@@ -190,8 +206,12 @@ async def add_note(
     alert_id: UUID, body: AlertNoteCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("alerts:update"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(select(Alert).where(Alert.id == alert_id))
+    query = select(Alert).where(Alert.id == alert_id)
+    if group_filter is not None:
+        query = query.where(Alert.group_id == group_filter)
+    result = await db.execute(query)
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Alert not found")
     note = AlertNote(alert_id=alert_id, author_id=current_user.id, content=body.content)
@@ -205,8 +225,14 @@ async def add_note(
 async def list_alert_feedback(
     alert_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
     _=Depends(require_permission("alerts:read")),
 ):
+    alert_query = select(Alert.id).where(Alert.id == alert_id)
+    if group_filter is not None:
+        alert_query = alert_query.where(Alert.group_id == group_filter)
+    if (await db.execute(alert_query)).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
     result = await db.execute(
         select(AiFeedback)
         .where(AiFeedback.entity_type == "alert", AiFeedback.entity_id == alert_id)
@@ -221,8 +247,12 @@ async def submit_alert_feedback(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("alerts:update"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    alert = (await db.execute(select(Alert).where(Alert.id == alert_id))).scalar_one_or_none()
+    query = select(Alert).where(Alert.id == alert_id)
+    if group_filter is not None:
+        query = query.where(Alert.group_id == group_filter)
+    alert = (await db.execute(query)).scalar_one_or_none()
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 

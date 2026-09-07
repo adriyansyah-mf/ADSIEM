@@ -3,9 +3,7 @@ import json
 import uuid
 import structlog
 from datetime import datetime, timezone
-from typing import Any
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
 from worker.database import AsyncSessionLocal
 from worker.redis_client import get_redis
 from worker.config import AI_ANALYSIS_QUEUE
@@ -17,6 +15,21 @@ from worker.settings_cache import get_setting
 log = structlog.get_logger()
 
 _SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
+
+
+async def _choose_least_loaded_analyst(group_id: str) -> uuid.UUID | None:
+    """Return the active analyst with the fewest open alerts when auto-assign is enabled."""
+    if (await get_setting("auto_assign_alerts", "false")).lower() != "true":
+        return None
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(text(
+            "SELECT u.id FROM users u "
+            "LEFT JOIN alerts a ON a.assignee_id = u.id AND a.status IN ('new', 'in_progress') "
+            "WHERE u.is_active = TRUE AND u.group_id = :group_id "
+            "GROUP BY u.id ORDER BY COUNT(a.id), u.id LIMIT 1"
+        ), {"group_id": group_id})
+        row = result.first()
+    return uuid.UUID(str(row[0])) if row else None
 
 
 def _severity_gte(sev: str, minimum: str) -> bool:
@@ -66,7 +79,7 @@ async def _is_suppressed(
             from sqlalchemy import or_
             row = (await db.execute(
                 select(AlertSuppression).where(
-                    AlertSuppression.is_active == True,
+                    AlertSuppression.is_active,
                     AlertSuppression.entity_type == etype,
                     AlertSuppression.entity_value == evalue,
                     or_(AlertSuppression.group_id == group_id,
@@ -98,7 +111,6 @@ async def create_alert(
     from datetime import timedelta
     dedup_window = datetime.now(timezone.utc) - timedelta(minutes=30)
     async with AsyncSessionLocal() as db:
-        from sqlalchemy import or_
         dedup_q = (
             select(Alert)
             .where(Alert.title == rule_match["title"])
@@ -106,6 +118,8 @@ async def create_alert(
             .where(Alert.status.in_(["new", "in_progress"]))
             .where(Alert.created_at >= dedup_window)
         )
+        if rule_match.get("correlation_key"):
+            dedup_q = dedup_q.where(Alert.correlation_key == rule_match["correlation_key"])
         if source_ip:
             dedup_q = dedup_q.where(Alert.source_ip == source_ip)
         elif hostname:
@@ -119,16 +133,25 @@ async def create_alert(
             return existing.id
 
     async with AsyncSessionLocal() as db:
+        try:
+            originating_rule_id = uuid.UUID(str(rule_match.get("id")))
+        except (TypeError, ValueError, AttributeError):
+            originating_rule_id = None
+        assignee_id = await _choose_least_loaded_analyst(group_id)
         alert = Alert(
             title=rule_match["title"],
             severity=rule_match["level"],
             status="new",
-            rule_id=None,
+            rule_id=originating_rule_id,
+            correlation_id=rule_match.get("correlation_id"),
+            correlation_key=rule_match.get("correlation_key"),
+            source_event_ids=rule_match.get("source_event_ids", []),
             event_id=event_id,
             agent_id=agent_id,
             group_id=group_id,
             source_ip=source_ip,
             hostname=hostname,
+            assignee_id=assignee_id,
         )
         db.add(alert)
         await db.flush()
@@ -147,8 +170,8 @@ async def create_alert(
 
         result = await db.execute(
             select(WebhookConfig).where(
-                WebhookConfig.is_enabled == True,
-                (WebhookConfig.group_id == None) | (WebhookConfig.group_id == group_id)
+                WebhookConfig.is_enabled,
+                (WebhookConfig.group_id.is_(None)) | (WebhookConfig.group_id == group_id)
             )
         )
         webhooks = result.scalars().all()
@@ -156,6 +179,7 @@ async def create_alert(
             db.add(WebhookDelivery(
                 alert_id=alert_id,
                 webhook_config_id=webhook.id,
+                group_id=group_id,
                 payload=payload,
                 status="pending",
                 attempts=0,
@@ -191,6 +215,7 @@ async def create_alert(
                 "source_ip": source_ip,
                 "hostname": hostname,
                 "decoded_fields": rule_match.get("matched_fields", {}),
+                "sigma_rule": rule_match.get("sigma_rule", {}),
                 "group_id": group_id,
             }))
             log.info("ai_queued", alert_id=str(alert_id),
@@ -241,8 +266,8 @@ async def dispatch_case_webhooks(
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(WebhookConfig).where(
-                WebhookConfig.is_enabled == True,
-                (WebhookConfig.group_id == None) | (WebhookConfig.group_id == group_id)
+                WebhookConfig.is_enabled,
+                (WebhookConfig.group_id.is_(None)) | (WebhookConfig.group_id == group_id)
             )
         )
         webhooks = result.scalars().all()
@@ -261,6 +286,7 @@ async def dispatch_case_webhooks(
             db.add(WebhookDelivery(
                 alert_id=alert_id,
                 webhook_config_id=webhook.id,
+                group_id=group_id,
                 payload=payload,
                 status="pending",
                 attempts=0,

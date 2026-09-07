@@ -1,16 +1,17 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
-import { Terminal, Play, Users, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Clock } from 'lucide-react'
+import { Terminal, Play, Users, Download, ChevronDown, ChevronRight, CheckCircle, XCircle, Loader2, Clock, ClipboardList, FileSearch, FolderOpen, ListTree, Network, ScanSearch, ScrollText, ShieldCheck, type LucideIcon } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { useTasks, useCreateTask, useFleetHunts, useCreateFleetHunt } from '@/hooks/useTasks'
 import { useBuiltinArtifacts } from '@/hooks/useArtifacts'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { Agent, AgentTask } from '@/types'
 
-const TASK_ICONS: Record<string, string> = {
-  process_list: '⚙️', netstat: '🌐', persistence_check: '🔩',
-  users_list: '👤', dmesg_tail: '📟', open_files: '📂',
-  file_list: '🗂️', file_get: '💾', yara_scan: '🔍',
+const TASK_ICONS: Record<string, LucideIcon> = {
+  process_list: ListTree, netstat: Network, persistence_check: ShieldCheck,
+  users_list: Users, dmesg_tail: ScrollText, open_files: FolderOpen,
+  file_list: FileSearch, file_get: Download, yara_scan: ScanSearch,
 }
 
 function StatusIcon({ status }: { status: string }) {
@@ -37,7 +38,7 @@ function TaskResult({ task }: { task: AgentTask }) {
           </tr></thead>
           <tbody>{(Array.isArray(result) ? result : []).map((p: typeof procs[0], i: number) => (
             <tr key={i} className="border-b border-border/40 hover:bg-muted/20">
-              <td className="py-0.5 pr-3 text-accent-cyan">{p.pid}</td>
+              <td className="py-0.5 pr-3 text-[var(--accent-blue)]">{p.pid}</td>
               <td className="py-0.5 pr-3 font-bold">{p.name}</td>
               <td className="py-0.5 pr-3">{p.state}</td>
               <td className="py-0.5 pr-3">{p.uid}</td>
@@ -60,7 +61,7 @@ function TaskResult({ task }: { task: AgentTask }) {
         </tr></thead>
         <tbody>{(Array.isArray(result) ? result : []).map((u: typeof users[0], i: number) => (
           <tr key={i} className="border-b border-border/40">
-            <td className="py-0.5 pr-3 font-bold text-accent-cyan">{u.username}</td>
+            <td className="py-0.5 pr-3 font-bold text-[var(--accent-blue)]">{u.username}</td>
             <td className="py-0.5 pr-3">{u.uid}</td><td className="py-0.5 pr-3">{u.gid}</td>
             <td className="py-0.5 pr-3">{u.home_dir}</td><td className="py-0.5">{u.shell}</td>
           </tr>
@@ -83,7 +84,7 @@ function TaskResult({ task }: { task: AgentTask }) {
               <td className="py-0.5 pr-3 text-muted-foreground">{f.mode}</td>
               <td className="py-0.5 pr-3">{f.size}</td>
               <td className="py-0.5 pr-3">{f.mod_time?.slice(0, 16)}</td>
-              <td className={`py-0.5 ${f.is_dir ? 'text-blue-400 font-bold' : 'text-accent-cyan'}`}>{f.path}</td>
+              <td className={`py-0.5 ${f.is_dir ? 'text-blue-400 font-bold' : 'text-[var(--accent-blue)]'}`}>{f.path}</td>
             </tr>
           ))}</tbody>
         </table>
@@ -123,7 +124,7 @@ function TaskResult({ task }: { task: AgentTask }) {
             <p className="text-xs font-bold uppercase text-muted-foreground mb-1">{cat.replace(/_/g, ' ')}</p>
             {(Array.isArray(result) ? result as typeof items : []).filter(i => i.category === cat).map((item, i) => (
               <details key={i} className="mb-1">
-                <summary className="text-xs font-mono cursor-pointer text-accent-cyan hover:underline">{item.path}</summary>
+                <summary className="text-xs font-mono cursor-pointer text-[var(--accent-blue)] hover:underline">{item.path}</summary>
                 <pre className="text-xs bg-muted/20 p-2 mt-1 rounded max-h-40 overflow-auto whitespace-pre-wrap">{item.content || '(empty)'}</pre>
               </details>
             ))}
@@ -150,7 +151,7 @@ function TaskResult({ task }: { task: AgentTask }) {
             <div className="max-h-40 overflow-auto space-y-0.5">
               {conns.map((c, i) => (
                 <div key={i} className="flex gap-3 text-xs font-mono">
-                  <span className="text-accent-cyan">{c.local}</span>
+                  <span className="text-[var(--accent-blue)]">{c.local}</span>
                   <span className="text-muted-foreground">→</span>
                   <span>{c.remote}</span>
                   <span className="text-muted-foreground">{c.state}</span>
@@ -170,7 +171,7 @@ function TaskResult({ task }: { task: AgentTask }) {
 function TaskCard({ task }: { task: AgentTask }) {
   const [open, setOpen] = useState(task.status === 'done' || task.status === 'failed')
   return (
-    <div className="rounded border border-border bg-card overflow-hidden">
+    <div className="enterprise-panel rounded border border-border bg-card overflow-hidden">
       <button className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/20 text-left" onClick={() => setOpen(x => !x)}>
         <StatusIcon status={task.status} />
         <span className="text-xs font-mono font-bold">{task.task_type}</span>
@@ -228,13 +229,10 @@ export default function LiveResponsePage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center gap-2">
-        <Terminal size={18} />
-        <h1 className="text-xl font-bold">Live Response</h1>
-      </div>
+      <PageHeader title={<><Terminal aria-hidden="true" size={18} /> Live Response</>} />
 
       {/* Target selector — one specific agent, or every online agent */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div className="enterprise-panel rounded-lg border border-border bg-card p-4 space-y-3">
         <p className="text-xs text-muted-foreground uppercase font-semibold">Target</p>
         <select value={selectedAgent} onChange={e => setSelectedAgent(e.target.value)}
           className="w-full bg-muted border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary sm:max-w-xs">
@@ -246,11 +244,12 @@ export default function LiveResponsePage() {
       </div>
 
       {/* Collections */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div className="enterprise-panel rounded-lg border border-border bg-card p-4 space-y-3">
         <p className="text-xs text-muted-foreground uppercase font-semibold">Collections</p>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {builtins.map(art => (
-            <div key={art.task_type} className="space-y-1">
+          {builtins.map(art => {
+            const TaskIcon = TASK_ICONS[art.task_type] ?? ClipboardList
+            return <div key={art.task_type} className="space-y-1">
               {/* param inputs for tasks that need them */}
               {(art.task_type === 'file_list' || art.task_type === 'file_get') && (
                 <input
@@ -266,17 +265,17 @@ export default function LiveResponsePage() {
                 title={art.description}
                 className="w-full flex items-center gap-1.5 px-3 py-2 rounded border border-border hover:border-primary hover:text-primary transition-colors text-sm disabled:opacity-50"
               >
-                <span>{TASK_ICONS[art.task_type] ?? '📋'}</span>
+                <TaskIcon aria-hidden="true" size={15} />
                 <span className="truncate">{art.name}</span>
                 {justRan === art.task_type && <CheckCircle size={12} className="text-emerald-400 ml-auto shrink-0" />}
               </button>
             </div>
-          ))}
+          })}
         </div>
       </div>
 
       {/* Fleet Hunt — named, tracked runs across all online agents */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div className="enterprise-panel rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="flex items-center gap-2">
           <Users size={14} />
           <p className="text-xs text-muted-foreground uppercase font-semibold">Fleet Hunt — Tracked Run on All Online Agents</p>

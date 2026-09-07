@@ -6,7 +6,7 @@ from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group
@@ -27,7 +27,7 @@ async def list_tokens(
     current_user: User = Depends(get_current_user),
     group_id: Optional[str] = Depends(get_scoped_group),
 ):
-    q = select(EnrollmentToken).where(EnrollmentToken.is_active == True).order_by(EnrollmentToken.created_at.desc())
+    q = select(EnrollmentToken).where(EnrollmentToken.is_active.is_(True)).order_by(EnrollmentToken.created_at.desc())
     if group_id is not None:
         q = q.where(EnrollmentToken.group_id == group_id)
     rows = (await db.execute(q)).scalars().all()
@@ -72,8 +72,12 @@ async def revoke_token(
     token_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    group_id: Optional[str] = Depends(get_scoped_group),
 ):
-    tok = await db.get(EnrollmentToken, uuid.UUID(token_id))
+    query = select(EnrollmentToken).where(EnrollmentToken.id == uuid.UUID(token_id))
+    if group_id is not None:
+        query = query.where(EnrollmentToken.group_id == group_id)
+    tok = (await db.execute(query)).scalar_one_or_none()
     if not tok:
         raise HTTPException(status_code=404, detail="Token not found")
     tok.is_active = False

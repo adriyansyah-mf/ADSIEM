@@ -1,0 +1,62 @@
+=== Manual live HTTP QA: tamper-evident audit chain (server-api container, via nginx on 127.0.0.1) ===
+
+Migration applied via `docker compose restart server-api` against the live dev DB (268
+pre-existing audit_logs rows, no prior chain columns).
+
+1. Post-migration state:
+   $ SELECT count(*) FROM audit_logs WHERE chain_hash IS NULL;  -> 0   (all 268 rows backfilled)
+   $ SELECT count(*) FROM audit_logs;                            -> 268
+   $ SELECT group_id, chain_hash FROM audit_chain_heads;
+     __unscoped__ | 339b205d789a83f571fba6488d343c7add0cff4715a8e6f0323d50b3e1b245
+     default      | 3a8473d0cc3e8e4a9fcb636f5ae90bedf895e64ca346da34f5d204bad63a268
+   Two tenant chains reconstructed from history: 69 rows in "__unscoped__" (agent_enrolled /
+   login_failed events with no resolvable actor), 199 rows in "default" (all resolvable
+   actor_id -> users.group_id lookups), 268 total. Sequential previous_hash/chain_hash
+   linkage spot-checked directly in Postgres and confirmed correct (row N's chain_hash ==
+   row N+1's previous_hash).
+
+2. GET /api/audit-logs/verify (superadmin, no group_id param -> defaults to "__unscoped__"):
+   {"group_id": "__unscoped__", "verified": true, "verified_count": 69, "total_count": 69,
+    "head_hash_prefix": "339b205d789a", "broken_at_id": null, "broken_at_timestamp": null}
+
+3. GET /api/audit-logs/verify?group_id=default:
+   {"group_id": "default", "verified": true, "verified_count": 201, "total_count": 201,
+    "head_hash_prefix": "dc42e0c0a755", ...}
+   69 + 201 = 268, matching the full pre-existing row count exactly — no rows lost or
+   double-counted across the two reconstructed tenant chains.
+
+4. Live tamper test: directly UPDATEd a historical row's resource_id via psql (row ~100 of
+   201 in the "default" chain, an old login_success entry), bypassing the application entirely:
+   GET /api/audit-logs/verify?group_id=default ->
+   {"verified": false, "verified_count": 100, "total_count": 202, "broken_at_id":
+    "47cb84e3-4c76-4219-ad6a-eeef998ce05c", "broken_at_timestamp": "2026-05-22T04:23:31..."}
+   broken_at_id matched the exact tampered row; the 100 entries before it still verified
+   correctly (the tamper does not retroactively invalidate history before it). Row restored
+   to its original value afterward; re-verified true (203/203, chain grew by one from a
+   live login that happened during the test window).
+
+5. Live append proof: triggered a fresh `POST /api/auth/login` (admin) mid-session; the
+   "default" chain's row count increased by exactly one on the next verify call, and
+   `verified` stayed true — proving new events append correctly onto the reconstructed
+   historical chain, not a separate/disconnected segment.
+
+6. Unauthenticated GET /api/audit-logs/verify -> 401 (no credentials).
+
+7. UI (dashboard/src/pages/AuditLogsPage.tsx), captured live via a temporary Vite dev server
+   proxied to this container, driven by the `browse` skill:
+   - Verified state: green "Audit chain VERIFIED (69/69 entries verified, tenant
+     "__unscoped__")" banner with head-hash prefix, at 1280/768/375px.
+   - Broken state: reproduced live by tampering one "__unscoped__" row's `action` via psql
+     (recorded resource_type/resource_id/detail beforehand to restore it exactly afterward);
+     UI correctly rendered a red "Audit chain BROKEN (30/69 entries verified...)" banner with
+     the first-discrepancy timestamp and an explicit "read-only, cannot repair" notice. Row
+     restored afterward; re-verified true (69/69) via the API before moving on.
+   - Table's Actor column correctly renders "(system)" for historical rows whose actor_id
+     became NULL via ON DELETE SET NULL after their originating (test) user account was later
+     deleted — a real, previously-unnoticed artifact of this dev database's history, not a
+     bug introduced by this task.
+
+Permission enforcement (audit:verify) relies on the same `require_permission` dependency
+already covered by tests/server-api/test_rbac.py; a live non-superadmin rejection was not
+independently re-created for this task (the only interactive account in this dev DB is
+superadmin), consistent with the same documented judgment call made in the Task 3 report.

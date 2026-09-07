@@ -108,6 +108,7 @@ async def analyze_alert_with_ai(
     source_ip: str | None,
     hostname: str | None,
     decoded_fields: dict,
+    sigma_context: dict | None = None,
     enrichment=None,
     heuristic_mitre: list[str] | None = None,
     search_results: list[dict] | None = None,
@@ -137,6 +138,14 @@ async def analyze_alert_with_ai(
         enrichment_section = "\nTHREAT INTEL: Not available — use alert context for analysis."
 
     mitre_hint = f"\nHeuristic MITRE: {', '.join(heuristic_mitre)}" if heuristic_mitre else ""
+
+    sigma_section = ""
+    if sigma_context:
+        sigma_section = (
+            "\nSIGMA RULE THAT GENERATED THIS ALERT:\n"
+            f"{json.dumps(sigma_context, default=str)[:1800]}\n"
+            "Explain which rule intent is supported by the observed fields and assess false-positive risk."
+        )
 
     ioc_list = ""
     if enrichment and enrichment.iocs:
@@ -184,7 +193,7 @@ Title    : {title}
 Severity : {severity}
 Source IP: {source_ip or 'unknown'}
 Hostname : {hostname or 'unknown'}
-Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{similar_cases_section}{sop_section}{feedback_section}
+Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{sigma_section}{enrichment_section}{similar_cases_section}{sop_section}{feedback_section}
 
 Perform triage and provide your verdict as an L1 analyst."""
 

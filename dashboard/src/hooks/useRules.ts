@@ -54,3 +54,74 @@ export function useTestRule() {
     onError: () => emitToast('Rule test failed', 'error'),
   })
 }
+
+export function useImportRules() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (content: string) => api.post('/api/rules/import', { content }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rules'] }),
+  })
+}
+
+export function useImportRulesFromRepository() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (url: string) => api.post('/api/rules/import/repository', { url }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rules'] }),
+  })
+}
+
+export function useExportRule() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await api.get(`/api/rules/${id}/export`, { responseType: 'blob' })
+      const url = URL.createObjectURL(response.data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `sigma-rule-${id}.yml`
+      link.click()
+      URL.revokeObjectURL(url)
+    },
+  })
+}
+
+export function useApproveRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/api/rules/${id}/approve`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rules'] }),
+  })
+}
+
+export function useRuleQuality() {
+  return useMutation({
+    mutationFn: (id: string) => api.get(`/api/rules/${id}/quality`).then(r => r.data as { score: number; recommendation: string }),
+    onSuccess: result => emitToast(`Rule quality: ${result.score}/100`, result.score >= 80 ? 'success' : 'error'),
+  })
+}
+
+export function useRollbackRule() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version: number }) => api.post(`/api/rules/${id}/rollback/${version}`).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rules'] })
+      emitToast('Rule rolled back as a new version', 'success')
+    },
+  })
+}
+
+export function useRuleRevisions(id: string | null) {
+  return useQuery<Array<{ version: number; content: string; created_at: string }> >({
+    queryKey: ['rule-revisions', id],
+    queryFn: () => api.get(`/api/rules/${id}/revisions`).then(r => r.data),
+    enabled: Boolean(id),
+  })
+}
+
+export function useRuleDiff() {
+  return useMutation({
+    mutationFn: ({ id, fromVersion, toVersion }: { id: string; fromVersion: number; toVersion: number }) =>
+      api.get(`/api/rules/${id}/diff`, { params: { from_version: fromVersion, to_version: toVersion } }).then(r => r.data as { diff: string }),
+  })
+}

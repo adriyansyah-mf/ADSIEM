@@ -8,6 +8,12 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
     JWT_SECRET: str  # required — must be set via JWT_SECRET environment variable
     JWT_ALGORITHM: str = "HS256"
+    # Signs chain-of-custody incident exports (HMAC-SHA256). Deliberately
+    # separate from JWT_SECRET (key separation: a JWT leak must not also let
+    # someone forge export signatures). Falls back to a JWT_SECRET-derived
+    # key only when unset, so exports work out of the box in dev without a
+    # second required secret, but production deployments should set it.
+    EXPORT_SIGNING_SECRET: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     AGENT_ENROLLMENT_TOKEN: str = "bootstrap-token"
@@ -16,6 +22,7 @@ class Settings(BaseSettings):
     REDIS_CONSUMER_GROUP: str = "siem-workers"
     ELASTICSEARCH_URL: str = "http://elasticsearch:9200"
     NINEROUTER_BASE_URL: str = "http://9router:20128/v1"
+    ENVIRONMENT: str = "development"  # set to "production" to enable HSTS from the API layer
 
     @field_validator("JWT_SECRET")
     @classmethod

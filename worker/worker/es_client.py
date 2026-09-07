@@ -102,3 +102,48 @@ async def delete_by_query(query: dict) -> int:
     resp = await client.post(f"/{LOGS_INDEX}/_delete_by_query", json={"query": query})
     resp.raise_for_status()
     return resp.json().get("deleted", 0)
+
+
+async def count_by_query(query: dict) -> int:
+    client = _get_client()
+    resp = await client.post(f"/{LOGS_INDEX}/_count", json={"query": query})
+    resp.raise_for_status()
+    return resp.json()["count"]
+
+
+async def distinct_group_ids() -> list[str]:
+    """Every tenant with at least one indexed log document."""
+    client = _get_client()
+    resp = await client.post(f"/{LOGS_INDEX}/_search", json={
+        "size": 0,
+        "aggs": {"by_group": {"terms": {"field": "group_id", "size": 10000}}},
+    })
+    resp.raise_for_status()
+    buckets = resp.json().get("aggregations", {}).get("by_group", {}).get("buckets", [])
+    return [b["key"] for b in buckets]
+
+
+async def find_quota_cutoff(group_id: str, keep_count: int) -> str | None:
+    """Return the `created_at` of the boundary document when trimming a
+    tenant to its `keep_count` most recent documents -- i.e. every document
+    at or before this timestamp is excess and should be deleted. Returns
+    None if the tenant is at or under its quota already.
+
+    Uses a single from/size lookup (not deep pagination of a UI listing, so
+    Elasticsearch's default 10,000-result window is an acceptable bound
+    here, unlike the search_after cursor used for the /api/logs listing)."""
+    total = await count_by_query({"term": {"group_id": group_id}})
+    excess = total - keep_count
+    if excess <= 0:
+        return None
+    client = _get_client()
+    resp = await client.post(f"/{LOGS_INDEX}/_search", json={
+        "query": {"term": {"group_id": group_id}},
+        "sort": [{"created_at": "asc"}],
+        "from": excess - 1,
+        "size": 1,
+        "_source": ["created_at"],
+    })
+    resp.raise_for_status()
+    hits = resp.json()["hits"]["hits"]
+    return hits[0]["_source"]["created_at"] if hits else None

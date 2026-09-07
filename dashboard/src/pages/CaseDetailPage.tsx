@@ -11,13 +11,14 @@ import MarkdownNote from '@/components/MarkdownNote'
 import AttackGraph from '@/components/AttackGraph'
 import AlertDetailModal from '@/components/AlertDetailModal'
 import AiFeedbackWidget from '@/components/AiFeedbackWidget'
+import { BrainCircuit } from 'lucide-react'
 
 const severityColors = {
-  critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
-  high:     { bg: 'rgba(255,107,0,0.15)', border: '#ff6b00', color: '#ff6b00' },
-  medium:   { bg: 'rgba(255,215,0,0.1)',  border: '#ffd700', color: '#ffd700' },
-  low:      { bg: 'rgba(0,255,136,0.1)',  border: '#00ff88', color: '#00ff88' },
-  info:     { bg: 'rgba(0,212,255,0.1)',  border: '#00d4ff', color: '#00d4ff' },
+  critical: { bg: 'rgba(255,59,92,0.15)', border: '#FF3B5C', color: '#FF3B5C' },
+  high:     { bg: 'rgba(255,122,69,0.15)', border: '#FF7A45', color: '#FF7A45' },
+  medium:   { bg: 'rgba(255,197,61,0.1)',  border: '#FFC53D', color: '#FFC53D' },
+  low:      { bg: 'rgba(46,212,122,0.1)',  border: '#2ED47A', color: '#2ED47A' },
+  info:     { bg: 'rgba(0,217,192,0.1)',  border: '#00D9C0', color: '#00D9C0' },
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -31,7 +32,7 @@ function SeverityBadge({ severity }: { severity: string }) {
       border: `1px solid ${c.border}`,
       background: c.bg,
       color: c.color,
-      fontFamily: 'Rajdhani, sans-serif',
+      fontFamily: 'IBM Plex Sans, sans-serif',
       fontWeight: 700,
       fontSize: '12px',
       letterSpacing: '1px',
@@ -60,12 +61,12 @@ function Box({ title, children, actions }: { title: string; children: React.Reac
         marginBottom: '12px',
       }}>
         <div style={{
-          fontFamily: 'Rajdhani, sans-serif',
+          fontFamily: 'IBM Plex Sans, sans-serif',
           fontSize: '11px',
           fontWeight: 700,
           letterSpacing: '2px',
           textTransform: 'uppercase',
-          color: 'var(--accent-cyan)',
+          color: 'var(--accent-blue)',
         }}>
           {title}
         </div>
@@ -87,13 +88,13 @@ function ActionBtn({ label, onClick, color, loading, disabled }: { label: string
         border: `1px solid ${color}`,
         background: `${color}18`,
         color,
-        fontFamily: 'Rajdhani, sans-serif',
+        fontFamily: 'IBM Plex Sans, sans-serif',
         fontWeight: 700,
         fontSize: '12px',
         letterSpacing: '1px',
         cursor: loading || disabled ? 'not-allowed' : 'pointer',
         opacity: loading || disabled ? 0.6 : 1,
-        transition: 'all 0.15s',
+        transition: 'opacity 0.15s',
         width: '100%',
         marginBottom: '6px',
         textAlign: 'left',
@@ -107,13 +108,13 @@ function ActionBtn({ label, onClick, color, loading, disabled }: { label: string
 function AttackTimeline({ items }: { items: any[] }) {
   if (!items || items.length === 0) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', padding: '8px 0' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', padding: '8px 0' }}>
         No related events found in ±24h window.
       </div>
     )
   }
   const sevColor = (s: string): string =>
-    ({ critical: '#ff2244', high: '#ff6b00', medium: '#ffd700', low: '#00ff88' } as Record<string, string>)[s] ?? '#00d4ff'
+    ({ critical: '#FF3B5C', high: '#FF7A45', medium: '#FFC53D', low: '#2ED47A' } as Record<string, string>)[s] ?? '#00D9C0'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -134,21 +135,21 @@ function AttackTimeline({ items }: { items: any[] }) {
           {/* Event content */}
           <div style={{ flex: 1, paddingBottom: 10 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                 {new Date(item.ts).toLocaleString('en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
               </span>
               {item.type === 'alert' && (
-                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: `${sevColor(item.severity)}22`, color: sevColor(item.severity), fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase' }}>
+                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: `${sevColor(item.severity)}22`, color: sevColor(item.severity), fontFamily: 'IBM Plex Sans, sans-serif', textTransform: 'uppercase' }}>
                   {item.severity}
                 </span>
               )}
               {item.type === 'note' && (
-                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: 'rgba(100,116,139,0.15)', color: '#64748b', fontFamily: 'Share Tech Mono, monospace' }}>
+                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: 'rgba(100,116,139,0.15)', color: '#64748b', fontFamily: 'IBM Plex Sans, sans-serif' }}>
                   NOTE
                 </span>
               )}
               {item.is_this_case && (
-                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: 'rgba(0,212,255,0.15)', color: '#00d4ff', fontFamily: 'Share Tech Mono, monospace' }}>
+                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: 'rgba(0,217,192,0.15)', color: '#00D9C0', fontFamily: 'IBM Plex Sans, sans-serif' }}>
                   THIS CASE
                 </span>
               )}
@@ -157,7 +158,7 @@ function AttackTimeline({ items }: { items: any[] }) {
               {item.title}
             </div>
             {item.source_ip && (
-              <div style={{ fontSize: 10, fontFamily: 'Share Tech Mono, monospace', color: 'var(--accent-cyan)', marginTop: 1 }}>
+              <div style={{ fontSize: 10, fontFamily: 'IBM Plex Sans, sans-serif', color: 'var(--accent-blue)', marginTop: 1 }}>
                 {item.source_ip}
               </div>
             )}
@@ -227,7 +228,7 @@ export default function CaseDetailPage() {
 
   if (isLoading) {
     return (
-      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-muted)', padding: '40px', textAlign: 'center' }}>
+      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)', padding: '40px', textAlign: 'center' }}>
         LOADING CASE...
       </div>
     )
@@ -235,7 +236,7 @@ export default function CaseDetailPage() {
 
   if (!caseData) {
     return (
-      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--accent-red)', padding: '40px', textAlign: 'center' }}>
+      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--accent-red)', padding: '40px', textAlign: 'center' }}>
         CASE NOT FOUND
       </div>
     )
@@ -254,7 +255,7 @@ export default function CaseDetailPage() {
   )
 
   const statusColor = {
-    open: 'var(--accent-cyan)',
+    open: 'var(--accent-blue)',
     in_review: 'var(--accent-yellow)',
     escalated: 'var(--accent-orange)',
     resolved: 'var(--accent-green)',
@@ -276,7 +277,7 @@ export default function CaseDetailPage() {
             border: '1px solid var(--border)',
             background: 'transparent',
             color: 'var(--text-secondary)',
-            fontFamily: 'Rajdhani, sans-serif',
+            fontFamily: 'IBM Plex Sans, sans-serif',
             fontWeight: 600,
             fontSize: '12px',
             letterSpacing: '1px',
@@ -288,14 +289,14 @@ export default function CaseDetailPage() {
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <h1 style={{
-            fontFamily: 'Exo 2, sans-serif',
+            fontFamily: 'IBM Plex Sans, sans-serif',
             fontWeight: 700,
             fontSize: '20px',
             color: 'var(--text-primary)',
             margin: 0,
             flex: 1,
           }}>
-            {caseData.created_by_ai && <span style={{ marginRight: '8px' }}>🤖</span>}
+            {caseData.created_by_ai && <BrainCircuit aria-label="AI generated" size={18} style={{ marginRight: '8px' }} />}
             {caseData.title}
           </h1>
           <SeverityBadge severity={caseData.severity} />
@@ -305,7 +306,7 @@ export default function CaseDetailPage() {
             borderRadius: '4px',
             border: `1px solid ${statusColor}`,
             color: statusColor,
-            fontFamily: 'Rajdhani, sans-serif',
+            fontFamily: 'IBM Plex Sans, sans-serif',
             fontWeight: 700,
             fontSize: '12px',
             letterSpacing: '1px',
@@ -327,7 +328,7 @@ export default function CaseDetailPage() {
               <div>
                 <MarkdownNote
                   content={caseData.ai_reasoning}
-                  style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '12px' }}
+                  style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '12px' }}
                 />
                 {(() => {
                   const pct = caseData.ai_confidence != null ? caseData.ai_confidence : null
@@ -343,13 +344,13 @@ export default function CaseDetailPage() {
                       background: `${color}12`,
                       border: `1px solid ${color}44`,
                     }}>
-                      <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
+                      <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
                         AI CONFIDENCE
                       </span>
                       <div style={{ flex: 1, height: '4px', borderRadius: '2px', background: 'var(--border)', overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: `${Math.round(pct * 100)}%`, background: color, borderRadius: '2px' }} />
                       </div>
-                      <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color }}>{Math.round(pct * 100)}%</span>
+                      <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color }}>{Math.round(pct * 100)}%</span>
                     </div>
                   )
                 })()}
@@ -364,7 +365,7 @@ export default function CaseDetailPage() {
                 )}
               </div>
             ) : (
-              <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
+              <div style={{ color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px' }}>
                 Pending AI analysis
               </div>
             )}
@@ -381,10 +382,10 @@ export default function CaseDetailPage() {
                     background: 'var(--bg-panel)',
                     border: '1px solid var(--border)',
                   }}>
-                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '3px' }}>
+                    <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '3px' }}>
                       {key === 'overall_risk' ? 'TI RISK SCORE' : key.replace(/_/g, ' ')}
                     </div>
-                    <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: key === 'overall_risk' ? (Number(val) >= 0.75 ? 'var(--accent-red)' : Number(val) >= 0.45 ? 'var(--accent-orange)' : 'var(--accent-yellow)') : 'var(--accent-cyan)', wordBreak: 'break-all' }}>
+                    <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: key === 'overall_risk' ? (Number(val) >= 0.75 ? 'var(--accent-red)' : Number(val) >= 0.45 ? 'var(--accent-orange)' : 'var(--accent-yellow)') : 'var(--accent-blue)', wordBreak: 'break-all' }}>
                       {key === 'overall_risk' ? `${Math.round(Number(val) * 100)}%` : Array.isArray(val)
                         ? (val as unknown[]).map((item, i) =>
                             typeof item === 'object' && item !== null
@@ -415,15 +416,15 @@ export default function CaseDetailPage() {
                     background: 'var(--bg-panel)',
                     border: '1px solid var(--border)',
                   }}>
-                    <div style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                    <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>
                       {r.title}
                     </div>
-                    <div style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                       {r.content}
                     </div>
                     {r.url && (
                       <a href={r.url} target="_blank" rel="noopener noreferrer"
-                        style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--accent-cyan)', textDecoration: 'none', marginTop: '4px', display: 'block' }}>
+                        style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--accent-blue)', textDecoration: 'none', marginTop: '4px', display: 'block' }}>
                         {r.url}
                       </a>
                     )}
@@ -451,26 +452,26 @@ export default function CaseDetailPage() {
                     display: 'inline-block',
                     padding: '2px 8px',
                     borderRadius: '3px',
-                    border: `1px solid ${severityColors[alertData.severity as keyof typeof severityColors]?.border ?? '#00d4ff'}`,
+                    border: `1px solid ${severityColors[alertData.severity as keyof typeof severityColors]?.border ?? '#00D9C0'}`,
                     background: severityColors[alertData.severity as keyof typeof severityColors]?.bg ?? 'transparent',
-                    color: severityColors[alertData.severity as keyof typeof severityColors]?.color ?? '#00d4ff',
-                    fontFamily: 'Rajdhani, sans-serif',
+                    color: severityColors[alertData.severity as keyof typeof severityColors]?.color ?? '#00D9C0',
+                    fontFamily: 'IBM Plex Sans, sans-serif',
                     fontWeight: 700,
                     fontSize: '11px',
                     textTransform: 'uppercase',
                   }}>
                     {alertData.severity}
                   </span>
-                  <span style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>
+                  <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>
                     {alertData.title}
                   </span>
                 </div>
                 {alertData.source_ip && (
-                  <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)', marginTop: '6px' }}>
+                  <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-blue)', marginTop: '6px' }}>
                     SRC: {alertData.source_ip}
                   </div>
                 )}
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
                   {format(new Date(alertData.created_at), 'yyyy-MM-dd HH:mm:ss')}
                 </div>
               </div>
@@ -485,7 +486,7 @@ export default function CaseDetailPage() {
           <Box title="Timeline / Notes">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
               {sortedNotes.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>No notes yet</div>
+                <div style={{ color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px' }}>No notes yet</div>
               ) : sortedNotes.map(note => (
                 <div key={note.id} style={{
                   padding: '10px',
@@ -494,16 +495,16 @@ export default function CaseDetailPage() {
                   border: '1px solid var(--border)',
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 600, fontSize: '11px', color: note.is_ai_generated ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>
-                      {note.is_ai_generated ? '🤖 AI' : note.author_id ?? 'System'}
+                    <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '11px', color: note.is_ai_generated ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>
+                      {note.is_ai_generated ? 'AI analyst' : note.author_id ?? 'System'}
                     </span>
-                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+                    <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
                       {format(new Date(note.created_at), 'yyyy-MM-dd HH:mm:ss')}
                     </span>
                   </div>
                   <MarkdownNote
                     content={note.content}
-                    style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)' }}
+                    style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px', color: 'var(--text-primary)' }}
                   />
                 </div>
               ))}
@@ -520,11 +521,10 @@ export default function CaseDetailPage() {
                   border: '1px solid var(--border)',
                   borderRadius: '4px',
                   color: 'var(--text-primary)',
-                  fontFamily: 'Exo 2, sans-serif',
+                  fontFamily: 'IBM Plex Sans, sans-serif',
                   fontSize: '13px',
                   padding: '8px 10px',
                   resize: 'vertical',
-                  outline: 'none',
                 }}
               />
               <button
@@ -533,10 +533,10 @@ export default function CaseDetailPage() {
                 style={{
                   padding: '8px 16px',
                   borderRadius: '4px',
-                  border: '1px solid var(--accent-cyan)',
-                  background: 'rgba(0,212,255,0.15)',
-                  color: 'var(--accent-cyan)',
-                  fontFamily: 'Rajdhani, sans-serif',
+                  border: '1px solid var(--accent-blue)',
+                  background: 'rgba(0,217,192,0.15)',
+                  color: 'var(--accent-blue)',
+                  fontFamily: 'IBM Plex Sans, sans-serif',
                   fontWeight: 700,
                   fontSize: '12px',
                   letterSpacing: '1px',
@@ -561,9 +561,9 @@ export default function CaseDetailPage() {
                       appearance: 'none',
                       border: 0,
                       borderLeft: v === 'linear' ? '1px solid var(--border)' : 'none',
-                      background: timelineView === v ? 'rgba(0,212,255,0.12)' : 'transparent',
-                      color: timelineView === v ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                      fontFamily: 'Rajdhani, sans-serif',
+                      background: timelineView === v ? 'rgba(0,217,192,0.12)' : 'transparent',
+                      color: timelineView === v ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                      fontFamily: 'IBM Plex Sans, sans-serif',
                       fontWeight: 700,
                       fontSize: '11px',
                       letterSpacing: '1px',
@@ -604,10 +604,10 @@ export default function CaseDetailPage() {
                 padding: '5px 0',
                 borderBottom: '1px solid var(--border)',
               }}>
-                <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
+                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
                   {item!.label}
                 </span>
-                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-primary)' }}>
+                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-primary)' }}>
                   {item!.value}
                 </span>
               </div>
@@ -642,7 +642,7 @@ export default function CaseDetailPage() {
             <ActionBtn
               label="RESOLVE"
               onClick={() => update.mutate({ status: 'resolved' })}
-              color="var(--accent-cyan)"
+              color="var(--accent-blue)"
               loading={update.isPending}
               disabled={caseData.status === 'resolved' || caseData.status === 'closed'}
             />
@@ -658,15 +658,15 @@ export default function CaseDetailPage() {
           {/* Remediations */}
           <Box title="Remediations">
             {!targetAgentId ? (
-              <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', lineHeight: 1.5 }}>
+              <div style={{ color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', lineHeight: 1.5 }}>
                 No agent linked to this case — remediation actions need a linked alert with a known host.
               </div>
             ) : (
               <div>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '4px' }}>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '4px' }}>
                   TARGET HOST
                 </div>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-primary)', marginBottom: '10px' }}>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--text-primary)', marginBottom: '10px' }}>
                   {alertData?.hostname ?? targetAgentId.slice(0, 8)}
                 </div>
 
@@ -680,11 +680,10 @@ export default function CaseDetailPage() {
                     border: '1px solid var(--border)',
                     borderRadius: '4px',
                     color: 'var(--text-primary)',
-                    fontFamily: 'Share Tech Mono, monospace',
+                    fontFamily: 'IBM Plex Sans, sans-serif',
                     fontSize: '12px',
                     padding: '7px 10px',
                     marginBottom: '6px',
-                    outline: 'none',
                     boxSizing: 'border-box',
                   }}
                 />
@@ -697,11 +696,10 @@ export default function CaseDetailPage() {
                     border: '1px solid var(--border)',
                     borderRadius: '4px',
                     color: 'var(--text-primary)',
-                    fontFamily: 'Share Tech Mono, monospace',
+                    fontFamily: 'IBM Plex Sans, sans-serif',
                     fontSize: '12px',
                     padding: '7px 10px',
                     marginBottom: '8px',
-                    outline: 'none',
                   }}
                 >
                   <option value={3600}>1 hour</option>
@@ -719,14 +717,14 @@ export default function CaseDetailPage() {
 
                 {recentBlocks.length > 0 && (
                   <div style={{ marginTop: '10px' }}>
-                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+                    <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
                       RECENT BLOCKS
                     </div>
                     {recentBlocks.map(t => (
                       <div key={t.id} style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         padding: '5px 0', borderBottom: '1px solid var(--border)',
-                        fontFamily: 'Share Tech Mono, monospace', fontSize: '11px',
+                        fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px',
                       }}>
                         <span style={{ color: 'var(--text-secondary)' }}>{String((t.params as Record<string, unknown>)?.ip ?? '')}</span>
                         <span style={{

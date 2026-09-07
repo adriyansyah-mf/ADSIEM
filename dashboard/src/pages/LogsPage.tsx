@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { SlidersHorizontal } from 'lucide-react'
 import DataTable from '@/components/DataTable'
+import { PageHeader } from '@/components/ui/PageHeader'
 import QueryBuilder, { EMPTY_GROUP, isEmptyTree, type Group } from '@/components/QueryBuilder'
 import { useLogs } from '@/hooks/useLogs'
 import { useCursorPagination } from '@/hooks/useCursorPagination'
@@ -31,7 +32,7 @@ export default function LogsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Raw Logs</h1>
+        <PageHeader title="Raw Logs" className="!mb-0" />
         <button
           onClick={() => setShowBuilder((x) => !x)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-medium transition-colors ${
@@ -43,7 +44,7 @@ export default function LogsPage() {
       </div>
 
       {showBuilder && (
-        <div className="mb-4 rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="mb-4 enterprise-panel rounded-lg border border-border bg-card p-4 space-y-3">
           <QueryBuilder node={builderTree} onChange={setBuilderTree} fields={FIELDS} />
           <div className="flex gap-2">
             <button

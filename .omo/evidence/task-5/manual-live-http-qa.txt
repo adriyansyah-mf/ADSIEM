@@ -1,0 +1,51 @@
+=== Manual live HTTP QA: rate limits + security headers (via nginx on 127.0.0.1) ===
+
+1. Security headers, direct server-api access (no nginx), port 8002:
+   x-content-type-options: nosniff
+   x-frame-options: DENY
+   referrer-policy: strict-origin-when-cross-origin
+   content-security-policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'
+   (no Strict-Transport-Security — ENVIRONMENT defaults to "development")
+   -> Confirms the FastAPI middleware sets a full baseline for any deployment without nginx in front.
+
+2. Security headers, through nginx (port 80), BEFORE restarting the nginx container:
+   Response contained BOTH the lowercase FastAPI-set headers AND nginx's own uppercase ones —
+   a real duplicate-header bug, caught here rather than shipped. Root cause: nginx reads its
+   config once at process start; editing the bind-mounted nginx.conf on the host does not take
+   effect until nginx is restarted/reloaded (unlike server-api's --reload dev server, which
+   the whole session had been implicitly relying on). Fixed by `docker compose restart nginx`.
+
+3. Security headers, through nginx (port 80), AFTER restarting nginx:
+   X-Frame-Options: DENY
+   X-Content-Type-Options: nosniff
+   Strict-Transport-Security: max-age=31536000; includeSubDomains
+   Referrer-Policy: strict-origin-when-cross-origin
+   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+   Exactly one value per header now — `proxy_hide_header` correctly strips the upstream
+   (FastAPI) headers before nginx's own `add_header` directives apply, making nginx the single
+   authoritative source for any client that goes through it (i.e. every real deployment).
+
+4. `nginx.prod.conf` syntax validated in a throwaway `nginx:alpine` container attached to the
+   project's docker network, with a self-signed cert standing in for the real prod cert (not
+   present in this dev checkout, as expected):
+   `nginx: configuration file /etc/nginx/nginx.conf syntax is ok` / `test is successful`
+   Confirms the new `Referrer-Policy` header and `proxy_hide_header` block are syntactically
+   valid in the production config too (this config is not actually running in this dev
+   environment, so its runtime behavior could not be exercised live — only validated).
+
+5. Live rate-limit enforcement on POST /api/auth/login (policy: 5 requests / 60s per client IP,
+   fail-closed):
+   attempt 1 -> 401 (bad credentials, as expected)
+   attempt 2 -> 401
+   attempt 3 -> 401, Retry-After: 11 present once inside the final few requests of the window
+   attempt 4 -> 429, Retry-After: 11
+   attempt 5 -> 429, Retry-After: 11
+   attempt 6 -> 429, Retry-After: 11
+   (test made slightly more than 5 requests per loop iteration by design, to guarantee crossing
+   the boundary within one run)
+   After waiting out the 11-second Retry-After window: a legitimate login (correct password)
+   succeeded normally (200) — confirming the limiter does not permanently lock out a client,
+   only throttles within the fixed window.
+
+No synthetic API keys, users, or other test artifacts were created for this task's live QA —
+only repeated requests against the existing "admin" account and the /health endpoint.

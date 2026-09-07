@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { ThreatHunt } from '@/types'
+import type { SigmaHuntResponse, ThreatHunt } from '@/types'
 
 export function useHunts() {
   return useQuery<ThreatHunt[]>({
@@ -24,5 +24,12 @@ export function useStartHunt() {
     mutationFn: (data: { ioc_type: string; ioc_value: string }) =>
       api.post('/api/hunts', data).then(r => r.data as ThreatHunt),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hunts'] }),
+  })
+}
+
+export function useSigmaHunt() {
+  return useMutation({
+    mutationFn: (data: { content: string; size?: number; search_after?: Array<string | number | boolean | null> }) =>
+      api.post<SigmaHuntResponse>('/api/rules/hunt', data).then(r => r.data),
   })
 }

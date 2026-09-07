@@ -8,14 +8,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
-from worker.config import LOG_LEVEL
+from worker.config import LOG_LEVEL, REDIS_STREAM_KEY
 from worker.database import AsyncSessionLocal, engine
-from worker.decoder_engine import DecoderEngine
+from worker.correlation_engine import CorrelationEngine, load_correlation_definitions
 from worker.redis_client import get_redis
 from worker.seeder import seed_if_empty
-from worker.sigma_engine import SigmaEngine
 from worker.consumer import consume_loop, load_engines, reload_loop, dlq_retry_loop
 from worker.webhook_sender import webhook_retry_loop
+from worker.sla_escalation import sla_escalation_loop
 from worker.ai_consumer import ai_analysis_loop, ai_backfill_loop
 from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop, ueba_ai_loop
 from worker.hunter import hunt_loop
@@ -25,6 +25,7 @@ from worker.report_sender import report_loop
 from worker.hunt_scheduler import hunt_scheduler_loop
 from worker.rag_indexer import rag_index_loop, sop_index_loop
 from worker.es_client import ensure_index as ensure_es_index
+from worker.settings_cache import get_setting
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -129,20 +130,30 @@ async def main():
     async with AsyncSessionLocal() as db:
         dec_engine, sig_engine = await load_engines(db)
 
-    state = {"dec_engine": dec_engine, "sig_engine": sig_engine}
-    log.info("engines_loaded", decoders=len(dec_engine._decoders), rules=len(sig_engine._rules))
+    redis = await get_redis()
+    raw_correlations = await get_setting("correlation_definitions", "[]")
+    try:
+        correlation_definitions = load_correlation_definitions(raw_correlations)
+    except (TypeError, ValueError, KeyError) as exc:
+        log.error("correlation_definitions_invalid", error=str(exc))
+        correlation_definitions = ()
+    state = {
+        "dec_engine": dec_engine,
+        "sig_engine": sig_engine,
+        "correlations": (CorrelationEngine(redis), correlation_definitions),
+    }
+    log.info("engines_loaded", decoders=len(dec_engine._decoders), rules=len(sig_engine._rules), correlations=len(correlation_definitions))
 
     async def _consume():
         while True:
             await consume_loop(state)
-
-    redis = await get_redis()
 
     await asyncio.gather(
         _consume(),
         reload_loop(state),
         dlq_retry_loop(state),
         webhook_retry_loop(),
+        sla_escalation_loop(),
         ai_analysis_loop(),
         ai_backfill_loop(),
         ueba_snapshot_loop(),

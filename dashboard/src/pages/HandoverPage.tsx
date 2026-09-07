@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { ArrowRightLeft, AlertCircle, Briefcase, TrendingUp, Loader2 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface Handover {
   id: string
@@ -44,10 +45,7 @@ export default function HandoverPage() {
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ArrowRightLeft size={20} />
-          <h1 className="text-xl font-bold">Shift Handover</h1>
-        </div>
+        <PageHeader title={<><ArrowRightLeft aria-hidden="true" size={20} /> Shift Handover</>} className="!mb-0" />
         <button
           onClick={() => setShowForm(x => !x)}
           className="flex items-center gap-2 px-4 py-2 rounded bg-primary text-primary-foreground text-sm font-medium"
@@ -57,7 +55,7 @@ export default function HandoverPage() {
       </div>
 
       {showForm && (
-        <div className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <div className="enterprise-panel rounded-lg border border-border bg-card p-5 space-y-4">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Create Handover</h2>
           <p className="text-xs text-muted-foreground">
             Open alert/case counts are captured automatically at submission time.
@@ -101,14 +99,14 @@ export default function HandoverPage() {
       {isLoading && <div className="text-muted-foreground text-sm">Loading…</div>}
 
       {!isLoading && handovers.length === 0 && (
-        <div className="rounded-lg border border-border bg-card p-8 text-center text-muted-foreground text-sm">
+        <div className="enterprise-panel rounded-lg border border-border bg-card p-8 text-center text-muted-foreground text-sm">
           No handover records yet.
         </div>
       )}
 
       <div className="space-y-4">
         {handovers.map(h => (
-          <div key={h.id} className="rounded-lg border border-border bg-card p-5 space-y-3">
+          <div key={h.id} className="enterprise-panel rounded-lg border border-border bg-card p-5 space-y-3">
             <div className="flex items-start justify-between">
               <div>
                 <span className="text-xs font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-muted text-muted-foreground">

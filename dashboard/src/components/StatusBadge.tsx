@@ -1,5 +1,5 @@
 const COLOR: Record<string, string> = {
-  new: 'var(--accent-cyan)',
+  new: 'var(--accent-blue)',
   in_progress: 'var(--accent-yellow)',
   resolved: 'var(--accent-green)',
   false_positive: 'var(--text-muted)',
@@ -14,14 +14,13 @@ export default function StatusBadge({ status }: { status: string }) {
       style={{
         display: 'inline-block',
         padding: '2px 8px',
-        borderRadius: 3,
+        borderRadius: 4,
         border: `1px solid ${c}`,
         background: `color-mix(in srgb, ${c} 12%, transparent)`,
         color: c,
-        fontFamily: 'Rajdhani, sans-serif',
-        fontWeight: 700,
+        fontWeight: 600,
         fontSize: 11,
-        letterSpacing: '0.5px',
+        letterSpacing: '0.02em',
         textTransform: 'uppercase',
         whiteSpace: 'nowrap',
       }}

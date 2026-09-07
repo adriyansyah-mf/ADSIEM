@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useAgent, useLogSources, useAddLogSource, useUpdateLogSource, useDeleteLogSource } from '@/hooks/useAgents'
 import { useDecoders } from '@/hooks/useDecoders'
 import StatusBadge from '@/components/StatusBadge'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { Trash2, Plus, ArrowLeft, ToggleLeft, ToggleRight } from 'lucide-react'
 import type { LogSource } from '@/types'
 
@@ -53,23 +54,24 @@ export default function LogSourcesPage() {
     <div className="max-w-3xl">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate('/agents')}
+        <button aria-label="Back to agents" title="Back to agents" onClick={() => navigate('/agents')}
           className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground">
           <ArrowLeft size={18} />
         </button>
-        <div>
-          <h1 className="text-xl font-bold">Log Sources</h1>
-          {agent && (
-            <p className="text-sm text-muted-foreground">
+        <PageHeader
+          title="Log Sources"
+          className="!mb-0"
+          subtitle={agent && (
+            <span className="text-sm text-muted-foreground">
               {agent.name} &middot; <span className="font-mono">{agent.hostname}</span>
               <span className="ml-2"><StatusBadge status={agent.status} /></span>
-            </p>
+            </span>
           )}
-        </div>
+        />
       </div>
 
       {/* Add form */}
-      <div className="rounded-lg border border-border bg-card p-4 mb-6">
+      <div className="enterprise-panel rounded-lg border border-border bg-card p-4 mb-6">
         <h2 className="text-sm font-semibold mb-3">Add Log Source</h2>
         <div className="flex flex-col gap-2">
           <input
@@ -130,16 +132,17 @@ export default function LogSourcesPage() {
           <div className="space-y-2">
             {(sources ?? []).map((s: LogSource) => (
               <div key={s.id}
-                className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card">
+                className="flex items-center justify-between px-4 py-3 enterprise-panel rounded-lg border border-border bg-card">
                 <div>
                   <div className="font-mono text-sm">{s.path}</div>
                   <div className="text-xs text-muted-foreground mt-0.5">{s.log_type}</div>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
+                    aria-label={s.is_enabled ? `Disable ${s.path}` : `Enable ${s.path}`}
+                    title={s.is_enabled ? `Disable ${s.path}` : `Enable ${s.path}`}
                     onClick={() => updateSource.mutate({ sourceId: s.id, data: { ...s, is_enabled: !s.is_enabled } })}
                     className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    title={s.is_enabled ? 'Disable' : 'Enable'}
                   >
                     {s.is_enabled
                       ? <ToggleRight size={18} className="text-green-500" />
@@ -147,9 +150,10 @@ export default function LogSourcesPage() {
                   </button>
                   <StatusBadge status={s.is_enabled ? 'online' : 'offline'} />
                   <button
+                    aria-label={`Remove ${s.path}`}
+                    title={`Remove ${s.path}`}
                     onClick={() => { if (confirm(`Remove ${s.path}?`)) deleteSource.mutate(s.id) }}
                     className="text-destructive hover:opacity-70 ml-1"
-                    title="Remove"
                   >
                     <Trash2 size={14} />
                   </button>

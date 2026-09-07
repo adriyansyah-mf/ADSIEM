@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 
 import structlog
-from sqlalchemy import update, select
+from sqlalchemy import update
 
 from worker.database import AsyncSessionLocal
 from worker.models import Agent

@@ -1,0 +1,97 @@
+{
+  "meta": {
+    "name": "Obsidian Sentinel",
+    "description": "A precision command-console system for enterprise SOC/SIEM platforms — dense, fast to scan, unmistakably serious.",
+    "version": "1.0.0",
+    "created": "2026-09-07",
+    "personality": "Obsidian Sentinel reads like a hardened operations console, not a consumer app skinned dark. Near-black graphite surfaces, a cold radar-teal for interactive elements, a dedicated five-step severity ramp for triage at a glance, and IBM Plex's mono/sans pairing so log lines, hashes, and IPs render with the same technical precision as the UI chrome around them. Sharp small-radius geometry throughout — nothing bubbly, nothing playful."
+  },
+  "colors": {
+    "primary": { "value": "#00D9C0", "usage": "Primary buttons, active nav item, key interactive elements, focus rings, links" },
+    "primary-hover": { "value": "#00BFA8", "usage": "Hover/active state for primary-colored elements (darkens, does not lighten)" },
+    "secondary": { "value": "#4A5A78", "usage": "Secondary buttons, inactive tabs, neutral interactive chrome" },
+    "accent": { "value": "#FFB020", "usage": "Notification dots, highlighted metrics, 'new'/'updated' badges, warm counterpoint to primary teal" },
+    "background": { "value": "#0A0E14", "usage": "App shell / page background" },
+    "surface": { "value": "#11161F", "usage": "Cards, panels, table rows, sidebar" },
+    "surface-elevated": { "value": "#182030", "usage": "Modals, dropdowns, popovers, toasts — one step brighter than surface" },
+    "border": { "value": "#232B3A", "usage": "Default dividers, card borders, input borders, table row separators" },
+    "border-strong": { "value": "#334059", "usage": "Hover borders, focused inputs, emphasized dividers" },
+    "text-primary": { "value": "#E6EAF2", "usage": "Body copy, headings, primary data values (soft white-blue, not pure white, for long-shift eye comfort)" },
+    "text-secondary": { "value": "#8A94A6", "usage": "Labels, captions, table headers, secondary metadata" },
+    "text-muted": { "value": "#5A6478", "usage": "Placeholders, disabled text, timestamps, low-emphasis helper text" },
+    "text-on-primary": { "value": "#04140F", "usage": "Text/icons sitting on top of primary-teal-colored backgrounds" },
+    "success": { "value": "#2ED47A", "usage": "Healthy/online/resolved states, success toasts, up-trend indicators" },
+    "warning": { "value": "#FFB020", "usage": "Degraded states, pending-review flags, caution toasts" },
+    "error": { "value": "#FF3B5C", "usage": "Failed actions, destructive-action confirmation, error toasts" },
+    "info": { "value": "#3D9EFF", "usage": "Informational banners, neutral system notices" },
+    "severity": {
+      "critical": { "value": "#FF3B5C", "usage": "Critical severity badge/row accent — same hue family as error, reserved for the top of the triage stack" },
+      "high":     { "value": "#FF7A45", "usage": "High severity badge/row accent" },
+      "medium":   { "value": "#FFC53D", "usage": "Medium severity badge/row accent" },
+      "low":      { "value": "#3D9EFF", "usage": "Low severity badge/row accent" },
+      "informational": { "value": "#6B7A99", "usage": "Info-level severity badge/row accent — deliberately desaturated so it recedes under real findings" }
+    }
+  },
+  "typography": {
+    "font-display": { "family": "IBM Plex Sans", "fallback": "'Segoe UI', system-ui, sans-serif", "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&display=swap", "weightsUsed": [600, 700] },
+    "font-body": { "family": "IBM Plex Sans", "fallback": "'Segoe UI', system-ui, sans-serif", "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap", "weightsUsed": [400, 500] },
+    "font-mono": { "family": "IBM Plex Mono", "fallback": "'SFMono-Regular', Consolas, monospace", "source": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap", "usage": "IPs, hashes, hostnames, timestamps, log/event payloads, rule IDs, code, terminal output — anything the analyst needs to read character-by-character" },
+    "scale": {
+      "xs":  { "size": "0.6875rem", "lineHeight": "0.875rem", "usage": "Badge text, table micro-labels, footnotes" },
+      "sm":  { "size": "0.8125rem", "lineHeight": "1.125rem", "usage": "Table cells, form labels, secondary UI text — the default density for a data-heavy SOC console" },
+      "base":{ "size": "0.9375rem", "lineHeight": "1.5rem",   "usage": "Body copy, descriptions, modal text" },
+      "lg":  { "size": "1.0625rem", "lineHeight": "1.625rem", "usage": "Card titles, panel headers" },
+      "xl":  { "size": "1.25rem",   "lineHeight": "1.75rem",  "usage": "Section headers within a page" },
+      "2xl": { "size": "1.5rem",    "lineHeight": "2rem",     "usage": "Page titles" },
+      "3xl": { "size": "2rem",      "lineHeight": "2.25rem",  "usage": "KPI numbers, dashboard headline metrics" },
+      "4xl": { "size": "2.75rem",   "lineHeight": "3rem",     "usage": "Hero/landing-only display numbers" }
+    },
+    "weights": { "normal": 400, "medium": 500, "semibold": 600, "bold": 700 }
+  },
+  "spacing": {
+    "base-unit": "4px",
+    "scale": {
+      "0": "0", "1": "0.25rem", "2": "0.5rem", "3": "0.75rem", "4": "1rem",
+      "5": "1.25rem", "6": "1.5rem", "8": "2rem", "10": "2.5rem", "12": "3rem",
+      "16": "4rem", "20": "5rem"
+    }
+  },
+  "borders": {
+    "radius": { "none": "0", "sm": "4px", "md": "6px", "lg": "8px", "xl": "12px", "full": "9999px" },
+    "width": { "default": "1px", "thick": "2px" }
+  },
+  "shadows": {
+    "sm": { "value": "0 1px 2px rgba(0,0,0,0.4)", "usage": "Inputs, small chips, subtle lift off the surface" },
+    "md": { "value": "0 4px 12px rgba(0,0,0,0.5)", "usage": "Cards, dropdown menus" },
+    "lg": { "value": "0 12px 32px rgba(0,0,0,0.6)", "usage": "Modals, dialogs, command palette" },
+    "glow": { "value": "0 0 0 3px rgba(0,217,192,0.25)", "usage": "Focus ring / active-selection glow using primary teal" }
+  },
+  "effects": {
+    "backdrop-blur": "8px",
+    "glass-opacity": "0.85",
+    "transition-default": "all 0.15s ease",
+    "transition-slow": "all 0.3s ease"
+  },
+  "components": {
+    "button": {
+      "primary":   { "bg": "primary", "text": "text-on-primary", "radius": "md", "padding": "spacing.2 spacing.4", "hover": "primary-hover" },
+      "secondary": { "bg": "surface-elevated", "text": "text-primary", "radius": "md", "border": "border-strong", "padding": "spacing.2 spacing.4" },
+      "ghost":     { "bg": "transparent", "text": "text-secondary", "radius": "md", "padding": "spacing.2 spacing.4", "hover-bg": "surface" },
+      "destructive": { "bg": "error", "text": "#FFFFFF", "radius": "md", "padding": "spacing.2 spacing.4" }
+    },
+    "card": { "bg": "surface", "radius": "lg", "shadow": "sm", "padding": "spacing.5", "border": "border" },
+    "input": { "bg": "background", "border": "border", "radius": "md", "text": "text-primary", "placeholder": "text-muted", "focus-ring": "shadows.glow", "font": "font-mono (for value fields like IP/search), font-body (for free text)" },
+    "badge": {
+      "radius": "sm",
+      "padding": "spacing.1 spacing.2",
+      "font": "font-mono, scale.xs, weights.semibold, uppercase, letter-spacing 0.04em",
+      "pattern": "10% opacity tint of the semantic color as background, full-strength semantic color as text and 30% opacity border of the same color"
+    },
+    "table": {
+      "header": { "bg": "surface", "text": "text-secondary", "font": "font-body, scale.xs, weights.semibold, uppercase, letter-spacing 0.05em", "border-bottom": "border-strong" },
+      "row": { "bg": "background", "hover-bg": "surface", "border-bottom": "border", "text": "text-primary" },
+      "row-technical-cell": { "font": "font-mono, scale.sm" }
+    },
+    "sidebar": { "bg": "surface", "text": "text-secondary", "active-bg": "rgba(0,217,192,0.12)", "active-text": "primary", "active-indicator": "2px solid primary on left edge" }
+  }
+}

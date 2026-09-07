@@ -84,8 +84,11 @@ async def toggle_schedule(
     _=Depends(get_current_user),
     group_filter: str | None = Depends(get_scoped_group),
 ):
-    s = (await db.execute(select(HuntSchedule).where(HuntSchedule.id == schedule_id))).scalar_one_or_none()
-    if not s or (group_filter and s.group_id != group_filter):
+    query = select(HuntSchedule).where(HuntSchedule.id == schedule_id)
+    if group_filter is not None:
+        query = query.where(HuntSchedule.group_id == group_filter)
+    s = (await db.execute(query)).scalar_one_or_none()
+    if not s:
         raise HTTPException(404)
     s.is_enabled = not s.is_enabled
     await db.commit()
@@ -100,8 +103,11 @@ async def delete_schedule(
     _=Depends(get_current_user),
     group_filter: str | None = Depends(get_scoped_group),
 ):
-    s = (await db.execute(select(HuntSchedule).where(HuntSchedule.id == schedule_id))).scalar_one_or_none()
-    if not s or (group_filter and s.group_id != group_filter):
+    query = select(HuntSchedule).where(HuntSchedule.id == schedule_id)
+    if group_filter is not None:
+        query = query.where(HuntSchedule.group_id == group_filter)
+    s = (await db.execute(query)).scalar_one_or_none()
+    if not s:
         raise HTTPException(404)
     await db.delete(s)
     await db.commit()

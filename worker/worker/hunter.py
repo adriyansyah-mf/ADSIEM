@@ -95,8 +95,6 @@ async def _search_alerts(db: AsyncSession, ioc_type: str, ioc_value: str) -> lis
         agent_ids = [str(r[0]) for r in result]
         if not agent_ids:
             return []
-        from sqlalchemy import cast
-        from sqlalchemy.dialects.postgresql import UUID as PGUUID
         q = select(Alert).where(Alert.agent_id.in_([uuid.UUID(a) for a in agent_ids]))
     else:
         return []

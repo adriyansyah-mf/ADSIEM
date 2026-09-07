@@ -25,6 +25,7 @@ async def _analyze_one(data: dict) -> None:
             source_ip=data.get("source_ip"),
             hostname=data.get("hostname"),
             decoded_fields=data.get("decoded_fields", {}),
+            sigma_rule=data.get("sigma_rule") or None,
             group_id=data.get("group_id", "default"),
         )
     except Exception as e:

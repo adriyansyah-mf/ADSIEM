@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FileBarChart, Download, Loader2 } from 'lucide-react'
 import { format, subDays } from 'date-fns'
 import { api } from '@/api/client'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const LANGUAGES = ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Japanese']
 
@@ -40,12 +41,9 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <FileBarChart size={20} />
-        <h1 className="text-xl font-bold">Reports</h1>
-      </div>
+      <PageHeader title={<><FileBarChart aria-hidden="true" size={20} /> Reports</>} />
 
-      <div className="rounded-lg border border-border bg-card p-5 space-y-4 max-w-xl">
+      <div className="enterprise-panel rounded-lg border border-border bg-card p-5 space-y-4 max-w-xl">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
           Generate Security Report
         </h2>

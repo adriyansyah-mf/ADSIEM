@@ -4,10 +4,12 @@ import DataTable from '@/components/DataTable'
 import SeverityBadge from '@/components/SeverityBadge'
 import StatusBadge from '@/components/StatusBadge'
 import AlertDetailModal from '@/components/AlertDetailModal'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { useAlerts } from '@/hooks/useAlerts'
 import { useStartHunt } from '@/hooks/useHunts'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 import { format } from 'date-fns'
 import { Crosshair, Download, Search, ShieldOff, X } from 'lucide-react'
 import { TimeRangeFilter, type TimeRange } from '@/components/TimeRangeSelect'
@@ -126,9 +128,11 @@ export default function AlertsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState(() => searchParams.get('severity') ?? '')
   const [hostnameFilter, setHostnameFilter] = useState('')
+  const [assigneeFilter, setAssigneeFilter] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [searchFilter, setSearchFilter] = useState('')
   const [timeFilter, setTimeFilter] = useState<TimeRange>({})
+  const currentUserId = useAuthStore(state => state.user?.id)
 
   // Sync URL params on first mount (e.g. from dashboard severity clicks)
   useEffect(() => {
@@ -149,6 +153,12 @@ export default function AlertsPage() {
     search: searchFilter || undefined,
     start_time: timeFilter.start_time,
     end_time: timeFilter.end_time,
+    assignee_id: assigneeFilter || undefined,
+  })
+
+  const { data: usersData } = useQuery<{ items: Array<{ id: string; username: string }> }>({
+    queryKey: ['alert-assignee-options'],
+    queryFn: () => api.get('/api/users', { params: { page_size: 100 } }).then(r => r.data),
   })
 
   // Deep link from the global search dropdown (?open=<alert_id>) — fetched
@@ -168,6 +178,7 @@ export default function AlertsPage() {
     { key: 'severity', header: 'Severity', render: (r: Alert) => <SeverityBadge severity={r.severity} /> },
     { key: 'title', header: 'Title', render: (r: Alert) => <span className="font-medium">{r.title}</span> },
     { key: 'status', header: 'Status', render: (r: Alert) => <StatusBadge status={r.status} /> },
+    { key: 'sla', header: 'SLA', render: (r: Alert) => r.sla_breached ? <span className="text-red-400 font-medium">Breached</span> : <span className="text-emerald-400">Within SLA</span> },
     { key: 'source_ip', header: 'Source IP', render: (r: Alert) => r.source_ip ?? '—' },
     { key: 'country', header: 'Country', render: (r: Alert) => r.source_ip_country ?? '—' },
     { key: 'hostname', header: 'Hostname', render: (r: Alert) => r.hostname ?? '—' },
@@ -179,13 +190,16 @@ export default function AlertsPage() {
     <div>
       <SuppressionPanel />
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold">Alerts</h1>
+        <PageHeader title="Alerts" className="!mb-0" />
         <button onClick={() => downloadFile('/api/export/alerts/csv', 'alerts.csv')}
           className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
           <Download size={13} /> CSV
         </button>
       </div>
       <div className="flex flex-wrap items-center gap-2 mb-6">
+        <button type="button" onClick={() => { setAssigneeFilter(currentUserId ?? ''); setPage(1) }}
+          disabled={!currentUserId}
+          className={`px-3 py-1.5 rounded border text-sm ${assigneeFilter === currentUserId && currentUserId ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'} disabled:opacity-50`}>My queue</button>
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={searchInput} onChange={e => setSearchInput(e.target.value)}
@@ -211,6 +225,12 @@ export default function AlertsPage() {
           <option value="in_progress">In Progress</option>
           <option value="resolved">Resolved</option>
           <option value="false_positive">False Positive</option>
+        </select>
+        <select value={assigneeFilter} onChange={(e) => { setAssigneeFilter(e.target.value); setPage(1) }}
+          className="px-3 py-1.5 rounded border border-border bg-background text-sm">
+          <option value="">All assignees</option>
+          <option value="unassigned">Unassigned</option>
+          {(usersData?.items ?? []).map(user => <option key={user.id} value={user.id}>{user.username}</option>)}
         </select>
         <TimeRangeFilter
           value={timeFilter}

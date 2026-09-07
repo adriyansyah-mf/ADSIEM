@@ -19,7 +19,8 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config
-    if (error.response?.status === 401 && !original._retry) {
+    const authRequest = original?.url?.includes('/api/auth/login') || original?.url?.includes('/api/auth/refresh')
+    if (error.response?.status === 401 && !original._retry && !authRequest) {
       original._retry = true
       if (isRefreshing) {
         return new Promise((resolve) => {

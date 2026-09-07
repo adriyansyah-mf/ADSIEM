@@ -35,7 +35,7 @@ type EnrollResponse struct {
 // Enroll performs first-run enrollment. Retries indefinitely on network errors.
 func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 	slog.Info("enrolling agent", "server", cfg.Server.URL, "name", cfg.Agent.Name)
-	c := client.New(cfg.Server.URL, "")
+	c := client.New(cfg.Server.URL, "", cfg.Server.InsecureSkipVerify)
 
 	sources := make([]LogSourcePayload, len(cfg.Logs))
 	for i, l := range cfg.Logs {

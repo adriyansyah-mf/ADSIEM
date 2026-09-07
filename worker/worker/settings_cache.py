@@ -1,7 +1,6 @@
 # worker/worker/settings_cache.py
 # Reads platform_settings from DB with a TTL cache so the worker picks up
 # changes made via the UI without requiring a restart.
-import asyncio
 import time
 import structlog
 from worker.database import AsyncSessionLocal

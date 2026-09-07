@@ -15,21 +15,24 @@ from app.core.deps import get_current_user
 from app.core.security import (
     create_access_token, create_refresh_token, decode_token, verify_password
 )
-from app.models.models import Role, User
+from app.models.models import User
 from app.schemas.schemas import LoginRequest, TokenResponse, UserMe
 from app.services.audit import audit_log
 from app.core.limiter import limiter
+from app.core.rate_limit import rate_limit_by_ip, rate_limit_by_user_group
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+RateLimitLogin = rate_limit_by_ip("login")
+RateLimitMfa = rate_limit_by_user_group("mfa")
 
 @router.post("/login", response_model=TokenResponse)
-@limiter.limit("5/minute")
 async def login(
     request: Request,
     body: LoginRequest,
     response: Response,
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_limit: Annotated[None, Depends(RateLimitLogin)],
 ):
     result = await db.execute(
         select(User).options(selectinload(User.role))
@@ -53,7 +56,7 @@ async def login(
     access_token = create_access_token(str(user.id))
     refresh_token = create_refresh_token(str(user.id))
     response.set_cookie("refresh_token", refresh_token, httponly=True, samesite="lax", max_age=7 * 86400)
-    background.add_task(audit_log, db, user.id, "login_success", "user", str(user.id))
+    background.add_task(audit_log, db, user, "login_success", "user", str(user.id))
     return TokenResponse(access_token=access_token)
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -95,6 +98,7 @@ async def me(current_user: Annotated[User, Depends(get_current_user)]):
 async def mfa_setup(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_limit: Annotated[None, Depends(RateLimitMfa)],
 ):
     """Generate a TOTP secret and QR code PNG for the current user (not yet enabled)."""
     if current_user.mfa_enabled:
@@ -117,6 +121,7 @@ async def mfa_enable(
     body: dict,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_limit: Annotated[None, Depends(RateLimitMfa)],
 ):
     """Verify a TOTP code and enable MFA for the current user."""
     if not current_user.mfa_secret:
@@ -134,6 +139,7 @@ async def mfa_disable(
     body: dict,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    _rate_limit: Annotated[None, Depends(RateLimitMfa)],
 ):
     """Disable MFA after verifying the current TOTP code."""
     if current_user.mfa_enabled and current_user.mfa_secret:

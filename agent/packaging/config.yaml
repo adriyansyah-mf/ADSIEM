@@ -7,8 +7,17 @@ agent:
   buffer_size: 10000
 
 server:
-  url: http://your-siem-server:8000
+  # The platform's public HTTPS endpoint (via nginx, port 443 implied) --
+  # NOT :8000, which is server-api's internal port and isn't reachable from
+  # outside the platform's own docker network in a real deployment.
+  url: https://your-siem-server
   heartbeat_interval: 30
+  # Until your-siem-server has a real CA-issued certificate (e.g. Let's
+  # Encrypt) instead of the default self-signed one, TLS verification must
+  # be disabled or every request will fail with "certificate signed by
+  # unknown authority". Set to false once a trusted certificate is in place.
+  # Can also be set via AGENT_INSECURE_SKIP_VERIFY=true.
+  insecure_skip_verify: true
 
 # Common log paths by distro:
 #   Debian/Ubuntu (with rsyslog): /var/log/auth.log, /var/log/syslog

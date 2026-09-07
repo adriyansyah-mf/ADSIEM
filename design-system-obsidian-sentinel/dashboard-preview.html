@@ -1,0 +1,524 @@
+<title>SOC Dashboard</title>
+<meta name="description" content="AD-SIEM operations dashboard concept — Obsidian Sentinel design system with alert volume, severity, fleet health, and workload charts.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --color-primary: #00D9C0;
+    --color-primary-hover: #00BFA8;
+    --color-background: #0A0E14;
+    --color-surface: #11161F;
+    --color-surface-elevated: #182030;
+    --color-border: #232B3A;
+    --color-border-strong: #334059;
+    --color-text-primary: #E6EAF2;
+    --color-text-secondary: #8A94A6;
+    --color-text-muted: #5A6478;
+    --color-text-on-primary: #04140F;
+    --color-success: #2ED47A;
+    --color-warning: #FFB020;
+    --color-error: #FF3B5C;
+    --sev-critical: #FF3B5C;
+    --sev-high: #FF7A45;
+    --sev-medium: #FFC53D;
+    --sev-low: #3D9EFF;
+    --sev-info: #6B7A99;
+
+    --font-display: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.5);
+    --shadow-lg: 0 12px 32px rgba(0,0,0,0.6);
+    --shadow-glow: 0 0 0 3px rgba(0,217,192,0.25);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--color-background);
+    color: var(--color-text-primary);
+    font-family: var(--font-body);
+    font-size: 13px;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(0,217,192,0.3); }
+
+  .axis-label { font-family: var(--font-mono); font-size: 9.5px; fill: var(--color-text-muted); }
+
+  /* ---- Shell ---- */
+  .shell { display: grid; grid-template-columns: 208px 1fr; min-height: 100vh; }
+
+  .sidebar { background: var(--color-surface); border-right: 1px solid var(--color-border); padding: 18px 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 18px; margin-bottom: 10px; border-bottom: 1px solid var(--color-border); }
+  .brand-mark {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--color-text-on-primary); flex-shrink: 0;
+  }
+  .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 13.5px; letter-spacing: -0.01em; line-height: 1.2; }
+  .brand-sub { font-size: 10px; color: var(--color-text-muted); font-family: var(--font-mono); }
+  .nav-group-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-muted); padding: 14px 8px 6px; }
+  .nav-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 8px; border-radius: 6px; color: var(--color-text-secondary);
+    font-size: 13px; font-weight: 500; text-decoration: none; border-left: 2px solid transparent; margin-bottom: 1px;
+  }
+  .nav-item .left { display: flex; align-items: center; gap: 9px; }
+  .nav-item .ic { width: 14px; text-align: center; opacity: 0.85; font-size: 12px; }
+  .nav-item.active { background: rgba(0,217,192,0.12); color: var(--color-primary); border-left-color: var(--color-primary); }
+  .nav-item .count { font-family: var(--font-mono); font-size: 10px; background: var(--color-surface-elevated); color: var(--color-text-muted); padding: 1px 6px; border-radius: 999px; }
+
+  .main { padding: 22px 28px 60px; overflow-x: hidden; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 16px; flex-wrap: wrap; }
+  .topbar h1 { font-family: var(--font-display); font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .topbar .sub { font-size: 12px; color: var(--color-text-muted); margin-top: 3px; font-family: var(--font-mono); }
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+  .live-pill {
+    display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px;
+    color: var(--color-success); background: rgba(46,212,122,0.1); border: 1px solid rgba(46,212,122,0.3);
+    padding: 5px 10px; border-radius: 999px;
+  }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 6px rgba(46,212,122,0.8); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-body); font-size: 12.5px; font-weight: 600;
+    border-radius: 6px; padding: 7px 14px; border: 1px solid var(--color-border-strong);
+    background: var(--color-surface-elevated); color: var(--color-text-primary); cursor: pointer;
+  }
+
+  /* ---- KPI row ---- */
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  .kpi-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 16px; position: relative; overflow: hidden; }
+  .kpi-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .kpi-label { font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .kpi-value { font-family: var(--font-display); font-size: 27px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; margin-top: 8px; }
+  .kpi-value .unit { font-size: 14px; color: var(--color-text-muted); font-weight: 500; }
+  .kpi-value.c-critical { color: var(--sev-critical); }
+  .kpi-value.c-primary { color: var(--color-primary); }
+  .kpi-delta { font-family: var(--font-mono); font-size: 10.5px; margin-top: 6px; display: inline-flex; align-items: center; gap: 4px; }
+  .kpi-delta.bad { color: var(--color-error); }
+  .kpi-delta.good { color: var(--color-success); }
+  .kpi-spark { position: absolute; right: 14px; bottom: 12px; opacity: 0.9; }
+
+  /* ---- Panels / grid ---- */
+  .grid-2 { display: grid; grid-template-columns: 1.65fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 14px; }
+  .panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border-bottom: 1px solid var(--color-border); }
+  .panel-head h2 { font-family: var(--font-display); font-size: 13.5px; font-weight: 600; margin: 0; }
+  .panel-head .meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-muted); }
+  .panel-body { padding: 14px 16px; }
+  .panel-body.tight { padding: 6px 16px 12px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--color-text-secondary); }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+
+  .donut-wrap { display: flex; align-items: center; gap: 20px; }
+  .donut-center-label { text-align: center; }
+  .donut-total { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
+  .donut-total-label { font-family: var(--font-mono); font-size: 9.5px; color: var(--color-text-muted); text-transform: uppercase; }
+  .donut-legend { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .donut-legend-row { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+  .donut-legend-row .left { display: flex; align-items: center; gap: 7px; }
+  .donut-legend-row .swatch { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .donut-legend-row .val { font-family: var(--font-mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .hbar-labels { display: flex; flex-direction: column; }
+  .hbar-row-label { height: 30px; display: flex; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--color-text-secondary); }
+  .hbar-row-val { height: 30px; display: flex; align-items: center; justify-content: flex-end; font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; color: var(--color-text-primary); }
+
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.data-table thead th {
+    background: var(--color-surface); color: var(--color-text-secondary);
+    font-family: var(--font-body); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    text-align: left; padding: 9px 16px; border-bottom: 2px solid var(--color-border-strong);
+  }
+  table.data-table tbody td { padding: 9px 16px; border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); vertical-align: middle; }
+  table.data-table tbody tr:hover { background: var(--color-surface-elevated); }
+  table.data-table tbody tr:last-child td { border-bottom: none; }
+  .cell-mono { font-family: var(--font-mono); color: var(--color-text-secondary); }
+  .cell-title .mitre { display: block; font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); margin-top: 2px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 7px; border-radius: 4px; border: 1px solid transparent; line-height: 1;
+  }
+  .badge-critical { background: rgba(255,59,92,0.12); color: var(--sev-critical); border-color: rgba(255,59,92,0.3); }
+  .badge-high     { background: rgba(255,122,69,0.12); color: var(--sev-high); border-color: rgba(255,122,69,0.3); }
+  .badge-medium   { background: rgba(255,197,61,0.12); color: var(--sev-medium); border-color: rgba(255,197,61,0.3); }
+  .badge-low      { background: rgba(61,158,255,0.12); color: var(--sev-low); border-color: rgba(61,158,255,0.3); }
+
+  .event-item { padding: 8px 0; border-bottom: 1px solid var(--color-border); }
+  .event-item:last-child { border-bottom: none; }
+  .event-time { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); }
+  .event-action { font-size: 12px; margin-top: 2px; }
+  .event-ip { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-primary); margin-top: 1px; }
+
+  .row-bottom { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
+
+  @media (max-width: 980px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { display: none; }
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .grid-2, .grid-3, .row-bottom { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="shell">
+  <div class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">AD</div>
+      <div><div class="brand-name">AD-SIEM</div><div class="brand-sub">SECURITY OPS</div></div>
+    </div>
+    <div class="nav-group-label">Monitor</div>
+    <a class="nav-item active"><span class="left"><span class="ic">▤</span>Dashboard</span></a>
+    <a class="nav-item"><span class="left"><span class="ic">≡</span>Logs</span></a>
+    <a class="nav-item"><span class="left"><span class="ic">◈</span>Events</span></a>
+    <a class="nav-item"><span class="left"><span class="ic">⚠</span>Alerts</span><span class="count">247</span></a>
+    <a class="nav-item"><span class="left"><span class="ic">▢</span>Cases</span></a>
+    <div class="nav-group-label">Analytics</div>
+    <a class="nav-item"><span class="left"><span class="ic">◎</span>UEBA</span></a>
+    <a class="nav-item"><span class="left"><span class="ic">⌖</span>Threat Hunt</span></a>
+    <a class="nav-item"><span class="left"><span class="ic">▦</span>MITRE Heatmap</span></a>
+    <div class="nav-group-label">Response</div>
+    <a class="nav-item"><span class="left"><span class="ic">⟐</span>SOAR</span></a>
+    <a class="nav-item"><span class="left"><span class="ic">›_</span>Live Response</span></a>
+    <a class="nav-item"><span class="left"><span class="ic">◫</span>Agents</span></a>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <h1>Dashboard</h1>
+        <div class="sub">TENANT: DEFAULT · UPDATED 6S AGO</div>
+      </div>
+      <div class="topbar-right">
+        <span class="live-pill"><span class="live-dot"></span>LIVE</span>
+        <button class="btn">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- KPI ROW -->
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Open Alerts</span></div>
+        <div class="kpi-value">247</div>
+        <div class="kpi-delta bad">↑ 12 last hour</div>
+        <svg class="kpi-spark" width="80" height="26" viewBox="0 0 110 32">
+          <path d="M 0.0 32.0 L 15.7 27.2 L 31.4 20.1 L 47.1 23.4 L 62.9 17.7 L 78.6 10.5 L 94.3 4.3 L 110.0 0.0 L 110 32 L 0 32 Z" fill="rgba(0,217,192,0.12)"/>
+          <path d="M 0.0 32.0 L 15.7 27.2 L 31.4 20.1 L 47.1 23.4 L 62.9 17.7 L 78.6 10.5 L 94.3 4.3 L 110.0 0.0" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Critical</span></div>
+        <div class="kpi-value c-critical">9</div>
+        <div class="kpi-delta bad">↑ 3 last hour</div>
+        <svg class="kpi-spark" width="80" height="26" viewBox="0 0 110 32">
+          <path d="M 0.0 32.0 L 15.7 25.6 L 31.4 32.0 L 47.1 19.2 L 62.9 12.8 L 78.6 19.2 L 94.3 6.4 L 110.0 0.0 L 110 32 L 0 32 Z" fill="rgba(255,59,92,0.12)"/>
+          <path d="M 0.0 32.0 L 15.7 25.6 L 31.4 32.0 L 47.1 19.2 L 62.9 12.8 L 78.6 19.2 L 94.3 6.4 L 110.0 0.0" fill="none" stroke="var(--sev-critical)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Avg MTTR (24h)</span></div>
+        <div class="kpi-value">18<span class="unit">m</span></div>
+        <div class="kpi-delta good">↓ 4m vs. yesterday</div>
+        <svg class="kpi-spark" width="80" height="26" viewBox="0 0 110 32">
+          <path d="M 0.0 0.0 L 15.7 8.0 L 31.4 4.0 L 47.1 16.0 L 62.9 20.0 L 78.6 28.0 L 94.3 24.0 L 110.0 32.0 L 110 32 L 0 32 Z" fill="rgba(46,212,122,0.12)"/>
+          <path d="M 0.0 0.0 L 15.7 8.0 L 31.4 4.0 L 47.1 16.0 L 62.9 20.0 L 78.6 28.0 L 94.3 24.0 L 110.0 32.0" fill="none" stroke="var(--color-success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-top"><span class="kpi-label">Agents Online</span></div>
+        <div class="kpi-value c-primary">312<span class="unit">/318</span></div>
+        <div class="kpi-delta bad">↓ 2 offline</div>
+        <svg class="kpi-spark" width="80" height="26" viewBox="0 0 110 32">
+          <path d="M 0.0 32.0 L 15.7 18.3 L 31.4 9.1 L 47.1 13.7 L 62.9 4.6 L 78.6 0.0 L 94.3 9.1 L 110.0 0.0 L 110 32 L 0 32 Z" fill="rgba(0,217,192,0.12)"/>
+          <path d="M 0.0 32.0 L 15.7 18.3 L 31.4 9.1 L 47.1 13.7 L 62.9 4.6 L 78.6 0.0 L 94.3 9.1 L 110.0 0.0" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ALERT VOLUME + SEVERITY DONUT -->
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Alert Volume — Last 24h</h2>
+          <span class="meta">247 TOTAL</span>
+        </div>
+        <div class="panel-body">
+          <svg viewBox="0 0 700 180" width="100%" style="overflow: visible; display:block;">
+            <line x1="34" y1="158.0" x2="690" y2="158.0" stroke="var(--color-border)" stroke-width="1"/>
+            <text x="26" y="161.0" text-anchor="end" class="axis-label">0</text>
+            <line x1="34" y1="121.5" x2="690" y2="121.5" stroke="var(--color-border)" stroke-width="1"/>
+            <text x="26" y="124.5" text-anchor="end" class="axis-label">6</text>
+            <line x1="34" y1="85.0" x2="690" y2="85.0" stroke="var(--color-border)" stroke-width="1"/>
+            <text x="26" y="88.0" text-anchor="end" class="axis-label">12</text>
+            <line x1="34" y1="48.5" x2="690" y2="48.5" stroke="var(--color-border)" stroke-width="1"/>
+            <text x="26" y="51.5" text-anchor="end" class="axis-label">18</text>
+            <line x1="34" y1="12.0" x2="690" y2="12.0" stroke="var(--color-border)" stroke-width="1"/>
+            <text x="26" y="15.0" text-anchor="end" class="axis-label">24</text>
+            <rect x="38.4" y="139.8" width="18.6" height="18.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="38.4" y="127.6" width="18.6" height="12.2" fill="#FFC53D" rx="1.5"/>
+            <rect x="38.4" y="121.5" width="18.6" height="6.1" fill="#FF7A45" rx="1.5"/>
+            <rect x="65.7" y="145.8" width="18.6" height="12.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="65.7" y="139.8" width="18.6" height="6.1" fill="#FFC53D" rx="1.5"/>
+            <rect x="93.0" y="151.9" width="18.6" height="6.1" fill="#3D9EFF" rx="1.5"/>
+            <rect x="93.0" y="145.8" width="18.6" height="6.1" fill="#FFC53D" rx="1.5"/>
+            <rect x="120.4" y="145.8" width="18.6" height="12.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="147.7" y="151.9" width="18.6" height="6.1" fill="#3D9EFF" rx="1.5"/>
+            <rect x="147.7" y="145.8" width="18.6" height="6.1" fill="#FFC53D" rx="1.5"/>
+            <rect x="175.0" y="145.8" width="18.6" height="12.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="175.0" y="139.8" width="18.6" height="6.1" fill="#FFC53D" rx="1.5"/>
+            <rect x="175.0" y="133.7" width="18.6" height="6.1" fill="#FF7A45" rx="1.5"/>
+            <rect x="202.4" y="139.8" width="18.6" height="18.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="202.4" y="127.6" width="18.6" height="12.2" fill="#FFC53D" rx="1.5"/>
+            <rect x="202.4" y="121.5" width="18.6" height="6.1" fill="#FF7A45" rx="1.5"/>
+            <rect x="229.7" y="133.7" width="18.6" height="24.3" fill="#3D9EFF" rx="1.5"/>
+            <rect x="229.7" y="115.4" width="18.6" height="18.2" fill="#FFC53D" rx="1.5"/>
+            <rect x="229.7" y="103.2" width="18.6" height="12.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="229.7" y="97.2" width="18.6" height="6.1" fill="#FF3B5C" rx="1.5"/>
+            <rect x="257.0" y="127.6" width="18.6" height="30.4" fill="#3D9EFF" rx="1.5"/>
+            <rect x="257.0" y="103.3" width="18.6" height="24.3" fill="#FFC53D" rx="1.5"/>
+            <rect x="257.0" y="85.0" width="18.6" height="18.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="257.0" y="78.9" width="18.6" height="6.1" fill="#FF3B5C" rx="1.5"/>
+            <rect x="284.4" y="121.5" width="18.6" height="36.5" fill="#3D9EFF" rx="1.5"/>
+            <rect x="284.4" y="91.1" width="18.6" height="30.4" fill="#FFC53D" rx="1.5"/>
+            <rect x="284.4" y="66.8" width="18.6" height="24.3" fill="#FF7A45" rx="1.5"/>
+            <rect x="284.4" y="54.6" width="18.6" height="12.2" fill="#FF3B5C" rx="1.5"/>
+            <rect x="311.7" y="121.5" width="18.6" height="36.5" fill="#3D9EFF" rx="1.5"/>
+            <rect x="311.7" y="91.1" width="18.6" height="30.4" fill="#FFC53D" rx="1.5"/>
+            <rect x="311.7" y="72.8" width="18.6" height="18.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="311.7" y="66.8" width="18.6" height="6.1" fill="#FF3B5C" rx="1.5"/>
+            <rect x="339.0" y="127.6" width="18.6" height="30.4" fill="#3D9EFF" rx="1.5"/>
+            <rect x="339.0" y="103.3" width="18.6" height="24.3" fill="#FFC53D" rx="1.5"/>
+            <rect x="339.0" y="85.0" width="18.6" height="18.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="339.0" y="72.8" width="18.6" height="12.2" fill="#FF3B5C" rx="1.5"/>
+            <rect x="366.4" y="127.6" width="18.6" height="30.4" fill="#3D9EFF" rx="1.5"/>
+            <rect x="366.4" y="103.3" width="18.6" height="24.3" fill="#FFC53D" rx="1.5"/>
+            <rect x="366.4" y="91.1" width="18.6" height="12.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="366.4" y="85.0" width="18.6" height="6.1" fill="#FF3B5C" rx="1.5"/>
+            <rect x="393.7" y="133.7" width="18.6" height="24.3" fill="#3D9EFF" rx="1.5"/>
+            <rect x="393.7" y="109.3" width="18.6" height="24.3" fill="#FFC53D" rx="1.5"/>
+            <rect x="393.7" y="91.1" width="18.6" height="18.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="393.7" y="78.9" width="18.6" height="12.2" fill="#FF3B5C" rx="1.5"/>
+            <rect x="421.0" y="133.7" width="18.6" height="24.3" fill="#3D9EFF" rx="1.5"/>
+            <rect x="421.0" y="103.2" width="18.6" height="30.4" fill="#FFC53D" rx="1.5"/>
+            <rect x="421.0" y="72.8" width="18.6" height="30.4" fill="#FF7A45" rx="1.5"/>
+            <rect x="421.0" y="48.5" width="18.6" height="24.3" fill="#FF3B5C" rx="1.5"/>
+            <rect x="448.4" y="139.8" width="18.6" height="18.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="448.4" y="109.3" width="18.6" height="30.4" fill="#FFC53D" rx="1.5"/>
+            <rect x="448.4" y="66.8" width="18.6" height="42.6" fill="#FF7A45" rx="1.5"/>
+            <rect x="448.4" y="30.3" width="18.6" height="36.5" fill="#FF3B5C" rx="1.5"/>
+            <rect x="475.7" y="133.7" width="18.6" height="24.3" fill="#3D9EFF" rx="1.5"/>
+            <rect x="475.7" y="109.3" width="18.6" height="24.3" fill="#FFC53D" rx="1.5"/>
+            <rect x="475.7" y="78.9" width="18.6" height="30.4" fill="#FF7A45" rx="1.5"/>
+            <rect x="475.7" y="60.7" width="18.6" height="18.2" fill="#FF3B5C" rx="1.5"/>
+            <rect x="503.0" y="133.7" width="18.6" height="24.3" fill="#3D9EFF" rx="1.5"/>
+            <rect x="503.0" y="109.3" width="18.6" height="24.3" fill="#FFC53D" rx="1.5"/>
+            <rect x="503.0" y="91.1" width="18.6" height="18.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="503.0" y="78.9" width="18.6" height="12.2" fill="#FF3B5C" rx="1.5"/>
+            <rect x="530.4" y="133.7" width="18.6" height="24.3" fill="#3D9EFF" rx="1.5"/>
+            <rect x="530.4" y="109.3" width="18.6" height="24.3" fill="#FFC53D" rx="1.5"/>
+            <rect x="530.4" y="91.1" width="18.6" height="18.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="530.4" y="85.0" width="18.6" height="6.1" fill="#FF3B5C" rx="1.5"/>
+            <rect x="557.7" y="133.7" width="18.6" height="24.3" fill="#3D9EFF" rx="1.5"/>
+            <rect x="557.7" y="115.4" width="18.6" height="18.2" fill="#FFC53D" rx="1.5"/>
+            <rect x="557.7" y="103.2" width="18.6" height="12.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="557.7" y="97.2" width="18.6" height="6.1" fill="#FF3B5C" rx="1.5"/>
+            <rect x="585.0" y="139.8" width="18.6" height="18.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="585.0" y="121.5" width="18.6" height="18.2" fill="#FFC53D" rx="1.5"/>
+            <rect x="585.0" y="109.3" width="18.6" height="12.2" fill="#FF7A45" rx="1.5"/>
+            <rect x="612.4" y="139.8" width="18.6" height="18.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="612.4" y="127.6" width="18.6" height="12.2" fill="#FFC53D" rx="1.5"/>
+            <rect x="612.4" y="121.5" width="18.6" height="6.1" fill="#FF7A45" rx="1.5"/>
+            <rect x="639.7" y="145.8" width="18.6" height="12.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="639.7" y="133.7" width="18.6" height="12.2" fill="#FFC53D" rx="1.5"/>
+            <rect x="639.7" y="127.6" width="18.6" height="6.1" fill="#FF7A45" rx="1.5"/>
+            <rect x="667.0" y="145.8" width="18.6" height="12.2" fill="#3D9EFF" rx="1.5"/>
+            <rect x="667.0" y="139.8" width="18.6" height="6.1" fill="#FFC53D" rx="1.5"/>
+            <rect x="667.0" y="133.7" width="18.6" height="6.1" fill="#FF7A45" rx="1.5"/>
+            <text x="43.3" y="174" text-anchor="middle" class="axis-label">00:00</text>
+            <text x="152.6" y="174" text-anchor="middle" class="axis-label">04:00</text>
+            <text x="262.0" y="174" text-anchor="middle" class="axis-label">08:00</text>
+            <text x="371.3" y="174" text-anchor="middle" class="axis-label">12:00</text>
+            <text x="480.6" y="174" text-anchor="middle" class="axis-label">16:00</text>
+            <text x="590.0" y="174" text-anchor="middle" class="axis-label">20:00</text>
+          </svg>
+          <div class="legend">
+            <div class="legend-item"><span class="legend-dot" style="background:var(--sev-critical)"></span>Critical</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--sev-high)"></span>High</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--sev-medium)"></span>Medium</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--sev-low)"></span>Low</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Severity Distribution</h2></div>
+        <div class="panel-body">
+          <div class="donut-wrap">
+            <svg width="140" height="140" viewBox="0 0 180 180">
+              <g transform="translate(0,0)">
+                <path d="M 90.00 12.00 A 78 78 0 0 1 119.85 17.94 L 109.13 43.81 A 50 50 0 0 0 90.00 40.00 Z" fill="#FF3B5C"/>
+                <path d="M 119.85 17.94 A 78 78 0 0 1 164.39 113.46 L 137.69 105.04 A 50 50 0 0 0 109.13 43.81 Z" fill="#FF7A45"/>
+                <path d="M 164.39 113.46 A 78 78 0 0 1 13.18 103.54 L 40.76 98.68 A 50 50 0 0 0 137.69 105.04 Z" fill="#FFC53D"/>
+                <path d="M 13.18 103.54 A 78 78 0 0 1 90.00 12.00 L 90.00 40.00 A 50 50 0 0 0 40.76 98.68 Z" fill="#3D9EFF"/>
+              </g>
+              <text x="90" y="85" text-anchor="middle" font-family="var(--font-display)" font-size="26" font-weight="700" fill="var(--color-text-primary)">144</text>
+              <text x="90" y="102" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="var(--color-text-muted)" letter-spacing="0.05em">OPEN</text>
+            </svg>
+            <div class="donut-legend">
+              <div class="donut-legend-row"><span class="left"><span class="swatch" style="background:var(--sev-critical)"></span>Critical</span><span class="val">9</span></div>
+              <div class="donut-legend-row"><span class="left"><span class="swatch" style="background:var(--sev-high)"></span>High</span><span class="val">34</span></div>
+              <div class="donut-legend-row"><span class="left"><span class="swatch" style="background:var(--sev-medium)"></span>Medium</span><span class="val">61</span></div>
+              <div class="donut-legend-row"><span class="left"><span class="swatch" style="background:var(--sev-low)"></span>Low</span><span class="val">40</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOP IPS / FLEET HEALTH / WORKLOAD -->
+    <div class="grid-3">
+      <div class="panel">
+        <div class="panel-head"><h2>Top Source IPs</h2><span class="meta">BY ALERT COUNT</span></div>
+        <div class="panel-body">
+          <div style="display:flex;">
+            <div class="hbar-labels">
+              <div class="hbar-row-label">203.0.113.44</div>
+              <div class="hbar-row-label">198.51.100.12</div>
+              <div class="hbar-row-label">10.20.4.17</div>
+              <div class="hbar-row-label">192.0.2.88</div>
+              <div class="hbar-row-label">198.51.100.201</div>
+            </div>
+            <svg width="100%" height="150" viewBox="0 0 300 150" preserveAspectRatio="none" style="flex:1;">
+              <rect x="0" y="6.0" width="300.0" height="16" rx="3" fill="var(--color-primary)" opacity="1.0"/>
+              <rect x="0" y="36.0" width="238.2" height="16" rx="3" fill="var(--color-primary)" opacity="0.91"/>
+              <rect x="0" y="66.0" width="167.6" height="16" rx="3" fill="var(--color-primary)" opacity="0.82"/>
+              <rect x="0" y="96.0" width="123.5" height="16" rx="3" fill="var(--color-primary)" opacity="0.73"/>
+              <rect x="0" y="126.0" width="79.4" height="16" rx="3" fill="var(--color-primary)" opacity="0.64"/>
+            </svg>
+            <div class="hbar-labels">
+              <div class="hbar-row-val">34</div>
+              <div class="hbar-row-val">27</div>
+              <div class="hbar-row-val">19</div>
+              <div class="hbar-row-val">14</div>
+              <div class="hbar-row-val">9</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Fleet Health</h2><span class="meta">318 AGENTS</span></div>
+        <div class="panel-body">
+          <div class="donut-wrap">
+            <svg width="120" height="120" viewBox="0 0 140 140">
+              <path d="M 70.00 10.00 A 60 60 0 1 1 62.90 10.42 L 65.27 30.28 A 40 40 0 1 0 70.00 30.00 Z" fill="#2ED47A"/>
+              <path d="M 62.90 10.42 A 60 60 0 0 1 67.63 10.05 L 68.42 30.03 A 40 40 0 0 0 65.27 30.28 Z" fill="#FFB020"/>
+              <path d="M 67.63 10.05 A 60 60 0 0 1 70.00 10.00 L 70.00 30.00 A 40 40 0 0 0 68.42 30.03 Z" fill="#5A6478"/>
+              <text x="70" y="65" text-anchor="middle" font-family="var(--font-display)" font-size="20" font-weight="700" fill="var(--color-text-primary)">98%</text>
+              <text x="70" y="79" text-anchor="middle" font-family="var(--font-mono)" font-size="8" fill="var(--color-text-muted)">ONLINE</text>
+            </svg>
+            <div class="donut-legend">
+              <div class="donut-legend-row"><span class="left"><span class="swatch" style="background:var(--color-success)"></span>Online</span><span class="val">312</span></div>
+              <div class="donut-legend-row"><span class="left"><span class="swatch" style="background:var(--color-warning)"></span>Degraded</span><span class="val">4</span></div>
+              <div class="donut-legend-row"><span class="left"><span class="swatch" style="background:var(--color-text-muted)"></span>Offline</span><span class="val">2</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Analyst Workload</h2><span class="meta">ALERTS · CASES</span></div>
+        <div class="panel-body">
+          <div style="display:flex;">
+            <div class="hbar-labels">
+              <div class="hbar-row-label">j.tan</div>
+              <div class="hbar-row-label">m.reyes</div>
+              <div class="hbar-row-label">a.khan</div>
+              <div class="hbar-row-label">s.osei</div>
+              <div class="hbar-row-label" style="font-style:italic; color:var(--color-warning);">unassigned</div>
+            </div>
+            <svg width="100%" height="150" viewBox="0 0 260 150" preserveAspectRatio="none" style="flex:1;">
+              <rect x="0" y="6.0" width="189.1" height="16" fill="var(--sev-high)" opacity="0.85"/>
+              <rect x="189.1" y="6.0" width="70.9" height="16" fill="var(--color-primary)" opacity="0.85"/>
+              <rect x="0" y="36.0" width="141.8" height="16" fill="var(--sev-high)" opacity="0.85"/>
+              <rect x="141.8" y="36.0" width="118.2" height="16" fill="var(--color-primary)" opacity="0.85"/>
+              <rect x="0" y="66.0" width="118.2" height="16" fill="var(--sev-high)" opacity="0.85"/>
+              <rect x="118.2" y="66.0" width="47.3" height="16" fill="var(--color-primary)" opacity="0.85"/>
+              <rect x="0" y="96.0" width="70.9" height="16" fill="var(--sev-high)" opacity="0.85"/>
+              <rect x="70.9" y="96.0" width="94.5" height="16" fill="var(--color-primary)" opacity="0.85"/>
+              <rect x="0" y="126.0" width="94.5" height="16" fill="var(--sev-high)" opacity="0.85"/>
+            </svg>
+            <div class="hbar-labels">
+              <div class="hbar-row-val">11</div>
+              <div class="hbar-row-val">11</div>
+              <div class="hbar-row-val">7</div>
+              <div class="hbar-row-val">7</div>
+              <div class="hbar-row-val">4</div>
+            </div>
+          </div>
+          <div class="legend" style="margin-top:4px;">
+            <div class="legend-item"><span class="legend-dot" style="background:var(--sev-high)"></span>Open alerts</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--color-primary)"></span>Open cases</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRIAGE TABLE + LIVE EVENTS -->
+    <div class="row-bottom">
+      <div class="panel">
+        <div class="panel-head"><h2>Agentic Triage Feed</h2><span class="meta">LAST 5 ALERTS</span></div>
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead><tr><th>Time</th><th>Alert</th><th>Severity</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="cell-mono">02:14</td>
+                <td class="cell-title">Lateral movement via SMB<span class="mitre">T1021.002 · fin-db01</span></td>
+                <td><span class="badge badge-critical">Critical</span></td>
+                <td class="cell-mono">new</td>
+              </tr>
+              <tr>
+                <td class="cell-mono">02:09</td>
+                <td class="cell-title">Suspicious PowerShell download<span class="mitre">T1059.001 · web03</span></td>
+                <td><span class="badge badge-high">High</span></td>
+                <td class="cell-mono">ack</td>
+              </tr>
+              <tr>
+                <td class="cell-mono">01:52</td>
+                <td class="cell-title">Impossible travel — analyst.k<span class="mitre">T1078 · vpn-gw02</span></td>
+                <td><span class="badge badge-medium">Medium</span></td>
+                <td class="cell-mono">ack</td>
+              </tr>
+              <tr>
+                <td class="cell-mono">01:47</td>
+                <td class="cell-title">New scheduled task registered<span class="mitre">T1053.005 · hr-app04</span></td>
+                <td><span class="badge badge-low">Low</span></td>
+                <td class="cell-mono">resolved</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Live Events</h2></div>
+        <div class="panel-body tight">
+          <div class="event-item"><div class="event-time">02:14:32</div><div class="event-action">authentication_failure</div><div class="event-ip">203.0.113.44</div></div>
+          <div class="event-item"><div class="event-time">02:14:08</div><div class="event-action">smb_session_setup</div><div class="event-ip">203.0.113.44</div></div>
+          <div class="event-item"><div class="event-time">02:13:51</div><div class="event-action">process_start · powershell.exe</div><div class="event-ip">198.51.100.12</div></div>
+          <div class="event-item"><div class="event-time">02:13:20</div><div class="event-action">dns_query · pastebin-mirror.top</div><div class="event-ip">198.51.100.12</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

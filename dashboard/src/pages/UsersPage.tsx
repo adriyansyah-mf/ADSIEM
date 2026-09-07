@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import DataTable from '@/components/DataTable'
 import StatusBadge from '@/components/StatusBadge'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { useUsers, useCreateUser, useDeleteUser } from '@/hooks/useUsers'
 import { Plus, Trash2 } from 'lucide-react'
 import type { User } from '@/types'
@@ -27,7 +28,7 @@ export default function UsersPage() {
     { key: 'group', header: 'Group', render: (r: User) => r.group_id },
     { key: 'active', header: 'Active', render: (r: User) => <StatusBadge status={r.is_active ? 'online' : 'offline'} /> },
     { key: 'actions', header: '', render: (r: User) => (
-      <button onClick={() => deleteUser.mutate(r.id)} className="text-destructive hover:opacity-70">
+      <button aria-label={`Delete user ${r.username}`} title={`Delete user ${r.username}`} onClick={() => deleteUser.mutate(r.id)} className="text-destructive hover:opacity-70">
         <Trash2 size={14} /></button>
     )},
   ]
@@ -35,14 +36,14 @@ export default function UsersPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Users</h1>
+        <PageHeader title="Users" className="!mb-0" />
         <button onClick={() => setShowForm(true)}
           className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm">
           <Plus size={14} /> New User
         </button>
       </div>
       {showForm && (
-        <div className="mb-4 p-4 rounded border border-border bg-card space-y-3">
+        <div className="mb-4 p-4 enterprise-panel rounded border border-border bg-card space-y-3">
           <div className="grid grid-cols-2 gap-3">
             {(['username', 'email', 'password', 'group_id'] as const).map((f) => (
               <div key={f}>

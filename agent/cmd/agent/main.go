@@ -44,6 +44,13 @@ func main() {
 		enrollToken = "bootstrap-token"
 	}
 
+	if skip := os.Getenv("AGENT_INSECURE_SKIP_VERIFY"); skip != "" {
+		cfg.Server.InsecureSkipVerify = skip == "true" || skip == "1"
+	}
+	if cfg.Server.InsecureSkipVerify {
+		slog.Warn("TLS certificate verification is disabled (insecure_skip_verify) -- only intended for bootstrapping trust with a self-signed server certificate")
+	}
+
 	if cfg.Agent.Token == "" {
 		if err := enrollment.Enroll(cfg, *configPath, enrollToken); err != nil {
 			slog.Error("enrollment failed", "err", err)
@@ -52,7 +59,7 @@ func main() {
 	}
 
 	buf := buffer.New(cfg.Agent.BufferSize)
-	c := client.New(cfg.Server.URL, cfg.Agent.Token)
+	c := client.New(cfg.Server.URL, cfg.Agent.Token, cfg.Server.InsecureSkipVerify)
 	mgr := tailer.NewManager(buf)
 
 	// seed initial sources from config

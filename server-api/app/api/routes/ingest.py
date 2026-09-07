@@ -3,27 +3,28 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Annotated
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 
 from app.core.database import get_db
 from app.core.deps import get_agent
+from app.core.rate_limit import rate_limit_by_agent_group
 from app.core.redis_client import get_redis
-from app.core.security import hash_token
 from app.models.models import Agent, AgentLogSource, AgentTask, FimWatchPath
 from app.schemas.schemas import AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
 from app.services.ingest import enqueue_log
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
+RateLimitIngestion = rate_limit_by_agent_group("ingestion")
 
 @router.post("/log", status_code=202)
 async def ingest_log(
     body: LogIngestRequest,
     agent: Annotated[Agent, Depends(get_agent)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    _rate_limit: Annotated[None, Depends(RateLimitIngestion)],
 ):
     await enqueue_log(redis, {
         "agent_id": str(agent.id),

@@ -1,0 +1,40 @@
+/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py:208: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+..........                                                               [100%]
+=============================== warnings summary ===============================
+tests/server-api/test_audit_chain.py:84
+  /tmp/repo/tests/server-api/test_audit_chain.py:84: PytestUnknownMarkWarning: Unknown pytest.mark.service_e2e - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.service_e2e
+
+tests/server-api/test_audit_chain.py:102
+  /tmp/repo/tests/server-api/test_audit_chain.py:102: PytestUnknownMarkWarning: Unknown pytest.mark.service_e2e - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.service_e2e
+
+tests/server-api/test_audit_chain.py:122
+  /tmp/repo/tests/server-api/test_audit_chain.py:122: PytestUnknownMarkWarning: Unknown pytest.mark.service_e2e - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.service_e2e
+
+tests/server-api/test_audit_chain.py:143
+  /tmp/repo/tests/server-api/test_audit_chain.py:143: PytestUnknownMarkWarning: Unknown pytest.mark.service_e2e - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.service_e2e
+
+tests/server-api/test_audit_chain.py:184
+  /tmp/repo/tests/server-api/test_audit_chain.py:184: PytestUnknownMarkWarning: Unknown pytest.mark.service_e2e - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.service_e2e
+
+tests/server-api/test_audit_chain.py::test_actor_type_resolution_for_none_is_system
+  /usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py:783: DeprecationWarning: The event_loop fixture provided by pytest-asyncio has been redefined in
+  /tmp/repo/tests/server-api/conftest.py:4
+  Replacing the event_loop fixture with a custom implementation is deprecated
+  and will lead to errors in the future.
+  If you want to request an asyncio event loop with a scope other than function
+  scope, use the "scope" argument to the asyncio mark when marking the tests.
+  If you want to return different types of event loops, use the event_loop_policy
+  fixture.
+  
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+10 passed, 6 warnings in 0.85s

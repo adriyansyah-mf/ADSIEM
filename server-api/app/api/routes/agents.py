@@ -1,5 +1,4 @@
 # server-api/app/api/routes/agents.py
-import hashlib
 import os
 from pathlib import Path
 from typing import Annotated
@@ -136,8 +135,12 @@ async def get_agent(
     agent_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(select(Agent).options(selectinload(Agent.log_sources)).where(Agent.id == agent_id))
+    query = select(Agent).options(selectinload(Agent.log_sources)).where(Agent.id == agent_id)
+    if group_filter is not None:
+        query = query.where(Agent.group_id == group_filter)
+    result = await db.execute(query)
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -149,8 +152,12 @@ async def update_agent(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(select(Agent).options(selectinload(Agent.log_sources)).where(Agent.id == agent_id))
+    query = select(Agent).options(selectinload(Agent.log_sources)).where(Agent.id == agent_id)
+    if group_filter is not None:
+        query = query.where(Agent.group_id == group_filter)
+    result = await db.execute(query)
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -158,7 +165,7 @@ async def update_agent(
         setattr(agent, field, value)
     await db.commit()
     await db.refresh(agent)
-    background.add_task(audit_log, db, current_user.id, "agent_updated", "agent", str(agent_id))
+    background.add_task(audit_log, db, current_user, "agent_updated", "agent", str(agent_id))
     return AgentOut.model_validate(agent)
 
 @router.delete("/api/agents/{agent_id}", status_code=204)
@@ -167,14 +174,18 @@ async def delete_agent(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
+    query = select(Agent).where(Agent.id == agent_id)
+    if group_filter is not None:
+        query = query.where(Agent.group_id == group_filter)
+    result = await db.execute(query)
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     await db.delete(agent)
     await db.commit()
-    background.add_task(audit_log, db, current_user.id, "agent_revoked", "agent", str(agent_id))
+    background.add_task(audit_log, db, current_user, "agent_revoked", "agent", str(agent_id))
 
 # ─── Log Sources ─────────────────────────────────────────────────
 
@@ -183,8 +194,12 @@ async def get_log_sources(
     agent_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(select(AgentLogSource).where(AgentLogSource.agent_id == agent_id))
+    query = select(AgentLogSource).join(Agent).where(AgentLogSource.agent_id == agent_id)
+    if group_filter is not None:
+        query = query.where(Agent.group_id == group_filter)
+    result = await db.execute(query)
     return [LogSourceOut.model_validate(s) for s in result.scalars().all()]
 
 @router.post("/api/agents/{agent_id}/log-sources", response_model=LogSourceOut, status_code=201)
@@ -193,12 +208,18 @@ async def add_log_source(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
+    agent_query = select(Agent.id).where(Agent.id == agent_id)
+    if group_filter is not None:
+        agent_query = agent_query.where(Agent.group_id == group_filter)
+    if (await db.execute(agent_query)).scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
     src = AgentLogSource(agent_id=agent_id, path=body.path, log_type=body.log_type, is_enabled=body.is_enabled)
     db.add(src)
     await db.commit()
     await db.refresh(src)
-    background.add_task(audit_log, db, current_user.id, "log_source_added", "agent_log_source", str(src.id), {"path": body.path})
+    background.add_task(audit_log, db, current_user, "log_source_added", "agent_log_source", str(src.id), {"path": body.path})
     return LogSourceOut.model_validate(src)
 
 @router.put("/api/agents/{agent_id}/log-sources/{source_id}", response_model=LogSourceOut)
@@ -207,10 +228,14 @@ async def update_log_source(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(
-        select(AgentLogSource).where(AgentLogSource.id == source_id, AgentLogSource.agent_id == agent_id)
+    query = select(AgentLogSource).join(Agent).where(
+        AgentLogSource.id == source_id, AgentLogSource.agent_id == agent_id
     )
+    if group_filter is not None:
+        query = query.where(Agent.group_id == group_filter)
+    result = await db.execute(query)
     src = result.scalar_one_or_none()
     if not src:
         raise HTTPException(status_code=404, detail="Log source not found")
@@ -218,7 +243,7 @@ async def update_log_source(
         setattr(src, field, value)
     await db.commit()
     await db.refresh(src)
-    background.add_task(audit_log, db, current_user.id, "log_source_updated", "agent_log_source", str(source_id))
+    background.add_task(audit_log, db, current_user, "log_source_updated", "agent_log_source", str(source_id))
     return LogSourceOut.model_validate(src)
 
 @router.delete("/api/agents/{agent_id}/log-sources/{source_id}", status_code=204)
@@ -227,16 +252,20 @@ async def delete_log_source(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(
-        select(AgentLogSource).where(AgentLogSource.id == source_id, AgentLogSource.agent_id == agent_id)
+    query = select(AgentLogSource).join(Agent).where(
+        AgentLogSource.id == source_id, AgentLogSource.agent_id == agent_id
     )
+    if group_filter is not None:
+        query = query.where(Agent.group_id == group_filter)
+    result = await db.execute(query)
     src = result.scalar_one_or_none()
     if not src:
         raise HTTPException(status_code=404, detail="Log source not found")
     await db.delete(src)
     await db.commit()
-    background.add_task(audit_log, db, current_user.id, "log_source_deleted", "agent_log_source", str(source_id))
+    background.add_task(audit_log, db, current_user, "log_source_deleted", "agent_log_source", str(source_id))
 
 
 @router.post("/api/agents/{agent_id}/isolate", response_model=AgentOut)
@@ -244,8 +273,12 @@ async def isolate_agent(
     agent_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    agent = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    query = select(Agent).where(Agent.id == agent_id)
+    if group_filter is not None:
+        query = query.where(Agent.group_id == group_filter)
+    agent = (await db.execute(query)).scalar_one_or_none()
     if not agent:
         raise HTTPException(404, "Agent not found")
     if agent.status != "online":
@@ -263,8 +296,12 @@ async def unisolate_agent(
     agent_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    agent = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
+    query = select(Agent).where(Agent.id == agent_id)
+    if group_filter is not None:
+        query = query.where(Agent.group_id == group_filter)
+    agent = (await db.execute(query)).scalar_one_or_none()
     if not agent:
         raise HTTPException(404, "Agent not found")
     agent.is_isolated = False

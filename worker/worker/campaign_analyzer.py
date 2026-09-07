@@ -6,7 +6,6 @@ Setelah sebuah case dibuat oleh AI, fungsi ini mengumpulkan SEMUA alert
 dari IP/host yang sama dalam 24 jam terakhir, plus anomali UEBA terkait,
 lalu meminta Groq membangun timeline dan narasi kampanye serangan secara utuh.
 """
-import asyncio
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional

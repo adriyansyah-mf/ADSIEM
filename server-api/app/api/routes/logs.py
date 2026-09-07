@@ -1,8 +1,9 @@
 # server-api/app/api/routes/logs.py
 import json
-from fastapi import APIRouter, Depends
+from typing import Annotated
+from fastapi import APIRouter, Depends, Query
 
-from app.core.deps import require_permission
+from app.core.deps import get_scoped_group, require_permission
 from app.core.es_client import search as es_search
 from app.core.query_builder import tree_to_query
 from app.schemas.schemas import PaginatedResponse, RawLogOut
@@ -10,15 +11,23 @@ from app.schemas.schemas import PaginatedResponse, RawLogOut
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 Perm = require_permission("logs:read")
 
+# Hard cap on a single request's page size: an unbounded page_size lets one
+# client force Elasticsearch to materialize an arbitrarily large result set
+# in one query, degrading the shared cluster for every tenant.
+MAX_PAGE_SIZE = 500
+
 @router.get("", response_model=PaginatedResponse)
 async def list_logs(
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(Perm),
-    page_size: int = 25,
+    page_size: int = Query(25, ge=1, le=MAX_PAGE_SIZE),
     after: str | None = None,
     log_type: str | None = None, search: str | None = None,
     filter_tree: str | None = None,
 ):
     filters: list[dict] = []
+    if group_filter:
+        filters.append({"term": {"group_id": group_filter}})
     if log_type:
         filters.append({"term": {"log_type": log_type}})
     if search:

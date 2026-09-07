@@ -21,24 +21,31 @@ async def update_user_counters(redis, user: str, decoded: dict) -> None:
     host   = decoded.get("host.hostname") or decoded.get("hostname")
     p = f"ueba:u:{user}"
 
-    await redis.incr(f"{p}:login");  await redis.expire(f"{p}:login",  WINDOW)
-    await redis.sadd("ueba:active:users", user); await redis.expire("ueba:active:users", WINDOW * 2)
+    await redis.incr(f"{p}:login")
+    await redis.expire(f"{p}:login", WINDOW)
+    await redis.sadd("ueba:active:users", user)
+    await redis.expire("ueba:active:users", WINDOW * 2)
 
     if "fail" in action.lower():
-        await redis.incr(f"{p}:failed"); await redis.expire(f"{p}:failed", WINDOW)
+        await redis.incr(f"{p}:failed")
+        await redis.expire(f"{p}:failed", WINDOW)
 
     if "sudo" in action.lower() or "privilege" in action.lower():
-        await redis.incr(f"{p}:sudo"); await redis.expire(f"{p}:sudo", WINDOW)
+        await redis.incr(f"{p}:sudo")
+        await redis.expire(f"{p}:sudo", WINDOW)
 
     if ip:
         is_new = not await redis.sismember(f"{p}:known_ips", ip)
         if is_new:
             await redis.set(f"{p}:new_ip", "1", ex=WINDOW)
-        await redis.sadd(f"{p}:ips", ip);       await redis.expire(f"{p}:ips",       WINDOW)
-        await redis.sadd(f"{p}:known_ips", ip); await redis.expire(f"{p}:known_ips", KNOWN_IPS_TTL)
+        await redis.sadd(f"{p}:ips", ip)
+        await redis.expire(f"{p}:ips", WINDOW)
+        await redis.sadd(f"{p}:known_ips", ip)
+        await redis.expire(f"{p}:known_ips", KNOWN_IPS_TTL)
 
     if host:
-        await redis.sadd(f"{p}:hosts", host); await redis.expire(f"{p}:hosts", WINDOW)
+        await redis.sadd(f"{p}:hosts", host)
+        await redis.expire(f"{p}:hosts", WINDOW)
 
 
 async def update_ip_counters(redis, ip: str, decoded: dict, user: str | None) -> None:
@@ -46,17 +53,22 @@ async def update_ip_counters(redis, ip: str, decoded: dict, user: str | None) ->
     host   = decoded.get("host.hostname") or decoded.get("hostname")
     p = f"ueba:ip:{ip}"
 
-    await redis.incr(f"{p}:total"); await redis.expire(f"{p}:total", WINDOW)
-    await redis.sadd("ueba:active:ips", ip); await redis.expire("ueba:active:ips", WINDOW * 2)
+    await redis.incr(f"{p}:total")
+    await redis.expire(f"{p}:total", WINDOW)
+    await redis.sadd("ueba:active:ips", ip)
+    await redis.expire("ueba:active:ips", WINDOW * 2)
 
     if "fail" in action.lower():
-        await redis.incr(f"{p}:failed"); await redis.expire(f"{p}:failed", WINDOW)
+        await redis.incr(f"{p}:failed")
+        await redis.expire(f"{p}:failed", WINDOW)
 
     if user:
-        await redis.sadd(f"{p}:users", user); await redis.expire(f"{p}:users", WINDOW)
+        await redis.sadd(f"{p}:users", user)
+        await redis.expire(f"{p}:users", WINDOW)
 
     if host:
-        await redis.sadd(f"{p}:hosts", host); await redis.expire(f"{p}:hosts", WINDOW)
+        await redis.sadd(f"{p}:hosts", host)
+        await redis.expire(f"{p}:hosts", WINDOW)
 
 
 async def build_user_vector_dict(redis, user: str, login_count: int, failed_count: int) -> dict:

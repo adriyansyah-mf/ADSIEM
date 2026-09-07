@@ -23,20 +23,21 @@ export default function Toaster() {
   if (toasts.length === 0) return null
 
   return (
-    <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 w-80">
+    <div className="fixed bottom-4 right-4 z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite">
       {toasts.map((t) => (
         <div
           key={t.id}
-          className={`flex items-start gap-3 rounded border px-4 py-3 text-sm shadow-lg transition-all
-            ${t.type === 'success' ? 'border-green-600 bg-green-950 text-green-200' : ''}
-            ${t.type === 'error' ? 'border-red-600 bg-red-950 text-red-200' : ''}
-            ${t.type === 'info' ? 'border-border bg-card text-foreground' : ''}
+          className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm shadow-lg backdrop-blur-xl transition-all
+            ${t.type === 'success' ? 'border-green-600 bg-green-950/80 text-green-200' : ''}
+            ${t.type === 'error' ? 'border-red-600 bg-red-950/80 text-red-200' : ''}
+            ${t.type === 'info' ? 'border-[var(--glass-border)] bg-[var(--glass-bg-strong)] text-[var(--text-primary)]' : ''}
           `}
         >
           <span className="flex-1">{t.message}</span>
           <button
             onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
-            className="text-muted-foreground hover:text-foreground flex-shrink-0"
+            aria-label="Dismiss notification"
+            className="-m-2 flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
           >
             <X size={14} />
           </button>

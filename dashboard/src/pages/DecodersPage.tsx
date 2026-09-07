@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import DataTable from '@/components/DataTable'
 import YamlEditor from '@/components/YamlEditor'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { useDecoders, useCreateDecoder, useUpdateDecoder, useDeleteDecoder, useTestDecoder } from '@/hooks/useDecoders'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
 import type { Decoder } from '@/types'
@@ -104,8 +105,11 @@ export default function DecodersPage() {
     { key: 'actions', header: '', render: (r: Decoder) => (
       <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
         <button onClick={() => { setEditing(r); setYamlContent(r.content) }}
-          className="text-muted-foreground hover:text-foreground"><Pencil size={14} /></button>
-        <button onClick={() => deleteDecoder.mutate(r.id)} className="text-destructive hover:opacity-70">
+          aria-label={`Edit ${r.name}`} title={`Edit ${r.name}`}
+          className="p-1.5 rounded text-muted-foreground hover:text-foreground"><Pencil size={14} /></button>
+        <button onClick={() => deleteDecoder.mutate(r.id)}
+          aria-label={`Delete ${r.name}`} title={`Delete ${r.name}`}
+          className="p-1.5 rounded text-destructive hover:opacity-70">
           <Trash2 size={14} /></button>
       </div>
     )},
@@ -114,7 +118,7 @@ export default function DecodersPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Decoders</h1>
+        <PageHeader title="Decoders" className="!mb-0" />
         <button onClick={() => { setCreating(true); setYamlContent(DEFAULT_DECODER) }}
           className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm">
           <Plus size={14} /> New Decoder

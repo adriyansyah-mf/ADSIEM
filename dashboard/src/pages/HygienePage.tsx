@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { ShieldCheck } from 'lucide-react'
 import { useHygieneLatest, useAgentVulns } from '@/hooks/useHygiene'
 import type { HygieneSnapshot, HygieneIssue, DiskPartition, OpenPort, InstalledPackage, VulnerablePackage } from '@/types'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const RISKY_PORTS = new Set([21, 22, 23, 25, 445, 3389, 5900, 6379, 9200, 27017])
 
@@ -15,7 +17,7 @@ function severityColor(sev: string) {
   if (s === 'critical') return 'var(--accent-red)'
   if (s === 'high') return '#ff6b35'
   if (s === 'medium') return 'var(--accent-yellow)'
-  return 'var(--accent-cyan)'
+  return 'var(--accent-blue)'
 }
 
 function fmtBytes(mb: number | null) {
@@ -26,7 +28,7 @@ function fmtBytes(mb: number | null) {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '8px' }}>
+    <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '8px' }}>
       {children}
     </div>
   )
@@ -38,7 +40,7 @@ function DiskBar({ part }: { part: DiskPartition }) {
   return (
     <div style={{ marginBottom: '6px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '2px' }}>
-        <span style={{ fontFamily: 'Share Tech Mono, monospace' }}>{part.mount}</span>
+        <span style={{ fontFamily: 'IBM Plex Sans, sans-serif' }}>{part.mount}</span>
         <span style={{ color }}>{pct.toFixed(0)}% — {fmtBytes(part.used_mb)} / {fmtBytes(part.total_mb)}</span>
       </div>
       <div style={{ height: '4px', background: 'var(--bg-base)', borderRadius: '2px', overflow: 'hidden' }}>
@@ -53,7 +55,7 @@ function PortTag({ port }: { port: OpenPort }) {
   return (
     <span style={{
       display: 'inline-block', padding: '1px 6px', borderRadius: '3px',
-      fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', margin: '2px',
+      fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', margin: '2px',
       border: `1px solid ${risky ? 'var(--accent-red)' : 'var(--border)'}`,
       color: risky ? 'var(--accent-red)' : 'var(--text-secondary)',
       background: risky ? 'rgba(255,68,68,0.08)' : 'transparent',
@@ -84,11 +86,11 @@ function PackagesTab({ snap, agentId }: { snap: HygieneSnapshot; agentId: string
       {/* OSV summary bar */}
       <div style={{
         padding: '8px 10px', borderRadius: '4px', marginBottom: '10px',
-        background: vuln_count > 0 ? 'rgba(255,68,68,0.07)' : 'rgba(0,255,136,0.06)',
-        border: `1px solid ${vuln_count > 0 ? 'rgba(255,68,68,0.3)' : 'rgba(0,255,136,0.2)'}`,
+        background: vuln_count > 0 ? 'rgba(255,68,68,0.07)' : 'rgba(46,212,122,0.06)',
+        border: `1px solid ${vuln_count > 0 ? 'rgba(255,68,68,0.3)' : 'rgba(46,212,122,0.2)'}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px' }}>
+        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px' }}>
           {vulnLoading ? (
             <span style={{ color: 'var(--text-muted)' }}>Querying osv.dev...</span>
           ) : vulnReport ? (
@@ -110,7 +112,7 @@ function PackagesTab({ snap, agentId }: { snap: HygieneSnapshot; agentId: string
               background: showVulnOnly ? 'rgba(255,68,68,0.2)' : 'transparent',
               border: '1px solid rgba(255,68,68,0.4)',
               borderRadius: '3px', padding: '2px 8px',
-              color: 'var(--accent-red)', fontFamily: 'Rajdhani, sans-serif',
+              color: 'var(--accent-red)', fontFamily: 'IBM Plex Sans, sans-serif',
               fontWeight: 700, fontSize: '9px', letterSpacing: '0.5px', cursor: 'pointer',
             }}
           >
@@ -128,14 +130,14 @@ function PackagesTab({ snap, agentId }: { snap: HygieneSnapshot; agentId: string
           width: '100%', boxSizing: 'border-box', marginBottom: '8px',
           background: 'var(--bg-base)', border: '1px solid var(--border)',
           borderRadius: '4px', padding: '5px 8px', color: 'var(--text-primary)',
-          fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', outline: 'none',
+          fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px',
         }}
       />
 
       {/* Package list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', maxHeight: '340px', overflowY: 'auto' }}>
         {filtered.length === 0 ? (
-          <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', textAlign: 'center', padding: '12px 0' }}>
+          <div style={{ color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', textAlign: 'center', padding: '12px 0' }}>
             {snap.packages.length === 0 ? 'No packages collected yet' : 'No matches'}
           </div>
         ) : filtered.map((pkg: InstalledPackage, i: number) => {
@@ -150,13 +152,13 @@ function PackagesTab({ snap, agentId }: { snap: HygieneSnapshot; agentId: string
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{
-                    fontFamily: 'Share Tech Mono, monospace', fontSize: '10px',
+                    fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px',
                     color: vuln ? 'var(--accent-red)' : 'var(--text-primary)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
                     {pkg.name}
                   </span>
-                  <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', flexShrink: 0 }}>
+                  <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', flexShrink: 0 }}>
                     {pkg.version}
                   </span>
                 </div>
@@ -166,7 +168,7 @@ function PackagesTab({ snap, agentId }: { snap: HygieneSnapshot; agentId: string
                       <div key={vi} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                         <span style={{
                           padding: '0px 4px', borderRadius: '2px', fontSize: '8px',
-                          fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '0.5px',
+                          fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '0.5px',
                           color: severityColor(v.severity),
                           border: `1px solid ${severityColor(v.severity)}55`,
                           background: `${severityColor(v.severity)}11`,
@@ -174,16 +176,16 @@ function PackagesTab({ snap, agentId }: { snap: HygieneSnapshot; agentId: string
                         }}>
                           {v.severity}
                         </span>
-                        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--accent-cyan)', flexShrink: 0 }}>
+                        <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--accent-blue)', flexShrink: 0 }}>
                           {v.id}
                         </span>
-                        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {v.summary}
                         </span>
                       </div>
                     ))}
                     {vuln.vuln_count > vuln.vulns.length && (
-                      <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+                      <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
                         +{vuln.vuln_count - vuln.vulns.length} more CVEs
                       </span>
                     )}
@@ -192,7 +194,7 @@ function PackagesTab({ snap, agentId }: { snap: HygieneSnapshot; agentId: string
               </div>
               <span style={{
                 padding: '0px 4px', borderRadius: '2px', fontSize: '8px',
-                fontFamily: 'Rajdhani, sans-serif', fontWeight: 600, letterSpacing: '0.5px',
+                fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, letterSpacing: '0.5px',
                 color: 'var(--text-muted)', border: '1px solid var(--border)',
                 flexShrink: 0, alignSelf: 'flex-start', marginTop: '2px',
               }}>
@@ -222,10 +224,10 @@ function DetailPanel({ snap, onClose }: { snap: HygieneSnapshot; onClose: () => 
         background: 'var(--bg-base)',
       }}>
         <div>
-          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '15px', color: 'var(--accent-cyan)' }}>
+          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '15px', color: 'var(--accent-blue)' }}>
             {snap.hostname ?? snap.agent_id.slice(0, 8)}
           </div>
-          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
             Score: <span style={{ color: scoreColor(snap.hygiene_score), fontWeight: 700 }}>{snap.hygiene_score}</span>
             {' · '}{snap.kernel}
           </div>
@@ -241,9 +243,9 @@ function DetailPanel({ snap, onClose }: { snap: HygieneSnapshot; onClose: () => 
             onClick={() => setTab(t)}
             style={{
               flex: 1, padding: '8px', background: 'none', border: 'none',
-              borderBottom: tab === t ? '2px solid var(--accent-cyan)' : '2px solid transparent',
-              color: tab === t ? 'var(--accent-cyan)' : 'var(--text-muted)',
-              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px',
+              borderBottom: tab === t ? '2px solid var(--accent-blue)' : '2px solid transparent',
+              color: tab === t ? 'var(--accent-blue)' : 'var(--text-muted)',
+              fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '11px',
               letterSpacing: '1px', cursor: 'pointer', textTransform: 'uppercase',
             }}
           >
@@ -268,7 +270,7 @@ function DetailPanel({ snap, onClose }: { snap: HygieneSnapshot; onClose: () => 
                     ['Uptime', snap.uptime_seconds != null ? `${Math.floor(snap.uptime_seconds / 3600)}h ${Math.floor((snap.uptime_seconds % 3600) / 60)}m` : '—'],
                   ].map(([k, v]) => (
                     <tr key={k}>
-                      <td style={{ color: 'var(--text-muted)', padding: '2px 8px 2px 0', width: '70px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px' }}>{k}</td>
+                      <td style={{ color: 'var(--text-muted)', padding: '2px 8px 2px 0', width: '70px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px' }}>{k}</td>
                       <td style={{ color: 'var(--text-primary)', padding: '2px 0' }}>{v}</td>
                     </tr>
                   ))}
@@ -290,13 +292,13 @@ function DetailPanel({ snap, onClose }: { snap: HygieneSnapshot; onClose: () => 
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '2px' }}>
                         <span style={{
                           padding: '1px 5px', borderRadius: '2px', fontSize: '9px',
-                          fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '0.5px',
+                          fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '0.5px',
                           color: severityColor(issue.severity),
                           border: `1px solid ${severityColor(issue.severity)}66`,
                         }}>
                           {issue.severity.toUpperCase()}
                         </span>
-                        <span style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'Rajdhani, sans-serif', fontWeight: 600 }}>
+                        <span style={{ fontSize: '10px', color: 'var(--text-secondary)', fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600 }}>
                           {issue.category}
                         </span>
                       </div>
@@ -362,7 +364,7 @@ function DetailPanel({ snap, onClose }: { snap: HygieneSnapshot; onClose: () => 
                       display: 'flex', justifyContent: 'space-between',
                       padding: '4px 8px', borderRadius: '3px',
                       background: 'var(--bg-base)', fontSize: '10px',
-                      fontFamily: 'Share Tech Mono, monospace',
+                      fontFamily: 'IBM Plex Sans, sans-serif',
                     }}>
                       <span style={{ color: u.uid === 0 ? 'var(--accent-red)' : 'var(--text-primary)' }}>{u.name}</span>
                       <span style={{ color: 'var(--text-muted)' }}>uid:{u.uid} · {u.shell.split('/').pop()}</span>
@@ -388,7 +390,7 @@ function HostCard({ snap, onClick, selected }: { snap: HygieneSnapshot; onClick:
     <div
       onClick={onClick}
       style={{
-        background: 'var(--bg-panel)', border: `1px solid ${selected ? 'var(--accent-cyan)' : 'var(--border)'}`,
+        background: 'var(--bg-panel)', border: `1px solid ${selected ? 'var(--accent-blue)' : 'var(--border)'}`,
         borderRadius: '6px', padding: '14px', cursor: 'pointer',
         transition: 'border-color 0.15s', position: 'relative',
       }}
@@ -399,15 +401,15 @@ function HostCard({ snap, onClick, selected }: { snap: HygieneSnapshot; onClick:
         border: `2px solid ${scoreColor(snap.hygiene_score)}`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: scoreColor(snap.hygiene_score),
-        fontFamily: 'Share Tech Mono, monospace', fontWeight: 700, fontSize: '13px',
+        fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '13px',
       }}>
         {snap.hygiene_score}
       </div>
 
-      <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', marginBottom: '2px', paddingRight: '50px' }}>
+      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', marginBottom: '2px', paddingRight: '50px' }}>
         {snap.hostname ?? snap.agent_id.slice(0, 8)}
       </div>
-      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '10px' }}>
         {snap.os_name} {snap.os_version} · {snap.arch}
       </div>
 
@@ -431,7 +433,7 @@ function HostCard({ snap, onClick, selected }: { snap: HygieneSnapshot; onClick:
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: snap.issues.length > 0 ? '8px' : '0' }}>
         {snap.packages.length > 0 && (
-          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
+          <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)' }}>
             {snap.packages.length} pkgs
           </span>
         )}
@@ -442,7 +444,7 @@ function HostCard({ snap, onClick, selected }: { snap: HygieneSnapshot; onClick:
           {snap.issues.slice(0, 3).map((issue, i) => (
             <span key={i} style={{
               padding: '1px 6px', borderRadius: '3px', fontSize: '9px',
-              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '0.5px',
+              fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '0.5px',
               background: `${severityColor(issue.severity)}22`,
               color: severityColor(issue.severity),
               border: `1px solid ${severityColor(issue.severity)}55`,
@@ -458,7 +460,7 @@ function HostCard({ snap, onClick, selected }: { snap: HygieneSnapshot; onClick:
         </div>
       )}
 
-      <div style={{ marginTop: '8px', fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+      <div style={{ marginTop: '8px', fontSize: '9px', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
         {new Date(snap.collected_at).toLocaleString()}
       </div>
     </div>
@@ -482,14 +484,7 @@ export default function HygienePage() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '20px', color: 'var(--accent-cyan)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>
-            IT HYGIENE
-          </h1>
-          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Host health + package vulnerability scan via osv.dev · auto-refresh 5 min
-          </div>
-        </div>
+        <PageHeader title="IT hygiene" subtitle="Host health and package vulnerability scan via osv.dev · auto-refresh 5 min" className="!mb-0" />
         {avgScore != null && (
           <div style={{ display: 'flex', gap: '16px' }}>
             {[
@@ -500,8 +495,8 @@ export default function HygienePage() {
               { label: 'PACKAGES', value: totalPackages, color: 'var(--text-secondary)' },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontWeight: 700, fontSize: '20px', color, lineHeight: 1 }}>{value}</div>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '1px', marginTop: '2px' }}>{label}</div>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '20px', color, lineHeight: 1 }}>{value}</div>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '1px', marginTop: '2px' }}>{label}</div>
               </div>
             ))}
           </div>
@@ -509,18 +504,18 @@ export default function HygienePage() {
       </div>
 
       {isLoading ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px' }}>
           LOADING HYGIENE DATA...
         </div>
       ) : isError ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-red)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-red)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px' }}>
           FAILED TO LOAD HYGIENE SNAPSHOTS
         </div>
       ) : snapshots.length === 0 ? (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: '32px' }}>🛡</div>
-          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '16px', letterSpacing: '1px' }}>NO HYGIENE DATA YET</div>
-          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px' }}>Agents send their first snapshot 30 seconds after enrollment.</div>
+          <ShieldCheck aria-hidden="true" size={32} />
+          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '16px', letterSpacing: '1px' }}>NO HYGIENE DATA YET</div>
+          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px' }}>Agents send their first snapshot 30 seconds after enrollment.</div>
         </div>
       ) : (
         <div style={{ flex: 1, display: 'flex', gap: '12px', overflow: 'hidden' }}>

@@ -3,6 +3,7 @@ import { format } from 'date-fns'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Upload, Trash2, FileText, Loader2 } from 'lucide-react'
 import { api } from '@/api/client'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface SopDocument {
   id: string
@@ -60,9 +61,7 @@ export default function SopPage() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-        <h1 style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '20px', color: 'var(--accent-cyan)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>
-          SOP Documents
-        </h1>
+        <PageHeader title="SOP documents" className="!mb-0" />
         <div>
           <input ref={fileRef} type="file" accept=".pdf,.docx,.txt" style={{ display: 'none' }} onChange={handleUpload} />
           <button
@@ -71,8 +70,8 @@ export default function SopPage() {
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '6px',
               padding: '8px 16px', borderRadius: '4px',
-              border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.12)',
-              color: 'var(--accent-cyan)', fontFamily: 'Rajdhani, sans-serif',
+              border: '1px solid var(--accent-blue)', background: 'rgba(0,217,192,0.12)',
+              color: 'var(--accent-blue)', fontFamily: 'IBM Plex Sans, sans-serif',
               fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
               cursor: uploading ? 'wait' : 'pointer', opacity: uploading ? 0.6 : 1,
             }}
@@ -84,19 +83,19 @@ export default function SopPage() {
       </div>
 
       {error && (
-        <div style={{ padding: '10px 14px', borderRadius: '4px', background: 'rgba(255,34,68,0.1)', border: '1px solid rgba(255,34,68,0.3)', color: 'var(--accent-red)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', marginBottom: '16px' }}>
+        <div style={{ padding: '10px 14px', borderRadius: '4px', background: 'rgba(255,59,92,0.1)', border: '1px solid rgba(255,59,92,0.3)', color: 'var(--accent-red)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', marginBottom: '16px' }}>
           {error}
         </div>
       )}
 
-      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px' }}>
         Upload PDF, DOCX, or TXT files (max 10 MB). Uploaded SOPs are chunked, embedded, and used by the AI analyst when triaging alerts.
       </div>
 
       {isLoading ? (
-        <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>Loading...</div>
+        <div style={{ color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px' }}>Loading...</div>
       ) : docs.length === 0 ? (
-        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', border: '1px dashed var(--border)', borderRadius: '6px' }}>
+        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', border: '1px dashed var(--border)', borderRadius: '6px' }}>
           No SOP documents uploaded yet. Upload your Incident Handling SOP to improve AI triage accuracy.
         </div>
       ) : (
@@ -107,12 +106,12 @@ export default function SopPage() {
               padding: '12px 14px', borderRadius: '6px',
               border: '1px solid var(--border)', background: 'var(--bg-card)',
             }}>
-              <FileText size={16} style={{ color: 'var(--accent-cyan)', flexShrink: 0 }} />
+              <FileText size={16} style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {doc.filename}
                 </div>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
                   {format(new Date(doc.created_at), 'yyyy-MM-dd HH:mm')} · {doc.content_type.split('/').pop()?.toUpperCase()}
                 </div>
               </div>
@@ -121,7 +120,7 @@ export default function SopPage() {
                 border: `1px solid ${statusColor[doc.status] ?? 'var(--text-muted)'}44`,
                 background: `${statusColor[doc.status] ?? 'var(--text-muted)'}18`,
                 color: statusColor[doc.status] ?? 'var(--text-muted)',
-                fontFamily: 'Rajdhani, sans-serif', fontWeight: 700,
+                fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700,
                 fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' as const,
               }}>
                 {doc.status}
@@ -130,8 +129,8 @@ export default function SopPage() {
                 onClick={() => deleteMutation.mutate(doc.id)}
                 disabled={deleteMutation.isPending}
                 style={{
-                  padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(255,34,68,0.3)',
-                  background: 'rgba(255,34,68,0.08)', color: 'var(--accent-red)',
+                  padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(255,59,92,0.3)',
+                  background: 'rgba(255,59,92,0.08)', color: 'var(--accent-red)',
                   cursor: 'pointer', display: 'flex', alignItems: 'center',
                 }}
               >

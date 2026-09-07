@@ -1,0 +1,8 @@
+[tool.ruff.lint]
+# E711/E712 (comparisons to None/True/False) are well-known false positives in
+# SQLAlchemy codebases: `Column == True` / `Column == None` are correct,
+# idiomatic SQLAlchemy filter expressions (SQLAlchemy overloads `__eq__` on
+# Column to produce `= true` / `IS NULL` at the SQL level) even though they
+# look like the plain-Python anti-pattern these rules target. Both server-api
+# and worker use this idiom throughout their query filters.
+ignore = ["E711", "E712"]

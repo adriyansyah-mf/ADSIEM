@@ -7,7 +7,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        border: 'hsl(var(--border))',
+        border: 'hsl(var(--border-tw))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
         primary: { DEFAULT: 'hsl(var(--primary))', foreground: 'hsl(var(--primary-foreground))' },

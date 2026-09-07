@@ -6,7 +6,6 @@ import numpy as np
 import structlog
 from datetime import datetime, timezone
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import select
 
 from worker.database import AsyncSessionLocal
 from worker.models import UebaEntityScore, UebaAnomaly

@@ -112,6 +112,18 @@ CREATE TABLE rules (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS rule_revisions (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id     UUID NOT NULL REFERENCES rules(id) ON DELETE CASCADE,
+    version     INTEGER NOT NULL,
+    content     TEXT NOT NULL,
+    created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (rule_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rule_revisions_rule_id ON rule_revisions(rule_id, version DESC);
+
 CREATE TABLE decoders (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name        VARCHAR(255) UNIQUE NOT NULL,
@@ -129,6 +141,9 @@ CREATE TABLE alerts (
     severity         VARCHAR(20) NOT NULL DEFAULT 'medium',
     status           VARCHAR(30) NOT NULL DEFAULT 'new',
     rule_id          UUID REFERENCES rules(id) ON DELETE SET NULL,
+    correlation_id   VARCHAR(255),
+    correlation_key  VARCHAR(512),
+    source_event_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     event_id         UUID REFERENCES events(id) ON DELETE SET NULL,
     agent_id         UUID REFERENCES agents(id) ON DELETE SET NULL,
     group_id         VARCHAR(100) NOT NULL DEFAULT 'default',
@@ -161,15 +176,31 @@ CREATE TABLE alert_notes (
 
 CREATE TABLE audit_logs (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_type    VARCHAR(20) NOT NULL DEFAULT 'user',
     actor_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+    group_id      VARCHAR(100),
     action        VARCHAR(100) NOT NULL,
     resource_type VARCHAR(100),
     resource_id   TEXT,
     detail        JSONB NOT NULL DEFAULT '{}',
+    request_id    VARCHAR(64),
+    payload_hash  VARCHAR(64),
+    previous_hash VARCHAR(64),
+    chain_hash    VARCHAR(64),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX idx_audit_logs_group_id ON audit_logs(group_id);
+
+-- One row per tenant: the current head hash of that tenant's tamper-evident
+-- audit chain. Appends lock this row (SELECT ... FOR UPDATE) to serialize
+-- concurrent writers per tenant.
+CREATE TABLE audit_chain_heads (
+    group_id   VARCHAR(100) PRIMARY KEY,
+    chain_hash VARCHAR(64) NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE webhook_configs (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -185,15 +216,20 @@ CREATE TABLE webhook_deliveries (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     alert_id           UUID NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
     webhook_config_id  UUID NOT NULL REFERENCES webhook_configs(id) ON DELETE CASCADE,
+    group_id           VARCHAR(100),
     payload            JSONB NOT NULL DEFAULT '{}',
     status             VARCHAR(20) NOT NULL DEFAULT 'pending',
     attempts           INTEGER NOT NULL DEFAULT 0,
+    last_error         TEXT,
+    error_class        VARCHAR(100),
+    first_failed_at    TIMESTAMPTZ,
     last_attempted_at  TIMESTAMPTZ,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_webhook_deliveries_status ON webhook_deliveries(status);
+CREATE INDEX idx_webhook_deliveries_group_id ON webhook_deliveries(group_id);
 
 -- ─── Cases ───────────────────────────────────────────────────────
 
@@ -313,6 +349,79 @@ SELECT
     'default'
 FROM roles r WHERE r.name = 'superadmin';
 
+-- ─── SOAR v2 execution safety ───────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS soar_workflows (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_enabled  BOOLEAN NOT NULL DEFAULT true,
+    group_id    VARCHAR(100) NOT NULL DEFAULT 'default',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS soar_nodes (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workflow_id UUID NOT NULL REFERENCES soar_workflows(id) ON DELETE CASCADE,
+    node_type   VARCHAR(50) NOT NULL,
+    name        VARCHAR(255) NOT NULL,
+    config      JSONB NOT NULL DEFAULT '{}'::jsonb,
+    pos_x       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    pos_y       DOUBLE PRECISION NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS soar_edges (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workflow_id    UUID NOT NULL REFERENCES soar_workflows(id) ON DELETE CASCADE,
+    source_node_id UUID NOT NULL REFERENCES soar_nodes(id) ON DELETE CASCADE,
+    source_handle  VARCHAR(50) NOT NULL DEFAULT 'out',
+    target_node_id UUID NOT NULL REFERENCES soar_nodes(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS soar_runs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workflow_id     UUID NOT NULL REFERENCES soar_workflows(id) ON DELETE CASCADE,
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+    trigger_type    VARCHAR(30) NOT NULL,
+    trigger_ref     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    current_node_id UUID REFERENCES soar_nodes(id),
+    variables       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    resume_at       TIMESTAMPTZ,
+    group_id        VARCHAR(100) NOT NULL DEFAULT 'default',
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at     TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS soar_run_steps (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id              UUID NOT NULL REFERENCES soar_runs(id) ON DELETE CASCADE,
+    node_id             UUID NOT NULL REFERENCES soar_nodes(id),
+    action_type         VARCHAR(50) NOT NULL,
+    status              VARCHAR(20) NOT NULL,
+    is_destructive      BOOLEAN NOT NULL DEFAULT false,
+    is_reversible       BOOLEAN NOT NULL DEFAULT false,
+    actor_id            UUID REFERENCES users(id) ON DELETE SET NULL,
+    acted_at            TIMESTAMPTZ,
+    idempotency_key     VARCHAR(255) NOT NULL,
+    input_hash          VARCHAR(64) NOT NULL,
+    rollback_of_step_id UUID REFERENCES soar_run_steps(id) ON DELETE RESTRICT,
+    input               JSONB,
+    output              JSONB,
+    error               TEXT,
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at         TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_soar_workflows_enabled_group ON soar_workflows(is_enabled, group_id);
+CREATE INDEX IF NOT EXISTS idx_soar_nodes_workflow_id ON soar_nodes(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_soar_edges_workflow_id ON soar_edges(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_soar_edges_source_node_id ON soar_edges(source_node_id);
+CREATE INDEX IF NOT EXISTS idx_soar_runs_workflow_status ON soar_runs(workflow_id, status);
+CREATE INDEX IF NOT EXISTS idx_soar_runs_status_resume ON soar_runs(status, resume_at);
+CREATE INDEX IF NOT EXISTS idx_soar_run_steps_run_id ON soar_run_steps(run_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_soar_run_steps_idempotency ON soar_run_steps(run_id, idempotency_key);
+
 -- ─── Platform Settings ───────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS platform_settings (
@@ -334,6 +443,8 @@ INSERT INTO platform_settings (key, value, is_secret, description) VALUES
     ('abuseipdb_api_key',   '',    true,  'AbuseIPDB API key (free tier: 1000 req/day) — abuseipdb.com/account/api'),
     ('otx_api_key',         '',    true,  'AlienVault OTX API key (free) — otx.alienvault.com/api'),
     ('greynoise_api_key',   '',    true,  'GreyNoise API key (optional — community endpoint used if empty)')
+    ,('correlation_definitions', '[]', false, 'JSON array of grouped sequence/threshold correlation definitions')
+    ,('soar_destructive_approval_required', 'true', false, 'Require approval before isolate-agent or block-IP SOAR actions')
 ON CONFLICT (key) DO NOTHING;
 
 -- settings:manage permission
@@ -408,3 +519,127 @@ CREATE TABLE IF NOT EXISTS fim_events (
 CREATE INDEX IF NOT EXISTS idx_fim_events_agent    ON fim_events(agent_id);
 CREATE INDEX IF NOT EXISTS idx_fim_events_detected ON fim_events(detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_fim_events_path     ON fim_events(path text_pattern_ops);
+
+-- ─── API Keys ──────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    prefix        VARCHAR(32) UNIQUE NOT NULL,
+    secret_hash   TEXT NOT NULL,
+    name          VARCHAR(255) NOT NULL,
+    group_id      VARCHAR(100) NOT NULL DEFAULT 'default',
+    permissions   JSONB NOT NULL DEFAULT '[]'::jsonb,
+    expires_at    TIMESTAMPTZ,
+    last_used_at  TIMESTAMPTZ,
+    revoked_at    TIMESTAMPTZ,
+    created_by    UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_group_id ON api_keys(group_id);
+
+-- api_keys:manage permission
+INSERT INTO permissions (name) VALUES ('api_keys:manage') ON CONFLICT DO NOTHING;
+
+-- superadmin and admin get api_keys:manage
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r, permissions p
+WHERE r.name IN ('superadmin', 'admin') AND p.name = 'api_keys:manage'
+ON CONFLICT DO NOTHING;
+
+-- audit:verify permission
+INSERT INTO permissions (name) VALUES ('audit:verify') ON CONFLICT DO NOTHING;
+
+-- superadmin and admin get audit:verify
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r, permissions p
+WHERE r.name IN ('superadmin', 'admin') AND p.name = 'audit:verify'
+ON CONFLICT DO NOTHING;
+
+-- queues:manage permission
+INSERT INTO permissions (name) VALUES ('queues:manage') ON CONFLICT DO NOTHING;
+
+-- superadmin and admin get queues:manage
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r, permissions p
+WHERE r.name IN ('superadmin', 'admin') AND p.name = 'queues:manage'
+ON CONFLICT DO NOTHING;
+
+-- ─── SLA escalation ──────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS sla_policies (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id       VARCHAR(100) NOT NULL,
+    severity       VARCHAR(20) NOT NULL,
+    warn_minutes   INTEGER NOT NULL,
+    breach_minutes INTEGER NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (group_id, severity)
+);
+
+CREATE TABLE IF NOT EXISTS sla_notifications (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    alert_id    UUID NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+    threshold   VARCHAR(10) NOT NULL,
+    notified_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (alert_id, threshold)
+);
+CREATE INDEX IF NOT EXISTS idx_sla_notifications_alert_id ON sla_notifications(alert_id);
+
+-- ─── Threat intel: IOC propagation ─────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS ioc_observations (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id    VARCHAR(100) NOT NULL,
+    indicator   VARCHAR(4096) NOT NULL,
+    ioc_type    VARCHAR(20) NOT NULL,
+    confidence  DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    verdict     VARCHAR(20) NOT NULL DEFAULT 'unknown',
+    source      VARCHAR(100) NOT NULL,
+    first_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at  TIMESTAMPTZ,
+    raw_ref     JSONB,
+    UNIQUE (group_id, indicator, ioc_type)
+);
+CREATE INDEX IF NOT EXISTS idx_ioc_observations_group_indicator ON ioc_observations(group_id, indicator);
+
+-- Links an observed IOC to whatever it was seen on (an event, an alert, a
+-- rule that matched it, a case it was added to) so an analyst can pivot from
+-- one indicator to everything it touched.
+CREATE TABLE IF NOT EXISTS ioc_links (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ioc_id      UUID NOT NULL REFERENCES ioc_observations(id) ON DELETE CASCADE,
+    group_id    VARCHAR(100) NOT NULL,
+    entity_type VARCHAR(20) NOT NULL,
+    entity_id   VARCHAR(100) NOT NULL,
+    linked_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (ioc_id, entity_type, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ioc_links_ioc_id ON ioc_links(ioc_id);
+CREATE INDEX IF NOT EXISTS idx_ioc_links_entity ON ioc_links(entity_type, entity_id);
+
+-- iocs:read permission
+INSERT INTO permissions (name) VALUES ('iocs:read') ON CONFLICT DO NOTHING;
+
+-- superadmin, admin, analyst get iocs:read
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r, permissions p
+WHERE r.name IN ('superadmin', 'admin', 'analyst') AND p.name = 'iocs:read'
+ON CONFLICT DO NOTHING;
+
+-- ─── Data lifecycle: per-tenant retention & storage quota ─────────
+
+-- NULL on any column means "use the platform-wide default setting"
+-- (retention_raw_logs_days / retention_events_days / retention_alerts_days),
+-- not "retain forever" — a tenant opts out of the default explicitly by
+-- setting a column to 0.
+CREATE TABLE IF NOT EXISTS retention_policies (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    group_id              VARCHAR(100) NOT NULL UNIQUE,
+    log_retention_days    INTEGER,
+    alert_retention_days  INTEGER,
+    storage_quota_docs    INTEGER,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

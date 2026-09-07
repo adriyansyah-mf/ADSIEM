@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, X, Plus, ShieldOff, ShieldCheck } from 'lucide-react'
 import DataTable from '@/components/DataTable'
 import StatusBadge from '@/components/StatusBadge'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { useAgents } from '@/hooks/useAgents'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/api/client'
@@ -53,10 +54,10 @@ sudo systemctl enable --now siem-agent`
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border)', background: 'var(--bg-base)' }}>
           <div>
-            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '15px', color: 'var(--accent-cyan)', letterSpacing: '1px' }}>
+            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '15px', color: 'var(--accent-blue)', letterSpacing: '1px' }}>
               INSTALL AGENT
             </div>
-            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
               Deploy the SIEM log collection agent on a host
             </div>
           </div>
@@ -68,7 +69,7 @@ sudo systemctl enable --now siem-agent`
         <div style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
           {/* Package type selector */}
           <div>
-            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '10px' }}>
               PACKAGE FORMAT
             </div>
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -81,23 +82,23 @@ sudo systemctl enable --now siem-agent`
                     onClick={() => setTab(t)}
                     style={{
                       flex: 1, padding: '12px 14px', borderRadius: '6px', cursor: 'pointer',
-                      border: `1px solid ${active ? 'var(--accent-cyan)' : 'var(--border)'}`,
-                      background: active ? 'rgba(0,212,255,0.08)' : 'var(--bg-base)',
+                      border: `1px solid ${active ? 'var(--accent-blue)' : 'var(--border)'}`,
+                      background: active ? 'rgba(0,217,192,0.08)' : 'var(--bg-base)',
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     }}
                   >
                     <div style={{ textAlign: 'left' }}>
-                      <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '13px', color: active ? 'var(--accent-cyan)' : 'var(--text-primary)', letterSpacing: '0.5px' }}>
+                      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '13px', color: active ? 'var(--accent-blue)' : 'var(--text-primary)', letterSpacing: '0.5px' }}>
                         .{t.toUpperCase()}
                       </div>
-                      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
                         {t === 'deb' ? 'Debian / Ubuntu' : 'RHEL / CentOS / Rocky'}
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       {p ? (
                         <>
-                          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>{fmt(p.size_bytes)}</div>
+                          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>{fmt(p.size_bytes)}</div>
                           <a
                             href={`/api/agents/packages/${p.filename}`}
                             download
@@ -105,10 +106,10 @@ sudo systemctl enable --now siem-agent`
                             style={{
                               display: 'inline-flex', alignItems: 'center', gap: '4px',
                               marginTop: '4px', padding: '3px 8px', borderRadius: '3px',
-                              border: `1px solid ${active ? 'var(--accent-cyan)' : 'var(--border)'}`,
+                              border: `1px solid ${active ? 'var(--accent-blue)' : 'var(--border)'}`,
                               background: 'transparent',
-                              color: active ? 'var(--accent-cyan)' : 'var(--text-muted)',
-                              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px',
+                              color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
+                              fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '9px',
                               letterSpacing: '1px', textDecoration: 'none',
                             }}
                           >
@@ -116,7 +117,7 @@ sudo systemctl enable --now siem-agent`
                           </a>
                         </>
                       ) : (
-                        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>not available</div>
+                        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)' }}>not available</div>
                       )}
                     </div>
                   </button>
@@ -127,12 +128,12 @@ sudo systemctl enable --now siem-agent`
 
           {/* Install commands */}
           <div>
-            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>
               INSTALL COMMANDS
             </div>
             <pre style={{
               background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '5px',
-              padding: '12px 14px', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px',
+              padding: '12px 14px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px',
               color: 'var(--text-primary)', overflowX: 'auto', whiteSpace: 'pre', lineHeight: 1.6, margin: 0,
             }}>
               {cmds}
@@ -146,14 +147,14 @@ sudo systemctl enable --now siem-agent`
               { label: 'ENROLLMENT TOKEN', value: enrollToken },
             ].map(({ label, value }) => (
               <div key={label} style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '5px', padding: '10px 12px' }}>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '9px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>{label}</div>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>{value}</div>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '9px', letterSpacing: '1.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>{label}</div>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-blue)', wordBreak: 'break-all' }}>{value}</div>
               </div>
             ))}
           </div>
 
           {/* Hints */}
-          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', padding: '8px 10px', background: 'rgba(0,212,255,0.04)', border: '1px solid rgba(0,212,255,0.15)', borderRadius: '4px' }}>
+          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', padding: '8px 10px', background: 'rgba(0,217,192,0.04)', border: '1px solid rgba(0,217,192,0.15)', borderRadius: '4px' }}>
             Config: <span style={{ color: 'var(--text-primary)' }}>/etc/siem-agent/config.yaml</span>
             &nbsp;&middot;&nbsp;
             Logs: <span style={{ color: 'var(--text-primary)' }}>journalctl -u siem-agent -f</span>
@@ -198,7 +199,7 @@ export default function AgentsPage() {
       <div className="flex items-center gap-2">
         <StatusBadge status={r.status} />
         {r.is_isolated && (
-          <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', padding: '1px 6px', borderRadius: '3px', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)', fontFamily: 'Rajdhani, sans-serif' }}>
+          <span style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px', padding: '1px 6px', borderRadius: '3px', background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
             ISOLATED
           </span>
         )}
@@ -218,7 +219,7 @@ export default function AgentsPage() {
           style={{
             display: 'flex', alignItems: 'center', gap: '4px',
             padding: '3px 8px', borderRadius: '3px', fontSize: '11px', fontWeight: 700,
-            fontFamily: 'Rajdhani, sans-serif', letterSpacing: '0.5px', cursor: 'pointer',
+            fontFamily: 'IBM Plex Sans, sans-serif', letterSpacing: '0.5px', cursor: 'pointer',
             border: r.is_isolated ? '1px solid rgba(34,197,94,0.5)' : '1px solid rgba(239,68,68,0.5)',
             background: r.is_isolated ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
             color: r.is_isolated ? '#4ade80' : '#f87171',
@@ -233,7 +234,7 @@ export default function AgentsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Agents</h1>
+        <PageHeader title="Agents" className="!mb-0" />
         <div className="flex items-center gap-2">
           <input
             type="text"

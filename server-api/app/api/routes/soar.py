@@ -8,8 +8,10 @@ import uuid
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group
 from app.models.models import SoarAction, SoarPlaybook, User
+from app.api.routes.soar_executions import router as execution_router
 
 router = APIRouter(prefix="/api/soar", tags=["soar"])
+router.include_router(execution_router)
 
 
 class PlaybookIn(BaseModel):

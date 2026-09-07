@@ -3,18 +3,23 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { format } from 'date-fns'
-import { Search, Loader2 } from 'lucide-react'
+import { BrainCircuit, Search, Loader2 } from 'lucide-react'
 import AlertDetailModal from '@/components/AlertDetailModal'
+import { GlassCard } from '@/components/ui/GlassCard'
+import { Sparkline } from '@/components/charts/Sparkline'
+import { StackedBarChart, type StackedBarDatum } from '@/components/charts/StackedBarChart'
+import { DonutChart } from '@/components/charts/DonutChart'
+import { HorizontalBarChart, type HBarRow } from '@/components/charts/HorizontalBarChart'
 import type { Alert, Agent, Case, Event } from '@/types'
 
 interface WorkloadItem { user_id: string; username: string; open_alerts: number; open_cases: number; total: number }
 
 const severityColors = {
-  critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
-  high:     { bg: 'rgba(255,107,0,0.15)', border: '#ff6b00', color: '#ff6b00' },
-  medium:   { bg: 'rgba(255,215,0,0.1)',  border: '#ffd700', color: '#ffd700' },
-  low:      { bg: 'rgba(0,255,136,0.1)',  border: '#00ff88', color: '#00ff88' },
-  info:     { bg: 'rgba(0,212,255,0.1)',  border: '#00d4ff', color: '#00d4ff' },
+  critical: { bg: 'rgba(255,59,92,0.15)', border: '#FF3B5C', color: '#FF3B5C' },
+  high:     { bg: 'rgba(255,122,69,0.15)', border: '#FF7A45', color: '#FF7A45' },
+  medium:   { bg: 'rgba(255,197,61,0.1)',  border: '#FFC53D', color: '#FFC53D' },
+  low:      { bg: 'rgba(46,212,122,0.1)',  border: '#2ED47A', color: '#2ED47A' },
+  info:     { bg: 'rgba(0,217,192,0.1)',  border: '#00D9C0', color: '#00D9C0' },
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -28,7 +33,7 @@ function SeverityBadge({ severity }: { severity: string }) {
       border: `1px solid ${c.border}`,
       background: c.bg,
       color: c.color,
-      fontFamily: 'Rajdhani, sans-serif',
+      fontFamily: 'IBM Plex Sans, sans-serif',
       fontWeight: 700,
       fontSize: '11px',
       letterSpacing: '0.5px',
@@ -42,55 +47,31 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{
-      borderRadius: '6px',
-      border: '1px solid var(--border)',
-      background: 'var(--bg-card)',
-      padding: '14px',
-      marginBottom: '12px',
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: '10px',
-      }}>
-        <span style={{
-          fontFamily: 'Rajdhani, sans-serif',
-          fontSize: '11px',
-          fontWeight: 700,
-          letterSpacing: '2px',
-          textTransform: 'uppercase',
-          color: 'var(--accent-cyan)',
-        }}>
-          {title}
-        </span>
-      </div>
+    <GlassCard title={title} className="mb-3">
       {children}
-    </div>
+    </GlassCard>
   )
 }
 
-function StatRow({ label, value, color, onClick }: { label: string; value: number; color: string; onClick?: () => void }) {
-  const [hovered, setHovered] = useState(false)
+function KpiTile({
+  label, value, valueColor, sparkline, sparkColor,
+}: { label: string; value: string | number; valueColor?: string; sparkline?: number[]; sparkColor?: string }) {
   return (
-    <div
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '6px 4px',
-        borderBottom: '1px solid var(--border)',
-        cursor: onClick ? 'pointer' : 'default',
-        borderRadius: 3,
-        background: hovered && onClick ? 'rgba(255,255,255,0.04)' : 'transparent',
-        transition: 'background 0.12s',
-      }}
-    >
-      <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '12px', color: hovered && onClick ? color : 'var(--text-secondary)', transition: 'color 0.12s' }}>{label}</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '14px', fontWeight: 700, color }}>{value}</span>
-        {onClick && <span style={{ color: 'var(--text-muted)', fontSize: 10, opacity: hovered ? 1 : 0, transition: 'opacity 0.12s' }}>→</span>}
+    <div style={{
+      position: 'relative', borderRadius: '6px', border: '1px solid var(--border)',
+      background: 'var(--bg-card)', padding: '12px 14px', overflow: 'hidden',
+    }}>
+      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+        {label}
       </div>
+      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '22px', fontWeight: 700, color: valueColor ?? 'var(--text-primary)', marginTop: '4px', fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </div>
+      {sparkline && sparkline.length > 1 && (
+        <div style={{ position: 'absolute', right: 10, bottom: 8 }}>
+          <Sparkline values={sparkline} color={sparkColor} width={64} height={22} />
+        </div>
+      )}
     </div>
   )
 }
@@ -138,6 +119,18 @@ export default function DashboardPage() {
     queryKey: ['metrics-workload'],
     queryFn: () => api.get('/api/metrics/workload').then(r => r.data),
     refetchInterval: 60_000,
+  })
+
+  const { data: health } = useQuery<{ status: string; postgres: string; redis: string; uptime_seconds: number }>({
+    queryKey: ['system-health'],
+    queryFn: () => api.get('/health').then(r => r.data),
+    refetchInterval: 30_000,
+  })
+
+  const { data: workerMetrics } = useQuery<{ status: string; sigma_evaluations: number; memory_bytes: number; ai_queue_depth: number; ingestion_stream_length: number }>({
+    queryKey: ['worker-metrics'],
+    queryFn: () => api.get('/api/metrics/worker').then(r => r.data),
+    refetchInterval: 30_000,
   })
 
   const [tiIoc, setTiIoc] = useState('')
@@ -189,17 +182,64 @@ export default function DashboardPage() {
   const caseByAlertId: Record<string, Case> = {}
   cases.forEach(c => { if (c.alert_id) caseByAlertId[c.alert_id] = c })
 
+  // Hourly alert volume for the last 24h, stacked by severity — feeds both
+  // the volume chart and (a coarser slice of) the KPI sparklines, so every
+  // chart on this page is derived from the same real fetched alert data,
+  // not a separate fabricated trend.
+  const hourBuckets: StackedBarDatum[] = Array.from({ length: 24 }, (_, i) => {
+    const hourStart = new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000 - (23 - i) * 3_600_000)
+    return { label: `${String(hourStart.getHours()).padStart(2, '0')}:00`, values: { critical: 0, high: 0, medium: 0, low: 0 } }
+  })
+  todayAlerts.forEach(a => {
+    const hoursAgo = Math.floor((Date.now() - new Date(a.created_at).getTime()) / 3_600_000)
+    const idx = 23 - hoursAgo
+    if (idx >= 0 && idx < 24 && a.severity in hourBuckets[idx].values) {
+      hourBuckets[idx].values[a.severity] += 1
+    }
+  })
+  const openAlertsSparkline = hourBuckets.filter((_, i) => i % 3 === 0)
+    .map(b => Object.values(b.values).reduce((s, v) => s + v, 0))
+  const criticalSparkline = hourBuckets.filter((_, i) => i % 3 === 0).map(b => b.values.critical)
+
+  const severitySegments = [
+    { label: 'Critical', value: severityCounts.critical, color: 'var(--accent-red)' },
+    { label: 'High', value: severityCounts.high, color: 'var(--accent-orange)' },
+    { label: 'Medium', value: severityCounts.medium, color: 'var(--accent-yellow)' },
+    { label: 'Low', value: severityCounts.low, color: 'var(--accent-green)' },
+  ]
+  const totalOpenSeverity = severityCounts.critical + severityCounts.high + severityCounts.medium + severityCounts.low
+
+  const fleetSegments = [
+    { label: 'Online', value: onlineAgentCount, color: 'var(--accent-green)' },
+    { label: 'Offline', value: agents.length - onlineAgentCount, color: 'var(--text-muted)' },
+  ]
+
+  const topIPRows: HBarRow[] = topIPs.map(([ip, count]) => ({
+    label: ip, segments: [{ value: count, color: 'var(--accent-blue)' }],
+  }))
+
+  const workloadRows: HBarRow[] = workload.slice(0, 7).map(w => ({
+    label: w.username,
+    segments: [
+      { value: w.open_alerts, color: 'var(--accent-orange)' },
+      { value: w.open_cases, color: 'var(--accent-blue)' },
+    ],
+    labelStyle: w.user_id === 'unassigned' ? { color: 'var(--accent-orange)', fontStyle: 'italic' } : undefined,
+  }))
+
   return (
     <>
-    <div style={{ display: 'flex', gap: '12px', height: '100%', minHeight: 0 }}>
+    <div className="dashboard-grid" style={{ display: 'flex', gap: '12px', height: '100%', minHeight: 0 }}>
       {/* LEFT COLUMN */}
-      <div style={{ width: '220px', flexShrink: 0, overflowY: 'auto' }}>
+      <div className="dashboard-left-rail" style={{ width: '220px', flexShrink: 0, overflowY: 'auto' }}>
         <SectionCard title="Alert Statistics">
-          <StatRow label="Critical" value={severityCounts.critical} color="#ff2244" onClick={() => navigate('/alerts?severity=critical')} />
-          <StatRow label="High" value={severityCounts.high} color="#ff6b00" onClick={() => navigate('/alerts?severity=high')} />
-          <StatRow label="Medium" value={severityCounts.medium} color="#ffd700" onClick={() => navigate('/alerts?severity=medium')} />
-          <StatRow label="Low" value={severityCounts.low} color="#00ff88" onClick={() => navigate('/alerts?severity=low')} />
-          <div style={{ marginTop: '6px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+          <DonutChart
+            segments={severitySegments}
+            size={84}
+            centerLabel={String(totalOpenSeverity)}
+            centerSublabel="OPEN"
+          />
+          <div style={{ marginTop: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
             LAST 24H: {todayAlerts.length} TOTAL
           </div>
         </SectionCard>
@@ -207,27 +247,9 @@ export default function DashboardPage() {
         <SectionCard title="Top Source IPs">
           {topIPs.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No data</div>
-          ) : topIPs.map(([ip, count]) => (
-            <div key={ip}
-              onClick={() => navigate(`/alerts?source_ip=${ip}`)}
-              style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '5px 4px',
-                borderBottom: '1px solid var(--border)',
-                cursor: 'pointer',
-                borderRadius: 3,
-                transition: 'background 0.12s',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-            >
-              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)' }}>{ip}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '13px', color: 'var(--accent-orange)' }}>{count}</span>
-                <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>→</span>
-              </div>
-            </div>
-          ))}
+          ) : (
+            <HorizontalBarChart rows={topIPRows} rowHeight={26} barHeight={13} />
+          )}
         </SectionCard>
 
         <SectionCard title="Live Events">
@@ -241,14 +263,14 @@ export default function DashboardPage() {
                 background: 'var(--bg-panel)',
                 border: '1px solid var(--border)',
               }}>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
                   {format(new Date(ev.created_at), 'HH:mm:ss')}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '2px' }}>
                   {ev.event_action ?? 'event'}
                 </div>
                 {ev.source_ip && (
-                  <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--accent-cyan)' }}>
+                  <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--accent-blue)' }}>
                     {ev.source_ip}
                   </div>
                 )}
@@ -273,10 +295,10 @@ export default function DashboardPage() {
                 placeholder="IoC value…" style={{
                   flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--border)',
                   borderRadius: '3px', color: 'var(--text-primary)', fontSize: '11px',
-                  padding: '3px 6px', fontFamily: 'Share Tech Mono, monospace',
+                  padding: '3px 6px', fontFamily: 'IBM Plex Sans, sans-serif',
                 }} />
-              <button onClick={handleTiLookup} disabled={tiLoading} style={{
-                background: 'var(--accent-cyan)', color: '#000', border: 'none',
+              <button aria-label="Run threat intelligence lookup" title="Run threat intelligence lookup" onClick={handleTiLookup} disabled={tiLoading} style={{
+                background: 'var(--accent-blue)', color: '#000', border: 'none',
                 borderRadius: '3px', padding: '3px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center',
               }}>
                 {tiLoading ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={11} />}
@@ -286,11 +308,11 @@ export default function DashboardPage() {
               <div style={{
                 padding: '6px', borderRadius: '3px',
                 background: 'var(--bg-panel)', border: '1px solid var(--border)',
-                fontSize: '10px', fontFamily: 'Share Tech Mono, monospace',
+                fontSize: '10px', fontFamily: 'IBM Plex Sans, sans-serif',
                 color: 'var(--text-secondary)', overflowX: 'hidden',
               }}>
                 {tiResult.error ? (
-                  <span style={{ color: '#ff2244' }}>{String(tiResult.error)}</span>
+                  <span style={{ color: '#FF3B5C' }}>{String(tiResult.error)}</span>
                 ) : (
                   <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                     {JSON.stringify(tiResult, null, 2)}
@@ -303,7 +325,53 @@ export default function DashboardPage() {
       </div>
 
       {/* CENTER COLUMN */}
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+      <div className="dashboard-center" style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+        {/* KPI row */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '12px' }}>
+          <KpiTile label="Open Alerts" value={totalOpenSeverity} sparkline={openAlertsSparkline} sparkColor="var(--accent-blue)" />
+          <KpiTile label="Critical" value={severityCounts.critical} sparkline={criticalSparkline} sparkColor="var(--accent-red)" valueColor="var(--accent-red)" />
+          <KpiTile label="Avg MTTR (24h)" value={socMetrics?.avg_mttr_minutes != null ? `${Math.round(socMetrics.avg_mttr_minutes)}m` : '—'} />
+          <KpiTile label="Agents Online" value={`${onlineAgentCount}/${agents.length}`} valueColor="var(--accent-blue)" />
+        </div>
+
+        {/* Alert volume chart */}
+        <div style={{
+          borderRadius: '6px',
+          border: '1px solid var(--border)',
+          background: 'var(--bg-card)',
+          overflow: 'hidden',
+          marginBottom: '12px',
+          padding: '14px 16px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: 'var(--accent-blue)' }}>
+              Alert Volume — Last 24h
+            </span>
+            <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>{todayAlerts.length} TOTAL</span>
+          </div>
+          <StackedBarChart
+            ariaLabel={`Alert volume over the last 24 hours by severity, ${todayAlerts.length} total alerts`}
+            data={hourBuckets}
+            series={[
+              { key: 'low', color: 'var(--accent-green)' },
+              { key: 'medium', color: 'var(--accent-yellow)' },
+              { key: 'high', color: 'var(--accent-orange)' },
+              { key: 'critical', color: 'var(--accent-red)' },
+            ]}
+          />
+          <div style={{ display: 'flex', gap: '14px', marginTop: '8px' }}>
+            {[
+              ['Critical', 'var(--accent-red)'], ['High', 'var(--accent-orange)'],
+              ['Medium', 'var(--accent-yellow)'], ['Low', 'var(--accent-green)'],
+            ].map(([label, color]) => (
+              <span key={label} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: color, display: 'inline-block' }} />
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+
         <div style={{
           borderRadius: '6px',
           border: '1px solid var(--border)',
@@ -318,17 +386,17 @@ export default function DashboardPage() {
             gap: '8px',
           }}>
             <span style={{
-              fontFamily: 'Rajdhani, sans-serif',
+              fontFamily: 'IBM Plex Sans, sans-serif',
               fontSize: '11px',
               fontWeight: 700,
               letterSpacing: '2px',
               textTransform: 'uppercase',
-              color: 'var(--accent-cyan)',
+              color: 'var(--accent-blue)',
             }}>
               Agentic Triage Feed
             </span>
             <span style={{
-              fontFamily: 'Share Tech Mono, monospace',
+              fontFamily: 'IBM Plex Sans, sans-serif',
               fontSize: '10px',
               color: 'var(--text-muted)',
             }}>
@@ -343,7 +411,7 @@ export default function DashboardPage() {
                     <th key={h} style={{
                       padding: '8px 12px',
                       textAlign: 'left',
-                      fontFamily: 'Rajdhani, sans-serif',
+                      fontFamily: 'IBM Plex Sans, sans-serif',
                       fontSize: '10px',
                       fontWeight: 700,
                       letterSpacing: '1.5px',
@@ -367,18 +435,18 @@ export default function DashboardPage() {
                       transition: 'background 0.1s',
                       cursor: 'pointer',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderLeft = '2px solid rgba(0,212,255,0.3)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderLeft = '2px solid rgba(0,217,192,0.3)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)'; e.currentTarget.style.borderLeft = '' }}
                     >
-                      <td style={{ padding: '8px 12px', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '8px 12px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         {format(new Date(alert.created_at), 'MM-dd HH:mm')}
                       </td>
                       <td style={{ padding: '8px 12px', maxWidth: '200px' }}>
-                        <div style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)' }}>
+                        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)' }}>
                           {alert.title}
                         </div>
                         {alert.hostname && (
-                          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+                          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
                             {alert.hostname}
                           </div>
                         )}
@@ -388,7 +456,7 @@ export default function DashboardPage() {
                       </td>
                       <td style={{ padding: '8px 12px', maxWidth: '280px' }}>
                         <div style={{
-                          fontFamily: 'Exo 2, sans-serif',
+                          fontFamily: 'IBM Plex Sans, sans-serif',
                           fontSize: '11px',
                           color: linkedCase ? 'var(--text-primary)' : 'var(--text-muted)',
                           overflow: 'hidden',
@@ -405,13 +473,13 @@ export default function DashboardPage() {
                           padding: '2px 7px',
                           borderRadius: '3px',
                           fontSize: '10px',
-                          fontFamily: 'Rajdhani, sans-serif',
+                          fontFamily: 'IBM Plex Sans, sans-serif',
                           fontWeight: 700,
                           letterSpacing: '0.5px',
                           textTransform: 'uppercase',
-                          background: alert.status === 'new' ? 'rgba(0,212,255,0.1)' : 'rgba(0,255,136,0.1)',
-                          color: alert.status === 'new' ? 'var(--accent-cyan)' : 'var(--accent-green)',
-                          border: `1px solid ${alert.status === 'new' ? 'var(--accent-cyan)' : 'var(--accent-green)'}`,
+                          background: alert.status === 'new' ? 'rgba(0,217,192,0.1)' : 'rgba(46,212,122,0.1)',
+                          color: alert.status === 'new' ? 'var(--accent-blue)' : 'var(--accent-green)',
+                          border: `1px solid ${alert.status === 'new' ? 'var(--accent-blue)' : 'var(--accent-green)'}`,
                         }}>
                           {alert.status.replace('_', ' ')}
                         </span>
@@ -421,7 +489,7 @@ export default function DashboardPage() {
                 })}
                 {recentAlertItems.length === 0 && (
                   <tr>
-                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
+                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px' }}>
                       NO ALERTS IN FEED
                     </td>
                   </tr>
@@ -433,7 +501,7 @@ export default function DashboardPage() {
       </div>
 
       {/* RIGHT COLUMN */}
-      <div style={{ width: '280px', flexShrink: 0, overflowY: 'auto' }}>
+      <div className="dashboard-right-rail" style={{ width: '280px', flexShrink: 0, overflowY: 'auto' }}>
         <SectionCard title="Active Cases">
           {openCases.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No open cases</div>
@@ -443,15 +511,15 @@ export default function DashboardPage() {
               borderBottom: '1px solid var(--border)',
             }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '3px' }}>
-                {c.created_by_ai && <span title="AI Generated" style={{ fontSize: '12px' }}>🤖</span>}
-                <span style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)', flex: 1 }}>
+                {c.created_by_ai && <BrainCircuit aria-label="AI generated" size={13} />}
+                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)', flex: 1 }}>
                   {c.title}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
                 <SeverityBadge severity={c.severity} />
                 <span style={{
-                  fontFamily: 'Rajdhani, sans-serif',
+                  fontFamily: 'IBM Plex Sans, sans-serif',
                   fontSize: '10px',
                   fontWeight: 600,
                   color: 'var(--text-muted)',
@@ -459,30 +527,50 @@ export default function DashboardPage() {
                   textTransform: 'uppercase',
                 }}>{c.status.replace('_', ' ')}</span>
               </div>
-              <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '3px' }}>
+              <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '3px' }}>
                 {format(new Date(c.created_at), 'MM-dd HH:mm')}
               </div>
             </div>
           ))}
         </SectionCard>
 
-        <SectionCard title="Platform Stats">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <SectionCard title="Fleet Health">
+          <DonutChart
+            segments={fleetSegments}
+            size={100}
+            centerLabel={agents.length > 0 ? `${Math.round((onlineAgentCount / agents.length) * 100)}%` : '—'}
+            centerSublabel="ONLINE"
+          />
+          <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
             {[
-              { label: 'TOTAL ALERTS', value: allAlerts?.total ?? '—', color: 'var(--accent-cyan)' },
-              { label: 'TOTAL CASES', value: casesData?.total ?? '—', color: 'var(--accent-green)' },
-              { label: 'AGENTS ONLINE', value: onlineAgentCount, color: 'var(--accent-orange)' },
+              { label: 'TOTAL ALERTS', value: allAlerts?.total ?? '—' },
+              { label: 'TOTAL CASES', value: casesData?.total ?? '—' },
             ].map(m => (
-              <div key={m.label} style={{
-                padding: '8px', borderRadius: '4px',
-                background: 'var(--bg-panel)', border: '1px solid var(--border)',
-              }}>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              <div key={m.label} style={{ flex: 1, padding: '6px 8px', borderRadius: '4px', background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '0.5px', fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                   {m.label}
                 </div>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '20px', fontWeight: 700, color: m.color, marginTop: '2px' }}>
+                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
                   {m.value}
                 </div>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="System Health">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {[
+              { label: 'API', value: health?.status ?? 'unknown', ok: health?.status === 'ok' },
+              { label: 'POSTGRES', value: health?.postgres ?? 'unknown', ok: health?.postgres === 'ok' },
+              { label: 'REDIS', value: health?.redis ?? 'unknown', ok: health?.redis === 'ok' },
+              { label: 'WORKER', value: workerMetrics?.status ?? 'unknown', ok: workerMetrics?.status === 'ok' },
+              { label: 'AI QUEUE', value: workerMetrics?.ai_queue_depth ?? 'unknown', ok: (workerMetrics?.ai_queue_depth ?? 0) < 100 },
+              { label: 'INGESTION STREAM', value: workerMetrics?.ingestion_stream_length ?? 'unknown', ok: true },
+            ].map(item => (
+              <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '3px', background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)' }}>{item.label}</span>
+                <span style={{ color: item.ok ? 'var(--accent-green)' : 'var(--accent-red)', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>{item.value}</span>
               </div>
             ))}
           </div>
@@ -491,19 +579,21 @@ export default function DashboardPage() {
         <SectionCard title="SOC Response">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {[
-              { label: 'AVG MTTD', value: socMetrics?.avg_ack_minutes != null ? `${Math.round(socMetrics.avg_ack_minutes)}m` : '—', color: '#00d4ff' },
-              { label: 'AVG MTTR', value: socMetrics?.avg_mttr_minutes != null ? `${Math.round(socMetrics.avg_mttr_minutes)}m` : '—', color: '#00ff88' },
-              { label: 'FP RATE', value: socMetrics?.false_positive_rate_pct != null ? `${(socMetrics.false_positive_rate_pct as number).toFixed(1)}%` : '—', color: '#ffd700' },
+              { label: 'AVG MTTD', value: socMetrics?.avg_ack_minutes != null ? `${Math.round(socMetrics.avg_ack_minutes)}m` : '—', color: '#00D9C0' },
+              { label: 'AVG MTTR', value: socMetrics?.avg_mttr_minutes != null ? `${Math.round(socMetrics.avg_mttr_minutes)}m` : '—', color: '#2ED47A' },
+              { label: 'FP RATE', value: socMetrics?.false_positive_rate_pct != null ? `${(socMetrics.false_positive_rate_pct as number).toFixed(1)}%` : '—', color: '#FFC53D' },
+              { label: 'SLA BREACHED', value: socMetrics?.sla_breached ?? '—', color: '#FF3B5C' },
+              { label: 'UNASSIGNED', value: socMetrics?.unassigned_open ?? '—', color: '#FF7A45' },
             ].map(m => (
               <div key={m.label} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '6px 8px', borderRadius: '3px',
                 background: 'var(--bg-panel)', border: '1px solid var(--border)',
               }}>
-                <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                   {m.label}
                 </span>
-                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '15px', fontWeight: 700, color: m.color }}>
+                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '15px', fontWeight: 700, color: m.color }}>
                   {m.value}
                 </span>
               </div>
@@ -514,32 +604,21 @@ export default function DashboardPage() {
         <SectionCard title="Analyst Workload">
           {workload.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No analysts assigned</div>
-          ) : workload.slice(0, 7).map((w) => {
-            const isPool = w.user_id === 'unassigned'
-            return (
-            <div key={w.user_id} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '5px 4px', borderBottom: '1px solid var(--border)',
-              background: isPool ? 'rgba(255,107,0,0.06)' : 'transparent',
-              borderRadius: isPool ? 3 : 0,
-              marginBottom: isPool ? 2 : 0,
-            }}>
-              <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '11px', color: isPool ? '#ff6b00' : 'var(--text-primary)', fontStyle: isPool ? 'italic' : 'normal' }}>
-                {w.username}
-              </span>
-              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                <span title="Open alerts" style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: '#ff6b00' }}>
-                  {w.open_alerts}A
+          ) : (
+            <>
+              <HorizontalBarChart rows={workloadRows} rowHeight={26} barHeight={13} />
+              <div style={{ display: 'flex', gap: '14px', marginTop: '8px' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--accent-orange)', display: 'inline-block' }} />
+                  Open alerts
                 </span>
-                <span title="Open cases" style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: '#00d4ff' }}>
-                  {w.open_cases}C
-                </span>
-                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', fontWeight: 700, color: isPool ? '#ff6b00' : 'var(--text-secondary)' }}>
-                  {w.total}
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--accent-blue)', display: 'inline-block' }} />
+                  Open cases
                 </span>
               </div>
-            </div>
-          )})}
+            </>
+          )}
         </SectionCard>
       </div>
     </div>

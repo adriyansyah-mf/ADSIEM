@@ -1,7 +1,7 @@
 # worker/worker/decoder_engine.py
 import re
 import yaml
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 _KV_RE = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')

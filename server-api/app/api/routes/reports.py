@@ -1,7 +1,7 @@
 # server-api/app/api/routes/reports.py
 import json
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response

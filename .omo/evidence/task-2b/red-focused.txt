@@ -1,0 +1,52 @@
+/home/wonka/.local/bin/pytest:6: PytestRemovedIn10Warning: pytest.console_main() is deprecated and will be removed in pytest 10.
+It was never intended for programmatic use; use pytest.main() instead.
+See https://docs.pytest.org/en/stable/deprecations.html#console-main
+  sys.exit(console_main())
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_______ test_foreign_resources_return_not_found_across_resource_families _______
+
+tenant_resources = TenantFixture(blue_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiNzljZTg1OS0xNjI2LTQ3NTItYTRhMS01ZDgwODFlZmR...'), 'token': UUID('cedc99f2-72e8-4b94-ae9b-ffc5aa78bbb2'), 'blue_alert': UUID('36ec221d-e3b4-4f27-a80a-a66f373d44db')})
+
+    @pytest.mark.service_e2e
+    def test_foreign_resources_return_not_found_across_resource_families(
+        tenant_resources: TenantFixture,
+    ) -> None:
+        # Given
+        resource_ids = tenant_resources.ids
+        scenarios = (
+            ("alert update", "PUT", f"/api/alerts/{resource_ids['alert']}", {"status": "investigating"}),
+            ("alert note", "POST", f"/api/alerts/{resource_ids['alert']}/notes", {"content": "foreign"}),
+            ("alert feedback", "GET", f"/api/alerts/{resource_ids['alert']}/feedback", None),
+            ("case delete", "DELETE", f"/api/cases/{resource_ids['case']}", None),
+            ("case feedback", "GET", f"/api/cases/{resource_ids['case']}/feedback", None),
+            ("agent read", "GET", f"/api/agents/{resource_ids['agent']}", None),
+            ("agent isolate", "POST", f"/api/agents/{resource_ids['agent']}/isolate", None),
+            ("agent log source", "PUT", f"/api/agents/{resource_ids['agent']}/log-sources/{resource_ids['log_source']}", {"path": "/tmp/foreign", "log_type": "syslog", "is_enabled": "true"}),
+            ("rule update", "PUT", f"/api/rules/{resource_ids['rule']}", {"title": "foreign"}),
+            ("rule revisions", "GET", f"/api/rules/{resource_ids['rule']}/revisions", None),
+            ("webhook delete", "DELETE", f"/api/webhooks/{resource_ids['webhook']}", None),
+            ("suppression delete", "DELETE", f"/api/suppressions/{resource_ids['suppression']}", None),
+            ("schedule toggle", "PATCH", f"/api/hunt-schedules/{resource_ids['schedule']}/toggle", None),
+            ("SOAR execution", "POST", f"/api/soar/executions/{resource_ids['run']}/approve", {"idempotency_key": "foreign-approval-key"}),
+            ("saved investigation", "GET", f"/api/hunts/{resource_ids['hunt']}", None),
+            ("enrollment token", "DELETE", f"/api/enrollment-tokens/{resource_ids['token']}", None),
+        )
+    
+        # When
+        observed = [
+            (name, _request(method, path, tenant_resources.blue_token, payload).status)
+            for name, method, path, payload in scenarios
+        ]
+    
+        # Then
+>       assert observed == [(name, 404) for name, *_ in scenarios]
+E       AssertionError: assert [('alert upda...d', 200), ...] == [('alert upda...d', 404), ...]
+E         
+E         At index 0 diff: ('alert update', 200) != ('alert update', 404)
+E         Use -v to get more diff
+
+tests/server-api/test_tenant_isolation.py:193: AssertionError
+=========================== short test summary info ============================
+FAILED tests/server-api/test_tenant_isolation.py::test_foreign_resources_return_not_found_across_resource_families
+1 failed in 1.09s

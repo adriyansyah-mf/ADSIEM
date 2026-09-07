@@ -7,17 +7,18 @@ export interface AlertFilters {
   status?: string
   severity?: string
   hostname?: string
+  assignee_id?: string
   search?: string
   start_time?: string
   end_time?: string
 }
 
 export function useAlerts(page = 1, pageSize = 25, filters: AlertFilters = {}) {
-  const { status, severity, hostname, search, start_time, end_time } = filters
+  const { status, severity, hostname, assignee_id, search, start_time, end_time } = filters
   return useQuery<PaginatedResponse<Alert>>({
-    queryKey: ['alerts', page, pageSize, status, severity, hostname, search, start_time, end_time],
+    queryKey: ['alerts', page, pageSize, status, severity, hostname, assignee_id, search, start_time, end_time],
     queryFn: () => api.get('/api/alerts', {
-      params: { page, page_size: pageSize, status, severity, hostname, search, start_time, end_time },
+      params: { page, page_size: pageSize, status, severity, hostname, assignee_id, search, start_time, end_time },
     }).then(r => r.data),
     refetchInterval: 15_000,
   })

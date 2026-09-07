@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { useYaraRules, useCreateYaraRule, useUpdateYaraRule, useToggleYaraRule, useDeleteYaraRule, useYaraScan, useSeedBuiltinRules } from '@/hooks/useYara'
 import { useTask } from '@/hooks/useTasks'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { Agent, YaraRule } from '@/types'
 
 const DEFAULT_RULE = `rule new_rule {
@@ -95,10 +96,7 @@ export default function YaraPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Shield size={18} />
-          <h1 className="text-xl font-bold">YARA Rules</h1>
-        </div>
+        <PageHeader title={<><Shield aria-hidden="true" size={18} /> YARA Rules</>} className="!mb-0" />
         <div className="flex gap-2">
           <button onClick={() => seedBuiltins.mutate()} disabled={seedBuiltins.isPending}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-border hover:border-primary text-sm disabled:opacity-50">
@@ -112,7 +110,7 @@ export default function YaraPage() {
       </div>
 
       {/* Scan panel */}
-      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+      <div className="enterprise-panel rounded-lg border border-border bg-card p-4 space-y-3">
         <p className="text-xs text-muted-foreground uppercase font-semibold">Run Scan</p>
         <div className="flex gap-3 flex-wrap items-end">
           <div className="space-y-1">

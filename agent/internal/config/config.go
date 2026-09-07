@@ -24,6 +24,11 @@ type AgentConfig struct {
 type ServerConfig struct {
 	URL               string `yaml:"url"`
 	HeartbeatInterval int    `yaml:"heartbeat_interval"`
+	// InsecureSkipVerify disables TLS certificate verification. Needed to
+	// bootstrap trust with a self-signed server certificate before a real
+	// CA-issued one is in place; set back to false once it is. Can also be
+	// set via the AGENT_INSECURE_SKIP_VERIFY=true environment variable.
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
 }
 
 type FimConfig struct {

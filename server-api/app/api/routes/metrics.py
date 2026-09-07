@@ -8,10 +8,43 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_scoped_group, require_permission
+from app.core.redis_client import get_redis
+from app.core.deps import get_current_user, get_scoped_group
 from app.models.models import Alert, Case, User
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
+
+
+@router.get("/worker")
+async def worker_metrics(_=Depends(get_current_user)):
+    import os
+    import httpx
+    worker_url = os.environ.get("WORKER_TI_URL", "http://worker:8001").replace("/ti/quick", "")
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{worker_url}/metrics")
+            response.raise_for_status()
+    except httpx.HTTPError:
+        return {"status": "unavailable"}
+    body = response.text
+    def metric(name: str) -> float:
+        for line in body.splitlines():
+            parts = line.split()
+            if len(parts) == 2 and parts[0] == name:
+                try:
+                    return float(parts[1])
+                except ValueError:
+                    return 0.0
+        return 0.0
+    redis = await get_redis()
+    return {
+        "status": "ok",
+        "sigma_evaluations": metric("siem_sigma_evaluation_seconds_count"),
+        "sigma_evaluation_seconds": metric("siem_sigma_evaluation_seconds_sum"),
+        "memory_bytes": metric("process_resident_memory_bytes"),
+        "ai_queue_depth": await redis.llen("siem:ai-analysis"),
+        "ingestion_stream_length": await redis.xlen("siem:logs"),
+    }
 
 
 @router.get("/soc")
@@ -31,13 +64,19 @@ async def soc_metrics(
     total = len(alerts)
     by_severity: dict[str, int] = {}
     by_status: dict[str, int] = {}
-    mttd_minutes: list[float] = []
     mttr_minutes: list[float] = []
     ack_minutes: list[float] = []
+    sla_breached = 0
+    unassigned_open = 0
 
     for a in alerts:
         by_severity[a.severity] = by_severity.get(a.severity, 0) + 1
         by_status[a.status]     = by_status.get(a.status, 0) + 1
+        sla_minutes = {"critical": 15, "high": 60, "medium": 240, "low": 1440, "info": 2880}.get(a.severity, 240)
+        if a.status not in {"resolved", "closed", "false_positive"} and a.created_at + timedelta(minutes=sla_minutes) < datetime.now(timezone.utc):
+            sla_breached += 1
+        if a.assignee_id is None and a.status in {"new", "in_progress"}:
+            unassigned_open += 1
         if a.acknowledged_at and a.created_at:
             ack_minutes.append((a.acknowledged_at - a.created_at).total_seconds() / 60)
         if a.resolved_at and a.created_at:
@@ -67,6 +106,9 @@ async def soc_metrics(
         "avg_ack_minutes": avg(ack_minutes),
         "avg_mttr_minutes": avg(mttr_minutes),
         "false_positive_rate_pct": fp_rate,
+        "sla_breached": sla_breached,
+        "sla_breach_rate_pct": round(sla_breached / total * 100, 1) if total else 0.0,
+        "unassigned_open": unassigned_open,
     }
 
 
@@ -78,18 +120,18 @@ async def analyst_workload(
 ):
     """Per-analyst count of open alerts and open cases."""
     # Fetch all analysts in group
-    user_q = select(User).where(User.is_active == True)
+    user_q = select(User).where(User.is_active)
     if group_filter:
         user_q = user_q.where(User.group_id == group_filter)
     users = (await db.execute(user_q)).scalars().all()
 
     # Unassigned pool — always show at top so analysts know what needs picking up
     unassigned_alert_q = select(func.count()).select_from(Alert).where(
-        Alert.assignee_id == None,
+        Alert.assignee_id.is_(None),
         Alert.status.in_(["new", "in_progress"])
     )
     unassigned_case_q = select(func.count()).select_from(Case).where(
-        Case.assignee_id == None,
+        Case.assignee_id.is_(None),
         Case.status.in_(["open", "in_review"])
     )
     if group_filter:
@@ -144,7 +186,8 @@ async def quick_ti_lookup(
     _=Depends(get_current_user),
 ):
     """Ad-hoc threat intelligence lookup — wraps the worker TI engine via direct HTTP."""
-    import httpx, os
+    import os
+    import httpx
     worker_url = os.environ.get("WORKER_TI_URL", "http://worker:8001")
     try:
         async with httpx.AsyncClient(timeout=20) as client:

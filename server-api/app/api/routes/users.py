@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_permission
+from app.core.deps import require_permission
 from app.core.security import hash_password
 from app.models.models import User
 from app.schemas.schemas import PaginatedResponse, UserCreate, UserOut, UserUpdate
@@ -44,7 +44,7 @@ async def create_user(
     await db.commit()
     result2 = await db.execute(select(User).options(selectinload(User.role)).where(User.id == user.id))
     user = result2.scalar_one()
-    background.add_task(audit_log, db, current_user.id, "user_created", "user", str(user.id))
+    background.add_task(audit_log, db, current_user, "user_created", "user", str(user.id))
     return UserOut.model_validate(user)
 
 @router.put("/{user_id}", response_model=UserOut)
@@ -67,7 +67,7 @@ async def update_user(
     await db.commit()
     result2 = await db.execute(select(User).options(selectinload(User.role)).where(User.id == user_id))
     user = result2.scalar_one()
-    background.add_task(audit_log, db, current_user.id, "user_updated", "user", str(user_id))
+    background.add_task(audit_log, db, current_user, "user_updated", "user", str(user_id))
     return UserOut.model_validate(user)
 
 @router.delete("/{user_id}", status_code=204)
@@ -85,4 +85,4 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="User not found")
     await db.delete(user)
     await db.commit()
-    background.add_task(audit_log, db, current_user.id, "user_deleted", "user", str(user_id))
+    background.add_task(audit_log, db, current_user, "user_deleted", "user", str(user_id))

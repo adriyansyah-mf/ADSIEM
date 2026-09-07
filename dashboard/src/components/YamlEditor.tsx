@@ -40,7 +40,7 @@ export default function YamlEditor({ title, value, onChange, onSave, onClose, ex
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-lg border border-border bg-card shadow-2xl"
+      <div className="w-full max-w-2xl enterprise-panel rounded-lg border border-border bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h2 className="font-semibold">{title}</h2>

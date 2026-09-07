@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { Grid3x3 } from 'lucide-react'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface TechniqueEntry {
   technique_id: string
@@ -46,14 +47,11 @@ export default function MitreHeatmapPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Grid3x3 size={20} /> MITRE ATT&amp;CK Heatmap
-          </h1>
-          <div className="text-xs text-muted-foreground mt-1">
-            Technique frequency across triaged alerts — darker cells were seen more often.
-          </div>
-        </div>
+        <PageHeader
+          title={<><Grid3x3 aria-hidden="true" size={20} /> MITRE ATT&amp;CK Heatmap</>}
+          subtitle="Technique frequency across triaged alerts; darker cells were seen more often."
+          className="!mb-0"
+        />
         <select
           value={days}
           onChange={e => setDays(Number(e.target.value))}

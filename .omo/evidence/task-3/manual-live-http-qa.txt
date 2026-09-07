@@ -1,0 +1,47 @@
+=== Manual live HTTP QA: API key lifecycle (server-api container, via nginx on 127.0.0.1) ===
+
+1. Create key (admin/superadmin JWT) -> 201, secret shown exactly once:
+{
+    "id": "8111b8cd-5d4b-4272-98af-6383f924a24d",
+    "prefix": "adsiem_838f7fb5",
+    "name": "manual-qa-key",
+    "group_id": "default",
+    "permissions": ["alerts:read"],
+    "expires_at": null, "last_used_at": null, "revoked_at": null,
+    "created_by": "e6f80ae7-a69d-4f07-988b-22f8b5c77b3d",
+    "created_at": "2026-09-06T13:16:30.374629Z",
+    "secret": "adsiem_838f7fb5.zbGS576xv7pn8xMuvx_-2q7Dh8ahdt7j_SjC7MPRZik"
+}
+
+2. GET /api/api-keys (list) -> response contains no "secret" field for any row (checked via grep -i secret, none found).
+
+3. Using the newly created key (only "alerts:read" granted) as Bearer to call GET /api/api-keys
+   (which requires "api_keys:manage"):
+   HTTP_STATUS:403 {"detail":"Insufficient permissions"}
+   -> Proves get_current_user resolved a real ServicePrincipal from the API key and
+      require_permission enforced against the key's OWN granted permission set, not
+      the creating admin's permissions.
+
+4. DELETE /api/api-keys/{id} (revoke) -> HTTP_STATUS:204
+
+5. Re-using the now-revoked key as Bearer -> HTTP_STATUS:401 {"detail":"Invalid or expired API key"}
+   -> Matches the brief's required "expired/revoked keys receive 401" behavior, verified live
+      (not just unit-tested).
+
+6. Second key created with "api_keys:manage" granted -> used as Bearer to call GET /api/api-keys
+   -> HTTP_STATUS:200 (a correctly-permissioned key succeeds). Revoked afterward (204).
+
+7. Permission-escalation live check: the only interactive user in this dev DB ("admin") has role
+   "superadmin" (confirmed via `SELECT r.name FROM roles r JOIN users u ... WHERE u.username='admin'`
+   -> "superadmin"), so a live request granting an arbitrary permission from this account correctly
+   succeeds (201) under the superadmin bypass — this is NOT a bug, it is the documented bypass rule.
+   The non-superadmin rejection path (a caller without the requested permission gets 403) is proven
+   deterministically by the unit/route tests instead:
+   - test_permission_escalation_is_rejected_for_non_superadmin
+   - test_create_route_rejects_permission_escalation
+   Creating a dedicated non-superadmin live user for this one additional manual check was skipped
+   as redundant given the unit-level coverage already exercises the exact same production code path
+   (`validate_requested_permissions` / the route's call to it) with a deterministic non-superadmin caller.
+
+All test keys/rows created during this manual QA were revoked (204) at the end; no synthetic keys
+remain active in the database.

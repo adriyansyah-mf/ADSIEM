@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { format } from 'date-fns'
 import { ShieldAlert, FilePlus, FilePen, FileX, RefreshCw, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
 import { useFimEvents, useFimPaths, useAddFimPath, useToggleFimPath, useDeleteFimPath } from '@/hooks/useFim'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { FimEvent, FimWatchPath } from '@/types'
 
 const TYPE_META = {
@@ -34,7 +35,7 @@ function WatchPathsPanel() {
   }
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="enterprise-panel rounded-lg border border-border bg-card p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">Watch Paths</h2>
         <span className="text-xs text-muted-foreground">Agents update on next heartbeat (~30s)</span>
@@ -99,10 +100,7 @@ export default function FimPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold flex items-center gap-2">
-          <ShieldAlert size={20} />
-          File Integrity Monitoring
-        </h1>
+        <PageHeader title={<><ShieldAlert aria-hidden="true" size={20} /> File Integrity Monitoring</>} className="!mb-0" />
         <button
           onClick={() => refetch()}
           disabled={isFetching}
@@ -153,7 +151,7 @@ export default function FimPage() {
       </div>
 
       {/* Event table */}
-      <div className="rounded border border-border bg-card overflow-auto shadow-[0_0_0_1px_hsl(var(--primary)/0.06)]">
+      <div className="enterprise-panel rounded border border-border bg-card overflow-auto shadow-[0_0_0_1px_hsl(var(--primary)/0.06)]">
         <table className="w-full text-sm">
           <thead className="bg-muted text-muted-foreground">
             <tr>

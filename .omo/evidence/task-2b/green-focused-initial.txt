@@ -1,0 +1,132 @@
+/home/wonka/.local/bin/pytest:6: PytestRemovedIn10Warning: pytest.console_main() is deprecated and will be removed in pytest 10.
+It was never intended for programmatic use; use pytest.main() instead.
+See https://docs.pytest.org/en/stable/deprecations.html#console-main
+  sys.exit(console_main())
+F.E                                                                      [100%]
+==================================== ERRORS ====================================
+_________ ERROR at setup of test_tenant_export_excludes_foreign_alerts _________
+
+    @pytest.fixture
+    def tenant_resources() -> Iterator[TenantFixture]:
+        ids = {name: uuid4() for name in (
+            "blue_user", "red_user", "alert", "case", "agent", "log_source", "rule",
+            "revision", "webhook", "suppression", "schedule", "workflow", "node", "run",
+            "step", "hunt", "token", "blue_alert",
+        )}
+        suffix = uuid4().hex[:10]
+        blue_username = f"tenant_blue_{suffix}"
+        red_username = f"tenant_red_{suffix}"
+        _psql(f"""
+            INSERT INTO users (id, username, email, password_hash, role_id, group_id)
+            SELECT '{ids['blue_user']}', '{blue_username}', '{blue_username}@example.test',
+                   password_hash, (SELECT id FROM roles WHERE name = 'admin'), 'blue'
+            FROM users WHERE username = 'admin';
+            INSERT INTO users (id, username, email, password_hash, role_id, group_id)
+            SELECT '{ids['red_user']}', '{red_username}', '{red_username}@example.test',
+                   password_hash, (SELECT id FROM roles WHERE name = 'admin'), 'red'
+            FROM users WHERE username = 'admin';
+            INSERT INTO alerts (id, title, severity, status, group_id)
+            VALUES ('{ids['alert']}', 'red alert', 'high', 'new', 'red'),
+                   ('{ids['blue_alert']}', 'blue alert', 'low', 'new', 'blue');
+            INSERT INTO cases (id, title, severity, status, group_id)
+            VALUES ('{ids['case']}', 'red case', 'high', 'open', 'red');
+            INSERT INTO agents (id, name, hostname, group_id, token_hash, status)
+            VALUES ('{ids['agent']}', 'red agent', 'red-host', 'red', 'tenant-test-token', 'online');
+            INSERT INTO agent_log_sources (id, agent_id, path, log_type)
+            VALUES ('{ids['log_source']}', '{ids['agent']}', '/var/log/red.log', 'syslog');
+            INSERT INTO rules (id, title, content, group_id)
+            VALUES ('{ids['rule']}', 'red rule', 'title: red-rule\nlogsource:\n  category: process_creation\ndetection:\n  selection:\n    EventID: 1\n  condition: selection\n', 'red');
+            INSERT INTO rule_revisions (id, rule_id, version, content, created_by, created_at)
+            VALUES ('{ids['revision']}', '{ids['rule']}', 1, 'title: red-rule', '{ids['red_user']}', NOW());
+            INSERT INTO webhook_configs (id, name, url, group_id)
+            VALUES ('{ids['webhook']}', 'red webhook', 'https://example.com/hook', 'red');
+            INSERT INTO alert_suppressions
+                (id, entity_type, entity_value, group_id, is_active, created_by, created_at)
+            VALUES ('{ids['suppression']}', 'ip', '203.0.113.2', 'red', TRUE, '{ids['red_user']}', NOW());
+            INSERT INTO hunt_schedules
+                (id, name, ioc_type, ioc_value, interval_hours, group_id, is_enabled, created_by, created_at)
+            VALUES ('{ids['schedule']}', 'red schedule', 'ip', '203.0.113.3', 24, 'red', TRUE,
+                    '{ids['red_user']}', NOW());
+            INSERT INTO soar_workflows (id, name, group_id)
+            VALUES ('{ids['workflow']}', 'red workflow', 'red');
+            INSERT INTO soar_nodes (id, workflow_id, node_type, name)
+            VALUES ('{ids['node']}', '{ids['workflow']}', 'action', 'red node');
+            INSERT INTO soar_runs (id, workflow_id, status, trigger_type, group_id)
+            VALUES ('{ids['run']}', '{ids['workflow']}', 'pending_approval', 'manual', 'red');
+            INSERT INTO soar_run_steps
+                (id, run_id, node_id, status, action_type, idempotency_key, input_hash)
+            VALUES ('{ids['step']}', '{ids['run']}', '{ids['node']}', 'pending_approval', 'noop',
+                    'seed-key-{suffix}', 'seed-hash');
+            INSERT INTO threat_hunts (id, ioc_type, ioc_value, status, group_id, created_by)
+            VALUES ('{ids['hunt']}', 'ip', '203.0.113.4', 'pending', 'red', '{ids['red_user']}');
+            INSERT INTO enrollment_tokens (id, token_hash, label, group_id, created_by)
+            VALUES ('{ids['token']}', 'token-{suffix}', 'red token', 'red', '{ids['red_user']}');
+        """)
+        try:
+            yield TenantFixture(
+                blue_token=_login(blue_username),
+>               superadmin_token=_login("admin"),
+                                 ^^^^^^^^^^^^^^^
+                ids=ids,
+            )
+
+tests/server-api/test_tenant_isolation.py:138: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+username = 'admin'
+
+    def _login(username: str) -> str:
+        response = _request("POST", "/api/auth/login", "", {"username": username, "password": PASSWORD})
+>       assert response.status == 200
+E       assert 429 == 200
+E        +  where 429 = ApiResponse(status=429, body=b'{"error":"Rate limit exceeded: 5 per 1 minute"}').status
+
+tests/server-api/test_tenant_isolation.py:73: AssertionError
+=================================== FAILURES ===================================
+_______ test_foreign_resources_return_not_found_across_resource_families _______
+
+tenant_resources = TenantFixture(blue_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjMTFjNTZmMC0yYzE2LTQ0MjAtYjI4Ni1mMjc0MDU1OWQ...'), 'token': UUID('16068918-3041-4fc3-bf2d-d8d313ff3e86'), 'blue_alert': UUID('b78ceeba-744c-4ed4-a1d3-64fcd75bc4d5')})
+
+    @pytest.mark.service_e2e
+    def test_foreign_resources_return_not_found_across_resource_families(
+        tenant_resources: TenantFixture,
+    ) -> None:
+        # Given
+        resource_ids = tenant_resources.ids
+        scenarios = (
+            ("alert update", "PUT", f"/api/alerts/{resource_ids['alert']}", {"status": "investigating"}),
+            ("alert note", "POST", f"/api/alerts/{resource_ids['alert']}/notes", {"content": "foreign"}),
+            ("alert feedback", "GET", f"/api/alerts/{resource_ids['alert']}/feedback", None),
+            ("case delete", "DELETE", f"/api/cases/{resource_ids['case']}", None),
+            ("case feedback", "GET", f"/api/cases/{resource_ids['case']}/feedback", None),
+            ("agent read", "GET", f"/api/agents/{resource_ids['agent']}", None),
+            ("agent isolate", "POST", f"/api/agents/{resource_ids['agent']}/isolate", None),
+            ("agent log source", "PUT", f"/api/agents/{resource_ids['agent']}/log-sources/{resource_ids['log_source']}", {"path": "/tmp/foreign", "log_type": "syslog", "is_enabled": "true"}),
+            ("rule update", "PUT", f"/api/rules/{resource_ids['rule']}", {"title": "foreign"}),
+            ("rule revisions", "GET", f"/api/rules/{resource_ids['rule']}/revisions", None),
+            ("webhook delete", "DELETE", f"/api/webhooks/{resource_ids['webhook']}", None),
+            ("suppression delete", "DELETE", f"/api/suppressions/{resource_ids['suppression']}", None),
+            ("schedule toggle", "PATCH", f"/api/hunt-schedules/{resource_ids['schedule']}/toggle", None),
+            ("SOAR execution", "POST", f"/api/soar/executions/{resource_ids['run']}/approve", {"idempotency_key": "foreign-approval-key"}),
+            ("saved investigation", "GET", f"/api/hunts/{resource_ids['hunt']}", None),
+            ("enrollment token", "DELETE", f"/api/enrollment-tokens/{resource_ids['token']}", None),
+        )
+    
+        # When
+        observed = [
+            (name, _request(method, path, tenant_resources.blue_token, payload).status)
+            for name, method, path, payload in scenarios
+        ]
+    
+        # Then
+>       assert observed == [(name, 404) for name, *_ in scenarios]
+E       AssertionError: assert [('alert upda...d', 200), ...] == [('alert upda...d', 404), ...]
+E         
+E         At index 0 diff: ('alert update', 200) != ('alert update', 404)
+E         Use -v to get more diff
+
+tests/server-api/test_tenant_isolation.py:193: AssertionError
+=========================== short test summary info ============================
+FAILED tests/server-api/test_tenant_isolation.py::test_foreign_resources_return_not_found_across_resource_families
+ERROR tests/server-api/test_tenant_isolation.py::test_tenant_export_excludes_foreign_alerts
+1 failed, 1 passed, 1 error in 2.02s

@@ -1,0 +1,5 @@
+CHANGELOG.md
+db/init.sql
+docs/IMPLEMENTATION_STATUS.md
+server-api/app/core/permission_matrix.py
+tests/server-api/test_route_permission_matrix.py

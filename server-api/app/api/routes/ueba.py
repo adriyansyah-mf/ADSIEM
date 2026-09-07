@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_permission
+from app.core.deps import require_permission
 from app.models.models import UebaEntityScore, UebaAnomaly, UebaFeatureSnapshot, User
 from app.schemas.schemas import UebaEntityScoreOut, UebaEntityDetailOut, UebaStatusOut
 from app.core.config import settings

@@ -1,0 +1,21 @@
+
+> siem-dashboard@1.0.0 build
+> tsc -b && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 2321 modules transformed.
+[plugin:vite:reporter] [plugin vite:reporter] 
+(!) /home/wonka/Documents/ADSIEM/dashboard/src/api/client.ts is dynamically imported by /home/wonka/Documents/ADSIEM/dashboard/src/pages/AlertsPage.tsx but also statically imported by /home/wonka/Documents/ADSIEM/dashboard/src/App.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/components/AlertDetailModal.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/components/AssistantWidget.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/components/AttackGraph.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/components/Layout.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useAgents.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useAlerts.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useApiKeys.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useArtifacts.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useCases.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useDecoders.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useEvents.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useFim.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useHunts.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useHygiene.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useLogs.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useRules.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useSettings.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useTasks.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useUeba.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useUsers.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useWebhooks.ts, /home/wonka/Documents/ADSIEM/dashboard/src/hooks/useYara.ts, /home/wonka/Documents/ADSIEM/dashboard/src/pages/AgentsPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/AlertsPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/AuditLogsPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/CaseDetailPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/DashboardPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/HuntsPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/LiveResponsePage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/LoginPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/MitreHeatmapPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/ReportsPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/SettingsPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/SoarPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/UEBAPage.tsx, /home/wonka/Documents/ADSIEM/dashboard/src/pages/YaraPage.tsx, dynamic import will not move module into another chunk.
+
+rendering chunks...
+computing gzip size...
+dist/index.html                     0.90 kB │ gzip:   0.48 kB
+dist/assets/index-ST_PeEGa.css     29.73 kB │ gzip:   6.95 kB
+dist/assets/index-C4iC2wNt.js   1,173.33 kB │ gzip: 347.81 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.80s

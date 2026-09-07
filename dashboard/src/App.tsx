@@ -29,6 +29,7 @@ import YaraPage from '@/pages/YaraPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
 import SoarPage from '@/pages/SoarPage'
 import MitreHeatmapPage from '@/pages/MitreHeatmapPage'
+import AssistantPage from '@/pages/AssistantPage'
 
 export default function App() {
   const { accessToken, setUser, logout } = useAuthStore()
@@ -53,6 +54,7 @@ export default function App() {
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/cases" element={<CasesPage />} />
             <Route path="/cases/:id" element={<CaseDetailPage />} />
+            <Route path="/assistant" element={<AssistantPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/decoders" element={<DecodersPage />} />
             <Route path="/users" element={<ProtectedRoute minRole="superadmin"><UsersPage /></ProtectedRoute>} />

@@ -1,7 +1,7 @@
 # worker/worker/models.py
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Float, Integer, String, Text, ARRAY
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Float, Integer, String, Text, ARRAY, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from pgvector.sqlalchemy import Vector
@@ -48,6 +48,9 @@ class Alert(Base):
     severity         = Column(String(20), nullable=False, default="medium")
     status           = Column(String(30), nullable=False, default="new")
     rule_id          = Column(UUID(as_uuid=True), ForeignKey("rules.id", ondelete="SET NULL"))
+    correlation_id   = Column(String(255))
+    correlation_key  = Column(String(512))
+    source_event_ids = Column(JSONB, nullable=False, default=list)
     event_id         = Column(UUID(as_uuid=True))  # pointer into Elasticsearch `logs` index _id, no FK
     agent_id         = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"))
     group_id         = Column(String(100), nullable=False, default="default")
@@ -61,6 +64,35 @@ class Alert(Base):
     kill_chain_stage = Column(String(50))
     created_at       = Column(DateTime(timezone=True), default=now_utc)
     updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class SlaPolicy(Base):
+    __tablename__ = "sla_policies"
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id       = Column(String(100), nullable=False)
+    severity       = Column(String(20), nullable=False)
+    warn_minutes   = Column(Integer, nullable=False)
+    breach_minutes = Column(Integer, nullable=False)
+    created_at     = Column(DateTime(timezone=True), default=now_utc)
+    updated_at     = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    __table_args__ = (UniqueConstraint("group_id", "severity", name="uq_sla_policies_group_severity"),)
+
+class RetentionPolicy(Base):
+    __tablename__ = "retention_policies"
+    id                   = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id             = Column(String(100), nullable=False, unique=True)
+    log_retention_days   = Column(Integer, nullable=True)
+    alert_retention_days = Column(Integer, nullable=True)
+    storage_quota_docs   = Column(Integer, nullable=True)
+    created_at           = Column(DateTime(timezone=True), default=now_utc)
+    updated_at           = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class SlaNotification(Base):
+    __tablename__ = "sla_notifications"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id    = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
+    threshold   = Column(String(10), nullable=False)
+    notified_at = Column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (UniqueConstraint("alert_id", "threshold", name="uq_sla_notifications_alert_threshold"),)
 
 class WebhookConfig(Base):
     __tablename__ = "webhook_configs"
@@ -76,9 +108,13 @@ class WebhookDelivery(Base):
     id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     alert_id          = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
     webhook_config_id = Column(UUID(as_uuid=True), ForeignKey("webhook_configs.id", ondelete="CASCADE"), nullable=False)
+    group_id          = Column(String(100), nullable=True)
     payload           = Column(JSONB, nullable=False, default=dict)
     status            = Column(String(20), nullable=False, default="pending")
     attempts          = Column(Integer, nullable=False, default=0)
+    last_error        = Column(Text, nullable=True)
+    error_class       = Column(String(100), nullable=True)
+    first_failed_at   = Column(DateTime(timezone=True), nullable=True)
     last_attempted_at = Column(DateTime(timezone=True))
     created_at        = Column(DateTime(timezone=True), default=now_utc)
     updated_at        = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

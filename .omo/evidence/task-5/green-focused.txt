@@ -1,0 +1,38 @@
+/usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py:208: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
+The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
+
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
+..........                                                               [100%]
+=============================== warnings summary ===============================
+../../usr/local/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /usr/local/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+tests/server-api/test_security_boundaries.py::test_requests_within_limit_do_not_raise
+  /usr/local/lib/python3.12/site-packages/pytest_asyncio/plugin.py:783: DeprecationWarning: The event_loop fixture provided by pytest-asyncio has been redefined in
+  /tmp/repo/tests/server-api/conftest.py:4
+  Replacing the event_loop fixture with a custom implementation is deprecated
+  and will lead to errors in the future.
+  If you want to request an asyncio event loop with a scope other than function
+  scope, use the "scope" argument to the asyncio mark when marking the tests.
+  If you want to return different types of event loops, use the event_loop_policy
+  fixture.
+  
+    warnings.warn(
+
+tests/server-api/test_security_boundaries.py::test_health_response_includes_baseline_security_headers
+  /usr/local/lib/python3.12/site-packages/starlette/testclient.py:40: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = typing.Callable[[], typing.ContextManager[anyio.abc.BlockingPortal]]
+
+tests/server-api/test_security_boundaries.py::test_health_response_includes_baseline_security_headers
+  /usr/local/lib/python3.12/site-packages/starlette/routing.py:616: DeprecationWarning: async generator function lifespans are deprecated, use an @contextlib.asynccontextmanager function instead
+    warnings.warn(
+
+tests/server-api/test_security_boundaries.py::test_hsts_absent_by_default_and_present_in_production
+  /usr/local/lib/python3.12/site-packages/_pytest/stash.py:108: RuntimeWarning: coroutine 'Connection._cancel' was never awaited
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+10 passed, 5 warnings in 2.25s

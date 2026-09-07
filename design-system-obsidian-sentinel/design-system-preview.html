@@ -1,0 +1,630 @@
+<title>Obsidian Sentinel</title>
+<meta name="description" content="Enterprise SOC console design system for AD-SIEM — palette, type, components, and a live dashboard mock.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --color-primary: #00D9C0;
+    --color-primary-hover: #00BFA8;
+    --color-secondary: #4A5A78;
+    --color-accent: #FFB020;
+    --color-background: #0A0E14;
+    --color-surface: #11161F;
+    --color-surface-elevated: #182030;
+    --color-border: #232B3A;
+    --color-border-strong: #334059;
+    --color-text-primary: #E6EAF2;
+    --color-text-secondary: #8A94A6;
+    --color-text-muted: #5A6478;
+    --color-text-on-primary: #04140F;
+    --color-success: #2ED47A;
+    --color-warning: #FFB020;
+    --color-error: #FF3B5C;
+    --color-info: #3D9EFF;
+    --sev-critical: #FF3B5C;
+    --sev-high: #FF7A45;
+    --sev-medium: #FFC53D;
+    --sev-low: #3D9EFF;
+    --sev-info: #6B7A99;
+
+    --font-display: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.5);
+    --shadow-lg: 0 12px 32px rgba(0,0,0,0.6);
+    --shadow-glow: 0 0 0 3px rgba(0,217,192,0.25);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--color-background);
+    color: var(--color-text-primary);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.6;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: rgba(0,217,192,0.3); color: var(--color-text-primary); }
+
+  a { color: var(--color-primary); }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 56px 32px 96px; }
+
+  /* ---- Masthead ---- */
+  .masthead {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding-bottom: 32px;
+    margin-bottom: 40px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .masthead-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-primary);
+    margin: 0 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .masthead-eyebrow::before {
+    content: "";
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--color-primary);
+    box-shadow: 0 0 8px rgba(0,217,192,0.7);
+  }
+  .masthead h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .masthead p {
+    max-width: 46ch;
+    color: var(--color-text-secondary);
+    font-size: 15px;
+    margin: 12px 0 0;
+  }
+  .masthead-meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-text-muted);
+    text-align: right;
+    line-height: 1.8;
+    white-space: nowrap;
+  }
+  .masthead-meta b { color: var(--color-text-secondary); font-weight: 500; }
+
+  /* ---- Section scaffolding ---- */
+  section { margin-bottom: 64px; }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .section-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+  .section-head h2 {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+  }
+  .section-desc {
+    color: var(--color-text-secondary);
+    font-size: 14px;
+    max-width: 62ch;
+    margin: 0 0 24px;
+  }
+
+  /* ---- Color swatches ---- */
+  .swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+  .swatch {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--color-surface);
+  }
+  .swatch-fill { height: 64px; }
+  .swatch-body { padding: 10px 12px; }
+  .swatch-name { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+  .swatch-hex { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-muted); margin: 0; }
+
+  .swatch-row-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    margin: 28px 0 12px;
+  }
+  .swatch-row-label:first-child { margin-top: 0; }
+
+  /* ---- Type scale ---- */
+  .type-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 140px;
+    align-items: baseline;
+    gap: 20px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .type-row:last-child { border-bottom: none; }
+  .type-token { font-family: var(--font-mono); font-size: 12px; color: var(--color-primary); }
+  .type-sample { font-family: var(--font-display); font-weight: 600; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .type-meta { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); text-align: right; }
+
+  .font-pair-note {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 20px;
+  }
+  .font-pair-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .font-pair-card .label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text-muted); margin-bottom: 10px; }
+  .font-pair-card .sample-display { font-family: var(--font-display); font-size: 22px; font-weight: 600; margin-bottom: 6px; }
+  .font-pair-card .sample-mono { font-family: var(--font-mono); font-size: 13px; color: var(--color-text-secondary); }
+
+  /* ---- Spacing ruler ---- */
+  .space-scale { display: flex; flex-direction: column; gap: 8px; }
+  .space-row { display: flex; align-items: center; gap: 16px; }
+  .space-tag { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-muted); width: 90px; flex-shrink: 0; }
+  .space-bar { height: 10px; background: var(--color-primary); border-radius: 2px; opacity: 0.85; }
+
+  /* ---- Component gallery ---- */
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+  }
+  .gallery-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .gallery-card h3 {
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text-secondary);
+    margin: 0 0 16px;
+  }
+  .row-flex { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-body); font-size: 13px; font-weight: 600;
+    border-radius: 6px; padding: 8px 16px; border: 1px solid transparent;
+    cursor: pointer; transition: all 0.15s ease; white-space: nowrap;
+  }
+  .btn-primary { background: var(--color-primary); color: var(--color-text-on-primary); }
+  .btn-primary:hover { background: var(--color-primary-hover); }
+  .btn-secondary { background: var(--color-surface-elevated); color: var(--color-text-primary); border-color: var(--color-border-strong); }
+  .btn-secondary:hover { border-color: var(--color-primary); color: var(--color-primary); }
+  .btn-ghost { background: transparent; color: var(--color-text-secondary); }
+  .btn-ghost:hover { background: var(--color-surface-elevated); color: var(--color-text-primary); }
+  .btn-destructive { background: var(--color-error); color: #fff; }
+  .btn-destructive:hover { background: #E62E4E; }
+  .btn:focus-visible { outline: none; box-shadow: var(--shadow-glow); }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 4px 8px; border-radius: 4px; border: 1px solid transparent; line-height: 1;
+  }
+  .badge-critical { background: rgba(255,59,92,0.12); color: var(--sev-critical); border-color: rgba(255,59,92,0.3); }
+  .badge-high     { background: rgba(255,122,69,0.12); color: var(--sev-high); border-color: rgba(255,122,69,0.3); }
+  .badge-medium   { background: rgba(255,197,61,0.12); color: var(--sev-medium); border-color: rgba(255,197,61,0.3); }
+  .badge-low      { background: rgba(61,158,255,0.12); color: var(--sev-low); border-color: rgba(61,158,255,0.3); }
+  .badge-info     { background: rgba(107,122,153,0.15); color: var(--sev-info); border-color: rgba(107,122,153,0.3); }
+  .badge-success  { background: rgba(46,212,122,0.12); color: var(--color-success); border-color: rgba(46,212,122,0.3); }
+
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-online { background: var(--color-success); box-shadow: 0 0 8px rgba(46,212,122,0.6); }
+  .dot-offline { background: var(--color-text-muted); }
+  .dot-degraded { background: var(--color-warning); box-shadow: 0 0 8px rgba(255,176,32,0.5); }
+  .status-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-text-secondary); margin-bottom: 10px; }
+  .status-line:last-child { margin-bottom: 0; }
+
+  .field-label { font-size: 12px; font-weight: 500; color: var(--color-text-secondary); display: block; margin-bottom: 6px; }
+  .input {
+    background: var(--color-background); border: 1px solid var(--color-border); border-radius: 6px;
+    color: var(--color-text-primary); font-family: var(--font-body); font-size: 13px;
+    padding: 9px 12px; width: 100%; transition: all 0.15s ease;
+  }
+  .input.mono { font-family: var(--font-mono); }
+  .input::placeholder { color: var(--color-text-muted); }
+  .input:focus { outline: none; border-color: var(--color-primary); box-shadow: var(--shadow-glow); }
+
+  /* ---- Mini app mock ---- */
+  .app-mock {
+    display: grid;
+    grid-template-columns: 208px 1fr;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+    height: 620px;
+  }
+  .app-sidebar {
+    background: var(--color-surface);
+    border-right: 1px solid var(--color-border);
+    padding: 18px 12px;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .app-brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 8px 18px; margin-bottom: 10px; border-bottom: 1px solid var(--color-border);
+  }
+  .app-brand-mark {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-hover));
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--color-text-on-primary);
+    flex-shrink: 0;
+  }
+  .app-brand-name { font-family: var(--font-display); font-weight: 700; font-size: 13.5px; letter-spacing: -0.01em; line-height: 1.2; }
+  .app-brand-sub { font-size: 10px; color: var(--color-text-muted); font-family: var(--font-mono); }
+
+  .nav-group-label {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--color-text-muted); padding: 14px 8px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 8px; border-radius: 6px; color: var(--color-text-secondary);
+    font-size: 13px; font-weight: 500; text-decoration: none;
+    border-left: 2px solid transparent; margin-bottom: 1px;
+  }
+  .nav-item .left { display: flex; align-items: center; gap: 9px; }
+  .nav-item .ic { width: 14px; text-align: center; opacity: 0.85; font-size: 12px; }
+  .nav-item.active { background: rgba(0,217,192,0.12); color: var(--color-primary); border-left-color: var(--color-primary); }
+  .nav-item .count {
+    font-family: var(--font-mono); font-size: 10px; background: var(--color-surface-elevated);
+    color: var(--color-text-muted); padding: 1px 6px; border-radius: 999px;
+  }
+  .nav-item.active .count { background: rgba(0,217,192,0.18); color: var(--color-primary); }
+
+  .app-main { background: var(--color-background); padding: 22px 26px; overflow-y: auto; }
+  .app-topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; gap: 16px; flex-wrap: wrap; }
+  .app-topbar h2 { font-family: var(--font-display); font-size: 19px; font-weight: 600; margin: 0; }
+  .app-topbar .sub { font-size: 12px; color: var(--color-text-muted); margin-top: 2px; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+  .kpi-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; padding: 14px 16px; }
+  .kpi-label { font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+  .kpi-value { font-family: var(--font-display); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  .kpi-value.accent-critical { color: var(--sev-critical); }
+  .kpi-value.accent-primary { color: var(--color-primary); }
+  .kpi-delta { font-family: var(--font-mono); font-size: 11px; margin-top: 6px; }
+  .kpi-delta.up { color: var(--color-error); }
+  .kpi-delta.down { color: var(--color-success); }
+
+  .panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--color-border); }
+  .panel-head h3 { font-size: 13.5px; font-weight: 600; margin: 0; }
+  .panel-head .btn { padding: 5px 10px; font-size: 12px; }
+
+  table.mock-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.mock-table thead th {
+    background: var(--color-surface); color: var(--color-text-secondary);
+    font-family: var(--font-body); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    text-align: left; padding: 9px 16px; border-bottom: 2px solid var(--color-border-strong);
+  }
+  table.mock-table tbody td { padding: 10px 16px; border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); vertical-align: middle; }
+  table.mock-table tbody tr:hover { background: var(--color-surface-elevated); }
+  table.mock-table tbody tr:last-child td { border-bottom: none; }
+  .cell-mono { font-family: var(--font-mono); color: var(--color-text-secondary); }
+  .cell-title { font-weight: 500; }
+  .cell-title .mitre { display: block; font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-muted); margin-top: 2px; }
+
+  footer.credit {
+    margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--color-border);
+    font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+
+  @media (max-width: 900px) {
+    .app-mock { grid-template-columns: 1fr; height: auto; }
+    .app-sidebar { display: none; }
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .type-row { grid-template-columns: 70px 1fr; }
+    .type-meta { display: none; }
+    .font-pair-note { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="masthead">
+    <div>
+      <p class="masthead-eyebrow">Design System · v1.0.0</p>
+      <h1>Obsidian Sentinel</h1>
+      <p>A precision command-console system for AD-SIEM. Built for eight-hour shifts: a five-step severity ramp readable in peripheral vision, monospace for every technical value, and geometry sharp enough to feel like operations software, not a themed dashboard template.</p>
+    </div>
+    <div class="masthead-meta">
+      <div><b>Fonts</b> IBM Plex Sans / Mono</div>
+      <div><b>Base unit</b> 4px</div>
+      <div><b>Radius</b> 4–12px</div>
+    </div>
+  </div>
+
+  <section id="color">
+    <div class="section-head"><span class="section-num">01</span><h2>Color</h2></div>
+    <p class="section-desc">Near-black graphite surfaces with a cold radar-teal accent. The severity ramp is the one place saturation is allowed to run high — everywhere else stays quiet so severity keeps the loudest voice on screen.</p>
+
+    <p class="swatch-row-label">Severity ramp</p>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="swatch-fill" style="background:var(--sev-critical)"></div><div class="swatch-body"><p class="swatch-name">Critical</p><p class="swatch-hex">#FF3B5C</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--sev-high)"></div><div class="swatch-body"><p class="swatch-name">High</p><p class="swatch-hex">#FF7A45</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--sev-medium)"></div><div class="swatch-body"><p class="swatch-name">Medium</p><p class="swatch-hex">#FFC53D</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--sev-low)"></div><div class="swatch-body"><p class="swatch-name">Low</p><p class="swatch-hex">#3D9EFF</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--sev-info)"></div><div class="swatch-body"><p class="swatch-name">Informational</p><p class="swatch-hex">#6B7A99</p></div></div>
+    </div>
+
+    <p class="swatch-row-label">Core surfaces</p>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-background)"></div><div class="swatch-body"><p class="swatch-name">Background</p><p class="swatch-hex">#0A0E14</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-surface)"></div><div class="swatch-body"><p class="swatch-name">Surface</p><p class="swatch-hex">#11161F</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-surface-elevated)"></div><div class="swatch-body"><p class="swatch-name">Surface Elevated</p><p class="swatch-hex">#182030</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-border-strong)"></div><div class="swatch-body"><p class="swatch-name">Border Strong</p><p class="swatch-hex">#334059</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-primary)"></div><div class="swatch-body"><p class="swatch-name">Primary</p><p class="swatch-hex">#00D9C0</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-accent)"></div><div class="swatch-body"><p class="swatch-name">Accent</p><p class="swatch-hex">#FFB020</p></div></div>
+    </div>
+
+    <p class="swatch-row-label">Semantic</p>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-success)"></div><div class="swatch-body"><p class="swatch-name">Success</p><p class="swatch-hex">#2ED47A</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-warning)"></div><div class="swatch-body"><p class="swatch-name">Warning</p><p class="swatch-hex">#FFB020</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-error)"></div><div class="swatch-body"><p class="swatch-name">Error</p><p class="swatch-hex">#FF3B5C</p></div></div>
+      <div class="swatch"><div class="swatch-fill" style="background:var(--color-info)"></div><div class="swatch-body"><p class="swatch-name">Info</p><p class="swatch-hex">#3D9EFF</p></div></div>
+    </div>
+  </section>
+
+  <section id="type">
+    <div class="section-head"><span class="section-num">02</span><h2>Typography</h2></div>
+    <p class="section-desc">IBM Plex Sans for UI and prose, IBM Plex Mono for anything technical — IPs, hashes, hostnames, rule IDs, timestamps. One type family, two registers, so headers and the data beneath them never clash.</p>
+
+    <div class="font-pair-note">
+      <div class="font-pair-card">
+        <div class="label">Display / Body — IBM Plex Sans</div>
+        <div class="sample-display">Lateral movement detected</div>
+        <div class="sample-mono" style="font-family:var(--font-display); font-weight:400;">Correlated across 3 hosts in the finance VLAN over 14 minutes.</div>
+      </div>
+      <div class="font-pair-card">
+        <div class="label">Technical / Data — IBM Plex Mono</div>
+        <div class="sample-display" style="font-family:var(--font-mono); font-size:18px;">203.0.113.44 → 10.20.4.17:445</div>
+        <div class="sample-mono">SHA256 8f3a...c19e · T1021.002 · 2026-09-07T02:14:08Z</div>
+      </div>
+    </div>
+
+    <div style="margin-top:28px;">
+      <div class="type-row"><span class="type-token">3xl</span><span class="type-sample" style="font-size:32px;">247 open alerts</span><span class="type-meta">32px · 700 · KPI</span></div>
+      <div class="type-row"><span class="type-token">2xl</span><span class="type-sample" style="font-size:24px;">Alert Queue</span><span class="type-meta">24px · 600 · Page title</span></div>
+      <div class="type-row"><span class="type-token">xl</span><span class="type-sample" style="font-size:20px;">Recent detections</span><span class="type-meta">20px · 600 · Section</span></div>
+      <div class="type-row"><span class="type-token">lg</span><span class="type-sample" style="font-size:17px;">Suspicious PowerShell download</span><span class="type-meta">17px · 600 · Card title</span></div>
+      <div class="type-row"><span class="type-token">base</span><span class="type-sample" style="font-size:15px; font-weight:400;">Case notes render at this size for readability.</span><span class="type-meta">15px · 400 · Body</span></div>
+      <div class="type-row"><span class="type-token">sm</span><span class="type-sample" style="font-size:13px; font-weight:400;">web03 · 198.51.100.12 · analyst.k</span><span class="type-meta">13px · 400 · Table default</span></div>
+      <div class="type-row"><span class="type-token">xs</span><span class="type-sample" style="font-size:11px; font-family:var(--font-mono); font-weight:600; text-transform:uppercase; letter-spacing:0.04em;">CRITICAL</span><span class="type-meta">11px · 600 · Badge</span></div>
+    </div>
+  </section>
+
+  <section id="spacing">
+    <div class="section-head"><span class="section-num">03</span><h2>Spacing</h2></div>
+    <p class="section-desc">4px base unit. Tables run tight (12–16px); cards get more room (20px); sections never sit closer than 24px apart.</p>
+    <div class="space-scale">
+      <div class="space-row"><span class="space-tag">1 · 4px</span><div class="space-bar" style="width:4px;"></div></div>
+      <div class="space-row"><span class="space-tag">2 · 8px</span><div class="space-bar" style="width:8px;"></div></div>
+      <div class="space-row"><span class="space-tag">3 · 12px</span><div class="space-bar" style="width:12px;"></div></div>
+      <div class="space-row"><span class="space-tag">4 · 16px</span><div class="space-bar" style="width:16px;"></div></div>
+      <div class="space-row"><span class="space-tag">5 · 20px</span><div class="space-bar" style="width:20px;"></div></div>
+      <div class="space-row"><span class="space-tag">6 · 24px</span><div class="space-bar" style="width:24px;"></div></div>
+      <div class="space-row"><span class="space-tag">8 · 32px</span><div class="space-bar" style="width:32px;"></div></div>
+      <div class="space-row"><span class="space-tag">10 · 40px</span><div class="space-bar" style="width:40px;"></div></div>
+      <div class="space-row"><span class="space-tag">12 · 48px</span><div class="space-bar" style="width:48px;"></div></div>
+      <div class="space-row"><span class="space-tag">16 · 64px</span><div class="space-bar" style="width:64px;"></div></div>
+    </div>
+  </section>
+
+  <section id="components">
+    <div class="section-head"><span class="section-num">04</span><h2>Components</h2></div>
+    <p class="section-desc">Every value below is a token reference, not a one-off. Badges are always uppercase monospace with the tint/solid-text/tint-border pattern — the single most load-bearing pattern in the system.</p>
+
+    <div class="gallery-grid">
+      <div class="gallery-card">
+        <h3>Buttons</h3>
+        <div class="row-flex">
+          <button class="btn btn-primary">Acknowledge</button>
+          <button class="btn btn-secondary">Assign</button>
+          <button class="btn btn-ghost">Snooze</button>
+          <button class="btn btn-destructive">Isolate host</button>
+        </div>
+      </div>
+
+      <div class="gallery-card">
+        <h3>Severity badges</h3>
+        <div class="row-flex">
+          <span class="badge badge-critical">Critical</span>
+          <span class="badge badge-high">High</span>
+          <span class="badge badge-medium">Medium</span>
+          <span class="badge badge-low">Low</span>
+          <span class="badge badge-info">Info</span>
+        </div>
+      </div>
+
+      <div class="gallery-card">
+        <h3>Status indicators</h3>
+        <div class="status-line"><span class="dot dot-online"></span> agent-web03 · online</div>
+        <div class="status-line"><span class="dot dot-degraded"></span> agent-db01 · degraded (heartbeat 4m ago)</div>
+        <div class="status-line"><span class="dot dot-offline"></span> agent-vpn02 · offline</div>
+      </div>
+
+      <div class="gallery-card">
+        <h3>Inputs</h3>
+        <label class="field-label">Search indicator</label>
+        <input class="input mono" placeholder="203.0.113.0/24" style="margin-bottom:12px;">
+        <label class="field-label">Case title</label>
+        <input class="input" placeholder="Lateral movement — finance VLAN">
+      </div>
+    </div>
+  </section>
+
+  <section id="mockup">
+    <div class="section-head"><span class="section-num">05</span><h2>In context</h2></div>
+    <p class="section-desc">The alert queue, assembled entirely from the tokens above — nothing here is a one-off value.</p>
+
+    <div class="app-mock">
+      <div class="app-sidebar">
+        <div class="app-brand">
+          <div class="app-brand-mark">AD</div>
+          <div>
+            <div class="app-brand-name">AD-SIEM</div>
+            <div class="app-brand-sub">SECURITY OPS</div>
+          </div>
+        </div>
+
+        <div class="nav-group-label">Monitor</div>
+        <a class="nav-item"><span class="left"><span class="ic">▤</span>Dashboard</span></a>
+        <a class="nav-item"><span class="left"><span class="ic">≡</span>Logs</span></a>
+        <a class="nav-item"><span class="left"><span class="ic">◈</span>Events</span></a>
+        <a class="nav-item active"><span class="left"><span class="ic">⚠</span>Alerts</span><span class="count">247</span></a>
+        <a class="nav-item"><span class="left"><span class="ic">▢</span>Cases</span></a>
+
+        <div class="nav-group-label">Analytics</div>
+        <a class="nav-item"><span class="left"><span class="ic">◎</span>UEBA</span></a>
+        <a class="nav-item"><span class="left"><span class="ic">⌖</span>Threat Hunt</span></a>
+        <a class="nav-item"><span class="left"><span class="ic">▦</span>MITRE Heatmap</span></a>
+
+        <div class="nav-group-label">Response</div>
+        <a class="nav-item"><span class="left"><span class="ic">⟐</span>SOAR</span></a>
+        <a class="nav-item"><span class="left"><span class="ic">›_</span>Live Response</span></a>
+      </div>
+
+      <div class="app-main">
+        <div class="app-topbar">
+          <div>
+            <h2>Alert Queue</h2>
+            <div class="sub">Tenant: default · Updated 6s ago</div>
+          </div>
+          <div class="row-flex">
+            <input class="input mono" placeholder="Filter by IP, host, rule…" style="width:220px;">
+            <button class="btn btn-primary">＋ New Case</button>
+          </div>
+        </div>
+
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="kpi-label">Open Alerts</div>
+            <div class="kpi-value">247</div>
+            <div class="kpi-delta up">↑ 12 last hour</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Critical</div>
+            <div class="kpi-value accent-critical">9</div>
+            <div class="kpi-delta up">↑ 3 last hour</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">MTTR (24h)</div>
+            <div class="kpi-value">18m</div>
+            <div class="kpi-delta down">↓ 4m vs. yesterday</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Agents Online</div>
+            <div class="kpi-value accent-primary">312<span style="font-size:15px; color:var(--color-text-muted); font-weight:500;">/318</span></div>
+            <div class="kpi-delta down">↓ 2 offline</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Recent detections</h3>
+            <button class="btn btn-ghost">View all →</button>
+          </div>
+          <div style="overflow-x:auto;">
+          <table class="mock-table">
+            <thead>
+              <tr><th>Severity</th><th>Alert</th><th>Source</th><th>Host</th><th>Detected</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="badge badge-critical">Critical</span></td>
+                <td class="cell-title">Lateral movement via SMB<span class="mitre">T1021.002 · Remote Services</span></td>
+                <td class="cell-mono">203.0.113.44</td>
+                <td class="cell-mono">fin-db01</td>
+                <td class="cell-mono">02:14:08Z</td>
+              </tr>
+              <tr>
+                <td><span class="badge badge-high">High</span></td>
+                <td class="cell-title">Suspicious PowerShell download<span class="mitre">T1059.001 · Command Interpreter</span></td>
+                <td class="cell-mono">198.51.100.12</td>
+                <td class="cell-mono">web03</td>
+                <td class="cell-mono">02:09:41Z</td>
+              </tr>
+              <tr>
+                <td><span class="badge badge-medium">Medium</span></td>
+                <td class="cell-title">Impossible travel — analyst.k<span class="mitre">T1078 · Valid Accounts</span></td>
+                <td class="cell-mono">10.20.4.17</td>
+                <td class="cell-mono">vpn-gw02</td>
+                <td class="cell-mono">01:52:03Z</td>
+              </tr>
+              <tr>
+                <td><span class="badge badge-low">Low</span></td>
+                <td class="cell-title">New scheduled task registered<span class="mitre">T1053.005 · Scheduled Task</span></td>
+                <td class="cell-mono">10.20.1.9</td>
+                <td class="cell-mono">hr-app04</td>
+                <td class="cell-mono">01:47:55Z</td>
+              </tr>
+              <tr>
+                <td><span class="badge badge-info">Info</span></td>
+                <td class="cell-title">Agent version updated<span class="mitre">Fleet maintenance</span></td>
+                <td class="cell-mono">—</td>
+                <td class="cell-mono">db01</td>
+                <td class="cell-mono">01:30:12Z</td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="credit">
+    <span>Obsidian Sentinel · v1.0.0</span>
+    <span>design-tokens.json · design-system.css · design-system.md</span>
+  </footer>
+
+</div>

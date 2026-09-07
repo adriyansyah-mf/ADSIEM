@@ -1,54 +1,63 @@
-@import url('https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700&family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   Obsidian Sentinel — enterprise SOC console theme.
+   See design-system-obsidian-sentinel/design-system.md for the full spec.
+   ========================================================================== */
+
 :root {
-  --bg-base: #050a12;
-  --bg-panel: #080e1a;
-  --bg-card: #0b1524;
-  --bg-hover: #0f1e30;
-  --border: #1a2d45;
-  --border-glow: #00d4ff33;
+  --bg-base: #0A0E14;
+  --bg-panel: #11161F;
+  --bg-card: #182030;
+  --bg-hover: #1E2838;
+  --border: #232B3A;
+  --border-glow: rgba(0, 217, 192, 0.24);
+  --glass-bg: rgba(17, 22, 31, 0.72);
+  --glass-bg-strong: rgba(24, 32, 48, 0.9);
+  --glass-border: rgba(0, 217, 192, 0.14);
+  --glass-blur: blur(18px) saturate(145%);
+  --glass-blur-chrome: blur(20px) saturate(135%);
 
-  --accent-cyan: #00d4ff;
-  --accent-green: #00ff88;
-  --accent-orange: #ff6b00;
-  --accent-red: #ff2244;
-  --accent-yellow: #ffd700;
+  --accent-blue: #00D9C0;
+  --accent-red: #FF3B5C;
+  --accent-orange: #FF7A45;
+  --accent-yellow: #FFC53D;
+  --accent-green: #2ED47A;
+  --accent-purple: #a979f7;
+  --note-color: #6b8aad;
 
-  --text-primary: #e0eaff;
-  --text-secondary: #6b8aad;
-  --text-muted: #3a5070;
+  --text-primary: #E6EAF2;
+  --text-secondary: #8A94A6;
+  --text-muted: #5A6478;
 
-  /* Tailwind compat overrides for dark mode */
-  --background: 213 78% 5%;
-  --foreground: 214 70% 94%;
-  --card: 213 60% 9%;
-  --card-foreground: 214 70% 94%;
-  --border-tw: 213 50% 18%;
-  --primary: 195 100% 50%;
-  --primary-foreground: 213 78% 5%;
-  --muted: 213 50% 14%;
-  --muted-foreground: 213 30% 50%;
-  --destructive: 348 100% 57%;
-  --destructive-foreground: 214 70% 94%;
-  --radius: 0.375rem;
-}
+  --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
 
-.dark {
-  --background: 213 78% 5%;
-  --foreground: 214 70% 94%;
-  --card: 213 60% 9%;
-  --card-foreground: 214 70% 94%;
-  --border: 213 50% 18%;
-  --primary: 195 100% 50%;
-  --primary-foreground: 213 78% 5%;
-  --muted: 213 50% 14%;
-  --muted-foreground: 213 30% 50%;
-  --destructive: 348 100% 57%;
-  --destructive-foreground: 214 70% 94%;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --motion-micro: 120ms ease-out;
+  --motion-standard: 200ms ease-in-out;
+
+  --background: 216 33% 6%;
+  --foreground: 220 32% 93%;
+  --card: 220 33% 14%;
+  --card-foreground: 220 32% 93%;
+  --border-tw: 219 25% 18%;
+  --primary: 173 100% 43%;
+  --primary-foreground: 213 61% 7%;
+  --muted: 219 29% 9%;
+  --muted-foreground: 219 14% 60%;
+  --destructive: 350 100% 62%;
+  --destructive-foreground: 220 32% 93%;
   --radius: 0.375rem;
 }
 
@@ -61,25 +70,15 @@ html, body {
   padding: 0;
   background-color: var(--bg-base);
   color: var(--text-primary);
-  font-family: 'Exo 2', system-ui, sans-serif;
+  font-family: var(--font-body);
   font-size: 15px;
   line-height: 1.5;
 }
 
-/* Page-title consistency: several pages (Alerts, Hunts, YARA, FIM, Live
-   Response, Reports, Decoders, Webhooks, Users, Logs, Audit Log, Log
-   Sources, Handover, MITRE Heatmap) render a bare `<h1 className="text-xl
-   font-bold">` with no font override, while Cases/Dashboard/Settings/etc.
-   set Rajdhani + uppercase + letter-spacing inline. Tailwind's utility
-   classes never set font-family/text-transform/letter-spacing, so this
-   rule fills that gap for every plain h1 without touching each page —
-   and has zero effect on headings that already set their own inline
-   font-family (inline styles win over this stylesheet rule). */
 main h1 {
-  font-family: 'Rajdhani', sans-serif;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
 }
 
 /* Tabular numerals for counters, timers, and table cells with changing
@@ -88,22 +87,130 @@ main :is(td, .tabular-nums) {
   font-variant-numeric: tabular-nums;
 }
 
-/* Grid line background */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image:
-    repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0,212,255,0.04) 39px, rgba(0,212,255,0.04) 40px),
-    repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(0,212,255,0.04) 39px, rgba(0,212,255,0.04) 40px);
+  background:
+    radial-gradient(ellipse 56rem 38rem at 7% -8%, rgba(49, 147, 255, 0.14), transparent 62%),
+    radial-gradient(ellipse 52rem 34rem at 94% -10%, rgba(169, 121, 247, 0.09), transparent 64%),
+    radial-gradient(ellipse 68rem 42rem at 50% 116%, rgba(49, 147, 255, 0.07), transparent 62%);
 }
 
 #root {
   position: relative;
   z-index: 1;
   min-height: 100vh;
+}
+
+.skip-link {
+  position: fixed;
+  inset-block-start: var(--space-2);
+  inset-inline-start: var(--space-2);
+  z-index: 1100;
+  transform: translateY(-160%);
+  border: 1px solid var(--accent-blue);
+  border-radius: 0.375rem;
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  padding: var(--space-2) var(--space-3);
+  text-decoration: none;
+  transition: transform var(--motion-micro);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.enterprise-panel {
+  border-color: var(--glass-border) !important;
+  background: var(--glass-bg) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+
+@media (max-width: 79.99rem) {
+  .dashboard-grid {
+    flex-wrap: wrap;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .dashboard-center {
+    flex-basis: calc(100% - 15rem);
+    order: 1;
+  }
+
+  .dashboard-left-rail {
+    order: 0;
+  }
+
+  .dashboard-right-rail {
+    display: grid;
+    width: 100% !important;
+    grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+    gap: var(--space-3);
+    order: 2;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .app-sidebar,
+  .app-topbar {
+    background: var(--bg-panel) !important;
+  }
+}
+
+@media (max-width: 47.99rem) {
+  .app-sidebar {
+    width: 3.5rem !important;
+    min-width: 3.5rem !important;
+  }
+
+  .app-sidebar img + div,
+  .app-sidebar nav > div > div,
+  .app-sidebar nav a span {
+    display: none !important;
+  }
+
+  .app-sidebar nav a {
+    min-height: 2.75rem;
+    justify-content: center !important;
+    padding: var(--space-2) 0 !important;
+  }
+
+  .app-topbar {
+    gap: var(--space-2) !important;
+    padding-inline: var(--space-3) !important;
+  }
+
+  .global-search {
+    margin-inline: 0 !important;
+  }
+
+  .user-controls > div:first-child,
+  .user-controls .sign-out-btn {
+    display: none !important;
+  }
+
+  #main-content {
+    padding: var(--space-3) !important;
+  }
+
+  .dashboard-grid {
+    flex-direction: column !important;
+  }
+
+  .dashboard-left-rail,
+  .dashboard-center,
+  .dashboard-right-rail {
+    width: 100% !important;
+    flex-basis: auto;
+    overflow: visible !important;
+  }
 }
 
 /* Dark scrollbar */
@@ -119,21 +226,21 @@ body::before {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-cyan);
+  background: var(--accent-blue);
 }
 
 /* Glow utilities */
 .glow-cyan {
-  box-shadow: 0 0 12px rgba(0, 212, 255, 0.4);
+  box-shadow: 0 0 10px rgba(49, 147, 255, 0.3);
 }
 .glow-red {
-  box-shadow: 0 0 12px rgba(255, 34, 68, 0.4);
+  box-shadow: 0 0 10px rgba(255, 92, 92, 0.3);
 }
 .glow-green {
-  box-shadow: 0 0 12px rgba(0, 255, 136, 0.4);
+  box-shadow: 0 0 10px rgba(107, 212, 124, 0.3);
 }
 .glow-orange {
-  box-shadow: 0 0 12px rgba(255, 107, 0, 0.4);
+  box-shadow: 0 0 10px rgba(255, 159, 67, 0.3);
 }
 
 .sign-out-btn {
@@ -153,8 +260,22 @@ body::before {
   50% { opacity: 0.4; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
 /* Tailwind base overrides */
 @layer base {
-  * { border-color: #1a2d45; }
+  * { border-color: var(--border); }
   body { background-color: var(--bg-base); color: var(--text-primary); }
 }

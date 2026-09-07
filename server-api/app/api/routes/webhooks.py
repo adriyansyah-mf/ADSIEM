@@ -1,13 +1,14 @@
 # server-api/app/api/routes/webhooks.py
 from typing import Annotated
 from uuid import UUID
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_scoped_group, require_permission, get_current_user
-from typing import Annotated
+from app.core.deps import get_scoped_group, require_permission
+from app.core.outbound_url import OutboundUrlRejected, validate_outbound_url
 from app.models.models import User, WebhookConfig
 from app.schemas.schemas import PaginatedResponse, WebhookCreate, WebhookOut, WebhookUpdate
 from app.services.audit import audit_log
@@ -38,13 +39,19 @@ async def create_webhook(
     group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
     data = body.model_dump()
-    if not data.get("group_id"):
+    try:
+        data["url"] = (await validate_outbound_url(body.url)).url
+    except OutboundUrlRejected as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if group_filter is not None:
+        data["group_id"] = group_filter
+    elif not data.get("group_id"):
         data["group_id"] = group_filter or current_user.group_id
     webhook = WebhookConfig(**data)
     db.add(webhook)
     await db.commit()
     await db.refresh(webhook)
-    background.add_task(audit_log, db, current_user.id, "webhook_created", "webhook", str(webhook.id))
+    background.add_task(audit_log, db, current_user, "webhook_created", "webhook", str(webhook.id))
     return WebhookOut.model_validate(webhook)
 
 @router.put("/{webhook_id}", response_model=WebhookOut)
@@ -53,16 +60,28 @@ async def update_webhook(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("agents:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(select(WebhookConfig).where(WebhookConfig.id == webhook_id))
+    query = select(WebhookConfig).where(WebhookConfig.id == webhook_id)
+    if group_filter is not None:
+        query = query.where(WebhookConfig.group_id == group_filter)
+    result = await db.execute(query)
     webhook = result.scalar_one_or_none()
-    if not webhook:
+    if not webhook or (group_filter is not None and webhook.group_id != group_filter):
         raise HTTPException(status_code=404, detail="Webhook not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    updates = body.model_dump(exclude_none=True)
+    if "url" in updates:
+        try:
+            updates["url"] = (await validate_outbound_url(body.url)).url
+        except OutboundUrlRejected as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if group_filter is not None:
+        updates["group_id"] = group_filter
+    for field, value in updates.items():
         setattr(webhook, field, value)
     await db.commit()
     await db.refresh(webhook)
-    background.add_task(audit_log, db, current_user.id, "webhook_updated", "webhook", str(webhook_id))
+    background.add_task(audit_log, db, current_user, "webhook_updated", "webhook", str(webhook_id))
     return WebhookOut.model_validate(webhook)
 
 @router.delete("/{webhook_id}", status_code=204)
@@ -71,11 +90,15 @@ async def delete_webhook(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("agents:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(select(WebhookConfig).where(WebhookConfig.id == webhook_id))
+    query = select(WebhookConfig).where(WebhookConfig.id == webhook_id)
+    if group_filter is not None:
+        query = query.where(WebhookConfig.group_id == group_filter)
+    result = await db.execute(query)
     webhook = result.scalar_one_or_none()
     if not webhook:
         raise HTTPException(status_code=404, detail="Webhook not found")
     await db.delete(webhook)
     await db.commit()
-    background.add_task(audit_log, db, current_user.id, "webhook_deleted", "webhook", str(webhook_id))
+    background.add_task(audit_log, db, current_user, "webhook_deleted", "webhook", str(webhook_id))

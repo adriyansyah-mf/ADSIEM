@@ -68,6 +68,8 @@ export interface Alert {
   source_ip_country: string | null
   hostname: string | null
   assignee_id: string | null
+  sla_due_at?: string | null
+  sla_breached?: boolean
   ai_verdict: string | null
   created_at: string
   updated_at: string
@@ -125,6 +127,23 @@ export interface Webhook {
   is_enabled: boolean
   group_id: string | null
   created_at: string
+}
+
+export interface ApiKey {
+  id: string
+  prefix: string
+  name: string
+  group_id: string
+  permissions: string[]
+  expires_at: string | null
+  last_used_at: string | null
+  revoked_at: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export interface ApiKeyCreated extends ApiKey {
+  secret: string
 }
 
 export interface CaseNote {
@@ -305,6 +324,13 @@ export interface ThreatHunt {
   related_alert_ids: string[] | null
   created_at: string
   completed_at: string | null
+}
+
+export interface SigmaHuntResponse {
+  lucene_query: string
+  matches: Array<Record<string, unknown>>
+  total: number
+  next_cursor: Array<string | number | boolean | null> | null
 }
 
 export interface FimWatchPath {

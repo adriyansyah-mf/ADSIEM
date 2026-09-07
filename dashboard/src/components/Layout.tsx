@@ -3,11 +3,10 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import AssistantWidget from '@/components/AssistantWidget'
 import {
   LayoutDashboard, FileText, Activity, Bell, FolderOpen,
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
-  Terminal, Server, BookOpen, Wrench, Shield,
+  Terminal, Server, BookOpen, Wrench, Shield, Bot,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
   Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown,
   type LucideIcon,
@@ -29,6 +28,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/events', label: 'Events', icon: Activity },
       { to: '/alerts', label: 'Alerts', icon: Bell },
       { to: '/cases', label: 'Cases', icon: FolderOpen },
+      { to: '/assistant', label: 'SOC Assistant', icon: Bot },
     ],
   },
   {
@@ -132,17 +132,20 @@ export default function Layout() {
   const sidebarW = collapsed ? 56 : 216
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#0d0f14' }}>
+    <div className="app-shell" style={{ display: 'flex', height: '100dvh', overflow: 'hidden', background: 'transparent' }}>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
 
       {/* ── Sidebar ── */}
-      <aside style={{
+      <aside className="app-sidebar" style={{
         width: sidebarW,
         minWidth: sidebarW,
         display: 'flex',
         flexDirection: 'column',
-        background: '#111318',
-        borderRight: '1px solid #1e2028',
-        transition: 'width 0.2s ease, min-width 0.2s ease',
+        background: 'var(--glass-bg)',
+        backdropFilter: 'var(--glass-blur-chrome)',
+        WebkitBackdropFilter: 'var(--glass-blur-chrome)',
+        borderRight: '1px solid var(--glass-border)',
+        transition: 'background var(--motion-standard)',
         overflow: 'hidden',
       }}>
 
@@ -153,7 +156,7 @@ export default function Layout() {
           alignItems: 'center',
           gap: 10,
           padding: '0 16px',
-          borderBottom: '1px solid #1e2028',
+          borderBottom: '1px solid var(--glass-border)',
           flexShrink: 0,
         }}>
           <img
@@ -166,10 +169,10 @@ export default function Layout() {
           />
           {!collapsed && (
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.02em', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em', lineHeight: 1.1 }}>
                 AD-SIEM
               </div>
-              <div style={{ fontSize: 10, color: '#64748b', letterSpacing: '0.04em' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.02em' }}>
                 Security Operations
               </div>
             </div>
@@ -189,13 +192,13 @@ export default function Layout() {
                   fontSize: 10,
                   fontWeight: 600,
                   letterSpacing: '0.08em',
-                  color: '#64748b',
+                  color: 'var(--text-muted)',
                   textTransform: 'uppercase',
                 }}>
                   {group.label}
                 </div>
               )}
-              {collapsed && gi > 0 && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
+              {collapsed && gi > 0 && <div style={{ height: 1, background: 'var(--glass-border)', margin: '6px 10px' }} />}
               {visibleItems.map(item => {
                 const active = isActive(item.to)
                 const Icon = item.icon
@@ -204,6 +207,7 @@ export default function Layout() {
                     key={item.to}
                     to={item.to}
                     title={collapsed ? item.label : undefined}
+                    aria-current={active ? 'page' : undefined}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -211,10 +215,11 @@ export default function Layout() {
                       padding: collapsed ? '8px 0' : '7px 16px',
                       justifyContent: collapsed ? 'center' : 'flex-start',
                       textDecoration: 'none',
-                      background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
-                      borderLeft: active ? '2px solid #3b82f6' : '2px solid transparent',
-                      color: active ? '#93c5fd' : '#64748b',
-                      transition: 'color 0.12s, background 0.12s',
+                      background: active ? 'rgba(0,217,192,0.12)' : 'transparent',
+                      borderLeft: active ? '2px solid var(--accent-blue)' : '2px solid transparent',
+                      color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
+                      boxShadow: active ? 'inset 12px 0 24px -24px var(--accent-blue)' : 'none',
+                      transition: 'color var(--motion-micro), background var(--motion-micro)',
                     }}
                   >
                     <Icon size={15} strokeWidth={active ? 2 : 1.75} style={{ flexShrink: 0 }} />
@@ -222,7 +227,7 @@ export default function Layout() {
                       <span style={{
                         fontSize: 13,
                         fontWeight: active ? 500 : 400,
-                        color: active ? '#e2e8f0' : '#94a3b8',
+                        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
                         whiteSpace: 'nowrap',
                         letterSpacing: '0.01em',
                       }}>
@@ -245,13 +250,13 @@ export default function Layout() {
                   fontSize: 10,
                   fontWeight: 600,
                   letterSpacing: '0.08em',
-                  color: '#64748b',
+                  color: 'var(--text-muted)',
                   textTransform: 'uppercase',
                 }}>
                   Administration
                 </div>
               )}
-              {collapsed && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
+              {collapsed && <div style={{ height: 1, background: 'var(--glass-border)', margin: '6px 10px' }} />}
               {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).map(item => {
                 const active = isActive(item.to)
                 const Icon = item.icon
@@ -260,6 +265,7 @@ export default function Layout() {
                     key={item.to}
                     to={item.to}
                     title={collapsed ? item.label : undefined}
+                    aria-current={active ? 'page' : undefined}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -267,10 +273,11 @@ export default function Layout() {
                       padding: collapsed ? '8px 0' : '7px 16px',
                       justifyContent: collapsed ? 'center' : 'flex-start',
                       textDecoration: 'none',
-                      background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
-                      borderLeft: active ? '2px solid #3b82f6' : '2px solid transparent',
-                      color: active ? '#93c5fd' : '#64748b',
-                      transition: 'color 0.12s, background 0.12s',
+                      background: active ? 'rgba(0,217,192,0.12)' : 'transparent',
+                      borderLeft: active ? '2px solid var(--accent-blue)' : '2px solid transparent',
+                      color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
+                      boxShadow: active ? 'inset 12px 0 24px -24px var(--accent-blue)' : 'none',
+                      transition: 'color var(--motion-micro), background var(--motion-micro)',
                     }}
                   >
                     <Icon size={15} strokeWidth={active ? 2 : 1.75} style={{ flexShrink: 0 }} />
@@ -278,7 +285,7 @@ export default function Layout() {
                       <span style={{
                         fontSize: 13,
                         fontWeight: active ? 500 : 400,
-                        color: active ? '#e2e8f0' : '#94a3b8',
+                        color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
                         whiteSpace: 'nowrap',
                         letterSpacing: '0.01em',
                       }}>
@@ -293,7 +300,7 @@ export default function Layout() {
         </nav>
 
         {/* Bottom: agent count + collapse */}
-        <div style={{ borderTop: '1px solid #1e2028', flexShrink: 0 }}>
+        <div style={{ borderTop: '1px solid var(--glass-border)', flexShrink: 0 }}>
           {!collapsed ? (
             <div style={{
               display: 'flex',
@@ -304,18 +311,18 @@ export default function Layout() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <span style={{
                   width: 7, height: 7, borderRadius: '50%',
-                  background: onlineCount > 0 ? '#34d399' : '#374151',
-                  boxShadow: onlineCount > 0 ? '0 0 5px #34d399' : 'none',
+                  background: onlineCount > 0 ? 'var(--accent-green)' : 'var(--text-muted)',
+                  boxShadow: onlineCount > 0 ? '0 0 6px color-mix(in srgb, var(--accent-green) 55%, transparent)' : 'none',
                   flexShrink: 0,
                 }} />
-                <span style={{ fontSize: 12, color: '#64748b' }}>
-                  <span style={{ color: onlineCount > 0 ? '#34d399' : '#64748b', fontWeight: 500 }}>{onlineCount}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  <span style={{ color: onlineCount > 0 ? 'var(--accent-green)' : 'var(--text-muted)', fontWeight: 500 }}>{onlineCount}</span>
                   <span> / {totalCount} agents</span>
                 </span>
               </div>
               <button
                 onClick={() => setCollapsed(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', padding: '8px', borderRadius: 4 }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: '8px', borderRadius: 4 }}
                 title="Collapse sidebar"
               >
                 <PanelLeftClose size={14} />
@@ -327,7 +334,7 @@ export default function Layout() {
               title="Expand sidebar"
               style={{
                 width: '100%', background: 'none', border: 'none',
-                cursor: 'pointer', color: '#64748b',
+                cursor: 'pointer', color: 'var(--text-muted)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 padding: '14px 0',
               }}
@@ -339,39 +346,43 @@ export default function Layout() {
       </aside>
 
       {/* ── Right side ── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+      <div className="app-workspace" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
         {/* Topbar */}
-        <header style={{
+        <header className="app-topbar" style={{
           height: 52,
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
           gap: 16,
           padding: '0 20px',
-          background: '#111318',
-          borderBottom: '1px solid #1e2028',
+          background: 'var(--glass-bg)',
+          backdropFilter: 'var(--glass-blur-chrome)',
+          WebkitBackdropFilter: 'var(--glass-blur-chrome)',
+          borderBottom: '1px solid var(--glass-border)',
         }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <span style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', letterSpacing: '0.01em' }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
               {currentLabel}
             </span>
             {wsConnected && (
               <span
                 title="Live feed connected"
-                style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', boxShadow: '0 0 6px #34d399', animation: 'pulse 2s infinite', flexShrink: 0, display: 'inline-block' }}
+                role="status"
+                aria-label="Live alert feed connected"
+                style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-green)', boxShadow: '0 0 6px var(--accent-green)', animation: 'pulse 2s infinite', flexShrink: 0, display: 'inline-block' }}
               />
             )}
           </span>
 
           {/* Global Search */}
-          <div style={{ flex: 1, maxWidth: 320, position: 'relative', margin: '0 16px' }}>
+          <div className="global-search" style={{ flex: 1, maxWidth: 360, position: 'relative', margin: '0 16px' }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6,
-              background: '#0d0f14', border: '1px solid #1e2028',
-              borderRadius: 6, padding: '4px 10px',
+              background: 'rgba(7,17,29,0.66)', border: '1px solid var(--glass-border)',
+              borderRadius: 8, padding: '6px 10px',
             }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
               </svg>
               <input
@@ -380,65 +391,67 @@ export default function Layout() {
                 onFocus={() => setSearchOpen(true)}
                 onBlur={() => setTimeout(() => setSearchOpen(false), 200)}
                 placeholder="Search alerts, cases, IPs…"
+                aria-label="Search alerts, cases, and indicators"
                 style={{
                   background: 'none', border: 'none', outline: 'none',
-                  color: '#94a3b8', fontSize: 12, width: '100%',
+                  color: 'var(--text-primary)', fontSize: 12, width: '100%',
                 }}
               />
             </div>
             {searchOpen && searchResults && (searchResults.alerts.length > 0 || searchResults.cases.length > 0) && (
               <div style={{
                 position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
-                background: '#111318', border: '1px solid #1e2028', borderRadius: 6,
-                zIndex: 1000, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                background: 'var(--glass-bg-strong)', border: '1px solid var(--glass-border)', borderRadius: 8,
+                backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
+                zIndex: 1000, overflow: 'hidden', boxShadow: '0 18px 48px rgba(0,0,0,0.34)',
               }}>
                 {searchResults.alerts.map((a: any) => (
                   <div
                     key={a.id}
                     onMouseDown={() => { navigate(`/alerts?open=${a.id}`); setSearchOpen(false); setSearchQuery('') }}
-                    style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid #1e2028', display: 'flex', gap: 8, alignItems: 'center' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1e2028' }}
+                    style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border)', display: 'flex', gap: 8, alignItems: 'center' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,217,192,0.08)' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                   >
-                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: 'rgba(255,34,68,0.15)', color: '#ff2244', fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,59,92,0.15)', color: 'var(--accent-red)', fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                       {a.severity}
                     </span>
-                    <span style={{ fontSize: 12, color: '#e2e8f0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {a.title}
                     </span>
-                    <span style={{ fontSize: 10, color: '#475569', whiteSpace: 'nowrap' }}>alert</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>alert</span>
                   </div>
                 ))}
                 {searchResults.cases.map((c: any) => (
                   <div
                     key={c.id}
                     onMouseDown={() => { navigate(`/cases/${c.id}`); setSearchOpen(false); setSearchQuery('') }}
-                    style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid #1e2028', display: 'flex', gap: 8, alignItems: 'center' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1e2028' }}
+                    style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border)', display: 'flex', gap: 8, alignItems: 'center' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,217,192,0.08)' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                   >
-                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: 'rgba(0,212,255,0.1)', color: '#00d4ff', fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(0,217,192,0.12)', color: 'var(--accent-blue)', fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                       {c.status}
                     </span>
-                    <span style={{ fontSize: 12, color: '#e2e8f0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {c.title}
                     </span>
-                    <span style={{ fontSize: 10, color: '#475569', whiteSpace: 'nowrap' }}>case</span>
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>case</span>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          <div style={{ width: 1, height: 24, background: '#1e2028' }} />
+          <div style={{ width: 1, height: 24, background: 'var(--glass-border)' }} />
 
           {/* User */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div className="user-controls" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: '#cbd5e1', lineHeight: 1.2 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
                 {user?.username ?? '—'}
               </div>
-              <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
                 {clock.toLocaleTimeString('en-US', { hour12: false })}
               </div>
             </div>
@@ -446,14 +459,15 @@ export default function Layout() {
               <div style={{ position: 'relative' }}>
                 <button
                   onClick={() => setAdminMenuOpen(o => !o)}
+                  aria-expanded={adminMenuOpen}
                   onBlur={() => setTimeout(() => setAdminMenuOpen(false), 150)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 4,
                     padding: '5px 12px',
-                    borderRadius: 5,
-                    border: '1px solid #1e2028',
-                    background: adminMenuOpen ? '#1e2028' : 'transparent',
-                    color: '#94a3b8',
+                    borderRadius: 7,
+                    border: '1px solid var(--glass-border)',
+                    background: adminMenuOpen ? 'rgba(0,217,192,0.1)' : 'transparent',
+                    color: 'var(--text-secondary)',
                     fontSize: 12,
                     fontWeight: 500,
                     cursor: 'pointer',
@@ -464,9 +478,10 @@ export default function Layout() {
                 {adminMenuOpen && (
                   <div style={{
                     position: 'absolute', top: '100%', right: 0, marginTop: 4,
-                    background: '#111318', border: '1px solid #1e2028', borderRadius: 6,
+                    background: 'var(--glass-bg-strong)', border: '1px solid var(--glass-border)', borderRadius: 8,
+                    backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
                     zIndex: 1000, overflow: 'hidden', minWidth: 160,
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                    boxShadow: '0 18px 48px rgba(0,0,0,0.34)',
                   }}>
                     {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).map(item => {
                       const Icon = item.icon
@@ -479,8 +494,8 @@ export default function Layout() {
                             display: 'flex', alignItems: 'center', gap: 8,
                             padding: '8px 14px',
                             textDecoration: 'none',
-                            background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
-                            color: active ? '#93c5fd' : '#cbd5e1',
+                            background: active ? 'rgba(0,217,192,0.12)' : 'transparent',
+                            color: active ? 'var(--accent-blue)' : 'var(--text-primary)',
                             fontSize: 12.5,
                           }}
                         >
@@ -498,10 +513,10 @@ export default function Layout() {
               className="sign-out-btn"
               style={{
                 padding: '5px 12px',
-                borderRadius: 5,
-                border: '1px solid #1e2028',
+                borderRadius: 7,
+                border: '1px solid var(--glass-border)',
                 background: 'transparent',
-                color: '#64748b',
+                color: 'var(--text-muted)',
                 fontSize: 12,
                 fontWeight: 500,
                 cursor: 'pointer',
@@ -513,11 +528,10 @@ export default function Layout() {
         </header>
 
         {/* Content */}
-        <main style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+        <main id="main-content" tabIndex={-1} style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 20 }}>
           <Outlet />
         </main>
       </div>
-      <AssistantWidget />
     </div>
   )
 }

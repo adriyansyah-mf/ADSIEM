@@ -2,8 +2,9 @@ import { useState } from 'react'
 import DataTable from '@/components/DataTable'
 import YamlEditor from '@/components/YamlEditor'
 import SeverityBadge from '@/components/SeverityBadge'
-import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useTestRule } from '@/hooks/useRules'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { useRules, useCreateRule, useUpdateRule, useDeleteRule, useTestRule, useImportRules, useImportRulesFromRepository, useExportRule, useApproveRule, useRuleQuality, useRollbackRule, useRuleRevisions, useRuleDiff } from '@/hooks/useRules'
+import { Plus, Pencil, Trash2, Upload, Download, ShieldCheck, Gauge, RotateCcw, GitBranch } from 'lucide-react'
 import type { Rule } from '@/types'
 
 const DEFAULT_RULE = `title: New Rule
@@ -129,12 +130,12 @@ function CorrelationPanel({
   return (
     <div style={{
       borderTop: '1px solid var(--border)',
-      background: enabled ? 'rgba(0,212,255,0.03)' : 'transparent',
+      background: enabled ? 'rgba(0,217,192,0.03)' : 'transparent',
       padding: '10px 16px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <span style={{
-          fontFamily: 'Rajdhani, sans-serif',
+          fontFamily: 'IBM Plex Sans, sans-serif',
           fontWeight: 700,
           fontSize: '10px',
           letterSpacing: '2px',
@@ -145,10 +146,10 @@ function CorrelationPanel({
           style={{
             padding: '2px 10px',
             borderRadius: '3px',
-            border: `1px solid ${enabled ? 'var(--accent-cyan)' : 'var(--border)'}`,
-            background: enabled ? 'rgba(0,212,255,0.15)' : 'transparent',
-            color: enabled ? 'var(--accent-cyan)' : 'var(--text-muted)',
-            fontFamily: 'Rajdhani, sans-serif',
+            border: `1px solid ${enabled ? 'var(--accent-blue)' : 'var(--border)'}`,
+            background: enabled ? 'rgba(0,217,192,0.15)' : 'transparent',
+            color: enabled ? 'var(--accent-blue)' : 'var(--text-muted)',
+            fontFamily: 'IBM Plex Sans, sans-serif',
             fontWeight: 700,
             fontSize: '10px',
             letterSpacing: '1px',
@@ -158,7 +159,7 @@ function CorrelationPanel({
           {enabled ? 'ENABLED' : 'DISABLED'}
         </button>
         {!enabled && (
-          <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
             Count events over a time window — fire alert when threshold crossed
           </span>
         )}
@@ -172,7 +173,7 @@ function CorrelationPanel({
               border: '1px solid var(--border)',
               background: 'transparent',
               color: 'var(--text-muted)',
-              fontFamily: 'Rajdhani, sans-serif',
+              fontFamily: 'IBM Plex Sans, sans-serif',
               fontWeight: 600,
               fontSize: '9px',
               letterSpacing: '1px',
@@ -188,7 +189,7 @@ function CorrelationPanel({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '10px', marginTop: '10px' }}>
           {/* Group By */}
           <div>
-            <label style={{ display: 'block', fontFamily: 'Rajdhani, sans-serif', fontWeight: 600, fontSize: '9px', letterSpacing: '1px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+            <label style={{ display: 'block', fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '9px', letterSpacing: '1px', color: 'var(--text-muted)', marginBottom: '4px' }}>
               GROUP BY
             </label>
             <select
@@ -260,10 +261,32 @@ function CorrelationPanel({
       )}
 
       {enabled && (
-        <div style={{ marginTop: '8px', fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', padding: '4px 8px', background: 'var(--bg-base)', borderRadius: '3px', border: '1px solid var(--border)' }}>
+        <div style={{ marginTop: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', padding: '4px 8px', background: 'var(--bg-base)', borderRadius: '3px', border: '1px solid var(--border)' }}>
           Alert fires when {cfg.count}+ events{cfg.group_by !== '_all' ? ` per ${cfg.group_by}` : ''} detected within {cfg.timewindow}s · cooldown {cfg.cooldown}s · stored in Redis (survives restart)
         </div>
       )}
+    </div>
+  )
+}
+
+function RevisionHistory({ ruleId }: { ruleId: string | null }) {
+  const { data: revisions = [] } = useRuleRevisions(ruleId)
+  const diff = useRuleDiff()
+  if (!ruleId || revisions.length === 0) return null
+  return (
+    <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+      <div className="mb-2 font-semibold uppercase tracking-wide">Revision history</div>
+      <div className="flex flex-wrap gap-2">
+        {revisions.map(revision => (
+          <details key={revision.version} className="rounded border border-border bg-muted/30 px-2 py-1">
+            <summary className="cursor-pointer">v{revision.version} · {new Date(revision.created_at).toLocaleDateString()}</summary>
+            <pre className="mt-2 max-h-28 max-w-full overflow-auto whitespace-pre-wrap font-mono text-[10px]">{revision.content}</pre>
+            {revision.version > 1 && <button type="button" onClick={() => ruleId && diff.mutate({ id: ruleId, fromVersion: revision.version - 1, toVersion: revision.version })}
+              className="mt-2 rounded border border-border px-2 py-1 text-[10px] hover:bg-muted">Compare previous</button>}
+            {diff.data?.diff && revision.version === revisions[0]?.version && <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[10px] text-primary">{diff.data.diff}</pre>}
+          </details>
+        ))}
+      </div>
     </div>
   )
 }
@@ -275,13 +298,13 @@ const inputStyle: React.CSSProperties = {
   border: '1px solid var(--border)',
   borderRadius: '3px',
   color: 'var(--text-primary)',
-  fontFamily: 'Share Tech Mono, monospace',
+  fontFamily: 'IBM Plex Sans, sans-serif',
   fontSize: '11px',
 }
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
-  fontFamily: 'Rajdhani, sans-serif',
+  fontFamily: 'IBM Plex Sans, sans-serif',
   fontWeight: 600,
   fontSize: '9px',
   letterSpacing: '1px',
@@ -291,7 +314,7 @@ const labelStyle: React.CSSProperties = {
 
 const hintStyle: React.CSSProperties = {
   marginTop: '3px',
-  fontFamily: 'Share Tech Mono, monospace',
+  fontFamily: 'IBM Plex Sans, sans-serif',
   fontSize: '9px',
   color: 'var(--text-muted)',
 }
@@ -304,6 +327,12 @@ export default function RulesPage() {
   const updateRule = useUpdateRule()
   const deleteRule = useDeleteRule()
   const testRule = useTestRule()
+  const importRules = useImportRules()
+  const importRulesFromRepository = useImportRulesFromRepository()
+  const exportRule = useExportRule()
+  const approveRule = useApproveRule()
+  const ruleQuality = useRuleQuality()
+  const rollbackRule = useRollbackRule()
   const [editing, setEditing] = useState<Rule | null>(null)
   const [creating, setCreating] = useState(false)
   const [yamlContent, setYamlContent] = useState('')
@@ -337,12 +366,12 @@ export default function RulesPage() {
             padding: '1px 5px',
             borderRadius: '3px',
             fontSize: '9px',
-            fontFamily: 'Rajdhani, sans-serif',
+            fontFamily: 'IBM Plex Sans, sans-serif',
             fontWeight: 700,
             letterSpacing: '0.5px',
-            border: '1px solid rgba(0,212,255,0.4)',
-            color: 'var(--accent-cyan)',
-            background: 'rgba(0,212,255,0.08)',
+            border: '1px solid rgba(0,217,192,0.4)',
+            color: 'var(--accent-blue)',
+            background: 'rgba(0,217,192,0.08)',
           }}>CORR</span>
         )}
       </div>
@@ -356,6 +385,15 @@ export default function RulesPage() {
     { key: 'version', header: 'Version', render: (r: Rule) => `v${r.version}` },
     { key: 'actions', header: '', render: (r: Rule) => (
       <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+        <button onClick={() => exportRule.mutate(r.id)} title="Export Sigma YAML"
+          className="text-muted-foreground hover:text-foreground"><Download size={14} /></button>
+        <button onClick={() => ruleQuality.mutate(r.id)} title="Check rule quality"
+          className="text-muted-foreground hover:text-foreground"><Gauge size={14} /></button>
+        {r.version > 1 && <button onClick={() => {
+          if (window.confirm(`Rollback ${r.title} to version ${r.version - 1}?`)) rollbackRule.mutate({ id: r.id, version: r.version - 1 })
+        }} title="Rollback previous version" className="text-muted-foreground hover:text-foreground"><RotateCcw size={14} /></button>}
+        {!r.is_enabled && <button onClick={() => approveRule.mutate(r.id)} title="Approve and enable rule"
+          className="text-emerald-400 hover:text-emerald-300"><ShieldCheck size={14} /></button>}
         <button onClick={() => { setEditing(r); setYamlContent(r.content); setTestResult(null) }}
           className="text-muted-foreground hover:text-foreground"><Pencil size={14} /></button>
         <button onClick={() => deleteRule.mutate(r.id)} className="text-destructive hover:opacity-70">
@@ -367,11 +405,24 @@ export default function RulesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Rules</h1>
-        <button onClick={() => { setCreating(true); setYamlContent(DEFAULT_RULE); setTestResult(null) }}
-          className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm">
-          <Plus size={14} /> New Rule
-        </button>
+        <PageHeader title="Rules" className="!mb-0" />
+        <div className="flex items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-1 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted">
+            <Upload size={14} /> Import YAML
+            <input type="file" accept=".yml,.yaml,text/yaml" className="sr-only" onChange={event => {
+              const file = event.target.files?.[0]
+              if (!file) return
+              void file.text().then(content => importRules.mutate(content))
+              event.target.value = ''
+            }} />
+          </label>
+          <button type="button" onClick={() => { const url = window.prompt('HTTPS GitHub/GitLab raw YAML URL'); if (url) importRulesFromRepository.mutate(url) }}
+            className="flex items-center gap-1 rounded border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"><GitBranch size={14} /> Import URL</button>
+          <button onClick={() => { setCreating(true); setYamlContent(DEFAULT_RULE); setTestResult(null) }}
+            className="flex items-center gap-1 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground">
+            <Plus size={14} /> New Rule
+          </button>
+        </div>
       </div>
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
@@ -387,11 +438,14 @@ export default function RulesPage() {
           onClose={() => { setEditing(null); setCreating(false) }}
           extraAction={{ label: testResult ?? 'Test Rule', onClick: handleTest }}
           footer={
-            <CorrelationPanel
-              key={editing?.id ?? 'new'}
-              yamlContent={yamlContent}
-              onYamlChange={setYamlContent}
-            />
+            <>
+              <CorrelationPanel
+                key={editing?.id ?? 'new'}
+                yamlContent={yamlContent}
+                onYamlChange={setYamlContent}
+              />
+              <RevisionHistory ruleId={editing?.id ?? null} />
+            </>
           }
         />
       )}

@@ -11,6 +11,7 @@ from worker.database import AsyncSessionLocal
 from worker.models import (
     AlertNote, AlertSuppression, Case, SoarAction, SoarPlaybook,
 )
+from worker.settings_cache import get_setting
 
 log = structlog.get_logger()
 
@@ -270,6 +271,17 @@ _ACTION_HANDLERS = {
     "block_ip":        _action_block_ip,
 }
 
+_DESTRUCTIVE_ACTIONS = frozenset({"isolate_agent", "block_ip"})
+
+
+async def _queue_approval_notice(alert_id: uuid.UUID, action_type: str, playbook: str) -> None:
+    async with AsyncSessionLocal() as db:
+        db.add(AlertNote(
+            alert_id=alert_id,
+            content=f"SOAR action `{action_type}` from `{playbook}` is pending explicit approval.",
+        ))
+        await db.commit()
+
 
 async def run_soar_playbooks(
     alert_id: uuid.UUID,
@@ -323,6 +335,12 @@ async def run_soar_playbooks(
                 log.warning("soar_unknown_action", action_type=action.action_type)
                 continue
             try:
+                if action.action_type in _DESTRUCTIVE_ACTIONS and (
+                    await get_setting("soar_destructive_approval_required", "true")
+                ).lower() == "true":
+                    await _queue_approval_notice(alert_id, action.action_type, pb_name)
+                    log.info("soar_action_pending_approval", action_type=action.action_type, playbook=pb_name)
+                    continue
                 await handler(alert_id, ctx, action.params or {})
             except Exception as exc:
                 log.error("soar_action_failed", action_type=action.action_type,

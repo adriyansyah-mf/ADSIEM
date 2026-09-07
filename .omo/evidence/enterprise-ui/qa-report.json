@@ -1,0 +1,859 @@
+{
+  "checked": 72,
+  "failures": [],
+  "results": [
+    {
+      "viewport": "mobile",
+      "route": "/login",
+      "pageErrors": []
+    },
+    {
+      "viewport": "mobile",
+      "route": "/",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 0,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 589
+    },
+    {
+      "viewport": "mobile",
+      "route": "/agents",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [
+        {
+          "tag": "div",
+          "className": "flex items-center gap-2",
+          "right": 556
+        },
+        {
+          "tag": "select",
+          "className": "px-3 py-1.5 rounded border border-border bg-background text-sm",
+          "right": 471
+        },
+        {
+          "tag": "button",
+          "className": "flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm",
+          "right": 556
+        },
+        {
+          "tag": "svg",
+          "className": "",
+          "right": 498
+        },
+        {
+          "tag": "path",
+          "className": "",
+          "right": 496
+        },
+        {
+          "tag": "path",
+          "className": "",
+          "right": 494
+        }
+      ],
+      "unnamedButtons": 0,
+      "bodyTextLength": 265
+    },
+    {
+      "viewport": "mobile",
+      "route": "/agents/agent-001/sources",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 362
+    },
+    {
+      "viewport": "mobile",
+      "route": "/logs",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 151
+    },
+    {
+      "viewport": "mobile",
+      "route": "/events",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 169
+    },
+    {
+      "viewport": "mobile",
+      "route": "/alerts",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 460
+    },
+    {
+      "viewport": "mobile",
+      "route": "/cases",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [
+        {
+          "tag": "button",
+          "className": "",
+          "right": 400
+        },
+        {
+          "tag": "button",
+          "className": "",
+          "right": 507
+        },
+        {
+          "tag": "button",
+          "className": "",
+          "right": 598
+        },
+        {
+          "tag": "div",
+          "className": "",
+          "right": 428
+        },
+        {
+          "tag": "button",
+          "className": "",
+          "right": 428
+        }
+      ],
+      "unnamedButtons": 0,
+      "bodyTextLength": 386
+    },
+    {
+      "viewport": "mobile",
+      "route": "/cases/case-001",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 619
+    },
+    {
+      "viewport": "mobile",
+      "route": "/rules",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 152
+    },
+    {
+      "viewport": "mobile",
+      "route": "/decoders",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 164
+    },
+    {
+      "viewport": "mobile",
+      "route": "/users",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 194
+    },
+    {
+      "viewport": "mobile",
+      "route": "/webhooks",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 150
+    },
+    {
+      "viewport": "mobile",
+      "route": "/settings",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 314
+    },
+    {
+      "viewport": "mobile",
+      "route": "/hygiene",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 218
+    },
+    {
+      "viewport": "mobile",
+      "route": "/ueba",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 354
+    },
+    {
+      "viewport": "mobile",
+      "route": "/fim",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [
+        {
+          "tag": "path",
+          "className": "",
+          "right": 382
+        },
+        {
+          "tag": "path",
+          "className": "",
+          "right": 382
+        },
+        {
+          "tag": "path",
+          "className": "",
+          "right": 382
+        }
+      ],
+      "unnamedButtons": 0,
+      "bodyTextLength": 278
+    },
+    {
+      "viewport": "mobile",
+      "route": "/hunts",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 343
+    },
+    {
+      "viewport": "mobile",
+      "route": "/reports",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 409
+    },
+    {
+      "viewport": "mobile",
+      "route": "/mitre-heatmap",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 262
+    },
+    {
+      "viewport": "mobile",
+      "route": "/live-response",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 259
+    },
+    {
+      "viewport": "mobile",
+      "route": "/yara",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 192
+    },
+    {
+      "viewport": "mobile",
+      "route": "/soar",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 208
+    },
+    {
+      "viewport": "mobile",
+      "route": "/audit-logs",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 87
+    },
+    {
+      "viewport": "tablet",
+      "route": "/login",
+      "pageErrors": []
+    },
+    {
+      "viewport": "tablet",
+      "route": "/",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 0,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 866
+    },
+    {
+      "viewport": "tablet",
+      "route": "/agents",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 542
+    },
+    {
+      "viewport": "tablet",
+      "route": "/agents/agent-001/sources",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 639
+    },
+    {
+      "viewport": "tablet",
+      "route": "/logs",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 428
+    },
+    {
+      "viewport": "tablet",
+      "route": "/events",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 446
+    },
+    {
+      "viewport": "tablet",
+      "route": "/alerts",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 737
+    },
+    {
+      "viewport": "tablet",
+      "route": "/cases",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [
+        {
+          "tag": "button",
+          "className": "",
+          "right": 770
+        }
+      ],
+      "unnamedButtons": 0,
+      "bodyTextLength": 663
+    },
+    {
+      "viewport": "tablet",
+      "route": "/cases/case-001",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 896
+    },
+    {
+      "viewport": "tablet",
+      "route": "/rules",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 429
+    },
+    {
+      "viewport": "tablet",
+      "route": "/decoders",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 441
+    },
+    {
+      "viewport": "tablet",
+      "route": "/users",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 471
+    },
+    {
+      "viewport": "tablet",
+      "route": "/webhooks",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 427
+    },
+    {
+      "viewport": "tablet",
+      "route": "/settings",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 591
+    },
+    {
+      "viewport": "tablet",
+      "route": "/hygiene",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 495
+    },
+    {
+      "viewport": "tablet",
+      "route": "/ueba",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 631
+    },
+    {
+      "viewport": "tablet",
+      "route": "/fim",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 555
+    },
+    {
+      "viewport": "tablet",
+      "route": "/hunts",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 620
+    },
+    {
+      "viewport": "tablet",
+      "route": "/reports",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 686
+    },
+    {
+      "viewport": "tablet",
+      "route": "/mitre-heatmap",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 539
+    },
+    {
+      "viewport": "tablet",
+      "route": "/live-response",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 536
+    },
+    {
+      "viewport": "tablet",
+      "route": "/yara",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 469
+    },
+    {
+      "viewport": "tablet",
+      "route": "/soar",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 485
+    },
+    {
+      "viewport": "tablet",
+      "route": "/audit-logs",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 364
+    },
+    {
+      "viewport": "desktop",
+      "route": "/login",
+      "pageErrors": []
+    },
+    {
+      "viewport": "desktop",
+      "route": "/",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 0,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 866
+    },
+    {
+      "viewport": "desktop",
+      "route": "/agents",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 542
+    },
+    {
+      "viewport": "desktop",
+      "route": "/agents/agent-001/sources",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 639
+    },
+    {
+      "viewport": "desktop",
+      "route": "/logs",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 428
+    },
+    {
+      "viewport": "desktop",
+      "route": "/events",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 446
+    },
+    {
+      "viewport": "desktop",
+      "route": "/alerts",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 737
+    },
+    {
+      "viewport": "desktop",
+      "route": "/cases",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 663
+    },
+    {
+      "viewport": "desktop",
+      "route": "/cases/case-001",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 896
+    },
+    {
+      "viewport": "desktop",
+      "route": "/rules",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 429
+    },
+    {
+      "viewport": "desktop",
+      "route": "/decoders",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 441
+    },
+    {
+      "viewport": "desktop",
+      "route": "/users",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 471
+    },
+    {
+      "viewport": "desktop",
+      "route": "/webhooks",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 427
+    },
+    {
+      "viewport": "desktop",
+      "route": "/settings",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 591
+    },
+    {
+      "viewport": "desktop",
+      "route": "/hygiene",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 495
+    },
+    {
+      "viewport": "desktop",
+      "route": "/ueba",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 631
+    },
+    {
+      "viewport": "desktop",
+      "route": "/fim",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 555
+    },
+    {
+      "viewport": "desktop",
+      "route": "/hunts",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 620
+    },
+    {
+      "viewport": "desktop",
+      "route": "/reports",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 686
+    },
+    {
+      "viewport": "desktop",
+      "route": "/mitre-heatmap",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 539
+    },
+    {
+      "viewport": "desktop",
+      "route": "/live-response",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 536
+    },
+    {
+      "viewport": "desktop",
+      "route": "/yara",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 469
+    },
+    {
+      "viewport": "desktop",
+      "route": "/soar",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 485
+    },
+    {
+      "viewport": "desktop",
+      "route": "/audit-logs",
+      "pageErrors": [],
+      "title": "AD-SIEM · Security Operations",
+      "h1": 1,
+      "horizontalOverflow": false,
+      "overflowElements": [],
+      "unnamedButtons": 0,
+      "bodyTextLength": 364
+    }
+  ]
+}

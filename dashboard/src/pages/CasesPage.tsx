@@ -4,6 +4,8 @@ import { format } from 'date-fns'
 import { useCases, useUpdateCase, useEscalateCase } from '@/hooks/useCases'
 import { useAuthStore } from '@/stores/auth'
 import { TimeRangeFilter, type TimeRange } from '@/components/TimeRangeSelect'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { BrainCircuit, BriefcaseBusiness } from 'lucide-react'
 import type { Case } from '@/types'
 
 const filterInputStyle: React.CSSProperties = {
@@ -12,41 +14,47 @@ const filterInputStyle: React.CSSProperties = {
   border: '1px solid var(--border)',
   background: 'var(--bg-card)',
   color: 'var(--text-primary)',
-  fontFamily: 'Share Tech Mono, monospace',
+  fontFamily: 'IBM Plex Sans, sans-serif',
   fontSize: '12px',
-  outline: 'none',
 }
 
+// Colors reference the same shared tokens as components/SeverityBadge.tsx so the
+// two badge shapes (this fixed-size tile vs. the inline pill used elsewhere) never
+// drift out of sync on what "critical"/"high"/etc. actually render as.
 const severityColors = {
-  critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
-  high:     { bg: 'rgba(255,107,0,0.15)', border: '#ff6b00', color: '#ff6b00' },
-  medium:   { bg: 'rgba(255,215,0,0.1)',  border: '#ffd700', color: '#ffd700' },
-  low:      { bg: 'rgba(0,255,136,0.1)',  border: '#00ff88', color: '#00ff88' },
-  info:     { bg: 'rgba(0,212,255,0.1)',  border: '#00d4ff', color: '#00d4ff' },
+  critical: 'var(--accent-red)',
+  high:     'var(--accent-orange)',
+  medium:   'var(--accent-yellow)',
+  low:      'var(--accent-green)',
+  info:     'var(--accent-blue)',
 }
 
-function SeverityBadge({ severity }: { severity: string }) {
+/** Fixed-size severity tile for the case-card leading edge — visually distinct from
+ * the shared inline SeverityBadge pill, so it keeps its own name and abbreviation. */
+function SeverityTile({ severity }: { severity: string }) {
   const s = severity as keyof typeof severityColors
   const c = severityColors[s] ?? severityColors.info
   return (
-    <div style={{
-      width: '36px',
-      height: '36px',
-      borderRadius: '4px',
-      border: `2px solid ${c.border}`,
-      background: c.bg,
-      color: c.color,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: 'Rajdhani, sans-serif',
-      fontWeight: 700,
-      fontSize: '11px',
-      letterSpacing: '0.5px',
-      textTransform: 'uppercase',
-      flexShrink: 0,
-      boxShadow: `0 0 8px ${c.border}44`,
-    }}>
+    <div
+      title={severity}
+      style={{
+        width: '36px',
+        height: '36px',
+        borderRadius: '4px',
+        border: `2px solid ${c}`,
+        background: `color-mix(in srgb, ${c} 12%, transparent)`,
+        color: c,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'IBM Plex Sans, sans-serif',
+        fontWeight: 700,
+        fontSize: '11px',
+        letterSpacing: '0.5px',
+        textTransform: 'uppercase',
+        flexShrink: 0,
+        boxShadow: `0 0 8px color-mix(in srgb, ${c} 27%, transparent)`,
+      }}>
       {severity.slice(0, 3).toUpperCase()}
     </div>
   )
@@ -70,7 +78,7 @@ function CaseCard({ c }: { c: Case }) {
   const sourceIp = c.ioc_data?.source_ip as string | undefined
 
   const statusColor = {
-    open: 'var(--accent-cyan)',
+    open: 'var(--accent-blue)',
     in_review: 'var(--accent-yellow)',
     escalated: 'var(--accent-orange)',
     resolved: 'var(--accent-green)',
@@ -95,12 +103,12 @@ function CaseCard({ c }: { c: Case }) {
     >
       {/* Top row */}
       <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-        <SeverityBadge severity={c.severity} />
+        <SeverityTile severity={c.severity} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-            {c.created_by_ai && <span title="AI Generated" style={{ fontSize: '14px' }}>🤖</span>}
+            {c.created_by_ai && <BrainCircuit aria-label="AI generated" size={14} />}
             <span style={{
-              fontFamily: 'Exo 2, sans-serif',
+              fontFamily: 'IBM Plex Sans, sans-serif',
               fontWeight: 700,
               fontSize: '14px',
               color: 'var(--text-primary)',
@@ -110,7 +118,7 @@ function CaseCard({ c }: { c: Case }) {
           </div>
           {c.ai_reasoning && (
             <div style={{
-              fontFamily: 'Exo 2, sans-serif',
+              fontFamily: 'IBM Plex Sans, sans-serif',
               fontSize: '12px',
               color: 'var(--text-secondary)',
               overflow: 'hidden',
@@ -122,7 +130,7 @@ function CaseCard({ c }: { c: Case }) {
             </div>
           )}
           {sourceIp && (
-            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)', marginTop: '3px' }}>
+            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-blue)', marginTop: '3px' }}>
               SRC: {sourceIp}
             </div>
           )}
@@ -134,7 +142,7 @@ function CaseCard({ c }: { c: Case }) {
             borderRadius: '3px',
             border: `1px solid ${statusColor}`,
             color: statusColor,
-            fontFamily: 'Rajdhani, sans-serif',
+            fontFamily: 'IBM Plex Sans, sans-serif',
             fontWeight: 700,
             fontSize: '11px',
             letterSpacing: '0.5px',
@@ -144,7 +152,7 @@ function CaseCard({ c }: { c: Case }) {
             {c.status.replace('_', ' ')}
           </span>
           {c.escalated_at && (
-            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--accent-orange)', marginTop: '3px' }}>
+            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--accent-orange)', marginTop: '3px' }}>
               ESC {format(new Date(c.escalated_at), 'MM-dd HH:mm')}
             </div>
           )}
@@ -161,16 +169,16 @@ function CaseCard({ c }: { c: Case }) {
       }}
       onClick={e => e.stopPropagation()}
       >
-        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+        <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
           {format(new Date(c.created_at), 'yyyy-MM-dd HH:mm')}
         </span>
         {c.alert_id && (
-          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+          <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
             ALT:{c.alert_id.slice(0, 8)}
           </span>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-          <ActionBtn label="View Detail" onClick={() => navigate(`/cases/${c.id}`)} color="var(--accent-cyan)" />
+          <ActionBtn label="View Detail" onClick={() => navigate(`/cases/${c.id}`)} color="var(--accent-blue)" />
           {user?.id && (
             <ActionBtn
               label="Assign to Me"
@@ -212,13 +220,13 @@ function ActionBtn({ label, onClick, color, loading }: { label: string; onClick:
         border: `1px solid ${color}`,
         background: 'transparent',
         color,
-        fontFamily: 'Rajdhani, sans-serif',
+        fontFamily: 'IBM Plex Sans, sans-serif',
         fontWeight: 700,
         fontSize: '10px',
         letterSpacing: '0.5px',
         cursor: loading ? 'wait' : 'pointer',
         opacity: loading ? 0.6 : 1,
-        transition: 'all 0.15s',
+        transition: 'opacity 0.15s',
       }}
     >
       {loading ? '...' : label}
@@ -268,32 +276,21 @@ export default function CasesPage() {
     <div>
       {/* Page header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-        <div>
-          <h1 style={{
-            fontFamily: 'Rajdhani, sans-serif',
-            fontWeight: 700,
-            fontSize: '22px',
-            letterSpacing: '2px',
-            color: 'var(--accent-cyan)',
-            margin: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}>
-            <span>🎫</span> SECURITY CASES
-          </h1>
-          <div style={{ display: 'flex', gap: '16px', marginTop: '6px' }}>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)' }}>
+        <PageHeader
+          title={<><BriefcaseBusiness aria-hidden="true" size={20} /> Security cases</>}
+          className="!mb-0"
+          subtitle={<span style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
+            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-blue)' }}>
               OPEN: {openCount}
             </span>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-orange)' }}>
+            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-orange)' }}>
               ESCALATED: {escalatedCount}
             </span>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)' }}>
+            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>
               TOTAL: {total}
             </span>
-          </div>
-        </div>
+          </span>}
+        />
       </div>
 
       {/* Filter tabs */}
@@ -313,15 +310,15 @@ export default function CasesPage() {
               style={{
                 padding: '7px 16px',
                 border: 'none',
-                borderBottom: isActive ? '2px solid var(--accent-cyan)' : '2px solid transparent',
+                borderBottom: isActive ? '2px solid var(--accent-blue)' : '2px solid transparent',
                 background: 'transparent',
-                color: isActive ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                fontFamily: 'Rajdhani, sans-serif',
+                color: isActive ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                fontFamily: 'IBM Plex Sans, sans-serif',
                 fontWeight: 700,
                 fontSize: '12px',
                 letterSpacing: '1px',
                 cursor: 'pointer',
-                transition: 'all 0.15s',
+                transition: 'color 0.15s, border-bottom-color 0.15s',
               }}
             >
               {tab.toUpperCase()}
@@ -366,11 +363,11 @@ export default function CasesPage() {
 
       {/* Cases list */}
       {isLoading ? (
-        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
+        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
           LOADING CASES...
         </div>
       ) : cases.length === 0 ? (
-        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
+        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
           NO CASES FOUND
         </div>
       ) : (
@@ -390,13 +387,13 @@ export default function CasesPage() {
             style={{
               padding: '6px 14px', borderRadius: '4px', border: '1px solid var(--border)',
               background: 'transparent', color: page <= 1 ? 'var(--text-muted)' : 'var(--text-secondary)',
-              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
+              fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
               cursor: page <= 1 ? 'not-allowed' : 'pointer',
             }}
           >
             ← PREV
           </button>
-          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)' }}>
+          <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>
             PAGE {page} / {totalPages}
           </span>
           <button
@@ -405,7 +402,7 @@ export default function CasesPage() {
             style={{
               padding: '6px 14px', borderRadius: '4px', border: '1px solid var(--border)',
               background: 'transparent', color: page >= totalPages ? 'var(--text-muted)' : 'var(--text-secondary)',
-              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
+              fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
               cursor: page >= totalPages ? 'not-allowed' : 'pointer',
             }}
           >

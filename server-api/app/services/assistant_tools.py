@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import (
     Agent, Alert, AlertNote, Case, CaseNote, FimEvent, HygieneSnapshot,
-    Rule, ThreatHunt, UebaAnomaly, UebaEntityScore, YaraRule,
+    Rule, ThreatHunt, UebaEntityScore, YaraRule,
 )
 
 TOOLS: list[dict] = [

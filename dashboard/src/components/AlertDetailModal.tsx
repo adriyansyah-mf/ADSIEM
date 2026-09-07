@@ -92,8 +92,8 @@ export default function AlertDetailModal({ alert, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-6 shadow-2xl max-h-[90vh] overflow-auto"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-lg border border-[var(--glass-border)] bg-[var(--glass-bg-strong)] p-6 shadow-2xl backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between mb-4">
           <div>
@@ -103,13 +103,14 @@ export default function AlertDetailModal({ alert, onClose }: Props) {
               <StatusBadge status={alert.status} />
             </div>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={20} /></button>
+          <button onClick={onClose} aria-label="Close alert details" className="flex min-h-11 min-w-11 items-center justify-center text-muted-foreground hover:text-foreground"><X size={20} /></button>
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-sm mb-4">
           <div><span className="text-muted-foreground">Source IP:</span> {alert.source_ip ?? '—'}</div>
           <div><span className="text-muted-foreground">Hostname:</span> {alert.hostname ?? '—'}</div>
           <div><span className="text-muted-foreground">Created:</span> {format(new Date(alert.created_at), 'yyyy-MM-dd HH:mm:ss')}</div>
+          <div><span className="text-muted-foreground">SLA:</span> <span className={alert.sla_breached ? 'text-red-400' : 'text-emerald-400'}>{alert.sla_breached ? 'Breached' : 'Within SLA'}</span></div>
           <div><span className="text-muted-foreground">Group:</span> {alert.group_id}</div>
         </div>
 

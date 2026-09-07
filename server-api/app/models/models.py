@@ -7,7 +7,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
-from pgvector.sqlalchemy import Vector
 from app.core.database import Base
 
 def now_utc():
@@ -92,6 +91,16 @@ class Rule(Base):
     created_at  = Column(DateTime(timezone=True), default=now_utc)
     updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
+
+class RuleRevision(Base):
+    __tablename__ = "rule_revisions"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rule_id     = Column(UUID(as_uuid=True), ForeignKey("rules.id", ondelete="CASCADE"), nullable=False)
+    version     = Column(Integer, nullable=False)
+    content     = Column(Text, nullable=False)
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+
 class Decoder(Base):
     __tablename__ = "decoders"
     id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -110,6 +119,9 @@ class Alert(Base):
     severity         = Column(String(20), nullable=False, default="medium")
     status           = Column(String(30), nullable=False, default="new")
     rule_id          = Column(UUID(as_uuid=True), ForeignKey("rules.id", ondelete="SET NULL"))
+    correlation_id   = Column(String(255))
+    correlation_key  = Column(String(512))
+    source_event_ids = Column(JSONB, nullable=False, default=list)
     event_id         = Column(UUID(as_uuid=True))  # pointer into Elasticsearch `logs` index _id, no FK (events live in ES now)
     agent_id         = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"))
     group_id         = Column(String(100), nullable=False, default="default")
@@ -138,12 +150,24 @@ class AlertNote(Base):
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    actor_type    = Column(String(20), nullable=False, default="user")
     actor_id      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    group_id      = Column(String(100), nullable=True)
     action        = Column(String(100), nullable=False)
     resource_type = Column(String(100))
     resource_id   = Column(Text)
     detail        = Column(JSONB, nullable=False, default=dict)
+    request_id    = Column(String(64), nullable=True)
+    payload_hash  = Column(String(64), nullable=True)
+    previous_hash = Column(String(64), nullable=True)
+    chain_hash    = Column(String(64), nullable=True)
     created_at    = Column(DateTime(timezone=True), default=now_utc)
+
+class AuditChainHead(Base):
+    __tablename__ = "audit_chain_heads"
+    group_id   = Column(String(100), primary_key=True)
+    chain_hash = Column(String(64), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 class WebhookConfig(Base):
     __tablename__ = "webhook_configs"
@@ -170,9 +194,13 @@ class WebhookDelivery(Base):
     id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     alert_id          = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
     webhook_config_id = Column(UUID(as_uuid=True), ForeignKey("webhook_configs.id", ondelete="CASCADE"), nullable=False)
+    group_id          = Column(String(100), nullable=True)
     payload           = Column(JSONB, nullable=False, default=dict)
     status            = Column(String(20), nullable=False, default="pending")
     attempts          = Column(Integer, nullable=False, default=0)
+    last_error        = Column(Text, nullable=True)
+    error_class       = Column(String(100), nullable=True)
+    first_failed_at   = Column(DateTime(timezone=True), nullable=True)
     last_attempted_at = Column(DateTime(timezone=True))
     created_at        = Column(DateTime(timezone=True), default=now_utc)
     updated_at        = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
@@ -373,6 +401,98 @@ class EnrollmentToken(Base):
     created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime(timezone=True), default=now_utc)
 
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    prefix       = Column(String(32), nullable=False, unique=True)
+    secret_hash  = Column(Text, nullable=False)
+    name         = Column(String(255), nullable=False)
+    group_id     = Column(String(100), nullable=False, default="default")
+    permissions  = Column(JSONB, nullable=False, default=list)
+    expires_at   = Column(DateTime(timezone=True), nullable=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at   = Column(DateTime(timezone=True), nullable=True)
+    created_by   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class SlaPolicy(Base):
+    __tablename__ = "sla_policies"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id      = Column(String(100), nullable=False)
+    severity      = Column(String(20), nullable=False)
+    warn_minutes  = Column(Integer, nullable=False)
+    breach_minutes = Column(Integer, nullable=False)
+    created_at    = Column(DateTime(timezone=True), default=now_utc)
+    updated_at    = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    __table_args__ = (UniqueConstraint("group_id", "severity", name="uq_sla_policies_group_severity"),)
+
+class SlaNotification(Base):
+    __tablename__ = "sla_notifications"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id    = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), nullable=False)
+    threshold   = Column(String(10), nullable=False)  # "warn" | "breach"
+    notified_at = Column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (UniqueConstraint("alert_id", "threshold", name="uq_sla_notifications_alert_threshold"),)
+
+class RetentionPolicy(Base):
+    __tablename__ = "retention_policies"
+    id                   = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id             = Column(String(100), nullable=False, unique=True)
+    log_retention_days   = Column(Integer, nullable=True)
+    alert_retention_days = Column(Integer, nullable=True)
+    storage_quota_docs   = Column(Integer, nullable=True)
+    created_at           = Column(DateTime(timezone=True), default=now_utc)
+    updated_at           = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class IocObservation(Base):
+    __tablename__ = "ioc_observations"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id    = Column(String(100), nullable=False)
+    indicator   = Column(String(4096), nullable=False)
+    ioc_type    = Column(String(20), nullable=False)
+    confidence  = Column(Float, nullable=False, default=0.0)
+    verdict     = Column(String(20), nullable=False, default="unknown")
+    source      = Column(String(100), nullable=False)
+    first_seen  = Column(DateTime(timezone=True), default=now_utc)
+    last_seen   = Column(DateTime(timezone=True), default=now_utc)
+    expires_at  = Column(DateTime(timezone=True), nullable=True)
+    raw_ref     = Column(JSONB, nullable=True)
+    __table_args__ = (UniqueConstraint("group_id", "indicator", "ioc_type", name="uq_ioc_observations_group_indicator_type"),)
+
+class IocLink(Base):
+    __tablename__ = "ioc_links"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ioc_id      = Column(UUID(as_uuid=True), ForeignKey("ioc_observations.id", ondelete="CASCADE"), nullable=False)
+    group_id    = Column(String(100), nullable=False)
+    entity_type = Column(String(20), nullable=False)  # event | alert | rule | case
+    entity_id   = Column(String(100), nullable=False)
+    linked_at   = Column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (UniqueConstraint("ioc_id", "entity_type", "entity_id", name="uq_ioc_links_ioc_entity"),)
+
+class SavedQuery(Base):
+    __tablename__ = "saved_queries"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id    = Column(String(100), nullable=False)
+    owner_id    = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name        = Column(String(255), nullable=False)
+    query_type  = Column(String(20), nullable=False)  # "logs" | "alerts" | "events" | "hunt"
+    query_params = Column(JSONB, nullable=False, default=dict)
+    is_shared   = Column(Boolean, nullable=False, default=False)
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class Bookmark(Base):
+    __tablename__ = "bookmarks"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id     = Column(String(100), nullable=False)
+    owner_id     = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    entity_type  = Column(String(20), nullable=False)  # "alert" | "case" | "ip" | "hostname" | "indicator" | ...
+    entity_id    = Column(String(255), nullable=False)
+    note         = Column(Text)
+    is_shared    = Column(Boolean, nullable=False, default=False)
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+    __table_args__ = (UniqueConstraint("owner_id", "entity_type", "entity_id", name="uq_bookmarks_owner_entity"),)
+
 class AlertSuppression(Base):
     __tablename__ = "alert_suppressions"
     id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -515,10 +635,25 @@ class SoarRun(Base):
 
 class SoarRunStep(Base):
     __tablename__ = "soar_run_steps"
+    __table_args__ = (
+        UniqueConstraint("run_id", "idempotency_key", name="uq_soar_run_steps_idempotency"),
+    )
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id      = Column(UUID(as_uuid=True), ForeignKey("soar_runs.id", ondelete="CASCADE"), nullable=False)
     node_id     = Column(UUID(as_uuid=True), ForeignKey("soar_nodes.id"), nullable=False)
+    action_type = Column(String(50), nullable=False)
     status      = Column(String(20), nullable=False)
+    is_destructive = Column(Boolean, nullable=False, default=False)
+    is_reversible  = Column(Boolean, nullable=False, default=False)
+    actor_id       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    acted_at       = Column(DateTime(timezone=True), nullable=True)
+    idempotency_key = Column(String(255), nullable=False)
+    input_hash      = Column(String(64), nullable=False)
+    rollback_of_step_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("soar_run_steps.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     input       = Column(JSONB, nullable=True)
     output      = Column(JSONB, nullable=True)
     error       = Column(Text, nullable=True)

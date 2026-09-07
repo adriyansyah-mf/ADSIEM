@@ -20,13 +20,17 @@ async def create_hunt(
     body: ThreatHuntCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
     ioc_type = body.ioc_type.lower()
     ioc_value = body.ioc_value.strip()
 
     # Auto-extract IoC from alert if alert_id given
     if body.alert_id and not ioc_value:
-        result = await db.execute(select(Alert).where(Alert.id == body.alert_id))
+        alert_query = select(Alert).where(Alert.id == body.alert_id)
+        if group_filter is not None:
+            alert_query = alert_query.where(Alert.group_id == group_filter)
+        result = await db.execute(alert_query)
         alert = result.scalar_one_or_none()
         if not alert:
             raise HTTPException(status_code=404, detail="Alert not found")
@@ -45,7 +49,7 @@ async def create_hunt(
     hunt = ThreatHunt(
         ioc_type=ioc_type,
         ioc_value=ioc_value,
-        group_id=current_user.group_id,
+        group_id=group_filter or current_user.group_id,
         created_by=current_user.id,
     )
     db.add(hunt)
@@ -73,8 +77,12 @@ async def get_hunt(
     hunt_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    hunt = await db.get(ThreatHunt, hunt_id)
+    query = select(ThreatHunt).where(ThreatHunt.id == hunt_id)
+    if group_filter is not None:
+        query = query.where(ThreatHunt.group_id == group_filter)
+    hunt = (await db.execute(query)).scalar_one_or_none()
     if not hunt:
         raise HTTPException(status_code=404)
     return hunt

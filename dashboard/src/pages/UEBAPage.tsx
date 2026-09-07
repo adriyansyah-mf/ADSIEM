@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { useUebaEntities, useUebaEntityDetail, useUebaStatus } from '@/hooks/useUeba'
 import { api } from '@/api/client'
 import type { UebaEntityScore, UebaAnomaly } from '@/types'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 function riskColor(score: number) {
   if (score >= 80) return 'var(--accent-red)'
-  if (score >= 60) return '#ff6b35'
+  if (score >= 60) return 'var(--accent-orange)'
   if (score >= 40) return 'var(--accent-yellow)'
   return 'var(--accent-green)'
 }
@@ -17,7 +18,7 @@ function RiskBar({ score }: { score: number }) {
       <div style={{ flex: 1, height: '4px', background: 'var(--bg-base)', borderRadius: '2px', overflow: 'hidden' }}>
         <div style={{ height: '100%', width: `${score}%`, background: riskColor(score), borderRadius: '2px', transition: 'width 0.3s' }} />
       </div>
-      <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: riskColor(score), minWidth: '28px', textAlign: 'right' }}>
+      <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: riskColor(score), minWidth: '28px', textAlign: 'right' }}>
         {score.toFixed(0)}
       </span>
     </div>
@@ -35,18 +36,18 @@ function EntityRow({ entity, selected, onClick }: { entity: UebaEntityScore; sel
         display: 'grid', gridTemplateColumns: '1fr auto auto',
         alignItems: 'center', gap: '10px',
         padding: '8px 12px',
-        background: selected ? 'rgba(0,212,255,0.08)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
-        borderLeft: `2px solid ${selected ? 'var(--accent-cyan)' : hovered ? 'rgba(0,212,255,0.3)' : 'transparent'}`,
+        background: selected ? 'rgba(0,217,192,0.08)' : hovered ? 'rgba(255,255,255,0.04)' : 'transparent',
+        borderLeft: `2px solid ${selected ? 'var(--accent-blue)' : hovered ? 'rgba(0,217,192,0.3)' : 'transparent'}`,
         cursor: 'pointer',
         transition: 'background 0.12s, border-color 0.12s',
       }}
     >
       <div>
-        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-primary)' }}>
+        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-primary)' }}>
           {entity.entity_value}
         </div>
         {entity.anomaly_count > 0 && (
-          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
+          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
             {entity.anomaly_count} anomal{entity.anomaly_count === 1 ? 'y' : 'ies'}
           </div>
         )}
@@ -54,7 +55,7 @@ function EntityRow({ entity, selected, onClick }: { entity: UebaEntityScore; sel
       <div style={{ width: '80px' }}>
         <RiskBar score={entity.risk_score} />
       </div>
-      <div style={{ width: 14, color: selected ? 'var(--accent-cyan)' : 'var(--text-muted)', fontSize: 10, transition: 'color 0.12s, transform 0.12s', transform: selected ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+      <div style={{ width: 14, color: selected ? 'var(--accent-blue)' : 'var(--text-muted)', fontSize: 10, transition: 'color 0.12s, transform 0.12s', transform: selected ? 'rotate(90deg)' : 'rotate(0deg)' }}>
         ›
       </div>
     </div>
@@ -76,8 +77,8 @@ function FeatureTable({ features }: { features: Record<string, number> }) {
           const warn = WARN_THRESHOLDS[k] !== undefined && v >= WARN_THRESHOLDS[k]
           return (
             <tr key={k}>
-              <td style={{ color: 'var(--text-muted)', padding: '2px 8px 2px 0', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px' }}>{k}</td>
-              <td style={{ color: warn ? 'var(--accent-yellow)' : 'var(--text-primary)', padding: '2px 0', fontFamily: 'Share Tech Mono, monospace' }}>
+              <td style={{ color: 'var(--text-muted)', padding: '2px 8px 2px 0', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px' }}>{k}</td>
+              <td style={{ color: warn ? 'var(--accent-yellow)' : 'var(--text-primary)', padding: '2px 0', fontFamily: 'IBM Plex Sans, sans-serif' }}>
                 {typeof v === 'number' ? v.toFixed(2) : v}
                 {warn && <span style={{ marginLeft: '4px', color: 'var(--accent-yellow)' }}>&#9888;</span>}
               </td>
@@ -90,7 +91,7 @@ function FeatureTable({ features }: { features: Record<string, number> }) {
 }
 
 function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
-  if (anomalies.length === 0) return <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>No anomalies recorded</div>
+  if (anomalies.length === 0) return <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>No anomalies recorded</div>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '160px', overflow: 'auto' }}>
       {anomalies.map((a) => (
@@ -101,14 +102,14 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <div>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: riskColor(a.risk_score) }}>
+            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: riskColor(a.risk_score) }}>
               risk {a.risk_score.toFixed(0)}
             </span>
-            <span style={{ marginLeft: '8px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+            <span style={{ marginLeft: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
               score {a.anomaly_score.toFixed(3)}
             </span>
           </div>
-          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
+          <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)' }}>
             {new Date(a.detected_at).toLocaleString()}
           </span>
         </div>
@@ -119,7 +120,7 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
 
 function RiskSparkline({ data }: { data: { day: string; max_risk: number }[] }) {
   if (!data || data.length === 0) return (
-    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
       No historical data yet
     </div>
   )
@@ -137,12 +138,12 @@ function RiskSparkline({ data }: { data: { day: string; max_risk: number }[] }) 
       return `L${x},${y}`
     }).join(' ') + ` L${W - PAD},${H - PAD} Z`
   const lastRisk = data[data.length - 1].max_risk
-  const color = lastRisk >= 80 ? '#ff2244' : lastRisk >= 60 ? '#ff6b35' : lastRisk >= 40 ? '#ffd700' : '#00ff88'
+  const color = lastRisk >= 80 ? '#FF3B5C' : lastRisk >= 60 ? '#ff6b35' : lastRisk >= 40 ? '#FFC53D' : '#2ED47A'
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 10, color: 'var(--text-muted)' }}>30-day risk trend</span>
-        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 10, color }}>{data.length} days · latest {lastRisk.toFixed(0)}</span>
+        <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, color: 'var(--text-muted)' }}>30-day risk trend</span>
+        <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, color }}>{data.length} days · latest {lastRisk.toFixed(0)}</span>
       </div>
       <svg width={W} height={H} style={{ overflow: 'visible' }}>
         {[25, 50, 75].map(v => (
@@ -184,10 +185,10 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
         background: 'var(--bg-base)', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       }}>
         <div>
-          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '14px', color: 'var(--accent-cyan)' }}>
+          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '14px', color: 'var(--accent-blue)' }}>
             {entityValue}
           </div>
-          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
             {entityType.toUpperCase()} ENTITY
           </div>
         </div>
@@ -195,17 +196,17 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
       </div>
 
       {isLoading ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
           LOADING...
         </div>
       ) : data ? (
         <div style={{ flex: 1, overflow: 'auto', padding: '14px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div>
-            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
               RISK SCORE
             </div>
             <RiskBar score={data.score.risk_score} />
-            <div style={{ marginTop: '4px', fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
+            <div style={{ marginTop: '4px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)' }}>
               {data.score.anomaly_count} total anomalies &middot;
               last seen {data.score.last_seen_at ? new Date(data.score.last_seen_at).toLocaleString() : '&mdash;'}
             </div>
@@ -213,7 +214,7 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
 
           {history && (
             <div>
-              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+              <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
                 RISK BASELINE
               </div>
               <RiskSparkline data={history.history} />
@@ -222,7 +223,7 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
 
           {data.anomalies.length > 0 && (
             <div>
-              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+              <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
                 LAST ANOMALY FEATURES
               </div>
               <FeatureTable features={data.anomalies[0].features} />
@@ -230,7 +231,7 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
           )}
 
           <div>
-            <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
               ANOMALY TIMELINE ({data.anomalies.length})
             </div>
             <AnomalyTimeline anomalies={data.anomalies} />
@@ -253,25 +254,18 @@ export default function UEBAPage() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '20px', color: 'var(--accent-cyan)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>
-            UEBA
-          </h1>
-          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-            User &amp; Entity Behavior Analytics &middot; Anomaly Detection Engine
-          </div>
-        </div>
+        <PageHeader title="UEBA" subtitle="User and entity behavior analytics · anomaly detection engine" className="!mb-0" />
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <div style={{
             padding: '4px 10px', borderRadius: '3px',
             border: `1px solid ${statusReady ? 'var(--accent-green)' : 'var(--accent-yellow)'}`,
-            background: statusReady ? 'rgba(0,255,136,0.08)' : 'rgba(255,214,0,0.08)',
+            background: statusReady ? 'rgba(46,212,122,0.08)' : 'rgba(255,214,0,0.08)',
           }}>
-            <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1px', color: statusReady ? 'var(--accent-green)' : 'var(--accent-yellow)' }}>
+            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '10px', letterSpacing: '1px', color: statusReady ? 'var(--accent-green)' : 'var(--accent-yellow)' }}>
               {statusReady ? '● MODEL READY' : '● COLLECTING DATA'}
             </span>
             {status?.trained_at && (
-              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)', marginLeft: '6px' }}>
+              <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', marginLeft: '6px' }}>
                 trained {new Date(status.trained_at).toLocaleTimeString()}
               </span>
             )}
@@ -282,8 +276,8 @@ export default function UEBAPage() {
             { label: 'IP SNAPS', value: status?.ip_snapshot_count ?? 0, color: 'var(--text-primary)' },
           ].map(({ label, value, color }) => (
             <div key={label} style={{ textAlign: 'center' }}>
-              <div style={{ fontFamily: 'Share Tech Mono, monospace', fontWeight: 700, fontSize: '18px', color, lineHeight: 1 }}>{value}</div>
-              <div style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '1px', marginTop: '2px' }}>{label}</div>
+              <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '18px', color, lineHeight: 1 }}>{value}</div>
+              <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '1px', marginTop: '2px' }}>{label}</div>
             </div>
           ))}
         </div>
@@ -293,7 +287,7 @@ export default function UEBAPage() {
         <div style={{
           padding: '10px 14px', borderRadius: '4px',
           border: '1px solid rgba(255,214,0,0.3)', background: 'rgba(255,214,0,0.05)',
-          fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-yellow)',
+          fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-yellow)',
         }}>
           &#9889; UEBA is collecting baseline data. Model trains automatically once 50 hourly snapshots are available
           (&#8776; 50 hours). Currently: {(status?.user_snapshot_count ?? 0) + (status?.ip_snapshot_count ?? 0)} snapshots collected.
@@ -309,10 +303,10 @@ export default function UEBAPage() {
                 onClick={() => { setTab(t); setSelected(null) }}
                 style={{
                   flex: 1, padding: '8px', border: 'none',
-                  background: tab === t ? 'rgba(0,212,255,0.08)' : 'transparent',
-                  borderBottom: `2px solid ${tab === t ? 'var(--accent-cyan)' : 'transparent'}`,
-                  color: tab === t ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                  fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px',
+                  background: tab === t ? 'rgba(0,217,192,0.08)' : 'transparent',
+                  borderBottom: `2px solid ${tab === t ? 'var(--accent-blue)' : 'transparent'}`,
+                  color: tab === t ? 'var(--accent-blue)' : 'var(--text-secondary)',
+                  fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '11px',
                   letterSpacing: '1px', cursor: 'pointer',
                 }}
               >
@@ -323,11 +317,11 @@ export default function UEBAPage() {
 
           <div style={{ flex: 1, overflow: 'auto' }}>
             {isLoading ? (
-              <div style={{ padding: '20px', textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+              <div style={{ padding: '20px', textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
                 LOADING...
               </div>
             ) : entities.length === 0 ? (
-              <div style={{ padding: '20px', textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>
+              <div style={{ padding: '20px', textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
                 NO {tab.toUpperCase()} ENTITIES YET
               </div>
             ) : (

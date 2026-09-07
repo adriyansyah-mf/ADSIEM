@@ -1,5 +1,4 @@
 # server-api/app/api/routes/decoders.py
-import re
 import yaml
 from typing import Annotated
 from uuid import UUID
@@ -8,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import require_permission, get_current_user
+from app.core.deps import require_permission
 from app.models.models import Decoder, User
 from app.schemas.schemas import (
     DecoderCreate, DecoderOut, DecoderTestRequest, DecoderTestResponse,
@@ -42,7 +41,7 @@ async def create_decoder(
     db.add(decoder)
     await db.commit()
     await db.refresh(decoder)
-    background.add_task(audit_log, db, current_user.id, "decoder_created", "decoder", str(decoder.id))
+    background.add_task(audit_log, db, current_user, "decoder_created", "decoder", str(decoder.id))
     return DecoderOut.model_validate(decoder)
 
 @router.put("/{decoder_id}", response_model=DecoderOut)
@@ -63,7 +62,7 @@ async def update_decoder(
         setattr(decoder, field, value)
     await db.commit()
     await db.refresh(decoder)
-    background.add_task(audit_log, db, current_user.id, "decoder_updated", "decoder", str(decoder_id))
+    background.add_task(audit_log, db, current_user, "decoder_updated", "decoder", str(decoder_id))
     return DecoderOut.model_validate(decoder)
 
 @router.delete("/{decoder_id}", status_code=204)
@@ -79,7 +78,7 @@ async def delete_decoder(
         raise HTTPException(status_code=404, detail="Decoder not found")
     await db.delete(decoder)
     await db.commit()
-    background.add_task(audit_log, db, current_user.id, "decoder_deleted", "decoder", str(decoder_id))
+    background.add_task(audit_log, db, current_user, "decoder_deleted", "decoder", str(decoder_id))
 
 @router.post("/test", response_model=DecoderTestResponse)
 async def test_decoder(body: DecoderTestRequest, _=Depends(require_permission("decoders:create"))):
