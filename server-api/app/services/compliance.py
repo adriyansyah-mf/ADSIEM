@@ -49,7 +49,12 @@ async def _check_hygiene_posture(db: AsyncSession, agent_id: str) -> CheckResult
 
 async def _check_open_ports_hardening(db: AsyncSession, agent_id: str) -> CheckResult:
     snap = await _latest_snapshot(db, agent_id)
-    if not snap or snap.open_ports is None:
+    if not snap:
+        return {"status": "not_automated", "evidence": "No open-port data collected yet from this host."}
+    aggregated = _aggregate_hardening_category(snap, "network")
+    if aggregated is not None:
+        return aggregated
+    if snap.open_ports is None:
         return {"status": "not_automated", "evidence": "No open-port data collected yet from this host."}
     found = []
     for p in snap.open_ports:
@@ -59,6 +64,27 @@ async def _check_open_ports_hardening(db: AsyncSession, agent_id: str) -> CheckR
     if found:
         return {"status": "gap", "evidence": f"Legacy/insecure service(s) listening: {', '.join(found)}."}
     return {"status": "met", "evidence": f"No legacy/insecure services (FTP, Telnet, r-commands, X11) found among {len(snap.open_ports)} open port(s)."}
+
+
+def _aggregate_hardening_category(snap: HygieneSnapshot, category: str) -> CheckResult | None:
+    """Aggregate all agent-reported hardening checks in one category into a
+    single control status. Returns None if this host hasn't reported any
+    hardening data yet for this category — callers fall back to older,
+    shallower logic so hosts on a not-yet-upgraded agent don't regress."""
+    checks = [c for c in (snap.hardening_checks or []) if c.get("category") == category]
+    if not checks:
+        return None
+    applicable = [c for c in checks if c.get("status") != "not_applicable"]
+    if not applicable:
+        return {"status": "not_automated", "evidence": f"All {len(checks)} {category} check(s) reported not_applicable on this host."}
+    failed = [c for c in applicable if c.get("status") in ("fail", "error")]
+    passed = [c for c in applicable if c.get("status") == "pass"]
+    if not failed:
+        return {"status": "met", "evidence": f"All {len(passed)} applicable {category} hardening check(s) pass."}
+    failed_titles = ", ".join(c.get("title", c.get("id", "?")) for c in failed)
+    if passed:
+        return {"status": "partial", "evidence": f"{len(passed)}/{len(applicable)} {category} check(s) pass. Failing: {failed_titles}."}
+    return {"status": "gap", "evidence": f"All {len(applicable)} {category} hardening check(s) fail: {failed_titles}."}
 
 
 async def _check_disk_capacity(db: AsyncSession, agent_id: str) -> CheckResult:
@@ -100,7 +126,14 @@ async def _check_file_integrity_monitoring(db: AsyncSession, agent_id: str) -> C
 
 async def _check_local_account_hygiene(db: AsyncSession, agent_id: str) -> CheckResult:
     snap = await _latest_snapshot(db, agent_id)
-    if not snap or snap.users is None:
+    if not snap:
+        return {"status": "not_automated", "evidence": "No local account data collected yet from this host."}
+    aggregated = _aggregate_hardening_category(snap, "account")
+    if aggregated is not None:
+        return aggregated
+    # Fall back to the shallow UID-0 check for hosts on an older agent
+    # version that hasn't reported hardening_checks yet.
+    if snap.users is None:
         return {"status": "not_automated", "evidence": "No local account data collected yet from this host."}
     users = snap.users
     root_uid0 = [u.get("name") for u in users if u.get("uid") == 0]
@@ -111,6 +144,26 @@ async def _check_local_account_hygiene(db: AsyncSession, agent_id: str) -> Check
     return {"status": "met", "evidence": f"{len(interactive)} local account(s) with an interactive shell; no unauthorized UID-0 accounts."}
 
 
+async def _check_ssh_hardening(db: AsyncSession, agent_id: str) -> CheckResult:
+    snap = await _latest_snapshot(db, agent_id)
+    if not snap:
+        return {"status": "not_automated", "evidence": "No SSH hardening data collected yet from this host."}
+    aggregated = _aggregate_hardening_category(snap, "ssh")
+    if aggregated is not None:
+        return aggregated
+    return {"status": "not_automated", "evidence": "This host's agent hasn't reported SSH hardening checks yet (requires an agent update)."}
+
+
+async def _check_kernel_hardening(db: AsyncSession, agent_id: str) -> CheckResult:
+    snap = await _latest_snapshot(db, agent_id)
+    if not snap:
+        return {"status": "not_automated", "evidence": "No kernel hardening data collected yet from this host."}
+    aggregated = _aggregate_hardening_category(snap, "kernel")
+    if aggregated is not None:
+        return aggregated
+    return {"status": "not_automated", "evidence": "This host's agent hasn't reported kernel hardening checks yet (requires an agent update)."}
+
+
 CHECKS: dict[str, Callable[[AsyncSession, str], Awaitable[CheckResult]]] = {
     "hygiene_posture": _check_hygiene_posture,
     "open_ports_hardening": _check_open_ports_hardening,
@@ -118,6 +171,8 @@ CHECKS: dict[str, Callable[[AsyncSession, str], Awaitable[CheckResult]]] = {
     "agent_monitoring_health": _check_agent_monitoring_health,
     "file_integrity_monitoring": _check_file_integrity_monitoring,
     "local_account_hygiene": _check_local_account_hygiene,
+    "ssh_hardening": _check_ssh_hardening,
+    "kernel_hardening": _check_kernel_hardening,
 }
 
 FRAMEWORKS: dict[str, dict] = {
@@ -130,6 +185,8 @@ FRAMEWORKS: dict[str, dict] = {
             {"id": "A.12.4", "title": "Logging and monitoring of this asset", "check": "agent_monitoring_health"},
             {"id": "A.12.4.1", "title": "Detection of unauthorized file changes", "check": "file_integrity_monitoring"},
             {"id": "A.9.2.5", "title": "Review of local user access rights", "check": "local_account_hygiene"},
+            {"id": "A.8.20", "title": "SSH remote access hardening", "check": "ssh_hardening"},
+            {"id": "A.8.9", "title": "Configuration hardening (kernel/filesystem)", "check": "kernel_hardening"},
         ],
     },
     "pci_dss": {
@@ -141,6 +198,8 @@ FRAMEWORKS: dict[str, dict] = {
             {"id": "Req 10.7", "title": "Failures of critical security control systems are detected", "check": "agent_monitoring_health"},
             {"id": "Req 11.5", "title": "Deploy a change/file-integrity detection mechanism", "check": "file_integrity_monitoring"},
             {"id": "Req 7.2", "title": "Unique accounts, no shared/root-equivalent access", "check": "local_account_hygiene"},
+            {"id": "Req 2.2.7", "title": "Secure remote administrative access (SSH hardening)", "check": "ssh_hardening"},
+            {"id": "Req 2.2", "title": "System configuration hardening", "check": "kernel_hardening"},
         ],
     },
     "soc2": {
@@ -152,6 +211,8 @@ FRAMEWORKS: dict[str, dict] = {
             {"id": "CC7.2", "title": "Monitors system components for anomalies", "check": "agent_monitoring_health"},
             {"id": "CC7.1", "title": "Detects unauthorized changes to configurations/files", "check": "file_integrity_monitoring"},
             {"id": "CC6.2", "title": "Periodic review of provisioned local accounts", "check": "local_account_hygiene"},
+            {"id": "CC6.1b", "title": "Secure remote access configuration", "check": "ssh_hardening"},
+            {"id": "CC6.8", "title": "Prevents/detects unauthorized software and configuration changes", "check": "kernel_hardening"},
         ],
     },
 }
