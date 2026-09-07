@@ -1,11 +1,24 @@
 package hardening
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// firewallCheckTimeout bounds each firewall-backend probe so a hung command
+// (e.g. iptables xtables lock contention, a busy nft ruleset) can't freeze
+// the synchronous hygiene collector that calls this check.
+const firewallCheckTimeout = 5 * time.Second
+
+func runFirewallCheck(name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), firewallCheckTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Output()
+}
 
 var insecurePorts = map[int]string{
 	21:   "FTP (unencrypted)",
@@ -21,22 +34,22 @@ func checkFirewallActive() Check {
 	const category = "network"
 	const title = "A firewall service is active with at least a default policy"
 
-	if out, err := exec.Command("firewall-cmd", "--state").Output(); err == nil {
+	if out, err := runFirewallCheck("firewall-cmd", "--state"); err == nil {
 		if strings.TrimSpace(string(out)) == "running" {
 			return Check{ID: id, Category: category, Title: title, Status: StatusPass, Detail: "firewalld is running"}
 		}
 	}
-	if out, err := exec.Command("ufw", "status").Output(); err == nil {
+	if out, err := runFirewallCheck("ufw", "status"); err == nil {
 		if strings.Contains(string(out), "Status: active") {
 			return Check{ID: id, Category: category, Title: title, Status: StatusPass, Detail: "ufw is active"}
 		}
 	}
-	if out, err := exec.Command("nft", "list", "ruleset").Output(); err == nil {
+	if out, err := runFirewallCheck("nft", "list", "ruleset"); err == nil {
 		if strings.TrimSpace(string(out)) != "" {
 			return Check{ID: id, Category: category, Title: title, Status: StatusPass, Detail: "nftables has an active ruleset"}
 		}
 	}
-	if out, err := exec.Command("iptables", "-S").Output(); err == nil {
+	if out, err := runFirewallCheck("iptables", "-S"); err == nil {
 		s := string(out)
 		if strings.Contains(s, "-P INPUT DROP") || strings.Contains(s, "-P INPUT REJECT") {
 			return Check{ID: id, Category: category, Title: title, Status: StatusPass, Detail: "iptables INPUT policy is DROP/REJECT"}
