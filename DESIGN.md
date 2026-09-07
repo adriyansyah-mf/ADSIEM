@@ -2,9 +2,9 @@
 
 ## 1. Atmosphere & Identity
 
-AD-SIEM is a calm, high-density security operations command center. It should feel precise, trustworthy, and continuously active without looking theatrical or cyberpunk. The signature is restrained navy glass: translucent operational surfaces sit over a subtle blue-violet ambient field, while semantic color is reserved for detections, health, and actions.
+AD-SIEM is an industrial-grade security operations workspace. It should feel like instrumentation an analyst trusts after years of use, not a product a marketer sold them: compact gunmetal surfaces, a rationed steel-blue interactive accent, and copper reserved only for urgent, non-severity operational attention. It rejects blur, glow, gradients, and decorative cyberpunk effects — hierarchy comes from layout, typography, borders, and sparse semantic color.
 
-Source of truth: the approved [enterprise glass redesign spec](docs/superpowers/specs/2026-08-12-enterprise-glass-ui-design.md) and the local `enterprise_siem_dashboard.html` reference. The UI/UX database reinforced dark, scannable, status-led information hierarchy; where its generated palette conflicts, this approved contract wins.
+Source of truth: [`docs/superpowers/specs/2026-09-07-ironwatch-ai-siem-ui-ux-design.md`](docs/superpowers/specs/2026-09-07-ironwatch-ai-siem-ui-ux-design.md) (the Ironwatch AI-SIEM UI/UX design contract) and [`design-system-enterprise-soc/design-system.md`](design-system-enterprise-soc/design-system.md) (the Ironwatch token/component reference). This document reconciles both into the single contract that governs all touched components, superseding the prior navy-glass contract and its `docs/superpowers/specs/2026-08-12-enterprise-glass-ui-design.md` source.
 
 ## 2. Color
 
@@ -12,142 +12,123 @@ Source of truth: the approved [enterprise glass redesign spec](docs/superpowers/
 
 | Role | Token | Value | Usage |
 |---|---|---:|---|
-| Canvas | `--bg-base` | `#07111d` | Application background |
-| Panel | `--bg-panel` | `#0d1a2a` | Inputs and nested regions |
-| Card | `--bg-card` | `#101f31` | Opaque fallback surface |
-| Glass surface | `--glass-bg` | `rgba(13, 26, 42, 0.72)` | Cards, sidebar, topbar |
-| Glass strong | `--glass-bg-strong` | `rgba(16, 31, 49, 0.90)` | Menus, modals, elevated UI |
-| Border | `--border` | `#1d3045` | Opaque dividers and controls |
-| Glass border | `--glass-border` | `rgba(148, 197, 255, 0.14)` | Translucent surface rims |
-| Text primary | `--text-primary` | `#e8f0fa` | Titles and primary values |
-| Text secondary | `--text-secondary` | `#9bb3c9` | Body and supporting labels |
-| Text muted | `--text-muted` | `#6f879e` | Timestamps and tertiary metadata |
-| Primary action | `--accent-blue` | `#3193ff` | Focus, links, active navigation |
-| Critical | `--accent-red` | `#ff5c5c` | Critical severity and destructive action |
-| High | `--accent-orange` | `#ff9f43` | High severity |
-| Medium | `--accent-yellow` | `#f3c94f` | Medium severity and caution |
-| Healthy | `--accent-green` | `#6bd47c` | Online, success, low severity |
-| Secondary | `--accent-purple` | `#a979f7` | Investigation and AI context |
+| Canvas | `--bg-base` | `#14181D` | Application background |
+| Surface | `--bg-panel` / `--bg-card` | `#1B2028` | Workspace and data regions — cards, sidebar, topbar, tables |
+| Elevated surface | `--bg-hover` / `--glass-bg-strong` | `#232A34` | Menus, dropdowns, dialogs, hover rows |
+| Sunken well | *(surface-sunken)* | `#10141A` | Inputs, log viewers, code blocks |
+| Border | `--border` | `#2E3540` | Opaque dividers and controls |
+| Text primary | `--text-primary` | `#E4E8ED` | Titles and primary values |
+| Text secondary | `--text-secondary` | `#9AA4B2` | Body and supporting labels |
+| Text muted | `--text-muted` | `#68717E` | Timestamps and tertiary metadata |
+| Interactive accent | `--accent-blue` | `#2C6E8E` | Focus, links, selected controls, primary action — the only general accent |
+| Attention-now | `--accent-copper` | `#C9822E` | Urgent, non-severity operational attention only (e.g. unread, live) — never decorative |
+| Critical | `--accent-red` | `#D8393F` | Critical severity and destructive action |
+| High | `--accent-orange` | `#D8752E` | High severity |
+| Medium | `--accent-yellow` | `#D8B23D` | Medium severity and caution |
+| Healthy / Low | `--accent-green` | `#4F8F63` | Online, success, low severity |
+| Secondary / info | `--accent-purple` | `#5C7C99` | Informational, investigation context |
 
 Rules:
 
-- Blue is the only general interactive accent. Other accents are semantic.
-- Color never carries status alone; pair it with text, icon, or shape.
-- Components consume tokens, never raw color literals.
+- Steel blue is the only general interactive accent. Copper is rationed for "needs a human to look now," never decorative. Other accents are strictly semantic (severity/health).
+- Color never carries status alone; pair it with text, icon, or shape. Severity and health states are labeled — shape-coded badges are the target contract (see Badge below); components not yet migrated must at minimum keep the text label.
+- Components consume tokens, never raw color literals. `grep`-checked periodically; see Accepted Debt for current stragglers.
 - Body text targets WCAG 2.2 AA contrast of at least 4.5:1; large UI and graphical controls target 3:1.
+- No blur, no glow, no gradients, no glass. Depth comes from a 1px border and a flat, dark `box-shadow` only (see Depth & Surface).
 
 ## 3. Typography
 
-Primary and data font: `Inter, ui-sans-serif, system-ui, sans-serif`. Numeric content uses tabular figures rather than a separate monospace family.
+| Role | Font | Usage |
+|---|---|---|
+| Display | `Archivo`, weights 600/700/800 | Page titles, KPI/metric values, compact headings |
+| Body / UI | `Public Sans`, weights 400/500/600/700 | Default UI copy, tables, forms, navigation |
+| Data | `JetBrains Mono` | Timestamps, hashes, IDs, IPs, query/code snippets |
 
-| Level | Size | Weight | Line height | Tracking | Usage |
-|---|---:|---:|---:|---:|---|
-| Page title | `1.375rem` | 700 | 1.25 | `-0.015em` | Page identity |
-| Section title | `1rem` | 600 | 1.35 | `-0.005em` | Panel headers |
-| Body | `0.9375rem` | 400 | 1.5 | normal | Default UI copy |
-| Body small | `0.8125rem` | 400 | 1.45 | normal | Dense table and navigation copy |
-| Label | `0.75rem` | 600 | 1.35 | `0.02em` | Metadata and field labels |
-| Caption | `0.6875rem` | 500 | 1.35 | `0.02em` | Secondary metadata |
-| KPI | `1.75rem` | 700 | 1.1 | `-0.02em` | Operational values |
+Numeric content uses tabular figures (`font-variant-numeric: tabular-nums`) wherever digits line up in columns — counts, timers, table cells.
 
-Sentence case is the default. Uppercase is limited to compact machine-like metadata and table column labels.
+| Level | Size | Weight | Usage |
+|---|---:|---:|---|
+| Page title | `1.625rem` (26px) | 700, Archivo | Page identity |
+| Section title | `1.0625rem` (17px) | 600, Archivo | Panel/card headers |
+| Body | `0.9375rem` (15px) | 400, Public Sans | Primary reading text, form inputs |
+| Body small | `0.8125rem` (13px) | 400, Public Sans | Default table/dense UI copy — the workhorse size |
+| Label | `0.75rem` (12px) | 600, Public Sans | Field labels, fine print |
+| Caption | `0.6875rem` (11px) | 700, JetBrains Mono, uppercase, `0.06em` tracking | Badge text, table column headers |
+| KPI | `2.25rem` (36px) | 800, Archivo | Operational values |
+
+Sentence case is the default. Uppercase is limited to compact machine-like metadata and table column labels. Decorative type, glow, gradients, and glass effects are out of scope.
 
 ## 4. Spacing & Layout
 
-All design spacing uses a 4px base.
+All design spacing uses a 4px base (`--space-1` through `--space-16`, see `design-system-enterprise-soc/design-tokens.json`).
 
-| Token | Value | Usage |
-|---|---:|---|
-| `--space-1` | `0.25rem` | Tight icon details |
-| `--space-2` | `0.5rem` | Inline groups |
-| `--space-3` | `0.75rem` | Compact control padding |
-| `--space-4` | `1rem` | Card and page rhythm |
-| `--space-5` | `1.25rem` | Standard section padding |
-| `--space-6` | `1.5rem` | Major groups |
-| `--space-8` | `2rem` | Page section separation |
-
-- The fixed shell uses `100dvh`: sidebar and topbar stay fixed; `<main>` is the primary vertical scroll owner.
-- Desktop pages use a fluid 12-column grid with a 1536px content ceiling. Dashboard rails collapse below content-driven breakpoints.
-- At 375px, primary content becomes one readable column with no page-level horizontal scrolling. Data tables may own a labeled horizontal scroll region.
-- Sidebar width is 13.5rem expanded and 3.5rem collapsed. Touch targets remain at least 44px.
-- Breakpoints verified at 375px, 768px, 1280px, and 1440px, plus 200% zoom.
+- The fixed shell uses `100dvh`: `WorkflowSidebar` and `OperationalTopbar` stay fixed; `<main>` is the primary vertical scroll owner.
+- Shell zones: navigation 216px (56px collapsed), fluid 12-column primary workspace, 320px contextual rail present only when it adds decision value. On 768px the rail becomes collapsible; at 375px it becomes an explicit, keyboard-accessible bottom sheet. The page itself never scrolls horizontally — tables own a labeled horizontal scroll region.
+- Sidebar width matches the shell zone above; touch targets remain at least 44px on narrow/touch layouts.
+- Breakpoints verified at 375px, 768px, 1280px, and 200% zoom.
+- Border radius stays small (2–8px) — nothing bubbly; this is precision, not friendliness.
 
 ## 5. Components
 
 ### Application shell
 
-- **Structure:** fixed sidenav shell, fixed topbar, single scrolling main region.
-- **States:** sidebar expanded/collapsed; navigation default/hover/active/focus; WebSocket live/offline; search closed/results/empty; admin menu closed/open.
-- **Accessibility:** skip link targets `<main>`; icon-only collapse control has an accessible name; menus expose expanded state; focus is never hidden under chrome.
-- **Motion:** opacity, background, and transform only; 150ms micro transitions; no width animation under reduced motion.
+Decomposed by responsibility (see `dashboard/src/components/shell/`):
 
-### GlassCard
+- **`AppShell`** — orchestrates layout: skip link, sidebar + topbar + single scrolling `<main>`, owns cross-cutting state (sidebar collapsed, live-feed WebSocket).
+- **`WorkflowSidebar`** — the workflow-grouped navigation (Command Center / Detection / Investigation / Agent Fleet / Automation / Governance). States: expanded/collapsed; item default/hover/active/focus. Icon-only collapsed control has an accessible name.
+- **`OperationalTopbar`** — current page identity, live-feed indicator, `EntityCommandPalette` trigger, identity/admin menu, sign-out.
+- **`EntityCommandPalette`** — global entity search (IP, hostname, user, hash, agent, alert, case), opened via trigger or keyboard shortcut, routes to the appropriate detail workspace. States: closed, open/typing, results, empty, error.
 
-- **Structure:** semantic `section` or `div`, optional header cluster, content region.
-- **Variants:** default, elevated, interactive, compact.
-- **States:** default, hover and focus for interactive cards, loading, empty, error.
-- **Spacing:** `--space-4` default, `--space-3` compact.
-- **Accessibility:** headings retain hierarchy; interactive cards use real links/buttons.
+**Accessibility:** skip link targets `<main>`; menus expose expanded state; focus is never hidden under chrome. Keyboard flow: skip link → navigation → top-bar search → page header actions → main content → context rail.
+**Motion:** opacity and transform only; 120ms micro-transitions; no width animation under reduced motion; `prefers-reduced-motion: reduce` disables non-essential transitions.
 
 ### PageHeader
 
-- **Structure:** title/breadcrumb stack plus wrapping action cluster.
-- **States:** with or without breadcrumb/actions; long-title wrapping.
-- **Accessibility:** exactly one page-level `h1`; actions remain keyboard reachable.
+Title/breadcrumb stack plus wrapping action cluster. Exactly one page-level `h1` (rendered in Archivo via the shared `main h1` rule). Actions remain keyboard reachable.
 
-### StatCard
+### MetricCard / StatCard
 
-- **Structure:** label, primary value, optional context/trend, optional sparkline.
-- **Variants:** neutral, critical, high, medium, healthy, info.
-- **Accessibility:** status includes text; trend arrows include descriptive labels; values use tabular figures.
+Label, primary value (tabular numerals), optional trend/sparkline. Variants: neutral, critical, high, medium, healthy, info. Status includes text, not color alone.
 
 ### DataTable
 
-- **Structure:** toolbar, horizontally scrollable table viewport, pagination cluster.
-- **States:** loading, populated, empty, error, row hover/focus, selected.
-- **Accessibility:** semantic table markup, labeled controls, visible focus, color-independent status badges.
+Toolbar, horizontally-scrollable table viewport (its own scroll region, never the page), pagination cluster. States: loading, populated, empty, error, row hover/focus, selected. Semantic table markup, labeled controls, visible focus.
 
-### Badge
+### Badge family
 
-- **Variants:** severity and workflow status.
-- **States:** static; no decorative animation.
-- **Accessibility:** complete readable text and at least 3:1 boundary contrast.
+`SeverityBadge`, `HealthBadge`, `ConfidenceBadge`, `ApprovalStateBadge` — static, no decorative animation, complete readable text, at least 3:1 boundary contrast. Target contract: shape + color + label (critical = square, high = triangle, medium = diamond, low = circle, info = outline) — see Accepted Debt for current color-only instances awaiting migration.
+
+### Investigation & fleet primitives
+
+`EvidenceTimeline`, `EntitySummary`, `ActionReviewSheet`, `AiRecommendationCard` (Investigation workspace); `AgentHealthScore`, `CollectorStateList`, `SpoolState`, `DriftIndicator` (Agent Fleet). Each ships default/hover/focus-visible/disabled/loading/empty/error states where relevant, added as their owning phase lands (see the Ironwatch spec's phased delivery table).
 
 ### Overlay surfaces
 
-- **Structure:** scrim, elevated glass panel, heading, body, close/action controls.
-- **States:** opening, open, closing, busy, error.
-- **Accessibility:** focus trap where supported, Escape closes, focus returns to trigger, `aria-live` for toast feedback.
+Scrim, elevated flat panel (solid `--bg-hover`, 1px border, `box-shadow: 0 12px 32px rgba(0,0,0,0.6)` — no blur), heading, body, close/action controls. Focus trap where supported, Escape closes, focus returns to trigger, `aria-live` for toast feedback.
 
 ### Form controls
 
-- **States:** default, hover, focus, disabled, read-only, loading, invalid, valid.
-- **Accessibility:** persistent label, inline error and recovery guidance, 44px minimum touch height on mobile.
+States: default, hover, focus, disabled, read-only, loading, invalid, valid. Persistent label (never placeholder-as-label), inline error and recovery guidance, 44px minimum touch height on mobile. Focus is a visible 2px `--accent-blue` outline — never suppressed without a replacement (see `:where(button,a,input,select,textarea):focus-visible` in `index.css`).
 
 ## 6. Motion & Interaction
 
 | Token | Value | Usage |
 |---|---|---|
 | `--motion-micro` | `120ms ease-out` | Press and hover feedback |
-| `--motion-standard` | `200ms ease-in-out` | Menus, modal fade, sidebar state |
-| `--motion-emphasis` | `360ms cubic-bezier(0.16, 1, 0.3, 1)` | Rare page-level reveal |
+| `--motion-standard` | `200ms ease-in-out` | Menus, dialog transitions, sidebar state |
 
-- Motion communicates state and causality; decorative motion is prohibited.
-- Only `transform`, `opacity`, and `filter` animate.
-- `prefers-reduced-motion: reduce` disables non-essential transitions and the live pulse.
-- Pressed controls use a subtle transform without shifting neighboring layout.
+- Motion communicates state and causality; decorative motion is prohibited — no glow pulses, no ambient rings, no scanlines.
+- Only `transform` and `opacity` animate.
+- `prefers-reduced-motion: reduce` disables non-essential transitions.
 
 ## 7. Depth & Surface
 
-Strategy: mixed translucent borders, tonal shift, and restrained shadows.
+Strategy: a 1px border plus a flat, dark `box-shadow`. No blur, no translucency, no glass.
 
 | Level | Value | Usage |
 |---|---|---|
-| Glass | translucent navy + 18px blur + inner rim | Default cards and shell chrome |
-| Elevated | stronger navy + 20px blur + `0 18px 48px rgba(0, 0, 0, 0.34)` | Menus and modals |
-| Interactive | glass plus subtle blue-tinted hover rim | Clickable rows/cards |
-
-Glass is a hierarchy tool, not decoration. Avoid nested glass cards where spacing or a divider communicates grouping more clearly. Ambient gradients remain faint so detection data stays dominant.
+| Surface | `1px solid var(--border)`, `box-shadow: 0 2px 8px rgba(0,0,0,0.5)` | Default cards, panels, shell chrome |
+| Elevated | `1px solid var(--border)`, `box-shadow: 0 12px 32px rgba(0,0,0,0.6)` | Menus, dialogs, dropdowns |
 
 ## 8. Accessibility Constraints & Accepted Debt
 
@@ -156,7 +137,7 @@ Glass is a hierarchy tool, not decoration. Avoid nested glass cards where spacin
 - WCAG 2.2 AA target; visible 2px focus ring on every interactive element.
 - Full keyboard operation for navigation, menus, search, tables, and dialogs.
 - Reduced-motion support and 200% text zoom without loss of content or controls.
-- Status never relies on color alone.
+- Status never relies on color alone (target — see Accepted Debt for current gaps).
 - Primary targets are at least 44 by 44 CSS pixels on narrow/touch layouts.
 - Dense layouts keep stable wayfinding: page title, active navigation, and current state remain obvious.
 
@@ -171,5 +152,8 @@ Glass is a hierarchy tool, not decoration. Avoid nested glass cards where spacin
 
 | Item | Location | Why accepted | Owner / Exit |
 |---|---|---|---|
-| Full route-level code splitting and Lighthouse remediation | `dashboard/src/App.tsx` | Existing bundle architecture predates this visual-only redesign; changing it would expand behavior scope. | Follow-up performance task after visual parity |
-| Legacy page-specific inline styles during rollout | Dashboard pages | Existing theme is heavily inline-styled; each touched page must remove old theme literals, while untouched logic remains stable. | Exit when final token scan is clean |
+| Severity badges are color+text only, not yet shape-coded | `SeverityBadge.tsx`, `SeverityTile` (`CasesPage.tsx`), chart legends | Shape-coding touches JSX/SVG structure across many call sites, not just token values; deferred out of the Phase 1/2 shell-and-Command-Center scope | Exit when a dedicated badge-shape pass lands (tracked against the Ironwatch spec's Phase 6) |
+| `--accent-copper` defined but unused | `index.css` | No component yet claims an "attention-now" surface distinct from severity | Exit when the first real attention-now indicator (e.g. unread Command Center brief) adopts it |
+| Full route-level code splitting and bundle-size remediation | `dashboard/src/App.tsx` | Predates this redesign; changing it expands behavior scope beyond the visual/IA contract | Follow-up performance task |
+| Some legacy pages retain page-local inline styles | Pages not yet touched by a phase | Existing theme is heavily inline-styled; each touched page removes old-theme literals as it's touched, untouched pages remain stable until their phase | Exit when the Ironwatch spec's Phase 6 (remaining pages adopt primitives) lands |
+| `AlertDetailModal`'s status-change dropdown offers `new/in_progress/resolved/false_positive`, missing `acknowledged` (the actual status ~87% of live alerts carry) and `closed` | `components/AlertDetailModal.tsx` | Discovered while building Command Center's Priority Queue against the same data; fixing the dropdown touches the alert-close workflow, which is outside Phase 1/2's shell-and-landing-page scope | Exit with a dedicated alert-workflow pass; `_RESOLVED_STATUSES` in `server-api/app/api/routes/alerts.py` is the authoritative status set to reconcile against |

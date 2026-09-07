@@ -155,6 +155,16 @@ main :is(td, .tabular-nums) {
   }
 }
 
+/* Command Center's context rail (Exposure/Coverage, Operational Health)
+   stacks below the main column instead of a true collapsible/bottom-sheet
+   treatment — kept simple for the Phase 1/2 scope; never causes horizontal
+   scrolling at any of the verified breakpoints (375/768/1280). */
+@media (max-width: 64rem) {
+  .cc-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
 @media (max-width: 47.99rem) {
   .app-sidebar {
     width: 3.5rem !important;
@@ -180,6 +190,10 @@ main :is(td, .tabular-nums) {
 
   .global-search {
     margin-inline: 0 !important;
+  }
+
+  .search-kbd-hint {
+    display: none !important;
   }
 
   .user-controls > div:first-child,

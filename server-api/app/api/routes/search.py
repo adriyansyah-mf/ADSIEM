@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group
-from app.models.models import Alert, Case, User
+from app.models.models import Agent, Alert, Case, User
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -19,7 +19,9 @@ async def global_search(
     _: User = Depends(get_current_user),
     limit: int = Query(default=5, le=20),
 ):
-    """Search alerts and cases by title, source IP, or hostname."""
+    """Search alerts, cases, and agents by title, source IP, hostname, or name.
+    The command palette treats an unmatched query as a candidate entity/indicator
+    lookup client-side, so this endpoint only needs to return direct hits."""
     pattern = f"%{q}%"
 
     alert_q = (
@@ -53,6 +55,16 @@ async def global_search(
         case_q = case_q.where(Case.group_id == group_id)
     cases = (await db.execute(case_q)).scalars().all()
 
+    agent_q = (
+        select(Agent)
+        .where(or_(Agent.name.ilike(pattern), Agent.hostname.ilike(pattern)))
+        .order_by(Agent.hostname.asc())
+        .limit(limit)
+    )
+    if group_id:
+        agent_q = agent_q.where(Agent.group_id == group_id)
+    agents = (await db.execute(agent_q)).scalars().all()
+
     return {
         "alerts": [
             {
@@ -76,5 +88,15 @@ async def global_search(
                 "created_at": c.created_at.isoformat(),
             }
             for c in cases
+        ],
+        "agents": [
+            {
+                "id": str(a.id),
+                "type": "agent",
+                "name": a.name,
+                "hostname": a.hostname,
+                "status": a.status,
+            }
+            for a in agents
         ],
     }

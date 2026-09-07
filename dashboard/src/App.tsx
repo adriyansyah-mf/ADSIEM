@@ -3,10 +3,10 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/api/client'
 import ProtectedRoute from '@/components/ProtectedRoute'
-import Layout from '@/components/Layout'
+import AppShell from '@/components/shell/AppShell'
 import Toaster from '@/components/Toaster'
 import LoginPage from '@/pages/LoginPage'
-import DashboardPage from '@/pages/DashboardPage'
+import CommandCenterPage from '@/pages/CommandCenterPage'
 import AgentsPage from '@/pages/AgentsPage'
 import LogSourcesPage from '@/pages/LogSourcesPage'
 import LogsPage from '@/pages/LogsPage'
@@ -45,8 +45,8 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<ProtectedRoute minRole="viewer" />}>
-          <Route element={<Layout />}>
-            <Route path="/" element={<DashboardPage />} />
+          <Route element={<AppShell />}>
+            <Route path="/" element={<CommandCenterPage />} />
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/agents/:id/sources" element={<ProtectedRoute minRole="admin"><LogSourcesPage /></ProtectedRoute>} />
             <Route path="/logs" element={<LogsPage />} />

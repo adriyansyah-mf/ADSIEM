@@ -59,7 +59,12 @@ export interface Alert {
   id: string
   title: string
   severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
-  status: 'new' | 'in_progress' | 'resolved' | 'false_positive'
+  // Authoritative set per server-api/app/api/routes/alerts.py — "acknowledged"
+  // was missing here even though it's the most common real status (a fresh
+  // pull of live seed data showed 96 acknowledged / 14 closed, zero of the
+  // other 4 values) — Command Center's Priority Queue silently showed 0
+  // actionable alerts against that same data until this was corrected.
+  status: 'new' | 'acknowledged' | 'in_progress' | 'resolved' | 'closed' | 'false_positive'
   rule_id: string | null
   event_id: string | null
   agent_id: string | null

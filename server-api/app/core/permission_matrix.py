@@ -108,6 +108,7 @@ ROUTE_PERMISSION_MATRIX: Final[dict[str, AccessRequirement]] = {
     "GET /api/metrics/worker": RouteAccess.AUTHENTICATED,
     "GET /api/metrics/workload": RouteAccess.AUTHENTICATED,
     "GET /api/mitre/heatmap": RouteAccess.AUTHENTICATED,
+    "GET /api/command-center/situation-brief": RouteAccess.AUTHENTICATED,
     "GET /api/queues/metrics": "queues:manage",
     "GET /api/queues/webhook-deliveries": "queues:manage",
     "POST /api/queues/webhook-deliveries/{delivery_id}/retry": "queues:manage",

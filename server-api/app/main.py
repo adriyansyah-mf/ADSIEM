@@ -41,6 +41,7 @@ from app.api.routes.search import router as search_router
 from app.api.routes.reports import router as reports_router
 from app.api.routes.assistant import router as assistant_router
 from app.api.routes.mitre import router as mitre_router
+from app.api.routes.command_center import router as command_center_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
 
 structlog.configure(
@@ -733,7 +734,9 @@ async def _security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com"
     )
     if settings.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -756,5 +759,6 @@ for router in [
     investigation_router,
     exports_router,
     retention_policies_router,
+    command_center_router,
 ]:
     app.include_router(router)
