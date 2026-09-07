@@ -77,11 +77,23 @@ def _aggregate_hardening_category(snap: HygieneSnapshot, category: str) -> Check
     applicable = [c for c in checks if c.get("status") != "not_applicable"]
     if not applicable:
         return {"status": "not_automated", "evidence": f"All {len(checks)} {category} check(s) reported not_applicable on this host."}
-    failed = [c for c in applicable if c.get("status") in ("fail", "error")]
+    failed = [c for c in applicable if c.get("status") == "fail"]
+    errored = [c for c in applicable if c.get("status") == "error"]
     passed = [c for c in applicable if c.get("status") == "pass"]
-    if not failed:
+    if not failed and not errored:
         return {"status": "met", "evidence": f"All {len(passed)} applicable {category} hardening check(s) pass."}
     failed_titles = ", ".join(c.get("title", c.get("id", "?")) for c in failed)
+    errored_titles = ", ".join(c.get("title", c.get("id", "?")) for c in errored)
+    if failed and errored:
+        status = "gap" if not passed else "partial"
+        return {"status": status, "evidence": f"{len(passed)}/{len(applicable)} {category} check(s) pass. "
+                                                f"Failing: {failed_titles}. Could not be evaluated: {errored_titles}."}
+    if errored:
+        # No outright failures — just checks we couldn't evaluate (e.g. a
+        # privileged read denied to the agent's service account). "We don't
+        # know" is not the same as "it's bad", so this can't be a gap.
+        return {"status": "partial", "evidence": f"{len(passed)}/{len(applicable)} {category} check(s) pass. "
+                                                   f"Could not be evaluated: {errored_titles}."}
     if passed:
         return {"status": "partial", "evidence": f"{len(passed)}/{len(applicable)} {category} check(s) pass. Failing: {failed_titles}."}
     return {"status": "gap", "evidence": f"All {len(applicable)} {category} hardening check(s) fail: {failed_titles}."}
@@ -236,7 +248,8 @@ async def evaluate_endpoint_framework(db: AsyncSession, agent_id: str, framework
         if check_key not in cache:
             cache[check_key] = await CHECKS[check_key](db, agent_id)
         controls.append({**c, **cache[check_key]})
-    met = sum(1 for c in controls if c["status"] == "met")
+    scorable = [c for c in controls if c["status"] != "not_automated"]
+    met = sum(1 for c in scorable if c["status"] == "met")
     total = len(controls)
     return {
         "id": framework_id,
@@ -245,7 +258,10 @@ async def evaluate_endpoint_framework(db: AsyncSession, agent_id: str, framework
         "controls": controls,
         "met_count": met,
         "total_count": total,
-        "score_pct": round(met / total * 100) if total else 0,
+        # Scored only against controls this host can actually be evaluated
+        # on — a not_automated control (host hasn't reported that data yet)
+        # shouldn't deflate the score just because a new control was added.
+        "score_pct": round(met / len(scorable) * 100) if scorable else 0,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
     }
 
