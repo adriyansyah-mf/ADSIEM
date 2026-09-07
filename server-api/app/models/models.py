@@ -63,6 +63,11 @@ class Agent(Base):
     enrolled_at  = Column(DateTime(timezone=True), default=now_utc)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    # Fleet-health telemetry (AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md P0-B)
+    buffer_depth = Column(Integer, nullable=True)
+    buffer_dropped_total = Column(BigInteger, nullable=False, default=0)
+    oldest_buffered_event_age_seconds = Column(Integer, nullable=True)
+    uptime_seconds = Column(Integer, nullable=True)
     log_sources  = relationship("AgentLogSource", back_populates="agent", cascade="all, delete-orphan")
 
 class AgentLogSource(Base):

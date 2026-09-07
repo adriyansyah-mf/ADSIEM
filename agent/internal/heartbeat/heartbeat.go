@@ -28,6 +28,10 @@ type HeartbeatRequest struct {
 	Status        string `json:"status"`
 	Version       string `json:"version"`
 	BufferDropped int64  `json:"buffer_dropped"`
+	// P0-B fleet-health telemetry (AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md).
+	BufferDepth                    int   `json:"buffer_depth"`
+	OldestBufferedEventAgeSeconds  *int  `json:"oldest_buffered_event_age_seconds"`
+	UptimeSeconds                  int64 `json:"uptime_seconds"`
 }
 
 type HeartbeatResponse struct {
@@ -43,6 +47,8 @@ func Loop(
 	cfg *config.Config,
 	buf *buffer.Buffer,
 	c *client.Client,
+	startedAt time.Time,
+	version string,
 	onConfig func(HeartbeatResponse),
 	onTasks func([]AgentTask),
 ) {
@@ -51,11 +57,22 @@ func Loop(
 
 	for {
 		dropped := buf.ResetDropped()
+		depth, _, _ := buf.Stats()
+
+		var oldestAgeSeconds *int
+		if age, ok := buf.OldestAge(); ok {
+			s := int(age.Seconds())
+			oldestAgeSeconds = &s
+		}
+
 		payload := HeartbeatRequest{
-			AgentID:       cfg.Agent.ID,
-			Status:        "online",
-			Version:       "1.0.0",
-			BufferDropped: dropped,
+			AgentID:                       cfg.Agent.ID,
+			Status:                        "online",
+			Version:                       version,
+			BufferDropped:                 dropped,
+			BufferDepth:                   depth,
+			OldestBufferedEventAgeSeconds: oldestAgeSeconds,
+			UptimeSeconds:                 int64(time.Since(startedAt).Seconds()),
 		}
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
 		if err != nil {

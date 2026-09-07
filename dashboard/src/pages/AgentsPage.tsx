@@ -16,6 +16,38 @@ function fmt(bytes: number) {
   return `${(bytes / 1024).toFixed(0)} KB`
 }
 
+function fmtUptime(seconds: number | null) {
+  if (seconds == null) return '—'
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+/** Explainable health score (Ironwatch spec 4.3 / AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md
+ * P0-B): built only from real signals the agent actually reports — buffer
+ * depth and oldest-queued-item age. "Degraded" means evidence is actively
+ * stuck delivering right now, not just that a drop happened at some point in
+ * this agent's history (buffer_dropped_total is cumulative and would
+ * otherwise mark an agent degraded forever after one blip). */
+function FleetHealth({ agent }: { agent: Agent }) {
+  if (agent.status !== 'online') {
+    return <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>OFFLINE</span>
+  }
+  const stuck = (agent.buffer_depth ?? 0) > 0 && (agent.oldest_buffered_event_age_seconds ?? 0) > 60
+  if (stuck) {
+    return (
+      <span title={`${agent.buffer_depth} events queued, oldest ${agent.oldest_buffered_event_age_seconds}s`}
+        style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-orange)' }}>
+        DEGRADED
+      </span>
+    )
+  }
+  return <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-green)' }}>HEALTHY</span>
+}
+
 function InstallModal({ onClose }: { onClose: () => void }) {
   const { data: packages = [] } = useQuery<AgentPackage[]>({
     queryKey: ['agent-packages'],
@@ -192,6 +224,7 @@ export default function AgentsPage() {
   })
 
   const columns = [
+    { key: 'health', header: 'Health', render: (r: Agent) => <FleetHealth agent={r} /> },
     { key: 'name', header: 'Name', render: (r: Agent) => r.name },
     { key: 'hostname', header: 'Hostname', render: (r: Agent) => r.hostname },
     { key: 'group', header: 'Group', render: (r: Agent) => r.group_id },
@@ -206,6 +239,10 @@ export default function AgentsPage() {
       </div>
     )},
     { key: 'version', header: 'Version', render: (r: Agent) => r.version ?? '—' },
+    { key: 'uptime', header: 'Uptime', render: (r: Agent) => fmtUptime(r.uptime_seconds) },
+    { key: 'buffer', header: 'Buffer', render: (r: Agent) =>
+      r.buffer_depth == null ? '—' : `${r.buffer_depth} queued${r.buffer_dropped_total > 0 ? ` · ${r.buffer_dropped_total} dropped (lifetime)` : ''}`
+    },
     { key: 'last_seen', header: 'Last Seen', render: (r: Agent) =>
       r.last_seen_at ? formatDistanceToNow(new Date(r.last_seen_at), { addSuffix: true }) : 'Never'
     },

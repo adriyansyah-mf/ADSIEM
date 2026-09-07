@@ -26,6 +26,11 @@ export interface Agent {
   last_seen_at: string | null
   enrolled_at: string
   log_sources: LogSource[]
+  // Fleet-health telemetry (docs/AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md P0-B)
+  buffer_depth: number | null
+  buffer_dropped_total: number
+  oldest_buffered_event_age_seconds: number | null
+  uptime_seconds: number | null
 }
 
 export interface LogSource {

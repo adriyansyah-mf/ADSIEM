@@ -115,6 +115,13 @@ class AgentOut(BaseModel):
     last_seen_at: datetime | None
     enrolled_at: datetime
     log_sources: list[LogSourceOut] = []
+    # Fleet-health telemetry (docs/AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md, P0-B) —
+    # real signals from the agent's existing in-memory buffer, not the full
+    # durable-spool rewrite (P0-A), which is a separate, much larger change.
+    buffer_depth: int | None = None
+    buffer_dropped_total: int = 0
+    oldest_buffered_event_age_seconds: int | None = None
+    uptime_seconds: int | None = None
     model_config = {"from_attributes": True}
 
 
@@ -123,6 +130,11 @@ class HeartbeatRequest(BaseModel):
     status: str = "online"
     version: str | None = None
     buffer_dropped: int = 0
+    # P0-B fleet-health telemetry — all optional so older agent binaries
+    # (which don't send these fields) keep heartbeating without validation errors.
+    buffer_depth: int | None = None
+    oldest_buffered_event_age_seconds: int | None = None
+    uptime_seconds: int | None = None
 
 
 class AgentTaskDef(BaseModel):

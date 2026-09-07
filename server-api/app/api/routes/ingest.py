@@ -45,7 +45,18 @@ async def heartbeat(
     from sqlalchemy import update
     await db.execute(
         update(Agent).where(Agent.id == agent.id)
-        .values(status="online", last_seen_at=datetime.now(timezone.utc), version=body.version)
+        .values(
+            status="online", last_seen_at=datetime.now(timezone.utc), version=body.version,
+            # Fleet-health telemetry (AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md P0-B):
+            # buffer_dropped is a since-last-heartbeat delta (the agent resets its
+            # counter after sending), so it accumulates into a running total here
+            # rather than overwriting it — every dropped event should stay visible
+            # to an operator, not just the drops since the last successful heartbeat.
+            buffer_dropped_total=Agent.buffer_dropped_total + body.buffer_dropped,
+            buffer_depth=body.buffer_depth,
+            oldest_buffered_event_age_seconds=body.oldest_buffered_event_age_seconds,
+            uptime_seconds=body.uptime_seconds,
+        )
     )
     await db.commit()
 

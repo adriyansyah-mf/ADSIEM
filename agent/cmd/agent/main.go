@@ -25,6 +25,7 @@ import (
 var Version = "dev"
 
 func main() {
+	startedAt := time.Now()
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()
 
@@ -97,7 +98,7 @@ func main() {
 	}
 
 	// heartbeat loop — drives log source + FIM path updates + task dispatch
-	go heartbeat.Loop(cfg, buf, c,
+	go heartbeat.Loop(cfg, buf, c, startedAt, Version,
 		func(resp heartbeat.HeartbeatResponse) {
 			mgr.Update(resp.LogSources)
 			fimWatcher.UpdatePaths(resp.FimPaths)

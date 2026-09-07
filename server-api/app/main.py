@@ -144,6 +144,22 @@ async def _migrate_ueba_columns() -> None:
             ON ueba_feature_snapshots(group_id, entity_type, snapshot_hour DESC)
         """))
 
+async def _migrate_agent_telemetry_columns() -> None:
+    """Fleet-health telemetry (AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md P0-B) —
+    real signals from the agent's existing in-memory buffer, sent with every
+    heartbeat: current queue depth, cumulative drops, oldest-queued-item age,
+    and process uptime. Not the full durable-spool rewrite (P0-A)."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            ALTER TABLE agents
+            ADD COLUMN IF NOT EXISTS buffer_depth INTEGER,
+            ADD COLUMN IF NOT EXISTS buffer_dropped_total BIGINT NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS oldest_buffered_event_age_seconds INTEGER,
+            ADD COLUMN IF NOT EXISTS uptime_seconds INTEGER
+        """))
+
+
 async def _migrate_alerts_columns() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -695,6 +711,7 @@ async def lifespan(app: FastAPI):
         await _migrate_audit_chain()
         await _migrate_webhook_dlq_columns()
         await _migrate_ioc_tables_permission()
+        await _migrate_agent_telemetry_columns()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()

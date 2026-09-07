@@ -6,6 +6,10 @@ All notable changes to AD-SIEM are documented here.
 
 ### Added
 
+- **Implemented P0-B (Fleet-health telemetry) from `docs/AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md`**: the Go endpoint agent now reports real buffer depth, cumulative dropped-event count, oldest-queued-item age, and process uptime with every heartbeat (new `Agent` columns + migration, extended heartbeat schema, new `agent/internal/buffer` tests). The Fleet page shows an explainable Health column (`HEALTHY`/`DEGRADED`/`OFFLINE`) built only from these real signals, plus Uptime and Buffer columns. Also fixed a real bug found while wiring this up: the agent hardcoded `Version: "1.0.0"` in every heartbeat instead of using the build-time-injectable `Version` var that already existed — fleet version reporting has been silently wrong since day one. P0-A (durable spool) and P0-C (device identity/mTLS) remain unstarted, much larger separate efforts; see `docs/IMPLEMENTATION_STATUS.md`.
+
+
+
 - **Partial Phase 4 (Agent Fleet)**: `GET /api/agents` had no sort order at all; added `order_by(status, last_seen_at nulls first)` so the fleet list defaults to health risk (offline and longest-silent agents first) instead of arbitrary DB order, per the Ironwatch spec. The rest of Phase 4 (spool/drift/certificate telemetry, tabbed agent detail) is blocked on the unstarted endpoint-agent production telemetry roadmap, not fabricated — see `docs/IMPLEMENTATION_STATUS.md`.
 
 
