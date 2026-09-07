@@ -80,6 +80,11 @@ services:
     build:
       context: ./agent
       dockerfile: Dockerfile.packages
+      args:
+        # Bump when agent/ gains real functionality (like P0-B fleet
+        # telemetry) — dnf/dpkg treat an unchanged version as "nothing to
+        # upgrade" even if the binary content changed underneath it.
+        VERSION: ${AGENT_VERSION:-1.3.0}
     volumes:
       - agent_packages:/output
     restart: "no"
