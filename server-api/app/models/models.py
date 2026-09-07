@@ -250,6 +250,7 @@ class HygieneSnapshot(Base):
     hygiene_score   = Column(Integer, nullable=False, default=100)
     issues          = Column(JSONB, nullable=False, default=list)
     packages        = Column(JSONB, nullable=False, default=list)
+    hardening_checks = Column(JSONB, nullable=False, default=list)
     collected_at    = Column(DateTime(timezone=True), default=now_utc)
 
 class CaseNote(Base):

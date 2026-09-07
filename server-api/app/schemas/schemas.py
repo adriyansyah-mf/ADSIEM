@@ -523,6 +523,7 @@ class HygieneSnapshotIn(BaseModel):
     hygiene_score: int = 100
     issues: list[dict] | None = []
     packages: list[dict] | None = []
+    hardening_checks: list[dict] | None = []
     collected_at: str | None = None
 
 
@@ -545,6 +546,7 @@ class HygieneSnapshotOut(BaseModel):
     hygiene_score: int
     issues: list[dict]
     packages: list[dict]
+    hardening_checks: list[dict]
     collected_at: datetime
     model_config = {"from_attributes": True}
 

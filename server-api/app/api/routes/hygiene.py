@@ -121,6 +121,7 @@ async def ingest_hygiene(
         hygiene_score=body.hygiene_score,
         issues=body.issues or [],
         packages=body.packages or [],
+        hardening_checks=body.hardening_checks or [],
     )
     db.add(snap)
     await db.commit()

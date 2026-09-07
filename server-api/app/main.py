@@ -160,6 +160,19 @@ async def _migrate_agent_telemetry_columns() -> None:
         """))
 
 
+async def _migrate_hygiene_hardening_column() -> None:
+    """OS-level hardening checks (docs/superpowers/specs/2026-09-08-compliance-os-hardening-design.md)
+    — CIS-Benchmark-style checks the agent runs locally (password policy,
+    firewall, SSH hardening, kernel hardening), reported alongside the
+    existing hygiene snapshot."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            ALTER TABLE hygiene_snapshots
+            ADD COLUMN IF NOT EXISTS hardening_checks JSONB NOT NULL DEFAULT '[]'::jsonb
+        """))
+
+
 async def _migrate_alerts_columns() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -712,6 +725,7 @@ async def lifespan(app: FastAPI):
         await _migrate_webhook_dlq_columns()
         await _migrate_ioc_tables_permission()
         await _migrate_agent_telemetry_columns()
+        await _migrate_hygiene_hardening_column()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
