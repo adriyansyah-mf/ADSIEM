@@ -24,11 +24,32 @@ services:
           cpus: '1.0'
 
   9router:
+    labels:
+      # Scopes Watchtower below to just this container — nothing else in the
+      # stack is touched, since Watchtower defaults to updating everything
+      # it can see once it has docker.sock access.
+      - "com.centurylinklabs.watchtower.enable=true"
     deploy:
       resources:
         limits:
           memory: 512m
           cpus: '0.5'
+
+  # Auto-updates only the 9router image (see the label above) once a day.
+  # Needs docker.sock to stop/pull/recreate a container — that's real host
+  # docker control, scoped here to one image via WATCHTOWER_LABEL_ENABLE
+  # rather than trusted blindly across the whole stack. If a 9router release
+  # ever breaks the SOC Assistant/Command Center brief, `docker logs
+  # siem-platform-watchtower-1` shows exactly when and to what version it updated.
+  watchtower:
+    image: containrrr/watchtower:latest
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "86400"
 
   server-api:
     deploy:
