@@ -31,7 +31,9 @@ PROTOCOL: Respond with ONLY ONE JSON object per turn, no markdown fences, no pro
 - To call a tool: {{"action": "tool", "tool": "<name>", "args": {{...}}}}
 - To answer the analyst: {{"action": "final", "message": "<answer in plain text, concise, no markdown headers>"}}
 
-Call tools as needed to answer accurately — don't guess at data. Once you have enough information, respond with "final". If a tool returns an error or empty results, say so plainly rather than making something up. Keep the final message under 150 words — this is a chat reply, not a report."""
+Call tools as needed to answer accurately — don't guess at data. Once you have enough information, respond with "final". If a tool returns an error or empty results, say so plainly rather than making something up. Keep the final message under 150 words — this is a chat reply, not a report.
+
+NEVER invent specific facts — alert titles, case names, hostnames, IP addresses, usernames, or risk scores — that did not come from a tool result. If you have not called a tool yet and the question is about platform data, call a tool first; do not answer from assumption or example data. Fabricating plausible-sounding entities is a serious failure, not a helpful shortcut."""
 
 
 async def _get_setting(db: AsyncSession, key: str, default: str = "") -> str:
@@ -83,6 +85,7 @@ async def run_assistant_chat(
     messages.append({"role": "user", "content": user_message[:2000]})
 
     tools_used: list[str] = []
+    nudged_for_tool_use = False
     for i in range(_MAX_TOOL_ROUNDS):
         if i == _MAX_TOOL_ROUNDS - 1:
             # Last round — force a wrap-up instead of another tool call so a
@@ -106,6 +109,25 @@ async def run_assistant_chat(
             return {"reply": salvaged or raw[:2000], "tools_used": tools_used}
 
         if action["action"] == "final":
+            # A model that jumps straight to "final" without ever calling a tool has
+            # nothing but its own (possibly fabricated) assumptions to go on — force
+            # one retry demanding real data before trusting an ungrounded answer.
+            # Confirmed live: the free-tier "combo" model has answered fact-shaped
+            # questions (e.g. "what's risky right now") with entirely invented
+            # hostnames/IPs/scores on its very first turn, with zero tool calls.
+            if not tools_used and not nudged_for_tool_use and i < _MAX_TOOL_ROUNDS - 1:
+                nudged_for_tool_use = True
+                messages.append({"role": "assistant", "content": raw})
+                messages.append({"role": "user", "content": (
+                    "You answered without calling any tool. This assistant must never state "
+                    "specific alert, case, agent, IP, hostname, or risk-score facts unless "
+                    "they came from a tool result — inventing plausible-sounding details is "
+                    "a serious failure, not a helpful shortcut. If the user's question needs "
+                    "platform data, call the relevant tool now. If it's genuinely conversational "
+                    "(a greeting, thanks, or a question about what you can do) and truly needs "
+                    "no data, respond with the same final answer again."
+                )})
+                continue
             return {"reply": str(action.get("message", ""))[:2000], "tools_used": tools_used}
 
         tool_name = str(action.get("tool", ""))
