@@ -88,6 +88,13 @@ async def list_agents(
         q = q.where(or_(Agent.name.ilike(like), Agent.hostname.ilike(like)))
     if status:
         q = q.where(Agent.status == status)
+    # Ironwatch spec 4.3: "the agent list defaults to health risk, not
+    # alphabetical order." No richer health signal exists yet (spool/drift/
+    # cert telemetry is unstarted — see docs/AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md),
+    # so this uses the two real signals available: offline agents first
+    # ("offline" < "online" alphabetically, conveniently), then within a
+    # status, the longest-silent agents first (nulls — never checked in — worst).
+    q = q.order_by(Agent.status.asc(), Agent.last_seen_at.asc().nulls_first())
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
     agents = result.scalars().all()

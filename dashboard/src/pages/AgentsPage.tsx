@@ -234,7 +234,7 @@ export default function AgentsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <PageHeader title="Agents" className="!mb-0" />
+        <PageHeader title="Fleet" subtitle="Sorted by health risk — offline and longest-silent agents first." className="!mb-0" />
         <div className="flex items-center gap-2">
           <input
             type="text"

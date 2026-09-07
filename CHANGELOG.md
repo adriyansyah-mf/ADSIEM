@@ -6,6 +6,10 @@ All notable changes to AD-SIEM are documented here.
 
 ### Added
 
+- **Partial Phase 4 (Agent Fleet)**: `GET /api/agents` had no sort order at all; added `order_by(status, last_seen_at nulls first)` so the fleet list defaults to health risk (offline and longest-silent agents first) instead of arbitrary DB order, per the Ironwatch spec. The rest of Phase 4 (spool/drift/certificate telemetry, tabbed agent detail) is blocked on the unstarted endpoint-agent production telemetry roadmap, not fabricated — see `docs/IMPLEMENTATION_STATUS.md`.
+
+
+
 - **Implemented Phase 3 of the Ironwatch AI-SIEM UI/UX redesign**: alerts now open a real investigation workspace (`pages/AlertInvestigationPage.tsx` at `/alerts/:id`) instead of a modal, per the spec's four regions — Header, Evidence Timeline, Entity Context (new: pivots through the existing entity/IOC endpoints to show UEBA risk and related alerts), and AI Context. All primary triage entry points (Alerts table, Command Center, command palette, Situation Brief) now link directly to it. Found and fixed two more real bugs: `AlertsPage.tsx`'s status filter had the same incomplete status list as the modal's dropdown (missing `acknowledged`/`closed`), and the new Entity Context panel silently returned empty results for a superadmin caller because `GET /api/entities/*`/`GET /api/iocs/*` require an explicit `group_id` for that role.
 
 
