@@ -1,0 +1,291 @@
+# Default SCA policy — the same 21 controls previously hardcoded as Go
+# functions in agent/internal/hardening/linux_*.go, re-expressed as data.
+# See engine.go's package doc for the rule DSL grammar. An operator can drop
+# an additional or overriding *.yml file under /etc/siem-agent/sca/ without
+# rebuilding the agent; a file there with id: cis_linux replaces this one
+# entirely (see engine.go's replacePolicy).
+id: cis_linux
+name: "CIS-Benchmark-style Linux hardening"
+
+checks:
+  - id: acct-password-maxage
+    category: account
+    title: "Password maximum age is set and reasonable (<=90 days)"
+    rationale: "Long-lived passwords give an attacker who obtains a hash a wider window to crack or reuse it."
+    remediation: "Set PASS_MAX_DAYS to a value between 1 and 90 in /etc/login.defs."
+    compliance:
+      cis: ["5.4.1.1"]
+      pci_dss: ["8.2.4"]
+      soc2: ["CC6.1"]
+    condition: all
+    rules:
+      - 'f:/etc/login.defs -> n:PASS_MAX_DAYS\s+(\d+) compare between 1..90'
+
+  - id: acct-password-complexity
+    category: account
+    title: "Password complexity module (pam_pwquality/pam_cracklib) is configured"
+    rationale: "Without a complexity module, users can set trivially guessable passwords."
+    remediation: "Install and configure pam_pwquality (or pam_cracklib) in the PAM password stack."
+    compliance:
+      cis: ["5.3.1"]
+      pci_dss: ["8.3.6"]
+      soc2: ["CC6.1"]
+    condition: any
+    rules:
+      - 'f:/etc/pam.d/common-password -> r:pam_pwquality\.so|pam_cracklib\.so'
+      - 'f:/etc/pam.d/system-auth -> r:pam_pwquality\.so|pam_cracklib\.so'
+      - 'f:/etc/pam.d/password-auth -> r:pam_pwquality\.so|pam_cracklib\.so'
+
+  - id: acct-lockout
+    category: account
+    title: "Account lockout on repeated failed logins (pam_faillock/pam_tally2) is configured"
+    rationale: "Without lockout, an attacker can brute-force local account passwords without limit."
+    remediation: "Enable pam_faillock (or pam_tally2) in the PAM auth stack."
+    compliance:
+      cis: ["5.3.3"]
+      pci_dss: ["8.3.4"]
+      soc2: ["CC6.1"]
+    condition: any
+    rules:
+      - 'f:/etc/pam.d/common-auth -> r:pam_faillock\.so|pam_tally2\.so'
+      - 'f:/etc/pam.d/system-auth -> r:pam_faillock\.so|pam_tally2\.so'
+      - 'f:/etc/pam.d/password-auth -> r:pam_faillock\.so|pam_tally2\.so'
+
+  - id: acct-no-empty-password
+    category: account
+    title: "No local account has an empty password"
+    rationale: "An empty password field lets anyone log in as that account with no credential at all."
+    remediation: "Set a password or lock the account (passwd -l <user>)."
+    compliance:
+      cis: ["5.5.5"]
+      pci_dss: ["8.2.3"]
+      soc2: ["CC6.1"]
+    special: no_empty_passwords
+
+  - id: acct-no-duplicate-root
+    category: account
+    title: "No non-root account shares UID 0"
+    rationale: "Any account with UID 0 has full root privileges regardless of its name — a classic backdoor technique."
+    remediation: "Change the UID of the offending account or remove it."
+    compliance:
+      cis: ["7.3"]
+      pci_dss: ["7.2.1"]
+      soc2: ["CC6.3"]
+    special: no_duplicate_root_uid
+
+  - id: acct-sensitive-file-perms
+    category: account
+    title: "Sensitive account files have restrictive permissions"
+    rationale: "World-readable /etc/shadow or a world-writable /etc/sudoers exposes password hashes or lets any local user escalate."
+    remediation: "chmod 0640 /etc/shadow; chmod 0644 /etc/passwd; chmod 0440 /etc/sudoers."
+    compliance:
+      cis: ["6.1.2", "6.1.3"]
+      pci_dss: ["7.2.1"]
+      soc2: ["CC6.1"]
+    condition: all
+    rules:
+      - 'f:/etc/shadow -> perm<=0640'
+      - 'f:/etc/passwd -> perm<=0644'
+      - 'f:/etc/sudoers -> perm<=0440'
+
+  - id: acct-sudo-logging
+    category: account
+    title: "Sudo commands are logged (use_pty and/or logfile configured)"
+    rationale: "Without use_pty/logfile, privileged commands run via sudo leave no dedicated audit trail."
+    remediation: "Add \"Defaults use_pty\" and/or \"Defaults logfile=...\" to /etc/sudoers."
+    compliance:
+      cis: ["5.2.4"]
+      pci_dss: ["10.2.2"]
+      soc2: ["CC7.2"]
+    condition: all
+    rules:
+      - 'f:/etc/sudoers -> r:use_pty|logfile'
+
+  - id: net-firewall-active
+    category: network
+    title: "A firewall service is active with at least a default policy"
+    rationale: "With no host firewall, every listening service is directly reachable from the network."
+    remediation: "Enable firewalld, ufw, or an nftables/iptables ruleset with a default-deny INPUT policy."
+    compliance:
+      cis: ["4.1"]
+      pci_dss: ["1.2.1"]
+      soc2: ["CC6.6"]
+    condition: any
+    rules:
+      - 'c:firewall-cmd --state -> r:(?m)^running$'
+      - 'c:ufw status -> r:Status: active'
+      - 'c:nft list ruleset -> r:\S'
+      - 'c:iptables -S -> r:-P INPUT (DROP|REJECT)'
+
+  - id: net-ip-forward-disabled
+    category: network
+    title: "IPv4 forwarding is disabled"
+    rationale: "A host that isn't a designated router shouldn't forward traffic between interfaces."
+    remediation: "Set net.ipv4.ip_forward=0 via sysctl (unless this host is intentionally a router)."
+    compliance:
+      cis: ["3.2.1"]
+      pci_dss: ["1.3.1"]
+      soc2: ["CC6.6"]
+    condition: all
+    rules:
+      - 'f:/proc/sys/net/ipv4/ip_forward -> n:(\d+) compare == 0'
+
+  - id: net-no-legacy-services
+    category: network
+    title: "No legacy/insecure network services are listening"
+    rationale: "FTP, Telnet, rexec/rlogin/rsh, and X11 transmit credentials or data in cleartext."
+    remediation: "Disable and remove the offending service; use SSH/SFTP instead."
+    compliance:
+      cis: ["2.1"]
+      pci_dss: ["2.2.2"]
+      soc2: ["CC6.6"]
+    special: no_legacy_services
+
+  - id: ssh-no-root-login
+    category: ssh
+    title: "SSH root login is disabled (PermitRootLogin no)"
+    rationale: "Direct root login over SSH removes per-user accountability and widens the brute-force attack surface."
+    remediation: "Set \"PermitRootLogin no\" in sshd_config."
+    compliance:
+      cis: ["5.1.7"]
+      pci_dss: ["2.2.4"]
+      soc2: ["CC6.1"]
+    condition: all
+    rules:
+      - 'sshd:permitrootlogin -> r:^no$ default:prohibit-password'
+
+  - id: ssh-no-password-auth
+    category: ssh
+    title: "SSH password authentication is disabled (key-only)"
+    rationale: "Key-only auth removes password brute-forcing and credential-stuffing as a viable SSH attack path."
+    remediation: "Set \"PasswordAuthentication no\" in sshd_config and provision SSH keys."
+    compliance:
+      cis: ["5.1.8"]
+      pci_dss: ["8.3.1"]
+      soc2: ["CC6.1"]
+    condition: all
+    rules:
+      - 'sshd:passwordauthentication -> r:^no$ default:yes'
+
+  - id: ssh-protocol-2
+    category: ssh
+    title: "SSH protocol is version 2 only"
+    rationale: "SSH protocol 1 has known cryptographic weaknesses."
+    remediation: "Remove any \"Protocol 1\" directive; modern OpenSSH is 2-only by default."
+    compliance:
+      cis: ["5.1.1"]
+      pci_dss: ["4.2.1"]
+      soc2: ["CC6.7"]
+    condition: all
+    rules:
+      - 'sshd:protocol -> r:^2$ default:2'
+
+  - id: ssh-max-auth-tries
+    category: ssh
+    title: "SSH MaxAuthTries is 4 or fewer"
+    rationale: "A high auth-attempt ceiling gives brute-force/credential-stuffing tools more tries per connection."
+    remediation: "Set \"MaxAuthTries 4\" (or lower) in sshd_config."
+    compliance:
+      cis: ["5.1.5"]
+      pci_dss: ["8.3.4"]
+      soc2: ["CC6.1"]
+    condition: all
+    rules:
+      - 'sshd:maxauthtries -> n:(\d+) compare <= 4 default:6'
+
+  - id: kernel-aslr-enabled
+    category: kernel
+    title: "Full ASLR is enabled (kernel.randomize_va_space=2)"
+    rationale: "ASLR makes memory-corruption exploits substantially harder to write reliably."
+    remediation: "Set kernel.randomize_va_space=2 via sysctl."
+    compliance:
+      cis: ["1.5.1"]
+      pci_dss: ["6.2.4"]
+      soc2: ["CC6.8"]
+    condition: all
+    rules:
+      - 'f:/proc/sys/kernel/randomize_va_space -> n:(\d+) compare == 2'
+
+  - id: kernel-ptrace-restricted
+    category: kernel
+    title: "Ptrace scope restricts cross-process debugging (kernel.yama.ptrace_scope>=1)"
+    rationale: "Unrestricted ptrace lets one user process attach to and read another's memory, including credentials."
+    remediation: "Set kernel.yama.ptrace_scope=1 (or higher) via sysctl."
+    compliance:
+      cis: ["1.5.2"]
+      pci_dss: ["6.2.4"]
+      soc2: ["CC6.8"]
+    condition: all
+    rules:
+      - 'f:/proc/sys/kernel/yama/ptrace_scope -> n:(\d+) compare >= 1'
+
+  - id: kernel-coredump-restricted
+    category: kernel
+    title: "Core dumps from setuid programs are restricted (fs.suid_dumpable=0)"
+    rationale: "A setuid program's core dump can leak sensitive memory contents (keys, hashes) to an unprivileged reader."
+    remediation: "Set fs.suid_dumpable=0 via sysctl."
+    compliance:
+      cis: ["1.5.3"]
+      pci_dss: ["6.2.4"]
+      soc2: ["CC6.8"]
+    condition: all
+    rules:
+      - 'f:/proc/sys/fs/suid_dumpable -> n:(\d+) compare == 0'
+
+  - id: fs-tmp-noexec
+    category: kernel
+    title: "/tmp, if its own mount, is mounted noexec,nosuid"
+    rationale: "A world-writable directory that also permits execution is a common local-privilege-escalation staging ground."
+    remediation: "Add noexec,nosuid to /tmp's mount options (fstab or systemd tmp.mount unit)."
+    compliance:
+      cis: ["1.1.2.1"]
+      pci_dss: ["6.2.4"]
+      soc2: ["CC6.8"]
+    condition: all
+    rules:
+      - 'm:/tmp -> opts:noexec,nosuid'
+
+  - id: log-auditd-active
+    category: logging
+    title: "Linux audit daemon (auditd) is active"
+    rationale: "Without auditd, security-relevant syscalls and file accesses leave no local audit trail."
+    remediation: "Install and enable auditd (systemctl enable --now auditd)."
+    compliance:
+      cis: ["4.1.1.1"]
+      pci_dss: ["10.2.1"]
+      soc2: ["CC7.2"]
+    condition: any
+    rules:
+      - 'c:systemctl is-active auditd -> r:(?m)^active$'
+      - 'c:systemctl is-active audit -> r:(?m)^active$'
+
+  - id: log-time-sync-active
+    category: logging
+    title: "A time-synchronization service is active (accurate timestamps for audit logs)"
+    rationale: "Clock drift makes cross-host log correlation and incident timelines unreliable."
+    remediation: "Install and enable chrony, ntpd, or systemd-timesyncd."
+    compliance:
+      cis: ["2.3.1.1"]
+      pci_dss: ["10.4.1"]
+      soc2: ["CC7.2"]
+    condition: any
+    rules:
+      - 'c:systemctl is-active chronyd -> r:(?m)^active$'
+      - 'c:systemctl is-active chrony -> r:(?m)^active$'
+      - 'c:systemctl is-active ntpd -> r:(?m)^active$'
+      - 'c:systemctl is-active systemd-timesyncd -> r:(?m)^active$'
+
+  - id: upd-auto-security-updates
+    category: updates
+    title: "Automatic security updates are enabled"
+    rationale: "Without automatic patching, known-vulnerable packages linger until someone manually updates them."
+    remediation: "Install and enable unattended-upgrades (Debian/Ubuntu) or dnf-automatic (RHEL/Fedora)."
+    compliance:
+      cis: ["1.9"]
+      pci_dss: ["6.3.3"]
+      soc2: ["CC7.1"]
+    condition: any
+    rules:
+      - 'c:systemctl is-active unattended-upgrades -> r:(?m)^active$'
+      - 'c:systemctl is-active dnf-automatic.timer -> r:(?m)^active$'
+      - 'c:systemctl is-active dnf-automatic-install.timer -> r:(?m)^active$'
