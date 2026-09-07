@@ -76,6 +76,24 @@ services:
     networks:
       - siem-net
 
+  # Local, self-hosted stable LLM fallback — 9router's free-tier "combo"
+  # chain (5 rotating providers) fails outright under quota/auth issues
+  # (see docs/IMPLEMENTATION_STATUS.md). Ollama gives one model that always
+  # answers, at the cost of running on CPU (no GPU on this host).
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    networks:
+      - siem-net
+
   package-builder:
     build:
       context: ./agent
@@ -84,7 +102,7 @@ services:
         # Bump when agent/ gains real functionality (like P0-B fleet
         # telemetry) — dnf/dpkg treat an unchanged version as "nothing to
         # upgrade" even if the binary content changed underneath it.
-        VERSION: ${AGENT_VERSION:-1.3.0}
+        VERSION: ${AGENT_VERSION:-1.4.0}
     volumes:
       - agent_packages:/output
     restart: "no"
@@ -251,6 +269,7 @@ volumes:
   redis_data:
   es_data:
   ninerouter_data:
+  ollama_data:
   agent_packages:
 
 networks:
