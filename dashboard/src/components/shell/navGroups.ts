@@ -3,6 +3,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Server, BookOpen, Wrench, Shield, Bot,
   Users, Settings, Webhook, ClipboardList, FileBarChart, Grid3x3,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -64,6 +65,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: 'Governance',
     items: [
       { to: '/reports', label: 'Reports', icon: FileBarChart },
+      { to: '/compliance', label: 'Compliance', icon: ShieldCheck },
       { to: '/webhooks', label: 'Integrations', icon: Webhook, minRole: 'admin' },
       { to: '/audit-logs', label: 'Audit Log', icon: ClipboardList, minRole: 'admin' },
       { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },

@@ -42,6 +42,7 @@ from app.api.routes.reports import router as reports_router
 from app.api.routes.assistant import router as assistant_router
 from app.api.routes.mitre import router as mitre_router
 from app.api.routes.command_center import router as command_center_router
+from app.api.routes.compliance import router as compliance_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
 
 structlog.configure(
@@ -791,5 +792,6 @@ for router in [
     exports_router,
     retention_policies_router,
     command_center_router,
+    compliance_router,
 ]:
     app.include_router(router)
