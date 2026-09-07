@@ -1,6 +1,10 @@
 package hardening
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestCheckSSHNoRootLogin(t *testing.T) {
 	hardened := writeTemp(t, "sshd_config", "PermitRootLogin no\n")
@@ -20,6 +24,27 @@ func TestCheckSSHNoRootLogin(t *testing.T) {
 
 	if c := checkSSHNoRootLogin("/nonexistent/sshd_config"); c.Status != StatusNotApplicable {
 		t.Fatalf("expected not_applicable, got %s", c.Status)
+	}
+}
+
+func TestParseSSHDConfig_FollowsIncludeDirective(t *testing.T) {
+	base := t.TempDir()
+	dropinDir := filepath.Join(base, "conf.d")
+	if err := os.MkdirAll(dropinDir, 0755); err != nil {
+		t.Fatalf("mkdir conf.d: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dropinDir, "hardening.conf"), []byte("PermitRootLogin no\n"), 0644); err != nil {
+		t.Fatalf("write drop-in: %v", err)
+	}
+
+	mainPath := filepath.Join(base, "sshd_config")
+	mainContent := "Include " + filepath.Join(dropinDir, "*.conf") + "\n"
+	if err := os.WriteFile(mainPath, []byte(mainContent), 0644); err != nil {
+		t.Fatalf("write main config: %v", err)
+	}
+
+	if c := checkSSHNoRootLogin(mainPath); c.Status != StatusPass {
+		t.Fatalf("expected pass via Include drop-in, got %s (%s)", c.Status, c.Detail)
 	}
 }
 
