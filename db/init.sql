@@ -311,7 +311,8 @@ INSERT INTO permissions (name) VALUES
     ('alerts:update'),
     ('alerts:manage'),
     ('cases:manage'),
-    ('cases:view');
+    ('cases:view'),
+    ('compliance:manage');
 
 -- superadmin: all permissions
 INSERT INTO role_permissions (role_id, permission_id)
@@ -324,14 +325,14 @@ WHERE r.name = 'admin'
   AND p.name IN (
     'agents:manage','rules:create','rules:update','rules:delete',
     'decoders:create','decoders:update','decoders:delete',
-    'logs:read','alerts:read','alerts:update','cases:manage','cases:view'
+    'logs:read','alerts:read','alerts:update','cases:manage','cases:view','compliance:manage'
   );
 
 -- analyst: logs:read + alerts:read + alerts:update + cases:manage + cases:view
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r, permissions p
 WHERE r.name = 'analyst'
-  AND p.name IN ('logs:read','alerts:read','alerts:update','cases:manage','cases:view');
+  AND p.name IN ('logs:read','alerts:read','alerts:update','cases:manage','cases:view','compliance:manage');
 
 -- viewer: logs:read + alerts:read + cases:view
 INSERT INTO role_permissions (role_id, permission_id)

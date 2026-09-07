@@ -19,7 +19,7 @@ from typing import Awaitable, Callable
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Agent, HygieneSnapshot, FimWatchPath, FimEvent
+from app.models.models import Agent, CustomComplianceControl, HygieneSnapshot, FimWatchPath, FimEvent
 
 CheckResult = dict  # {"status": "met" | "partial" | "gap" | "not_automated", "evidence": str}
 
@@ -309,3 +309,59 @@ async def evaluate_endpoint_framework(db: AsyncSession, agent_id: str, framework
 
 def list_frameworks() -> list[dict]:
     return [{"id": k, "name": v["name"], "control_count": len(v["controls"])} for k, v in FRAMEWORKS.items()]
+
+
+# ─── Custom per-endpoint controls ──────────────────────────────────
+# User-attested controls (no automated check backs these) that an analyst
+# adds for a specific endpoint — e.g. an internal SOP or contractual
+# requirement the framework catalogs above don't cover. Distinct from
+# CHECKS/FRAMEWORKS above: those are always agent-derived, these are
+# whatever the analyst says they are.
+
+
+async def list_custom_controls(db: AsyncSession, agent_id: str) -> list[CustomComplianceControl]:
+    q = (
+        select(CustomComplianceControl)
+        .where(CustomComplianceControl.agent_id == agent_id)
+        .order_by(CustomComplianceControl.created_at)
+    )
+    return (await db.execute(q)).scalars().all()
+
+
+async def create_custom_control(
+    db: AsyncSession, agent: Agent, data: dict, created_by: str | None
+) -> CustomComplianceControl:
+    control = CustomComplianceControl(
+        agent_id=agent.id,
+        group_id=agent.group_id,
+        created_by=created_by,
+        **data,
+    )
+    db.add(control)
+    await db.commit()
+    await db.refresh(control)
+    return control
+
+
+async def get_custom_control(db: AsyncSession, agent_id: str, control_id: str) -> CustomComplianceControl | None:
+    q = select(CustomComplianceControl).where(
+        CustomComplianceControl.id == control_id,
+        CustomComplianceControl.agent_id == agent_id,
+    )
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+async def update_custom_control(
+    db: AsyncSession, control: CustomComplianceControl, data: dict
+) -> CustomComplianceControl:
+    for field, value in data.items():
+        if value is not None:
+            setattr(control, field, value)
+    await db.commit()
+    await db.refresh(control)
+    return control
+
+
+async def delete_custom_control(db: AsyncSession, control: CustomComplianceControl) -> None:
+    await db.delete(control)
+    await db.commit()

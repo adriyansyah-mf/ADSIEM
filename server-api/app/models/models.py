@@ -577,6 +577,26 @@ class AiFeedback(Base):
     created_by      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     created_at      = Column(DateTime(timezone=True), default=now_utc)
 
+class CustomComplianceControl(Base):
+    """User-defined compliance control scoped to a single endpoint — lets an
+    analyst track an organization-specific requirement (internal SOP,
+    contractual obligation, ...) that has no automated check, unlike the
+    framework controls in app/services/compliance.py which are always
+    derived from live agent telemetry. Status/evidence here are manually
+    attested by whoever created or last edited the control."""
+    __tablename__ = "custom_compliance_controls"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id     = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    framework_id = Column(String(50))  # optional tag: "iso27001" | "pci_dss" | "soc2" | None
+    title        = Column(String(255), nullable=False)
+    description  = Column(Text)
+    status       = Column(String(20), nullable=False, default="gap")  # met | partial | gap
+    evidence     = Column(Text)
+    group_id     = Column(String(100), nullable=False, default="default")
+    created_by   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+    updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
 class SoarPlaybook(Base):
     __tablename__ = "soar_playbooks"
     id                 = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

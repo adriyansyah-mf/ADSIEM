@@ -663,6 +663,23 @@ async def _migrate_ioc_tables_permission() -> None:
             ON CONFLICT DO NOTHING
         """))
 
+async def _migrate_compliance_manage_permission() -> None:
+    """The custom_compliance_controls table itself is created by
+    Base.metadata.create_all; this only seeds the compliance:manage
+    permission for existing databases, since db/init.sql's seed block only
+    runs once against a fresh Postgres volume."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO permissions (name) VALUES ('compliance:manage') ON CONFLICT (name) DO NOTHING"
+        ))
+        await conn.execute(text("""
+            INSERT INTO role_permissions (role_id, permission_id)
+            SELECT r.id, p.id FROM roles r, permissions p
+            WHERE r.name IN ('superadmin', 'admin', 'analyst') AND p.name = 'compliance:manage'
+            ON CONFLICT DO NOTHING
+        """))
+
 async def _ws_redis_listener():
     """Subscribe to Redis ws:alerts channel and broadcast to WebSocket clients."""
     import asyncio
@@ -727,6 +744,7 @@ async def lifespan(app: FastAPI):
         await _migrate_ioc_tables_permission()
         await _migrate_agent_telemetry_columns()
         await _migrate_hygiene_hardening_column()
+        await _migrate_compliance_manage_permission()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()

@@ -551,6 +551,38 @@ class HygieneSnapshotOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ─── Compliance — custom per-endpoint controls ────────────────────
+
+
+class CustomComplianceControlIn(BaseModel):
+    framework_id: str | None = None
+    title: str
+    description: str | None = None
+    status: Literal["met", "partial", "gap"] = "gap"
+    evidence: str | None = None
+
+
+class CustomComplianceControlUpdate(BaseModel):
+    framework_id: str | None = None
+    title: str | None = None
+    description: str | None = None
+    status: Literal["met", "partial", "gap"] | None = None
+    evidence: str | None = None
+
+
+class CustomComplianceControlOut(BaseModel):
+    id: UUID
+    agent_id: UUID
+    framework_id: str | None
+    title: str
+    description: str | None
+    status: str
+    evidence: str | None
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
 # ─── UEBA ────────────────────────────────────────────────────────
 
 
