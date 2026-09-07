@@ -43,8 +43,8 @@ export function DonutChart({
       <svg width={size} height={size} viewBox={`0 0 ${vb} ${vb}`} aria-hidden="true">
         {arcs.length > 0 ? arcs.map(a => <path key={a.key} d={a.path} fill={a.color} />)
           : <circle cx={cx} cy={cy} r={(r + rInner) / 2} fill="none" stroke="var(--border)" strokeWidth={r - rInner} />}
-        <text x={cx} y={cy - 5} textAnchor="middle" style={{ font: '700 26px "IBM Plex Sans", sans-serif', fill: 'var(--text-primary)' }}>{centerLabel}</text>
-        <text x={cx} y={cy + 12} textAnchor="middle" style={{ font: '9px "IBM Plex Mono", monospace', fill: 'var(--text-muted)', letterSpacing: '0.05em' }}>{centerSublabel}</text>
+        <text x={cx} y={cy - 5} textAnchor="middle" style={{ font: '700 26px "Public Sans", sans-serif', fill: 'var(--text-primary)' }}>{centerLabel}</text>
+        <text x={cx} y={cy + 12} textAnchor="middle" style={{ font: '9px "JetBrains Mono", monospace', fill: 'var(--text-muted)', letterSpacing: '0.05em' }}>{centerSublabel}</text>
       </svg>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
         {segments.map(s => (
@@ -53,7 +53,7 @@ export function DonutChart({
               <span style={{ width: 9, height: 9, borderRadius: 2, background: s.color, flexShrink: 0 }} />
               {s.label}
             </span>
-            <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{s.value}</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 600, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{s.value}</span>
           </div>
         ))}
       </div>

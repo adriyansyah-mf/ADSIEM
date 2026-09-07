@@ -1,41 +1,45 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* ==========================================================================
-   Obsidian Sentinel — enterprise SOC console theme.
-   See design-system-obsidian-sentinel/design-system.md for the full spec.
+   Ironwatch — industrial-grade SOC console theme.
+   See design-system-enterprise-soc/design-system.md for the full spec.
+   Flat surfaces, no glass/blur/glow — instrumentation, not a startup dashboard.
    ========================================================================== */
 
 :root {
-  --bg-base: #0A0E14;
-  --bg-panel: #11161F;
-  --bg-card: #182030;
-  --bg-hover: #1E2838;
-  --border: #232B3A;
-  --border-glow: rgba(0, 217, 192, 0.24);
-  --glass-bg: rgba(17, 22, 31, 0.72);
-  --glass-bg-strong: rgba(24, 32, 48, 0.9);
-  --glass-border: rgba(0, 217, 192, 0.14);
-  --glass-blur: blur(18px) saturate(145%);
-  --glass-blur-chrome: blur(20px) saturate(135%);
+  --bg-base: #14181D;
+  --bg-panel: #1B2028;
+  --bg-card: #1B2028;
+  --bg-hover: #232A34;
+  --border: #2E3540;
+  --border-glow: rgba(44, 110, 142, 0.28);
+  --glass-bg: #1B2028;
+  --glass-bg-strong: #232A34;
+  --glass-border: #2E3540;
+  --glass-blur: none;
+  --glass-blur-chrome: none;
 
-  --accent-blue: #00D9C0;
-  --accent-red: #FF3B5C;
-  --accent-orange: #FF7A45;
-  --accent-yellow: #FFC53D;
-  --accent-green: #2ED47A;
-  --accent-purple: #a979f7;
-  --note-color: #6b8aad;
+  --accent-blue: #2C6E8E;
+  --accent-blue-hover: #3A87A8;
+  --accent-red: #D8393F;
+  --accent-orange: #D8752E;
+  --accent-yellow: #D8B23D;
+  --accent-green: #4F8F63;
+  --accent-purple: #5C7C99;
+  --accent-copper: #C9822E;
+  --note-color: #5C7C99;
 
-  --text-primary: #E6EAF2;
-  --text-secondary: #8A94A6;
-  --text-muted: #5A6478;
+  --text-primary: #E4E8ED;
+  --text-secondary: #9AA4B2;
+  --text-muted: #68717E;
 
-  --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  --font-body: 'Public Sans', -apple-system, BlinkMacSystemFont, ui-sans-serif, sans-serif;
+  --font-display: 'Archivo', 'Arial Narrow', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -47,18 +51,18 @@
   --motion-micro: 120ms ease-out;
   --motion-standard: 200ms ease-in-out;
 
-  --background: 216 33% 6%;
-  --foreground: 220 32% 93%;
-  --card: 220 33% 14%;
-  --card-foreground: 220 32% 93%;
-  --border-tw: 219 25% 18%;
-  --primary: 173 100% 43%;
-  --primary-foreground: 213 61% 7%;
-  --muted: 219 29% 9%;
-  --muted-foreground: 219 14% 60%;
-  --destructive: 350 100% 62%;
-  --destructive-foreground: 220 32% 93%;
-  --radius: 0.375rem;
+  --background: 213 18% 10%;
+  --foreground: 213 20% 91%;
+  --card: 217 19% 13%;
+  --card-foreground: 213 20% 91%;
+  --border-tw: 217 16% 22%;
+  --primary: 200 53% 36%;
+  --primary-foreground: 213 20% 91%;
+  --muted: 216 24% 8%;
+  --muted-foreground: 215 13% 65%;
+  --destructive: 358 67% 54%;
+  --destructive-foreground: 213 20% 91%;
+  --radius: 0.25rem;
 }
 
 * {
@@ -75,7 +79,8 @@ html, body {
   line-height: 1.5;
 }
 
-main h1 {
+main h1, main h2, main h3 {
+  font-family: var(--font-display);
   font-weight: 700;
   letter-spacing: -0.015em;
   text-wrap: balance;
@@ -85,18 +90,6 @@ main h1 {
    numbers — keeps digit widths stable instead of jittering. */
 main :is(td, .tabular-nums) {
   font-variant-numeric: tabular-nums;
-}
-
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(ellipse 56rem 38rem at 7% -8%, rgba(49, 147, 255, 0.14), transparent 62%),
-    radial-gradient(ellipse 52rem 34rem at 94% -10%, rgba(169, 121, 247, 0.09), transparent 64%),
-    radial-gradient(ellipse 68rem 42rem at 50% 116%, rgba(49, 147, 255, 0.07), transparent 62%);
 }
 
 #root {
@@ -125,11 +118,9 @@ body::before {
 }
 
 .enterprise-panel {
-  border-color: var(--glass-border) !important;
-  background: var(--glass-bg) !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  border-color: var(--border) !important;
+  background: var(--bg-panel) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 @media (max-width: 79.99rem) {
@@ -222,25 +213,11 @@ body::before {
   background: var(--bg-panel);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1a3050;
+  background: #414B59;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--accent-blue);
-}
-
-/* Glow utilities */
-.glow-cyan {
-  box-shadow: 0 0 10px rgba(49, 147, 255, 0.3);
-}
-.glow-red {
-  box-shadow: 0 0 10px rgba(255, 92, 92, 0.3);
-}
-.glow-green {
-  box-shadow: 0 0 10px rgba(107, 212, 124, 0.3);
-}
-.glow-orange {
-  box-shadow: 0 0 10px rgba(255, 159, 67, 0.3);
 }
 
 .sign-out-btn {

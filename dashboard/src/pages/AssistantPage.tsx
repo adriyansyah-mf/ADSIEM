@@ -84,8 +84,8 @@ export default function AssistantPage() {
             <div key={i} style={{
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
               maxWidth: '70%',
-              background: m.role === 'user' ? 'rgba(0,217,192,0.14)' : 'var(--bg-panel)',
-              border: `1px solid ${m.role === 'user' ? 'rgba(0,217,192,0.55)' : 'var(--border)'}`,
+              background: m.role === 'user' ? 'rgba(44,110,142,0.14)' : 'var(--bg-panel)',
+              border: `1px solid ${m.role === 'user' ? 'rgba(44,110,142,0.55)' : 'var(--border)'}`,
               borderRadius: 8, padding: '10px 14px',
               fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.55, whiteSpace: 'pre-wrap',
             }}>
@@ -119,7 +119,7 @@ export default function AssistantPage() {
             aria-label="Send message"
             style={{
               width: 42, minHeight: 42, borderRadius: 6, border: '1px solid var(--accent-blue)',
-              background: 'rgba(0,217,192,0.12)', color: 'var(--accent-blue)',
+              background: 'rgba(44,110,142,0.12)', color: 'var(--accent-blue)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
               opacity: loading || !input.trim() ? 0.5 : 1,

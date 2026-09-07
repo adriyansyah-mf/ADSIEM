@@ -215,7 +215,7 @@ export default function Layout() {
                       padding: collapsed ? '8px 0' : '7px 16px',
                       justifyContent: collapsed ? 'center' : 'flex-start',
                       textDecoration: 'none',
-                      background: active ? 'rgba(0,217,192,0.12)' : 'transparent',
+                      background: active ? 'rgba(44,110,142,0.12)' : 'transparent',
                       borderLeft: active ? '2px solid var(--accent-blue)' : '2px solid transparent',
                       color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
                       boxShadow: active ? 'inset 12px 0 24px -24px var(--accent-blue)' : 'none',
@@ -273,7 +273,7 @@ export default function Layout() {
                       padding: collapsed ? '8px 0' : '7px 16px',
                       justifyContent: collapsed ? 'center' : 'flex-start',
                       textDecoration: 'none',
-                      background: active ? 'rgba(0,217,192,0.12)' : 'transparent',
+                      background: active ? 'rgba(44,110,142,0.12)' : 'transparent',
                       borderLeft: active ? '2px solid var(--accent-blue)' : '2px solid transparent',
                       color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
                       boxShadow: active ? 'inset 12px 0 24px -24px var(--accent-blue)' : 'none',
@@ -410,7 +410,7 @@ export default function Layout() {
                     key={a.id}
                     onMouseDown={() => { navigate(`/alerts?open=${a.id}`); setSearchOpen(false); setSearchQuery('') }}
                     style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border)', display: 'flex', gap: 8, alignItems: 'center' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,217,192,0.08)' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(44,110,142,0.08)' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                   >
                     <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,59,92,0.15)', color: 'var(--accent-red)', fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
@@ -427,10 +427,10 @@ export default function Layout() {
                     key={c.id}
                     onMouseDown={() => { navigate(`/cases/${c.id}`); setSearchOpen(false); setSearchQuery('') }}
                     style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border)', display: 'flex', gap: 8, alignItems: 'center' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(0,217,192,0.08)' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(44,110,142,0.08)' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                   >
-                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(0,217,192,0.12)', color: 'var(--accent-blue)', fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(44,110,142,0.12)', color: 'var(--accent-blue)', fontWeight: 600, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                       {c.status}
                     </span>
                     <span style={{ fontSize: 12, color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -466,7 +466,7 @@ export default function Layout() {
                     padding: '5px 12px',
                     borderRadius: 7,
                     border: '1px solid var(--glass-border)',
-                    background: adminMenuOpen ? 'rgba(0,217,192,0.1)' : 'transparent',
+                    background: adminMenuOpen ? 'rgba(44,110,142,0.1)' : 'transparent',
                     color: 'var(--text-secondary)',
                     fontSize: 12,
                     fontWeight: 500,
@@ -494,7 +494,7 @@ export default function Layout() {
                             display: 'flex', alignItems: 'center', gap: 8,
                             padding: '8px 14px',
                             textDecoration: 'none',
-                            background: active ? 'rgba(0,217,192,0.12)' : 'transparent',
+                            background: active ? 'rgba(44,110,142,0.12)' : 'transparent',
                             color: active ? 'var(--accent-blue)' : 'var(--text-primary)',
                             fontSize: 12.5,
                           }}

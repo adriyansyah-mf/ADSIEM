@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ironwatch Design System</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root {
+  --color-primary: #2C6E8E; --color-primary-hover: #3A87A8; --color-secondary: #3A4250; --color-accent: #C9822E;
+  --color-background: #14181D; --color-surface: #1B2028; --color-surface-elevated: #232A34; --color-surface-sunken: #10141A;
+  --color-border: #2E3540; --color-border-strong: #414B59;
+  --color-text-primary: #E4E8ED; --color-text-secondary: #9AA4B2; --color-text-muted: #68717E; --color-text-on-primary: #0A0D11;
+  --color-success: #4F8F63; --color-warning: #D8B23D; --color-error: #D8393F; --color-info: #5C7C99;
+  --sev-critical: #D8393F; --sev-high: #D8752E; --sev-medium: #D8B23D; --sev-low: #4F8F63; --sev-info: #5C7C99;
+  --font-display: 'Archivo', 'Arial Narrow', sans-serif;
+  --font-body: 'Public Sans', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.25rem; --space-6: 1.5rem; --space-8: 2rem; --space-10: 2.5rem; --space-12: 3rem; --space-16: 4rem;
+  --radius-sm: 2px; --radius-md: 4px; --radius-lg: 6px; --radius-xl: 8px;
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.5); --shadow-lg: 0 12px 32px rgba(0,0,0,0.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--color-background); color: var(--color-text-primary);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+}
+code, .mono { font-family: var(--font-mono); }
+h1, h2, h3, .display { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+p { margin: 0; }
+a { color: var(--color-primary); }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: var(--space-12) var(--space-6) var(--space-16); }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-accent); margin-bottom: var(--space-2);
+}
+.hero { padding-bottom: var(--space-10); border-bottom: 1px solid var(--color-border); margin-bottom: var(--space-10); }
+.hero h1 { font-size: 44px; margin-bottom: var(--space-3); }
+.hero .sub { color: var(--color-text-secondary); font-size: 17px; max-width: 640px; }
+.hero .meta { display: flex; gap: var(--space-6); margin-top: var(--space-6); font-family: var(--font-mono); font-size: 12px; color: var(--color-text-muted); }
+
+section { margin-bottom: var(--space-16); }
+section > h2 { font-size: 22px; margin-bottom: var(--space-1); }
+section > .desc { color: var(--color-text-secondary); font-size: 14px; margin-bottom: var(--space-6); max-width: 680px; }
+
+/* Color swatches */
+.swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+.swatch { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.swatch .fill { height: 64px; }
+.swatch .info { padding: var(--space-3); }
+.swatch .name { font-weight: 600; font-size: 13px; }
+.swatch .hex { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-secondary); }
+.swatch .usage { font-size: 12px; color: var(--color-text-muted); margin-top: var(--space-1); }
+
+/* Severity ramp */
+.sev-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--space-3); }
+.sev-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-4); text-align: center; }
+.sev-shape { width: 28px; height: 28px; margin: 0 auto var(--space-3); display: flex; align-items: center; justify-content: center; }
+.sev-shape svg { width: 24px; height: 24px; }
+.sev-name { font-family: var(--font-mono); font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.sev-hex { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); margin-top: var(--space-1); }
+
+/* Type scale */
+.type-row { display: flex; align-items: baseline; gap: var(--space-6); padding: var(--space-3) 0; border-bottom: 1px solid var(--color-border); }
+.type-row .label { width: 90px; flex-shrink: 0; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+.type-row .sample { font-family: var(--font-display); font-weight: 700; }
+.type-row .use { margin-left: auto; font-size: 12px; color: var(--color-text-secondary); flex-shrink: 0; }
+.font-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); margin-top: var(--space-6); }
+.font-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-5); }
+.font-card .fname { font-size: 22px; margin-bottom: var(--space-1); }
+.font-card .frole { font-family: var(--font-mono); font-size: 11px; color: var(--color-accent); text-transform: uppercase; letter-spacing: 0.08em; }
+.font-card .fsample { margin-top: var(--space-3); color: var(--color-text-secondary); font-size: 14px; }
+
+/* Spacing scale */
+.space-row { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-2) 0; }
+.space-row .label { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-muted); width: 60px; }
+.space-row .bar { background: var(--color-primary); height: 14px; border-radius: 2px; }
+
+/* Components */
+.comp-block { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-6); margin-bottom: var(--space-4); }
+.comp-label { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: var(--space-4); }
+.row { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+
+.btn { display: inline-flex; align-items: center; gap: var(--space-2); font-family: var(--font-body); font-weight: 600; font-size: 13px; padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); border: 1px solid transparent; cursor: pointer; transition: all .12s ease-out; }
+.btn-primary { background: var(--color-primary); color: var(--color-text-on-primary); }
+.btn-primary:hover { background: var(--color-primary-hover); }
+.btn-secondary { background: var(--color-secondary); color: var(--color-text-primary); border-color: var(--color-border-strong); }
+.btn-ghost { background: transparent; color: var(--color-text-secondary); }
+.btn-ghost:hover { color: var(--color-text-primary); background: var(--color-surface-elevated); }
+.btn-danger { background: var(--color-error); color: var(--color-text-on-primary); }
+
+.input-demo { background: var(--color-surface-sunken); border: 1px solid var(--color-border); border-radius: var(--radius-md); color: var(--color-text-primary); font-family: var(--font-body); font-size: 13px; padding: var(--space-2) var(--space-3); width: 240px; }
+.input-demo:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(44,110,142,0.25); }
+
+.badge-severity { display: inline-flex; align-items: center; gap: var(--space-1); font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 3px var(--space-2); border-radius: var(--radius-sm); border: 1px solid currentColor; }
+.badge-severity .shape { width: 8px; height: 8px; flex-shrink: 0; }
+.badge-critical { color: var(--sev-critical); background: rgba(216,57,63,0.12); }
+.badge-critical .shape { background: currentColor; }
+.badge-high { color: var(--sev-high); background: rgba(216,117,46,0.12); }
+.badge-high .shape { background: currentColor; clip-path: polygon(50% 0%, 0% 100%, 100% 100%); }
+.badge-medium { color: var(--sev-medium); background: rgba(216,178,61,0.12); }
+.badge-medium .shape { background: currentColor; clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); }
+.badge-low { color: var(--sev-low); background: rgba(79,143,99,0.12); }
+.badge-low .shape { background: currentColor; border-radius: 50%; }
+.badge-info { color: var(--sev-info); background: transparent; }
+.badge-info .shape { border: 1.5px solid currentColor; border-radius: 50%; width: 6px; height: 6px; }
+
+.cards-demo { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); }
+.demo-card { background: var(--color-surface-elevated); border: 1px solid var(--color-border); border-radius: var(--radius-md); box-shadow: var(--shadow-md); padding: var(--space-4); }
+.demo-card .ctitle { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-text-secondary); margin-bottom: var(--space-2); }
+.demo-card .cval { font-size: 28px; font-family: var(--font-display); font-weight: 800; }
+
+/* Mini app mock */
+.app-mock { display: flex; border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg); height: 560px; }
+.app-sidebar { width: 220px; background: var(--color-surface); border-right: 1px solid var(--color-border); padding: var(--space-4) var(--space-3); flex-shrink: 0; overflow-y: auto; }
+.app-brand { font-family: var(--font-display); font-weight: 800; font-size: 15px; padding: 0 var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); margin-bottom: var(--space-3); }
+.app-brand .tag { display: block; font-family: var(--font-mono); font-size: 10px; font-weight: 400; color: var(--color-text-muted); letter-spacing: 0.06em; margin-top: 2px; }
+.nav-group { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-muted); padding: var(--space-3) var(--space-2) var(--space-1); }
+.nav-item { display: flex; align-items: center; gap: var(--space-2); padding: 7px var(--space-2); border-radius: var(--radius-sm); font-size: 13px; color: var(--color-text-secondary); cursor: pointer; }
+.nav-item.active { background: rgba(44,110,142,0.16); color: var(--color-primary-hover); font-weight: 600; border-left: 2px solid var(--color-primary); padding-left: 6px; }
+.nav-item .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--color-text-muted); flex-shrink: 0; }
+.app-main { flex: 1; background: var(--color-background); overflow-y: auto; padding: var(--space-5); }
+.app-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-5); }
+.app-header h3 { font-size: 20px; }
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); margin-bottom: var(--space-5); }
+.kpi { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); }
+.kpi .klabel { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.kpi .kval { font-family: var(--font-display); font-size: 26px; font-weight: 800; margin-top: 2px; }
+.kpi.accent .kval { color: var(--color-accent); }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.mini-table th { background: var(--color-surface-sunken); color: var(--color-text-secondary); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); }
+.mini-table td { padding: 7px var(--space-3); border-bottom: 1px solid var(--color-border); color: var(--color-text-secondary); }
+.mini-table td.host { color: var(--color-text-primary); font-family: var(--font-mono); }
+.mini-table tr:hover td { background: var(--color-surface-elevated); }
+.mini-table tr:last-child td { border-bottom: none; }
+
+footer { border-top: 1px solid var(--color-border); padding-top: var(--space-6); color: var(--color-text-muted); font-size: 12px; font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="eyebrow">Design System · v1.0.0</div>
+    <h1>Ironwatch</h1>
+    <p class="sub">Industrial-grade design system for AD-SIEM. Built to look like instrumentation an analyst trusts — reference points are Splunk Enterprise Security, Microsoft Sentinel, IBM QRadar, Elastic Security, and CrowdStrike Falcon, not a startup dashboard.</p>
+    <div class="meta">
+      <span>PRIMARY: Archivo / Public Sans / JetBrains Mono</span>
+      <span>BASE UNIT: 4px</span>
+      <span>RADIUS: 2–8px (no bubbles)</span>
+    </div>
+  </div>
+
+  <section>
+    <h2>Color System</h2>
+    <p class="desc">One confident primary, one rationed accent, and a severity ramp that never relies on hue alone.</p>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="fill" style="background:var(--color-primary)"></div><div class="info"><div class="name">Primary</div><div class="hex">#2C6E8E</div><div class="usage">Actions, active nav, links, focus rings</div></div></div>
+      <div class="swatch"><div class="fill" style="background:var(--color-accent)"></div><div class="info"><div class="name">Accent (copper)</div><div class="hex">#C9822E</div><div class="usage">"Look now" indicators only — never decorative</div></div></div>
+      <div class="swatch"><div class="fill" style="background:var(--color-background)"></div><div class="info"><div class="name">Background</div><div class="hex">#14181D</div><div class="usage">Page background — gunmetal, not black</div></div></div>
+      <div class="swatch"><div class="fill" style="background:var(--color-surface)"></div><div class="info"><div class="name">Surface</div><div class="hex">#1B2028</div><div class="usage">Cards, panels, tables</div></div></div>
+      <div class="swatch"><div class="fill" style="background:var(--color-surface-elevated)"></div><div class="info"><div class="name">Surface elevated</div><div class="hex">#232A34</div><div class="usage">Modals, dropdowns, hover rows</div></div></div>
+      <div class="swatch"><div class="fill" style="background:var(--color-surface-sunken)"></div><div class="info"><div class="name">Surface sunken</div><div class="hex">#10141A</div><div class="usage">Inputs, log viewers, code blocks</div></div></div>
+      <div class="swatch"><div class="fill" style="background:var(--color-success)"></div><div class="info"><div class="name">Success</div><div class="hex">#4F8F63</div><div class="usage">Resolved, healthy, online</div></div></div>
+      <div class="swatch"><div class="fill" style="background:var(--color-warning)"></div><div class="info"><div class="name">Warning</div><div class="hex">#D8B23D</div><div class="usage">Degraded, SLA at risk</div></div></div>
+      <div class="swatch"><div class="fill" style="background:var(--color-error)"></div><div class="info"><div class="name">Error</div><div class="hex">#D8393F</div><div class="usage">Errors, destructive actions</div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Severity Ramp</h2>
+    <p class="desc">Shape + color + label, always. Print this page in grayscale — severity must still be legible.</p>
+    <div class="sev-grid">
+      <div class="sev-card"><div class="sev-shape"><svg viewBox="0 0 24 24"><rect width="24" height="24" fill="#D8393F"/></svg></div><div class="sev-name" style="color:var(--sev-critical)">Critical</div><div class="sev-hex">#D8393F · square</div></div>
+      <div class="sev-card"><div class="sev-shape"><svg viewBox="0 0 24 24"><polygon points="12,1 23,23 1,23" fill="#D8752E"/></svg></div><div class="sev-name" style="color:var(--sev-high)">High</div><div class="sev-hex">#D8752E · triangle</div></div>
+      <div class="sev-card"><div class="sev-shape"><svg viewBox="0 0 24 24"><polygon points="12,1 23,12 12,23 1,12" fill="#D8B23D"/></svg></div><div class="sev-name" style="color:var(--sev-medium)">Medium</div><div class="sev-hex">#D8B23D · diamond</div></div>
+      <div class="sev-card"><div class="sev-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#4F8F63"/></svg></div><div class="sev-name" style="color:var(--sev-low)">Low</div><div class="sev-hex">#4F8F63 · circle</div></div>
+      <div class="sev-card"><div class="sev-shape"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#5C7C99" stroke-width="2.5"/></svg></div><div class="sev-name" style="color:var(--sev-info)">Info</div><div class="sev-hex">#5C7C99 · outline</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Typography</h2>
+    <p class="desc">Public Sans is the U.S. federal government's own accessibility-first typeface (USWDS) — chosen for legibility, not personality. Archivo carries display weight. Inter/Roboto/system-ui are never used as the primary face.</p>
+    <div class="font-cards">
+      <div class="font-card"><div class="fname" style="font-family:var(--font-display)">Archivo</div><div class="frole">Display</div><div class="fsample">Page titles, KPI numbers, card labels.</div></div>
+      <div class="font-card"><div class="fname" style="font-family:var(--font-body)">Public Sans</div><div class="frole">Body</div><div class="fsample">Everything else — the workhorse face.</div></div>
+      <div class="font-card"><div class="fname mono">JetBrains Mono</div><div class="frole">Mono</div><div class="fsample mono">IPs, hashes, log lines, badges.</div></div>
+    </div>
+    <div style="margin-top:24px">
+      <div class="type-row"><span class="label">3xl / 36px</span><span class="sample" style="font-size:36px">1,247</span><span class="use">KPI tile numbers</span></div>
+      <div class="type-row"><span class="label">2xl / 26px</span><span class="sample" style="font-size:26px">Alert Detail</span><span class="use">Page titles</span></div>
+      <div class="type-row"><span class="label">xl / 20px</span><span class="sample" style="font-size:20px">Active Investigations</span><span class="use">Section headers</span></div>
+      <div class="type-row"><span class="label">lg / 17px</span><span class="sample" style="font-size:17px;font-weight:600">Top Source IPs</span><span class="use">Card/panel titles</span></div>
+      <div class="type-row"><span class="label">sm / 13px</span><span class="sample" style="font-size:13px;font-weight:400;font-family:var(--font-body)">Direct root SSH login from 203.0.113.77</span><span class="use">Default table/body text</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Spacing</h2>
+    <p class="desc">4px base unit. No arbitrary values.</p>
+    <div class="space-row"><span class="label">4px</span><div class="bar" style="width:4px"></div></div>
+    <div class="space-row"><span class="label">8px</span><div class="bar" style="width:8px"></div></div>
+    <div class="space-row"><span class="label">12px</span><div class="bar" style="width:12px"></div></div>
+    <div class="space-row"><span class="label">16px</span><div class="bar" style="width:16px"></div></div>
+    <div class="space-row"><span class="label">24px</span><div class="bar" style="width:24px"></div></div>
+    <div class="space-row"><span class="label">32px</span><div class="bar" style="width:32px"></div></div>
+    <div class="space-row"><span class="label">48px</span><div class="bar" style="width:48px"></div></div>
+  </section>
+
+  <section>
+    <h2>Components</h2>
+
+    <div class="comp-block">
+      <div class="comp-label">Buttons</div>
+      <div class="row">
+        <button class="btn btn-primary">Acknowledge Alert</button>
+        <button class="btn btn-secondary">Export</button>
+        <button class="btn btn-ghost">View Detail</button>
+        <button class="btn btn-danger">Isolate Host</button>
+      </div>
+    </div>
+
+    <div class="comp-block">
+      <div class="comp-label">Severity Badges</div>
+      <div class="row">
+        <span class="badge-severity badge-critical"><span class="shape"></span>Critical</span>
+        <span class="badge-severity badge-high"><span class="shape"></span>High</span>
+        <span class="badge-severity badge-medium"><span class="shape"></span>Medium</span>
+        <span class="badge-severity badge-low"><span class="shape"></span>Low</span>
+        <span class="badge-severity badge-info"><span class="shape"></span>Info</span>
+      </div>
+    </div>
+
+    <div class="comp-block">
+      <div class="comp-label">Inputs</div>
+      <div class="row">
+        <input class="input-demo" placeholder="Search alerts, cases, IPs…">
+        <input class="input-demo" placeholder="Focused state" style="border-color:var(--color-primary);box-shadow:0 0 0 3px rgba(44,110,142,0.25)">
+      </div>
+    </div>
+
+    <div class="comp-block">
+      <div class="comp-label">KPI Cards</div>
+      <div class="cards-demo">
+        <div class="demo-card"><div class="ctitle">Open Alerts</div><div class="cval">108</div></div>
+        <div class="demo-card"><div class="ctitle">Critical</div><div class="cval" style="color:var(--sev-critical)">3</div></div>
+        <div class="demo-card"><div class="ctitle">Unread</div><div class="cval" style="color:var(--color-accent)">12</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>In Context</h2>
+    <p class="desc">Sidebar navigation grouped Monitor / Analytics / Response / Configuration / Administration, KPI row, and a dense alert table — the actual shape of the product.</p>
+    <div class="app-mock">
+      <div class="app-sidebar">
+        <div class="app-brand">AD-SIEM<span class="tag">SECURITY OPERATIONS</span></div>
+        <div class="nav-group">Monitor</div>
+        <div class="nav-item active">Dashboard</div>
+        <div class="nav-item">Logs</div>
+        <div class="nav-item">Events</div>
+        <div class="nav-item">Alerts</div>
+        <div class="nav-item">Cases</div>
+        <div class="nav-item">SOC Assistant</div>
+        <div class="nav-group">Analytics</div>
+        <div class="nav-item">UEBA</div>
+        <div class="nav-item">Hygiene</div>
+        <div class="nav-item">FIM</div>
+        <div class="nav-item">YARA</div>
+        <div class="nav-item">Threat Hunt</div>
+        <div class="nav-item">MITRE Heatmap</div>
+        <div class="nav-item">Reports</div>
+        <div class="nav-group">Response</div>
+        <div class="nav-item">Live Response</div>
+        <div class="nav-group">Configuration</div>
+        <div class="nav-item">Agents</div>
+        <div class="nav-item">Rules</div>
+        <div class="nav-item">Decoders</div>
+        <div class="nav-item">SOAR</div>
+        <div class="nav-item">Webhooks</div>
+        <div class="nav-group">Administration</div>
+        <div class="nav-item">Audit Log</div>
+        <div class="nav-item">Settings</div>
+        <div class="nav-item">Users</div>
+      </div>
+      <div class="app-main">
+        <div class="app-header">
+          <h3>Dashboard</h3>
+          <button class="btn btn-secondary">Last 24h</button>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi"><div class="klabel">Open Alerts</div><div class="kval">108</div></div>
+          <div class="kpi"><div class="klabel">Critical</div><div class="kval" style="color:var(--sev-critical)">3</div></div>
+          <div class="kpi"><div class="klabel">Agents Online</div><div class="kval">3/4</div></div>
+          <div class="kpi accent"><div class="klabel">Unread</div><div class="kval">12</div></div>
+        </div>
+        <table class="mini-table">
+          <thead><tr><th>Time</th><th>Alert</th><th class="host">Host</th><th>Severity</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>08:02:14</td><td>Cryptocurrency Miner Detected</td><td class="host">db-prod-09</td><td><span class="badge-severity badge-high"><span class="shape"></span>High</span></td><td>Acknowledged</td></tr>
+            <tr><td>08:01:59</td><td>Direct Root SSH Login</td><td class="host">web01</td><td><span class="badge-severity badge-critical"><span class="shape"></span>Critical</span></td><td>Open</td></tr>
+            <tr><td>07:58:40</td><td>SSH Login via Password Auth</td><td class="host">web01</td><td><span class="badge-severity badge-medium"><span class="shape"></span>Medium</span></td><td>Acknowledged</td></tr>
+            <tr><td>07:50:12</td><td>Unusual Privilege Escalation</td><td class="host">db-prod-09</td><td><span class="badge-severity badge-medium"><span class="shape"></span>Medium</span></td><td>Open</td></tr>
+            <tr><td>07:44:03</td><td>SSH Brute Force Attempt</td><td class="host">web03</td><td><span class="badge-severity badge-high"><span class="shape"></span>High</span></td><td>Open</td></tr>
+            <tr><td>07:30:51</td><td>File Integrity: /etc/passwd modified</td><td class="host">web02</td><td><span class="badge-severity badge-low"><span class="shape"></span>Low</span></td><td>Resolved</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer>IRONWATCH v1.0.0 · design-system-enterprise-soc/ · AD-SIEM</footer>
+</div>
+</body>
+</html>

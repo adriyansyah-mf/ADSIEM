@@ -21,7 +21,7 @@ export function HorizontalBarChart({ rows, rowHeight = 30, barHeight = 16 }: { r
         {rows.map(r => (
           <div key={r.label} style={{
             height: rowHeight, display: 'flex', alignItems: 'center',
-            fontFamily: 'IBM Plex Mono, monospace', fontSize: 11.5, color: 'var(--text-secondary)',
+            fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, color: 'var(--text-secondary)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...r.labelStyle,
           }}>
             {r.label}
@@ -49,7 +49,7 @@ export function HorizontalBarChart({ rows, rowHeight = 30, barHeight = 16 }: { r
         {rows.map(r => (
           <div key={r.label} style={{
             height: rowHeight, display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-            fontFamily: 'IBM Plex Mono, monospace', fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)',
+            fontFamily: 'JetBrains Mono, monospace', fontSize: 11.5, fontWeight: 600, color: 'var(--text-primary)',
             fontVariantNumeric: 'tabular-nums',
           }}>
             {r.segments.reduce((sum, s) => sum + s.value, 0)}

@@ -14,7 +14,7 @@ const filterInputStyle: React.CSSProperties = {
   border: '1px solid var(--border)',
   background: 'var(--bg-card)',
   color: 'var(--text-primary)',
-  fontFamily: 'IBM Plex Sans, sans-serif',
+  fontFamily: 'Public Sans, sans-serif',
   fontSize: '12px',
 }
 
@@ -47,7 +47,7 @@ function SeverityTile({ severity }: { severity: string }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontFamily: 'IBM Plex Sans, sans-serif',
+        fontFamily: 'Public Sans, sans-serif',
         fontWeight: 700,
         fontSize: '11px',
         letterSpacing: '0.5px',
@@ -108,7 +108,7 @@ function CaseCard({ c }: { c: Case }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
             {c.created_by_ai && <BrainCircuit aria-label="AI generated" size={14} />}
             <span style={{
-              fontFamily: 'IBM Plex Sans, sans-serif',
+              fontFamily: 'Public Sans, sans-serif',
               fontWeight: 700,
               fontSize: '14px',
               color: 'var(--text-primary)',
@@ -118,7 +118,7 @@ function CaseCard({ c }: { c: Case }) {
           </div>
           {c.ai_reasoning && (
             <div style={{
-              fontFamily: 'IBM Plex Sans, sans-serif',
+              fontFamily: 'Public Sans, sans-serif',
               fontSize: '12px',
               color: 'var(--text-secondary)',
               overflow: 'hidden',
@@ -130,7 +130,7 @@ function CaseCard({ c }: { c: Case }) {
             </div>
           )}
           {sourceIp && (
-            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-blue)', marginTop: '3px' }}>
+            <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '11px', color: 'var(--accent-blue)', marginTop: '3px' }}>
               SRC: {sourceIp}
             </div>
           )}
@@ -142,7 +142,7 @@ function CaseCard({ c }: { c: Case }) {
             borderRadius: '3px',
             border: `1px solid ${statusColor}`,
             color: statusColor,
-            fontFamily: 'IBM Plex Sans, sans-serif',
+            fontFamily: 'Public Sans, sans-serif',
             fontWeight: 700,
             fontSize: '11px',
             letterSpacing: '0.5px',
@@ -152,7 +152,7 @@ function CaseCard({ c }: { c: Case }) {
             {c.status.replace('_', ' ')}
           </span>
           {c.escalated_at && (
-            <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--accent-orange)', marginTop: '3px' }}>
+            <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--accent-orange)', marginTop: '3px' }}>
               ESC {format(new Date(c.escalated_at), 'MM-dd HH:mm')}
             </div>
           )}
@@ -169,11 +169,11 @@ function CaseCard({ c }: { c: Case }) {
       }}
       onClick={e => e.stopPropagation()}
       >
-        <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
+        <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
           {format(new Date(c.created_at), 'yyyy-MM-dd HH:mm')}
         </span>
         {c.alert_id && (
-          <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
+          <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
             ALT:{c.alert_id.slice(0, 8)}
           </span>
         )}
@@ -220,7 +220,7 @@ function ActionBtn({ label, onClick, color, loading }: { label: string; onClick:
         border: `1px solid ${color}`,
         background: 'transparent',
         color,
-        fontFamily: 'IBM Plex Sans, sans-serif',
+        fontFamily: 'Public Sans, sans-serif',
         fontWeight: 700,
         fontSize: '10px',
         letterSpacing: '0.5px',
@@ -280,13 +280,13 @@ export default function CasesPage() {
           title={<><BriefcaseBusiness aria-hidden="true" size={20} /> Security cases</>}
           className="!mb-0"
           subtitle={<span style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
-            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-blue)' }}>
+            <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '11px', color: 'var(--accent-blue)' }}>
               OPEN: {openCount}
             </span>
-            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--accent-orange)' }}>
+            <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '11px', color: 'var(--accent-orange)' }}>
               ESCALATED: {escalatedCount}
             </span>
-            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>
+            <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>
               TOTAL: {total}
             </span>
           </span>}
@@ -313,7 +313,7 @@ export default function CasesPage() {
                 borderBottom: isActive ? '2px solid var(--accent-blue)' : '2px solid transparent',
                 background: 'transparent',
                 color: isActive ? 'var(--accent-blue)' : 'var(--text-secondary)',
-                fontFamily: 'IBM Plex Sans, sans-serif',
+                fontFamily: 'Public Sans, sans-serif',
                 fontWeight: 700,
                 fontSize: '12px',
                 letterSpacing: '1px',
@@ -363,11 +363,11 @@ export default function CasesPage() {
 
       {/* Cases list */}
       {isLoading ? (
-        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
+        <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
           LOADING CASES...
         </div>
       ) : cases.length === 0 ? (
-        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
+        <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
           NO CASES FOUND
         </div>
       ) : (
@@ -387,13 +387,13 @@ export default function CasesPage() {
             style={{
               padding: '6px 14px', borderRadius: '4px', border: '1px solid var(--border)',
               background: 'transparent', color: page <= 1 ? 'var(--text-muted)' : 'var(--text-secondary)',
-              fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
+              fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
               cursor: page <= 1 ? 'not-allowed' : 'pointer',
             }}
           >
             ← PREV
           </button>
-          <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>
+          <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)' }}>
             PAGE {page} / {totalPages}
           </span>
           <button
@@ -402,7 +402,7 @@ export default function CasesPage() {
             style={{
               padding: '6px 14px', borderRadius: '4px', border: '1px solid var(--border)',
               background: 'transparent', color: page >= totalPages ? 'var(--text-muted)' : 'var(--text-secondary)',
-              fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
+              fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
               cursor: page >= totalPages ? 'not-allowed' : 'pointer',
             }}
           >

@@ -130,12 +130,12 @@ function CorrelationPanel({
   return (
     <div style={{
       borderTop: '1px solid var(--border)',
-      background: enabled ? 'rgba(0,217,192,0.03)' : 'transparent',
+      background: enabled ? 'rgba(44,110,142,0.03)' : 'transparent',
       padding: '10px 16px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <span style={{
-          fontFamily: 'IBM Plex Sans, sans-serif',
+          fontFamily: 'Public Sans, sans-serif',
           fontWeight: 700,
           fontSize: '10px',
           letterSpacing: '2px',
@@ -147,9 +147,9 @@ function CorrelationPanel({
             padding: '2px 10px',
             borderRadius: '3px',
             border: `1px solid ${enabled ? 'var(--accent-blue)' : 'var(--border)'}`,
-            background: enabled ? 'rgba(0,217,192,0.15)' : 'transparent',
+            background: enabled ? 'rgba(44,110,142,0.15)' : 'transparent',
             color: enabled ? 'var(--accent-blue)' : 'var(--text-muted)',
-            fontFamily: 'IBM Plex Sans, sans-serif',
+            fontFamily: 'Public Sans, sans-serif',
             fontWeight: 700,
             fontSize: '10px',
             letterSpacing: '1px',
@@ -159,7 +159,7 @@ function CorrelationPanel({
           {enabled ? 'ENABLED' : 'DISABLED'}
         </button>
         {!enabled && (
-          <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif' }}>
+          <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'Public Sans, sans-serif' }}>
             Count events over a time window — fire alert when threshold crossed
           </span>
         )}
@@ -173,7 +173,7 @@ function CorrelationPanel({
               border: '1px solid var(--border)',
               background: 'transparent',
               color: 'var(--text-muted)',
-              fontFamily: 'IBM Plex Sans, sans-serif',
+              fontFamily: 'Public Sans, sans-serif',
               fontWeight: 600,
               fontSize: '9px',
               letterSpacing: '1px',
@@ -189,7 +189,7 @@ function CorrelationPanel({
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '10px', marginTop: '10px' }}>
           {/* Group By */}
           <div>
-            <label style={{ display: 'block', fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '9px', letterSpacing: '1px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+            <label style={{ display: 'block', fontFamily: 'Public Sans, sans-serif', fontWeight: 600, fontSize: '9px', letterSpacing: '1px', color: 'var(--text-muted)', marginBottom: '4px' }}>
               GROUP BY
             </label>
             <select
@@ -261,7 +261,7 @@ function CorrelationPanel({
       )}
 
       {enabled && (
-        <div style={{ marginTop: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', padding: '4px 8px', background: 'var(--bg-base)', borderRadius: '3px', border: '1px solid var(--border)' }}>
+        <div style={{ marginTop: '8px', fontFamily: 'Public Sans, sans-serif', fontSize: '9px', color: 'var(--text-muted)', padding: '4px 8px', background: 'var(--bg-base)', borderRadius: '3px', border: '1px solid var(--border)' }}>
           Alert fires when {cfg.count}+ events{cfg.group_by !== '_all' ? ` per ${cfg.group_by}` : ''} detected within {cfg.timewindow}s · cooldown {cfg.cooldown}s · stored in Redis (survives restart)
         </div>
       )}
@@ -298,13 +298,13 @@ const inputStyle: React.CSSProperties = {
   border: '1px solid var(--border)',
   borderRadius: '3px',
   color: 'var(--text-primary)',
-  fontFamily: 'IBM Plex Sans, sans-serif',
+  fontFamily: 'Public Sans, sans-serif',
   fontSize: '11px',
 }
 
 const labelStyle: React.CSSProperties = {
   display: 'block',
-  fontFamily: 'IBM Plex Sans, sans-serif',
+  fontFamily: 'Public Sans, sans-serif',
   fontWeight: 600,
   fontSize: '9px',
   letterSpacing: '1px',
@@ -314,7 +314,7 @@ const labelStyle: React.CSSProperties = {
 
 const hintStyle: React.CSSProperties = {
   marginTop: '3px',
-  fontFamily: 'IBM Plex Sans, sans-serif',
+  fontFamily: 'Public Sans, sans-serif',
   fontSize: '9px',
   color: 'var(--text-muted)',
 }
@@ -366,12 +366,12 @@ export default function RulesPage() {
             padding: '1px 5px',
             borderRadius: '3px',
             fontSize: '9px',
-            fontFamily: 'IBM Plex Sans, sans-serif',
+            fontFamily: 'Public Sans, sans-serif',
             fontWeight: 700,
             letterSpacing: '0.5px',
-            border: '1px solid rgba(0,217,192,0.4)',
+            border: '1px solid rgba(44,110,142,0.4)',
             color: 'var(--accent-blue)',
-            background: 'rgba(0,217,192,0.08)',
+            background: 'rgba(44,110,142,0.08)',
           }}>CORR</span>
         )}
       </div>

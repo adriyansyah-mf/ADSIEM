@@ -15,11 +15,11 @@ import type { Alert, Agent, Case, Event } from '@/types'
 interface WorkloadItem { user_id: string; username: string; open_alerts: number; open_cases: number; total: number }
 
 const severityColors = {
-  critical: { bg: 'rgba(255,59,92,0.15)', border: '#FF3B5C', color: '#FF3B5C' },
-  high:     { bg: 'rgba(255,122,69,0.15)', border: '#FF7A45', color: '#FF7A45' },
-  medium:   { bg: 'rgba(255,197,61,0.1)',  border: '#FFC53D', color: '#FFC53D' },
-  low:      { bg: 'rgba(46,212,122,0.1)',  border: '#2ED47A', color: '#2ED47A' },
-  info:     { bg: 'rgba(0,217,192,0.1)',  border: '#00D9C0', color: '#00D9C0' },
+  critical: { bg: 'rgba(255,59,92,0.15)', border: '#D8393F', color: '#D8393F' },
+  high:     { bg: 'rgba(255,122,69,0.15)', border: '#D8752E', color: '#D8752E' },
+  medium:   { bg: 'rgba(255,197,61,0.1)',  border: '#D8B23D', color: '#D8B23D' },
+  low:      { bg: 'rgba(46,212,122,0.1)',  border: '#4F8F63', color: '#4F8F63' },
+  info:     { bg: 'rgba(44,110,142,0.1)',  border: '#2C6E8E', color: '#2C6E8E' },
 }
 
 function SeverityBadge({ severity }: { severity: string }) {
@@ -33,7 +33,7 @@ function SeverityBadge({ severity }: { severity: string }) {
       border: `1px solid ${c.border}`,
       background: c.bg,
       color: c.color,
-      fontFamily: 'IBM Plex Sans, sans-serif',
+      fontFamily: 'Public Sans, sans-serif',
       fontWeight: 700,
       fontSize: '11px',
       letterSpacing: '0.5px',
@@ -61,10 +61,10 @@ function KpiTile({
       position: 'relative', borderRadius: '6px', border: '1px solid var(--border)',
       background: 'var(--bg-card)', padding: '12px 14px', overflow: 'hidden',
     }}>
-      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+      <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
         {label}
       </div>
-      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '22px', fontWeight: 700, color: valueColor ?? 'var(--text-primary)', marginTop: '4px', fontVariantNumeric: 'tabular-nums' }}>
+      <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '22px', fontWeight: 700, color: valueColor ?? 'var(--text-primary)', marginTop: '4px', fontVariantNumeric: 'tabular-nums' }}>
         {value}
       </div>
       {sparkline && sparkline.length > 1 && (
@@ -239,7 +239,7 @@ export default function DashboardPage() {
             centerLabel={String(totalOpenSeverity)}
             centerSublabel="OPEN"
           />
-          <div style={{ marginTop: '8px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
+          <div style={{ marginTop: '8px', fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
             LAST 24H: {todayAlerts.length} TOTAL
           </div>
         </SectionCard>
@@ -263,14 +263,14 @@ export default function DashboardPage() {
                 background: 'var(--bg-panel)',
                 border: '1px solid var(--border)',
               }}>
-                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
+                <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
                   {format(new Date(ev.created_at), 'HH:mm:ss')}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '2px' }}>
                   {ev.event_action ?? 'event'}
                 </div>
                 {ev.source_ip && (
-                  <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--accent-blue)' }}>
+                  <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--accent-blue)' }}>
                     {ev.source_ip}
                   </div>
                 )}
@@ -295,7 +295,7 @@ export default function DashboardPage() {
                 placeholder="IoC value…" style={{
                   flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--border)',
                   borderRadius: '3px', color: 'var(--text-primary)', fontSize: '11px',
-                  padding: '3px 6px', fontFamily: 'IBM Plex Sans, sans-serif',
+                  padding: '3px 6px', fontFamily: 'Public Sans, sans-serif',
                 }} />
               <button aria-label="Run threat intelligence lookup" title="Run threat intelligence lookup" onClick={handleTiLookup} disabled={tiLoading} style={{
                 background: 'var(--accent-blue)', color: '#000', border: 'none',
@@ -308,11 +308,11 @@ export default function DashboardPage() {
               <div style={{
                 padding: '6px', borderRadius: '3px',
                 background: 'var(--bg-panel)', border: '1px solid var(--border)',
-                fontSize: '10px', fontFamily: 'IBM Plex Sans, sans-serif',
+                fontSize: '10px', fontFamily: 'Public Sans, sans-serif',
                 color: 'var(--text-secondary)', overflowX: 'hidden',
               }}>
                 {tiResult.error ? (
-                  <span style={{ color: '#FF3B5C' }}>{String(tiResult.error)}</span>
+                  <span style={{ color: '#D8393F' }}>{String(tiResult.error)}</span>
                 ) : (
                   <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                     {JSON.stringify(tiResult, null, 2)}
@@ -344,10 +344,10 @@ export default function DashboardPage() {
           padding: '14px 16px',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: 'var(--accent-blue)' }}>
+            <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '11px', fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase', color: 'var(--accent-blue)' }}>
               Alert Volume — Last 24h
             </span>
-            <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>{todayAlerts.length} TOTAL</span>
+            <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>{todayAlerts.length} TOTAL</span>
           </div>
           <StackedBarChart
             ariaLabel={`Alert volume over the last 24 hours by severity, ${todayAlerts.length} total alerts`}
@@ -386,7 +386,7 @@ export default function DashboardPage() {
             gap: '8px',
           }}>
             <span style={{
-              fontFamily: 'IBM Plex Sans, sans-serif',
+              fontFamily: 'Public Sans, sans-serif',
               fontSize: '11px',
               fontWeight: 700,
               letterSpacing: '2px',
@@ -396,7 +396,7 @@ export default function DashboardPage() {
               Agentic Triage Feed
             </span>
             <span style={{
-              fontFamily: 'IBM Plex Sans, sans-serif',
+              fontFamily: 'Public Sans, sans-serif',
               fontSize: '10px',
               color: 'var(--text-muted)',
             }}>
@@ -411,7 +411,7 @@ export default function DashboardPage() {
                     <th key={h} style={{
                       padding: '8px 12px',
                       textAlign: 'left',
-                      fontFamily: 'IBM Plex Sans, sans-serif',
+                      fontFamily: 'Public Sans, sans-serif',
                       fontSize: '10px',
                       fontWeight: 700,
                       letterSpacing: '1.5px',
@@ -435,18 +435,18 @@ export default function DashboardPage() {
                       transition: 'background 0.1s',
                       cursor: 'pointer',
                     }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderLeft = '2px solid rgba(0,217,192,0.3)' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderLeft = '2px solid rgba(44,110,142,0.3)' }}
                     onMouseLeave={e => { e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)'; e.currentTarget.style.borderLeft = '' }}
                     >
-                      <td style={{ padding: '8px 12px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '8px 12px', fontFamily: 'Public Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                         {format(new Date(alert.created_at), 'MM-dd HH:mm')}
                       </td>
                       <td style={{ padding: '8px 12px', maxWidth: '200px' }}>
-                        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)' }}>
+                        <div style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)' }}>
                           {alert.title}
                         </div>
                         {alert.hostname && (
-                          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
+                          <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)' }}>
                             {alert.hostname}
                           </div>
                         )}
@@ -456,7 +456,7 @@ export default function DashboardPage() {
                       </td>
                       <td style={{ padding: '8px 12px', maxWidth: '280px' }}>
                         <div style={{
-                          fontFamily: 'IBM Plex Sans, sans-serif',
+                          fontFamily: 'Public Sans, sans-serif',
                           fontSize: '11px',
                           color: linkedCase ? 'var(--text-primary)' : 'var(--text-muted)',
                           overflow: 'hidden',
@@ -473,11 +473,11 @@ export default function DashboardPage() {
                           padding: '2px 7px',
                           borderRadius: '3px',
                           fontSize: '10px',
-                          fontFamily: 'IBM Plex Sans, sans-serif',
+                          fontFamily: 'Public Sans, sans-serif',
                           fontWeight: 700,
                           letterSpacing: '0.5px',
                           textTransform: 'uppercase',
-                          background: alert.status === 'new' ? 'rgba(0,217,192,0.1)' : 'rgba(46,212,122,0.1)',
+                          background: alert.status === 'new' ? 'rgba(44,110,142,0.1)' : 'rgba(46,212,122,0.1)',
                           color: alert.status === 'new' ? 'var(--accent-blue)' : 'var(--accent-green)',
                           border: `1px solid ${alert.status === 'new' ? 'var(--accent-blue)' : 'var(--accent-green)'}`,
                         }}>
@@ -489,7 +489,7 @@ export default function DashboardPage() {
                 })}
                 {recentAlertItems.length === 0 && (
                   <tr>
-                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px' }}>
+                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'Public Sans, sans-serif', fontSize: '12px' }}>
                       NO ALERTS IN FEED
                     </td>
                   </tr>
@@ -512,14 +512,14 @@ export default function DashboardPage() {
             }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '3px' }}>
                 {c.created_by_ai && <BrainCircuit aria-label="AI generated" size={13} />}
-                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)', flex: 1 }}>
+                <span style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)', flex: 1 }}>
                   {c.title}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
                 <SeverityBadge severity={c.severity} />
                 <span style={{
-                  fontFamily: 'IBM Plex Sans, sans-serif',
+                  fontFamily: 'Public Sans, sans-serif',
                   fontSize: '10px',
                   fontWeight: 600,
                   color: 'var(--text-muted)',
@@ -527,7 +527,7 @@ export default function DashboardPage() {
                   textTransform: 'uppercase',
                 }}>{c.status.replace('_', ' ')}</span>
               </div>
-              <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '3px' }}>
+              <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '3px' }}>
                 {format(new Date(c.created_at), 'MM-dd HH:mm')}
               </div>
             </div>
@@ -547,10 +547,10 @@ export default function DashboardPage() {
               { label: 'TOTAL CASES', value: casesData?.total ?? '—' },
             ].map(m => (
               <div key={m.label} style={{ flex: 1, padding: '6px 8px', borderRadius: '4px', background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '0.5px', fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                <div style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 700, letterSpacing: '0.5px', fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                   {m.label}
                 </div>
-                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
+                <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginTop: '2px' }}>
                   {m.value}
                 </div>
               </div>
@@ -569,7 +569,7 @@ export default function DashboardPage() {
               { label: 'INGESTION STREAM', value: workerMetrics?.ingestion_stream_length ?? 'unknown', ok: true },
             ].map(item => (
               <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 8px', borderRadius: '3px', background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)' }}>{item.label}</span>
+                <span style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)' }}>{item.label}</span>
                 <span style={{ color: item.ok ? 'var(--accent-green)' : 'var(--accent-red)', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>{item.value}</span>
               </div>
             ))}
@@ -579,21 +579,21 @@ export default function DashboardPage() {
         <SectionCard title="SOC Response">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {[
-              { label: 'AVG MTTD', value: socMetrics?.avg_ack_minutes != null ? `${Math.round(socMetrics.avg_ack_minutes)}m` : '—', color: '#00D9C0' },
-              { label: 'AVG MTTR', value: socMetrics?.avg_mttr_minutes != null ? `${Math.round(socMetrics.avg_mttr_minutes)}m` : '—', color: '#2ED47A' },
-              { label: 'FP RATE', value: socMetrics?.false_positive_rate_pct != null ? `${(socMetrics.false_positive_rate_pct as number).toFixed(1)}%` : '—', color: '#FFC53D' },
-              { label: 'SLA BREACHED', value: socMetrics?.sla_breached ?? '—', color: '#FF3B5C' },
-              { label: 'UNASSIGNED', value: socMetrics?.unassigned_open ?? '—', color: '#FF7A45' },
+              { label: 'AVG MTTD', value: socMetrics?.avg_ack_minutes != null ? `${Math.round(socMetrics.avg_ack_minutes)}m` : '—', color: '#2C6E8E' },
+              { label: 'AVG MTTR', value: socMetrics?.avg_mttr_minutes != null ? `${Math.round(socMetrics.avg_mttr_minutes)}m` : '—', color: '#4F8F63' },
+              { label: 'FP RATE', value: socMetrics?.false_positive_rate_pct != null ? `${(socMetrics.false_positive_rate_pct as number).toFixed(1)}%` : '—', color: '#D8B23D' },
+              { label: 'SLA BREACHED', value: socMetrics?.sla_breached ?? '—', color: '#D8393F' },
+              { label: 'UNASSIGNED', value: socMetrics?.unassigned_open ?? '—', color: '#D8752E' },
             ].map(m => (
               <div key={m.label} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '6px 8px', borderRadius: '3px',
                 background: 'var(--bg-panel)', border: '1px solid var(--border)',
               }}>
-                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                <span style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
                   {m.label}
                 </span>
-                <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '15px', fontWeight: 700, color: m.color }}>
+                <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '15px', fontWeight: 700, color: m.color }}>
                   {m.value}
                 </span>
               </div>

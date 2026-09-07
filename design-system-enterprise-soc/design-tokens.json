@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "name": "Ironwatch",
+    "description": "Industrial-grade design system for enterprise SOC/SIEM consoles — built for legibility under fatigue, not first impressions.",
+    "version": "1.0.0",
+    "created": "2026-09-07",
+    "personality": "Ironwatch reads like instrumentation, not marketing: gunmetal surfaces, a restrained steel-blue primary, and a copper accent reserved for the one thing that needs a human's attention. Typography is chosen for extreme legibility at small sizes (Public Sans, the U.S. federal government's own accessibility-first typeface) over personality. Severity is never color alone — shape and label ride along every time. Nothing glows, nothing floats, nothing is bubbly; every panel is a flat, sharp-cornered instrument reading, the way a tool that has run unattended in a SOC for six years actually looks."
+  },
+  "colors": {
+    "primary": { "value": "#2C6E8E", "usage": "Primary actions, active nav state, links, focus rings — the one confident blue in the system" },
+    "primary-hover": { "value": "#3A87A8", "usage": "Hover state for primary buttons/links" },
+    "secondary": { "value": "#3A4250", "usage": "Secondary buttons, less-important controls" },
+    "accent": { "value": "#C9822E", "usage": "Copper — reserved for things that need a human to look NOW: unread badges, live indicators, the one highlighted row. Never used decoratively." },
+    "background": { "value": "#14181D", "usage": "Page background — gunmetal, not pure black" },
+    "surface": { "value": "#1B2028", "usage": "Card / panel / table background" },
+    "surface-elevated": { "value": "#232A34", "usage": "Modal / dropdown / popover background" },
+    "surface-sunken": { "value": "#10141A", "usage": "Inset wells — code blocks, log viewers, input backgrounds" },
+    "border": { "value": "#2E3540", "usage": "Default dividers, table rules, input borders" },
+    "border-strong": { "value": "#414B59", "usage": "Emphasized borders — focused inputs, active panel outline" },
+    "text-primary": { "value": "#E4E8ED", "usage": "Main body text — soft white, never pure #FFF" },
+    "text-secondary": { "value": "#9AA4B2", "usage": "Labels, captions, table headers, timestamps" },
+    "text-muted": { "value": "#68717E", "usage": "Placeholder text, disabled state, least-important metadata" },
+    "text-on-primary": { "value": "#0A0D11", "usage": "Text on primary/copper-colored backgrounds" },
+    "success": { "value": "#4F8F63", "usage": "Positive states — closed/resolved, healthy, online" },
+    "warning": { "value": "#D8B23D", "usage": "Caution states — degraded, pending review, SLA at risk" },
+    "error": { "value": "#D8393F", "usage": "Error states, destructive actions, critical severity" },
+    "info": { "value": "#5C7C99", "usage": "Informational states, neutral log/info severity" },
+    "severity-critical": { "value": "#D8393F", "usage": "Critical severity — filled square badge" },
+    "severity-high": { "value": "#D8752E", "usage": "High severity — filled triangle badge" },
+    "severity-medium": { "value": "#D8B23D", "usage": "Medium severity — filled diamond badge" },
+    "severity-low": { "value": "#4F8F63", "usage": "Low severity — filled circle badge" },
+    "severity-info": { "value": "#5C7C99", "usage": "Informational — outlined circle badge" }
+  },
+  "typography": {
+    "font-display": { "family": "Archivo", "fallback": "'Archivo', 'Arial Narrow', sans-serif", "source": "https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&display=swap" },
+    "font-body": { "family": "Public Sans", "fallback": "'Public Sans', -apple-system, sans-serif", "source": "https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" },
+    "font-mono": { "family": "JetBrains Mono", "fallback": "'JetBrains Mono', 'Consolas', monospace", "source": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" },
+    "scale": {
+      "2xs": { "size": "0.6875rem", "lineHeight": "0.875rem", "usage": "Micro-labels, badge text, table header caps" },
+      "xs": { "size": "0.75rem", "lineHeight": "1rem", "usage": "Fine print, secondary table cells, timestamps" },
+      "sm": { "size": "0.8125rem", "lineHeight": "1.25rem", "usage": "Default table/body text — this is the workhorse size" },
+      "base": { "size": "0.9375rem", "lineHeight": "1.5rem", "usage": "Primary reading text, form inputs" },
+      "lg": { "size": "1.0625rem", "lineHeight": "1.5rem", "usage": "Card titles, panel headers" },
+      "xl": { "size": "1.25rem", "lineHeight": "1.75rem", "usage": "Page section headers" },
+      "2xl": { "size": "1.625rem", "lineHeight": "2rem", "usage": "Page titles" },
+      "3xl": { "size": "2.25rem", "lineHeight": "2.5rem", "usage": "KPI tile numbers" }
+    },
+    "weights": { "normal": 400, "medium": 500, "semibold": 600, "bold": 700, "black": 800 }
+  },
+  "spacing": {
+    "base-unit": "4px",
+    "scale": {
+      "0": "0", "1": "0.25rem", "2": "0.5rem", "3": "0.75rem", "4": "1rem",
+      "5": "1.25rem", "6": "1.5rem", "8": "2rem", "10": "2.5rem", "12": "3rem", "16": "4rem"
+    }
+  },
+  "borders": {
+    "radius": { "none": "0", "sm": "2px", "md": "4px", "lg": "6px", "xl": "8px", "full": "9999px" },
+    "width": { "default": "1px", "thick": "2px" }
+  },
+  "shadows": {
+    "sm": { "value": "0 1px 2px rgba(0,0,0,0.45)", "usage": "Table row hover, subtle input elevation" },
+    "md": { "value": "0 2px 8px rgba(0,0,0,0.5)", "usage": "Cards, dropdowns, sticky headers" },
+    "lg": { "value": "0 12px 32px rgba(0,0,0,0.6)", "usage": "Modals, command palette" },
+    "glow": null
+  },
+  "effects": {
+    "backdrop-blur": null,
+    "glass-opacity": null,
+    "transition-default": "all 0.12s ease-out",
+    "transition-slow": "all 0.25s ease-out"
+  },
+  "components": {
+    "button": {
+      "primary": { "bg": "primary", "text": "text-on-primary", "radius": "radius-md", "padding": "spacing-2 spacing-4" },
+      "secondary": { "bg": "secondary", "text": "text-primary", "radius": "radius-md", "border": "border-strong" },
+      "ghost": { "bg": "transparent", "text": "text-secondary", "radius": "radius-md" },
+      "danger": { "bg": "error", "text": "text-on-primary", "radius": "radius-md" }
+    },
+    "card": { "bg": "surface", "radius": "radius-md", "shadow": "shadow-md", "padding": "spacing-4", "border": "border" },
+    "input": { "bg": "surface-sunken", "border": "border", "radius": "radius-md", "text": "text-primary", "placeholder": "text-muted", "focus-ring": "primary" },
+    "badge-severity": { "shape-critical": "filled-square", "shape-high": "filled-triangle", "shape-medium": "filled-diamond", "shape-low": "filled-circle", "shape-info": "outlined-circle", "note": "Shape + color + text label always travel together — never color alone" },
+    "table": { "header-bg": "surface-sunken", "row-bg": "surface", "row-hover-bg": "surface-elevated", "border": "border", "header-text": "text-secondary" }
+  }
+}

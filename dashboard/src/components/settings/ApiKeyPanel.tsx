@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/hooks/useApiKeys'
 import type { ApiKeyCreated } from '@/types'
 
-const font = { fontFamily: 'IBM Plex Sans, sans-serif' }
+const font = { fontFamily: 'Public Sans, sans-serif' }
 
 function StatusBadge({ revokedAt, expiresAt }: { revokedAt: string | null; expiresAt: string | null }) {
   const isRevoked = revokedAt !== null
@@ -44,7 +44,7 @@ function CreatedKeyReveal({ created, onDismiss }: { created: ApiKeyCreated; onDi
           {created.secret}
         </code>
         <button onClick={copy} style={{
-          ...font, padding: '7px 14px', background: copied ? 'rgba(46,212,122,0.1)' : 'rgba(0,217,192,0.1)',
+          ...font, padding: '7px 14px', background: copied ? 'rgba(46,212,122,0.1)' : 'rgba(44,110,142,0.1)',
           border: `1px solid ${copied ? 'var(--accent-green)' : 'var(--accent-blue)'}`,
           color: copied ? 'var(--accent-green)' : 'var(--accent-blue)',
           borderRadius: 4, cursor: 'pointer', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap',
@@ -114,7 +114,7 @@ function CreateKeyForm({ onCreated, onCancel }: { onCreated: (k: ApiKeyCreated) 
       {error && <div style={{ ...font, fontSize: 11, color: 'var(--accent-red)' }}>{error}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button onClick={submit} disabled={createKey.isPending} style={{
-          ...font, padding: '7px 16px', background: 'rgba(0,217,192,0.1)', border: '1px solid var(--accent-blue)',
+          ...font, padding: '7px 16px', background: 'rgba(44,110,142,0.1)', border: '1px solid var(--accent-blue)',
           color: 'var(--accent-blue)', borderRadius: 4, cursor: createKey.isPending ? 'not-allowed' : 'pointer',
           fontWeight: 700, fontSize: 12, opacity: createKey.isPending ? 0.6 : 1,
         }}>
@@ -150,7 +150,7 @@ export function ApiKeyPanel() {
         </div>
         {!showForm && !revealed && (
           <button onClick={() => setShowForm(true)} style={{
-            ...font, padding: '7px 16px', background: 'rgba(0,217,192,0.1)', border: '1px solid var(--accent-blue)',
+            ...font, padding: '7px 16px', background: 'rgba(44,110,142,0.1)', border: '1px solid var(--accent-blue)',
             color: 'var(--accent-blue)', borderRadius: 4, cursor: 'pointer', fontWeight: 700, fontSize: 12, letterSpacing: 0.5,
           }}>
             + CREATE KEY

@@ -18,7 +18,7 @@ export interface TimelineItem {
 }
 
 const SEV_COLOR: Record<string, string> = {
-  critical: '#FF3B5C', high: '#FF7A45', medium: '#FFC53D', low: '#2ED47A', info: '#00D9C0',
+  critical: '#D8393F', high: '#D8752E', medium: '#D8B23D', low: '#4F8F63', info: '#2C6E8E',
 }
 const NOTE_COLOR = 'var(--note-color)'
 
@@ -210,7 +210,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
 
   if (alerts.length === 0) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', padding: '8px 0' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'Public Sans, sans-serif', padding: '8px 0' }}>
         No related events found in ±24h window.
       </div>
     )
@@ -229,7 +229,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                 onClick={() => setFilters(f => ({ ...f, [c.key]: !f[c.key] }))}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-                  fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, letterSpacing: '.5px', textTransform: 'uppercase',
+                  fontFamily: 'Public Sans, sans-serif', fontSize: 10, letterSpacing: '.5px', textTransform: 'uppercase',
                   padding: '4px 9px', borderRadius: 20,
                   border: `1px solid ${on ? c.color : 'var(--border)'}`,
                   background: on ? `${c.color}22` : 'var(--bg-panel)',
@@ -248,7 +248,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
             disabled={isReplaying}
             style={{
               ...zoomBtnStyle, width: 'auto', padding: '0 12px', display: 'flex', alignItems: 'center', gap: 6,
-              fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: 11, letterSpacing: '1px',
+              fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: 11, letterSpacing: '1px',
               color: isReplaying ? 'var(--accent-orange)' : 'var(--text-secondary)',
               borderColor: isReplaying ? 'var(--accent-orange)' : 'var(--border)',
               cursor: isReplaying ? 'default' : 'pointer',
@@ -257,14 +257,14 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
             {isReplaying ? '■ PLAYING' : '▶ REPLAY'}
           </button>
           <button onClick={() => setZoom(z => Math.max(0.6, z - 0.15))} style={zoomBtnStyle}>−</button>
-          <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, color: 'var(--text-muted)', width: 34, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+          <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: 10, color: 'var(--text-muted)', width: 34, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
           <button onClick={() => setZoom(z => Math.min(2.4, z + 0.15))} style={zoomBtnStyle}>+</button>
           <button onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }} style={zoomBtnStyle} title="Reset view">⤾</button>
         </div>
       </div>
 
       {entityLabel && (
-        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 11, color: 'var(--accent-blue)', marginBottom: 8 }}>
+        <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: 11, color: 'var(--accent-blue)', marginBottom: 8 }}>
           ENTITY: {entityLabel}
         </div>
       )}
@@ -285,7 +285,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                 <g key={lane}>
                   {i % 2 === 1 && <rect x={0} y={y} width={W} height={laneH} fill="rgba(255,255,255,.02)" />}
                   <line x1={0} y1={y} x2={W} y2={y} stroke="var(--border)" strokeWidth={1} />
-                  <text x={12} y={y + laneH / 2 + 3} style={{ font: '9.5px "IBM Plex Mono", monospace', letterSpacing: '1px', textTransform: 'uppercase', fill: 'var(--text-muted)' } as React.CSSProperties}>
+                  <text x={12} y={y + laneH / 2 + 3} style={{ font: '9.5px "JetBrains Mono", monospace', letterSpacing: '1px', textTransform: 'uppercase', fill: 'var(--text-muted)' } as React.CSSProperties}>
                     {lane}
                   </text>
                 </g>
@@ -313,7 +313,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                    onClick={() => setSelected(n)}
                    onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(null)}>
                   <path d={diamond(x, y - 20, 6)} fill="var(--bg-card)" stroke={NOTE_COLOR} strokeWidth={1} />
-                  <text x={x} y={y - 28} textAnchor="middle" style={{ font: '700 9px "IBM Plex Sans", sans-serif', fill: 'var(--text-secondary)' } as React.CSSProperties}>N</text>
+                  <text x={x} y={y - 28} textAnchor="middle" style={{ font: '700 9px "Public Sans", sans-serif', fill: 'var(--text-secondary)' } as React.CSSProperties}>N</text>
                 </g>
               )
             })}
@@ -335,11 +335,11 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                   <circle cx={x} cy={y} r={isSel ? 9 : 6.5} fill={color} stroke="var(--bg-base)" strokeWidth={2} />
                   {showLabel && (
                     <>
-                      <text x={x} y={y - 16} textAnchor="middle" style={{ font: '8.5px "IBM Plex Mono", monospace', fill: 'var(--text-muted)' } as React.CSSProperties}>
+                      <text x={x} y={y - 16} textAnchor="middle" style={{ font: '8.5px "JetBrains Mono", monospace', fill: 'var(--text-muted)' } as React.CSSProperties}>
                         {fmtShort(a.ts)}
                       </text>
                       <text x={x > W - 200 ? x - 10 : x + 10} y={y + 22} textAnchor={x > W - 200 ? 'end' : 'start'}
-                            style={{ font: '600 10.5px "IBM Plex Sans", sans-serif', fill: 'var(--text-primary)' } as React.CSSProperties}>
+                            style={{ font: '600 10.5px "Public Sans", sans-serif', fill: 'var(--text-primary)' } as React.CSSProperties}>
                         {truncate(a.title, 30)}
                       </text>
                     </>
@@ -359,14 +359,14 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
             {CHIPS.map(c => (
               <span key={c.key} style={{
                 display: 'flex', alignItems: 'center', gap: 4,
-                fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase',
+                fontFamily: 'Public Sans, sans-serif', fontSize: 9, color: 'var(--text-secondary)', textTransform: 'uppercase',
               }}>
                 <span style={{ width: 7, height: 7, borderRadius: c.key === 'note' ? 0 : '50%', background: c.color }} />
                 {c.label}
               </span>
             ))}
           </div>
-          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 9, color: 'var(--text-muted)' }}>
+          <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: 9, color: 'var(--text-muted)' }}>
             drag to pan · scroll to zoom
           </div>
         </div>
@@ -384,12 +384,12 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
             <div style={{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', gap: 10 }}>
               <div>
                 <div style={{
-                  fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 6,
+                  fontFamily: 'Public Sans, sans-serif', fontSize: 10, letterSpacing: '1.5px', textTransform: 'uppercase', marginBottom: 6,
                   color: selected.type === 'note' ? 'var(--text-secondary)' : (SEV_COLOR[selected.severity || 'info'] || SEV_COLOR.info),
                 }}>
                   {selected.type === 'note' ? 'CASE NOTE' : `${selected.kill_chain_stage || 'Unknown'} · ${(selected.severity || '').toUpperCase()}`}
                 </div>
-                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: 16, lineHeight: 1.35, color: 'var(--text-primary)' }}>
+                <div style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: 16, lineHeight: 1.35, color: 'var(--text-primary)' }}>
                   {selected.title}
                 </div>
               </div>
@@ -408,8 +408,8 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                       <div>
                         {selected.mitre_techniques.map(t => (
                           <span key={t} style={{
-                            display: 'inline-block', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 10, padding: '3px 8px',
-                            borderRadius: 3, background: 'rgba(0,217,192,.1)', border: '1px solid #00D9C033', color: 'var(--accent-blue)', margin: '0 6px 6px 0',
+                            display: 'inline-block', fontFamily: 'Public Sans, sans-serif', fontSize: 10, padding: '3px 8px',
+                            borderRadius: 3, background: 'rgba(44,110,142,.1)', border: '1px solid #2C6E8E33', color: 'var(--accent-blue)', margin: '0 6px 6px 0',
                           }}>{t}</span>
                         ))}
                       </div>
@@ -419,8 +419,8 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                     onClick={() => setOpenAlertId(selected.id)}
                     style={{
                       marginTop: 'auto', display: 'block', width: '100%', textAlign: 'center', padding: 10, borderRadius: 5,
-                      border: '1px solid var(--accent-blue)', background: 'rgba(0,217,192,.08)', color: 'var(--accent-blue)',
-                      fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: 12, letterSpacing: '1.5px', cursor: 'pointer', textTransform: 'uppercase',
+                      border: '1px solid var(--accent-blue)', background: 'rgba(44,110,142,.08)', color: 'var(--accent-blue)',
+                      fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: 12, letterSpacing: '1.5px', cursor: 'pointer', textTransform: 'uppercase',
                     }}
                   >
                     Open Full Alert →
@@ -443,7 +443,7 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
   return (
     <div>
       <div style={fieldLabelStyle}>{label}</div>
-      <div style={{ fontSize: 13, color: mono ? 'var(--accent-blue)' : 'var(--text-primary)', fontFamily: mono ? 'IBM Plex Sans, sans-serif' : undefined, lineHeight: 1.55 }}>
+      <div style={{ fontSize: 13, color: mono ? 'var(--accent-blue)' : 'var(--text-primary)', fontFamily: mono ? 'Public Sans, sans-serif' : undefined, lineHeight: 1.55 }}>
         {value}
       </div>
     </div>
@@ -451,7 +451,7 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
 }
 
 const fieldLabelStyle: React.CSSProperties = {
-  fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 9.5, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4,
+  fontFamily: 'Public Sans, sans-serif', fontSize: 9.5, letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4,
 }
 const zoomBtnStyle: React.CSSProperties = {
   border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text-secondary)',

@@ -98,16 +98,16 @@ function SettingRow({ setting }: { setting: Setting }) {
       alignItems: 'start',
     }}>
       <div>
-        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>
+        <div style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>
           {label}
           {setting.is_secret && (
-            <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--accent-yellow)', background: 'rgba(255,195,0,0.1)', padding: '1px 4px', borderRadius: '3px', fontFamily: 'IBM Plex Sans, sans-serif' }}>
+            <span style={{ marginLeft: '6px', fontSize: '10px', color: 'var(--accent-yellow)', background: 'rgba(255,195,0,0.1)', padding: '1px 4px', borderRadius: '3px', fontFamily: 'Public Sans, sans-serif' }}>
               SECRET
             </span>
           )}
         </div>
         {hint && (
-          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
+          <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
             {hint}
           </div>
         )}
@@ -126,12 +126,12 @@ function SettingRow({ setting }: { setting: Setting }) {
             borderRadius: '4px',
             padding: '7px 12px',
             color: 'var(--text-primary)',
-            fontFamily: 'IBM Plex Sans, sans-serif',
+            fontFamily: 'Public Sans, sans-serif',
             fontSize: '13px',
           }}
         />
         {setting.is_secret && setting.value && !value && (
-          <span style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '13px', color: 'var(--text-muted)', letterSpacing: '2px' }}>
+          <span style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '13px', color: 'var(--text-muted)', letterSpacing: '2px' }}>
             {MASKED}
           </span>
         )}
@@ -142,9 +142,9 @@ function SettingRow({ setting }: { setting: Setting }) {
             padding: '7px 16px',
             borderRadius: '4px',
             border: '1px solid var(--accent-blue)',
-            background: saved ? 'rgba(46,212,122,0.15)' : 'rgba(0,217,192,0.1)',
+            background: saved ? 'rgba(46,212,122,0.15)' : 'rgba(44,110,142,0.1)',
             color: saved ? 'var(--accent-green)' : 'var(--accent-blue)',
-            fontFamily: 'IBM Plex Sans, sans-serif',
+            fontFamily: 'Public Sans, sans-serif',
             fontWeight: 700,
             fontSize: '12px',
             letterSpacing: '1px',
@@ -159,7 +159,7 @@ function SettingRow({ setting }: { setting: Setting }) {
       </div>
 
       {error && (
-        <div style={{ gridColumn: '2', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--accent-red)', marginTop: '-6px' }}>
+        <div style={{ gridColumn: '2', fontFamily: 'Public Sans, sans-serif', fontSize: '12px', color: 'var(--accent-red)', marginTop: '-6px' }}>
           {error}
         </div>
       )}
@@ -227,31 +227,31 @@ function MfaSection() {
   return (
     <div style={{ padding: '20px', borderBottom: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-        <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>
+        <div style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)' }}>
           Two-Factor Authentication (TOTP)
         </div>
         <span style={{
-          fontSize: 10, padding: '2px 7px', borderRadius: 3, fontFamily: 'IBM Plex Sans, sans-serif',
+          fontSize: 10, padding: '2px 7px', borderRadius: 3, fontFamily: 'Public Sans, sans-serif',
           background: isEnabled ? 'rgba(46,212,122,0.15)' : 'rgba(100,116,139,0.15)',
           color: isEnabled ? 'var(--accent-green)' : 'var(--text-muted)',
         }}>
           {isEnabled ? 'ACTIVE' : 'INACTIVE'}
         </span>
       </div>
-      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.5 }}>
+      <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.5 }}>
         Protect your account with an authenticator app (Google Authenticator, Authy, 1Password, etc.)
       </div>
 
       {phase === 'idle' && !isEnabled && (
-        <button onClick={startSetup} style={{ padding: '7px 18px', background: 'rgba(0,217,192,0.1)', border: '1px solid var(--accent-blue)', color: 'var(--accent-blue)', borderRadius: 4, cursor: 'pointer', fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>
+        <button onClick={startSetup} style={{ padding: '7px 18px', background: 'rgba(44,110,142,0.1)', border: '1px solid var(--accent-blue)', color: 'var(--accent-blue)', borderRadius: 4, cursor: 'pointer', fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>
           ENABLE MFA
         </button>
       )}
 
       {phase === 'idle' && isEnabled && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {msg && <div style={{ color: 'var(--accent-green)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 11 }}>✓ {msg}</div>}
-          <button onClick={() => { setCode(''); setMsg(''); setPhase('disable') }} style={{ alignSelf: 'flex-start', padding: '7px 18px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171', borderRadius: 4, cursor: 'pointer', fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>
+          {msg && <div style={{ color: 'var(--accent-green)', fontFamily: 'Public Sans, sans-serif', fontSize: 11 }}>✓ {msg}</div>}
+          <button onClick={() => { setCode(''); setMsg(''); setPhase('disable') }} style={{ alignSelf: 'flex-start', padding: '7px 18px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171', borderRadius: 4, cursor: 'pointer', fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>
             DISABLE MFA
           </button>
         </div>
@@ -259,7 +259,7 @@ function MfaSection() {
 
       {phase === 'setup' && qrCode && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
             1. Scan this QR code with your authenticator app.<br />
             2. Or enter the secret manually: <span style={{ color: 'var(--accent-blue)' }}>{secret}</span>
           </div>
@@ -271,10 +271,10 @@ function MfaSection() {
               placeholder="Enter 6-digit code"
               maxLength={6}
               autoFocus
-              style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 12px', color: 'var(--text-primary)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 15, width: 160, letterSpacing: 3 }}
+              style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 12px', color: 'var(--text-primary)', fontFamily: 'Public Sans, sans-serif', fontSize: 15, width: 160, letterSpacing: 3 }}
             />
             <button onClick={enableMfa} disabled={code.length !== 6}
-              style={{ padding: '7px 18px', background: 'rgba(46,212,122,0.1)', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', borderRadius: 4, cursor: code.length === 6 ? 'pointer' : 'not-allowed', opacity: code.length === 6 ? 1 : 0.5, fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: 13 }}>
+              style={{ padding: '7px 18px', background: 'rgba(46,212,122,0.1)', border: '1px solid var(--accent-green)', color: 'var(--accent-green)', borderRadius: 4, cursor: code.length === 6 ? 'pointer' : 'not-allowed', opacity: code.length === 6 ? 1 : 0.5, fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: 13 }}>
               VERIFY & ENABLE
             </button>
           </div>
@@ -283,7 +283,7 @@ function MfaSection() {
 
       {phase === 'disable' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5 }}>
             Enter your current TOTP code to confirm disabling MFA.
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -294,10 +294,10 @@ function MfaSection() {
               maxLength={6}
               autoFocus
               inputMode="numeric"
-              style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 12px', color: 'var(--text-primary)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 15, width: 120, letterSpacing: 3 }}
+              style={{ background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 4, padding: '7px 12px', color: 'var(--text-primary)', fontFamily: 'Public Sans, sans-serif', fontSize: 15, width: 120, letterSpacing: 3 }}
             />
             <button onClick={disableMfa} disabled={code.length !== 6}
-              style={{ padding: '7px 18px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171', borderRadius: 4, cursor: code.length === 6 ? 'pointer' : 'not-allowed', opacity: code.length === 6 ? 1 : 0.5, fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: 13 }}>
+              style={{ padding: '7px 18px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171', borderRadius: 4, cursor: code.length === 6 ? 'pointer' : 'not-allowed', opacity: code.length === 6 ? 1 : 0.5, fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: 13 }}>
               CONFIRM DISABLE
             </button>
             <button onClick={() => { setPhase('idle'); setCode('') }}
@@ -310,7 +310,7 @@ function MfaSection() {
 
       {phase === 'error' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ color: 'var(--accent-red)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: 12 }}>{msg}</div>
+          <div style={{ color: 'var(--accent-red)', fontFamily: 'Public Sans, sans-serif', fontSize: 12 }}>{msg}</div>
           <button onClick={() => { setPhase(isEnabled ? 'disable' : 'setup'); setMsg('') }} style={{ alignSelf: 'flex-start', padding: '5px 12px', background: 'none', border: '1px solid #1e2028', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
             Try again
           </button>
@@ -329,12 +329,12 @@ export default function SettingsPage() {
 
       <div className="enterprise-panel" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
         {isLoading && (
-          <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)' }}>
+          <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Public Sans, sans-serif', fontSize: '12px', color: 'var(--text-muted)' }}>
             LOADING SETTINGS…
           </div>
         )}
         {error && (
-          <div style={{ padding: '20px', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', color: 'var(--accent-red)' }}>
+          <div style={{ padding: '20px', fontFamily: 'Public Sans, sans-serif', fontSize: '12px', color: 'var(--accent-red)' }}>
             Failed to load settings. You may not have permission (superadmin required).
           </div>
         )}

@@ -47,7 +47,7 @@ export function StackedBarChart({
         return (
           <g key={val}>
             <line x1={plotLeft} y1={y} x2={plotRight} y2={y} stroke="var(--border)" strokeWidth={1} />
-            <text x={plotLeft - 8} y={y + 3} textAnchor="end" style={{ font: '9.5px "IBM Plex Mono", monospace', fill: 'var(--text-muted)' }}>{val}</text>
+            <text x={plotLeft - 8} y={y + 3} textAnchor="end" style={{ font: '9.5px "JetBrains Mono", monospace', fill: 'var(--text-muted)' }}>{val}</text>
           </g>
         )
       })}
@@ -73,7 +73,7 @@ export function StackedBarChart({
         if (i % xLabelEvery !== 0) return null
         const x = plotLeft + i * slotW + barW / 2
         return (
-          <text key={d.label} x={x} y={plotBottom + 16} textAnchor="middle" style={{ font: '9.5px "IBM Plex Mono", monospace', fill: 'var(--text-muted)' }}>
+          <text key={d.label} x={x} y={plotBottom + 16} textAnchor="middle" style={{ font: '9.5px "JetBrains Mono", monospace', fill: 'var(--text-muted)' }}>
             {d.label}
           </text>
         )

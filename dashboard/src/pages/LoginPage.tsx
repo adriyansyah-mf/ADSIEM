@@ -57,7 +57,7 @@ const CSS = `
   border: 1px solid rgba(148,197,255,0.16);
   border-radius: 8px;
   color: #e8f0fa;
-  font-family: 'IBM Plex Sans', sans-serif;
+  font-family: 'Public Sans', sans-serif;
   font-size: 15px;
   padding: 10px 12px;
   transition: border-color 0.2s, background 0.2s;
@@ -66,9 +66,9 @@ const CSS = `
 
 .soc-input:focus {
   outline: none;
-  border-color: #00D9C0;
+  border-color: #2C6E8E;
   background: rgba(7,17,29,0.9);
-  box-shadow: 0 0 0 3px rgba(0,217,192,0.14);
+  box-shadow: 0 0 0 3px rgba(44,110,142,0.14);
 }
 
 .soc-input::placeholder {
@@ -83,8 +83,8 @@ const CSS = `
 }
 
 .soc-btn:hover:not(:disabled) {
-  box-shadow: 0 8px 24px rgba(0,217,192,0.24) !important;
-  background: rgba(0,217,192,0.24) !important;
+  box-shadow: 0 8px 24px rgba(44,110,142,0.24) !important;
+  background: rgba(44,110,142,0.24) !important;
 }
 
 .soc-btn:disabled {
@@ -118,14 +118,14 @@ const CSS = `
 const STATUS_ITEMS = [
   { label: 'SYSTEM STATUS', value: 'OPERATIONAL',      color: '#10b981' },
   { label: 'THREAT MONITOR', value: 'ACTIVE',          color: '#f59e0b' },
-  { label: 'ENCRYPTION',     value: 'AES-256-GCM',     color: '#00D9C0' },
+  { label: 'ENCRYPTION',     value: 'AES-256-GCM',     color: '#2C6E8E' },
 ]
 
 const CORNERS: CSSProperties[] = [
-  { top: 24, left: 24, borderTop: '1px solid rgba(0,217,192,0.35)', borderLeft: '1px solid rgba(0,217,192,0.35)' },
-  { top: 24, right: 24, borderTop: '1px solid rgba(0,217,192,0.35)', borderRight: '1px solid rgba(0,217,192,0.35)' },
-  { bottom: 24, left: 24, borderBottom: '1px solid rgba(0,217,192,0.35)', borderLeft: '1px solid rgba(0,217,192,0.35)' },
-  { bottom: 24, right: 24, borderBottom: '1px solid rgba(0,217,192,0.35)', borderRight: '1px solid rgba(0,217,192,0.35)' },
+  { top: 24, left: 24, borderTop: '1px solid rgba(44,110,142,0.35)', borderLeft: '1px solid rgba(44,110,142,0.35)' },
+  { top: 24, right: 24, borderTop: '1px solid rgba(44,110,142,0.35)', borderRight: '1px solid rgba(44,110,142,0.35)' },
+  { bottom: 24, left: 24, borderBottom: '1px solid rgba(44,110,142,0.35)', borderLeft: '1px solid rgba(44,110,142,0.35)' },
+  { bottom: 24, right: 24, borderBottom: '1px solid rgba(44,110,142,0.35)', borderRight: '1px solid rgba(44,110,142,0.35)' },
 ]
 
 export default function LoginPage() {
@@ -176,8 +176,8 @@ export default function LoginPage() {
       <div style={{
         minHeight: '100dvh',
         display: 'flex',
-        background: 'radial-gradient(circle at 15% 10%, rgba(0,217,192,.13), transparent 38%), radial-gradient(circle at 90% 5%, rgba(169,121,247,.08), transparent 34%), var(--bg-base)',
-        fontFamily: "'IBM Plex Sans', sans-serif",
+        background: 'var(--bg-base)',
+        fontFamily: "'Public Sans', sans-serif",
         overflow: 'hidden',
       }}>
 
@@ -191,52 +191,23 @@ export default function LoginPage() {
           justifyContent: 'center',
           position: 'relative',
           overflow: 'hidden',
-          background: 'rgba(13,26,42,.48)',
-          backdropFilter: 'blur(18px) saturate(140%)',
-          borderRight: '1px solid rgba(148,197,255,0.14)',
+          background: 'var(--bg-panel)',
+          borderRight: '1px solid var(--border)',
         }}>
-
-          {/* Horizontal scanline */}
-          <div style={{
-            position: 'absolute', left: 0, right: 0, height: 2,
-            background: 'linear-gradient(to right, transparent, rgba(0,217,192,0.25), transparent)',
-            opacity: 0,
-            pointerEvents: 'none',
-          }} />
 
           {/* Corner brackets */}
           {CORNERS.map((s, i) => (
             <div key={i} style={{ position: 'absolute', width: 20, height: 20, ...s }} />
           ))}
 
-          {/* Radial vignette */}
-          <div style={{
-            position: 'absolute', inset: 0,
-            background: 'radial-gradient(ellipse at center, transparent 40%, rgba(2,4,8,0.7) 100%)',
-            pointerEvents: 'none',
-          }} />
-
-          {/* Shield emblem + rings */}
+          {/* Shield emblem */}
           <div style={{ position: 'relative', width: 100, height: 100, marginBottom: 36 }}>
             <div style={{
-              position: 'absolute', top: '50%', left: '50%',
-              width: 170, height: 170, borderRadius: '50%',
-              border: '1px solid rgba(0,217,192,0.18)',
-              animation: 'ring-pulse-2 4s ease-in-out infinite',
-            }} />
-            <div style={{
-              position: 'absolute', top: '50%', left: '50%',
-              width: 128, height: 128, borderRadius: '50%',
-              border: '1px solid rgba(0,217,192,0.28)',
-              animation: 'ring-pulse 3s ease-in-out infinite',
-            }} />
-            <div style={{
               position: 'absolute', inset: 0,
-              borderRadius: '50%',
-              background: 'radial-gradient(circle, rgba(0,217,192,0.12) 0%, rgba(0,217,192,0.04) 60%, transparent 100%)',
-              border: '1px solid rgba(0,217,192,0.45)',
+              borderRadius: 'var(--radius, 0.25rem)',
+              background: 'var(--bg-sunken, var(--bg-base))',
+              border: '1px solid var(--border-strong, var(--border))',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 0 32px rgba(0,217,192,0.2), inset 0 0 24px rgba(0,217,192,0.08)',
               overflow: 'hidden',
             }}>
               <img src="/favicon.jpeg" alt="AD-SIEM" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -244,30 +215,29 @@ export default function LoginPage() {
           </div>
 
           {/* Brand text */}
-          <div style={{ textAlign: 'center', animation: 'fade-up 0.9s ease-out both', position: 'relative', zIndex: 1 }}>
+          <div style={{ textAlign: 'center', position: 'relative', zIndex: 1 }}>
             <div style={{
-              fontFamily: "'IBM Plex Sans', sans-serif",
-              fontSize: 44,
-              fontWeight: 900,
-              color: '#00D9C0',
-              letterSpacing: '0.1em',
-              textShadow: '0 0 25px rgba(0,217,192,0.55), 0 0 60px rgba(0,217,192,0.2)',
+              fontFamily: "'Archivo', sans-serif",
+              fontSize: 40,
+              fontWeight: 800,
+              color: 'var(--text-primary)',
+              letterSpacing: '0.06em',
               lineHeight: 1,
             }}>AD-SIEM</div>
             <div style={{
-              fontFamily: "'IBM Plex Sans', sans-serif",
+              fontFamily: "'Public Sans', sans-serif",
               fontSize: 13,
               fontWeight: 400,
-              color: 'rgba(0,217,192,0.55)',
+              color: 'var(--text-muted)',
               letterSpacing: '0.42em',
               marginTop: 8,
             }}>PLATFORM</div>
             <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ height: 1, width: 40, background: 'linear-gradient(to left, rgba(0,217,192,0.4), transparent)' }} />
-              <div style={{ fontSize: 10, letterSpacing: '0.18em', color: 'rgba(100,116,139,0.65)', whiteSpace: 'nowrap' }}>
+              <div style={{ height: 1, width: 40, background: 'var(--border)' }} />
+              <div style={{ fontSize: 10, letterSpacing: '0.18em', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                 SECURITY OPERATIONS CENTER
               </div>
-              <div style={{ height: 1, width: 40, background: 'linear-gradient(to right, rgba(0,217,192,0.4), transparent)' }} />
+              <div style={{ height: 1, width: 40, background: 'var(--border)' }} />
             </div>
           </div>
 
@@ -303,7 +273,7 @@ export default function LoginPage() {
             top: '30%', left: '20%',
             width: 300, height: 300,
             borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(0,217,192,0.04) 0%, transparent 70%)',
+            background: 'radial-gradient(circle, rgba(44,110,142,0.04) 0%, transparent 70%)',
             pointerEvents: 'none',
           }} />
 
@@ -312,25 +282,25 @@ export default function LoginPage() {
             {/* Form header */}
             <div style={{ marginBottom: 44 }}>
               <div style={{
-                fontFamily: "'IBM Plex Sans', sans-serif",
+                fontFamily: "'Public Sans', sans-serif",
                 fontSize: 12,
                 letterSpacing: '0.32em',
                 color: 'rgba(100,116,139,0.6)',
                 marginBottom: 10,
               }}>Secure access</div>
               <div style={{
-                fontFamily: "'IBM Plex Sans', sans-serif",
+                fontFamily: "'Public Sans', sans-serif",
                 fontSize: 24,
                 fontWeight: 700,
-                color: '#e2e8f0',
+                color: 'var(--text-primary)',
                 letterSpacing: '0.08em',
               }}>Sign in to AD-SIEM</div>
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{
                   height: 1, flex: 1,
-                  background: 'linear-gradient(to right, rgba(0,217,192,0.5), transparent)',
+                  background: 'linear-gradient(to right, rgba(44,110,142,0.5), transparent)',
                 }} />
-                <div style={{ width: 4, height: 4, transform: 'rotate(45deg)', background: 'rgba(0,217,192,0.5)' }} />
+                <div style={{ width: 4, height: 4, transform: 'rotate(45deg)', background: 'rgba(44,110,142,0.5)' }} />
               </div>
             </div>
 
@@ -342,7 +312,7 @@ export default function LoginPage() {
                     <div>
                       <label htmlFor="username" style={{
                         fontSize: 12, letterSpacing: '0.18em',
-                        color: 'rgba(0,217,192,0.7)', marginBottom: 6, textTransform: 'uppercase',
+                        color: 'rgba(44,110,142,0.7)', marginBottom: 6, textTransform: 'uppercase',
                         display: 'block',
                       }}>Username</label>
                       <input
@@ -359,7 +329,7 @@ export default function LoginPage() {
                     <div>
                       <label htmlFor="password" style={{
                         fontSize: 12, letterSpacing: '0.18em',
-                        color: 'rgba(0,217,192,0.7)', marginBottom: 6, textTransform: 'uppercase',
+                        color: 'rgba(44,110,142,0.7)', marginBottom: 6, textTransform: 'uppercase',
                         display: 'block',
                       }}>Password</label>
                       <input
@@ -378,13 +348,13 @@ export default function LoginPage() {
                   <div>
                     <div style={{
                       fontSize: 11, letterSpacing: '0.14em',
-                      color: 'rgba(0,217,192,0.5)', marginBottom: 14, lineHeight: 1.6,
+                      color: 'rgba(44,110,142,0.5)', marginBottom: 14, lineHeight: 1.6,
                     }}>
                       MFA REQUIRED — Enter the 6-digit code from your authenticator app.
                     </div>
                     <label htmlFor="mfa-code" style={{
                       fontSize: 12, letterSpacing: '0.18em',
-                      color: 'rgba(0,217,192,0.7)', marginBottom: 6, textTransform: 'uppercase',
+                      color: 'rgba(44,110,142,0.7)', marginBottom: 6, textTransform: 'uppercase',
                       display: 'block',
                     }}>Authenticator code</label>
                     <input
@@ -431,10 +401,10 @@ export default function LoginPage() {
                 style={{
                   width: '100%',
                   padding: '15px',
-                  background: 'rgba(0,217,192,0.12)',
-                  border: '1px solid rgba(0,217,192,0.4)',
-                  color: '#00D9C0',
-                  fontFamily: "'IBM Plex Sans', sans-serif",
+                  background: 'rgba(44,110,142,0.12)',
+                  border: '1px solid rgba(44,110,142,0.4)',
+                  color: '#2C6E8E',
+                  fontFamily: "'Public Sans', sans-serif",
                   fontSize: 12,
                   letterSpacing: '0.28em',
                   fontWeight: 700,

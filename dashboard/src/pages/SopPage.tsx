@@ -70,8 +70,8 @@ export default function SopPage() {
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '6px',
               padding: '8px 16px', borderRadius: '4px',
-              border: '1px solid var(--accent-blue)', background: 'rgba(0,217,192,0.12)',
-              color: 'var(--accent-blue)', fontFamily: 'IBM Plex Sans, sans-serif',
+              border: '1px solid var(--accent-blue)', background: 'rgba(44,110,142,0.12)',
+              color: 'var(--accent-blue)', fontFamily: 'Public Sans, sans-serif',
               fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
               cursor: uploading ? 'wait' : 'pointer', opacity: uploading ? 0.6 : 1,
             }}
@@ -83,19 +83,19 @@ export default function SopPage() {
       </div>
 
       {error && (
-        <div style={{ padding: '10px 14px', borderRadius: '4px', background: 'rgba(255,59,92,0.1)', border: '1px solid rgba(255,59,92,0.3)', color: 'var(--accent-red)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', marginBottom: '16px' }}>
+        <div style={{ padding: '10px 14px', borderRadius: '4px', background: 'rgba(255,59,92,0.1)', border: '1px solid rgba(255,59,92,0.3)', color: 'var(--accent-red)', fontFamily: 'Public Sans, sans-serif', fontSize: '12px', marginBottom: '16px' }}>
           {error}
         </div>
       )}
 
-      <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+      <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px' }}>
         Upload PDF, DOCX, or TXT files (max 10 MB). Uploaded SOPs are chunked, embedded, and used by the AI analyst when triaging alerts.
       </div>
 
       {isLoading ? (
-        <div style={{ color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px' }}>Loading...</div>
+        <div style={{ color: 'var(--text-muted)', fontFamily: 'Public Sans, sans-serif', fontSize: '12px' }}>Loading...</div>
       ) : docs.length === 0 ? (
-        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '12px', border: '1px dashed var(--border)', borderRadius: '6px' }}>
+        <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'Public Sans, sans-serif', fontSize: '12px', border: '1px dashed var(--border)', borderRadius: '6px' }}>
           No SOP documents uploaded yet. Upload your Incident Handling SOP to improve AI triage accuracy.
         </div>
       ) : (
@@ -108,10 +108,10 @@ export default function SopPage() {
             }}>
               <FileText size={16} style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {doc.filename}
                 </div>
-                <div style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                <div style={{ fontFamily: 'Public Sans, sans-serif', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
                   {format(new Date(doc.created_at), 'yyyy-MM-dd HH:mm')} · {doc.content_type.split('/').pop()?.toUpperCase()}
                 </div>
               </div>
@@ -120,7 +120,7 @@ export default function SopPage() {
                 border: `1px solid ${statusColor[doc.status] ?? 'var(--text-muted)'}44`,
                 background: `${statusColor[doc.status] ?? 'var(--text-muted)'}18`,
                 color: statusColor[doc.status] ?? 'var(--text-muted)',
-                fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700,
+                fontFamily: 'Public Sans, sans-serif', fontWeight: 700,
                 fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' as const,
               }}>
                 {doc.status}
