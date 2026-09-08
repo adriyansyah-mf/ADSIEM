@@ -12,8 +12,10 @@ from app.core.database import get_db
 from app.core.deps import get_agent
 from app.core.rate_limit import rate_limit_by_agent_group
 from app.core.redis_client import get_redis
-from app.models.models import Agent, AgentLogSource, AgentTask, FimWatchPath
-from app.schemas.schemas import AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
+from app.models.models import Agent, AgentLogSource, AgentTask, CustomComplianceControl, FimWatchPath
+from app.schemas.schemas import (
+    AgentTaskDef, CustomComplianceRuleDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut,
+)
 from app.services.ingest import enqueue_log
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
@@ -83,6 +85,18 @@ async def heartbeat(
         )
         await db.commit()
 
+    # Automated custom compliance controls (non-empty `rules`) ship their
+    # DSL rules to the owning agent here — see CustomComplianceControl's
+    # docstring in models.py for the full round trip.
+    custom_result = await db.execute(
+        select(CustomComplianceControl).where(CustomComplianceControl.agent_id == agent.id)
+    )
+    custom_rules = [
+        CustomComplianceRuleDef(id=str(c.id), rules=c.rules, condition=c.condition or "all")
+        for c in custom_result.scalars().all()
+        if c.rules
+    ]
+
     sources_data = [{"path": s.path, "log_type": s.log_type, "is_enabled": s.is_enabled} for s in sources]
     config_hash = hashlib.sha256(
         json.dumps({"sources": sources_data, "fim_paths": fim_paths}, sort_keys=True).encode()
@@ -93,4 +107,5 @@ async def heartbeat(
         log_sources=[LogSourceOut.model_validate(s) for s in sources],
         fim_paths=fim_paths,
         tasks=[AgentTaskDef(id=t.id, task_type=t.task_type, params=t.params or {}) for t in pending_tasks],
+        custom_compliance_rules=custom_rules,
     )

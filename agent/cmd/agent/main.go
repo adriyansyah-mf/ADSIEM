@@ -17,8 +17,8 @@ import (
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
 	"github.com/siem-platform/agent/internal/procexec"
-	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/tailer"
+	"github.com/siem-platform/agent/internal/task"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=x.y.z"
@@ -102,6 +102,7 @@ func main() {
 		func(resp heartbeat.HeartbeatResponse) {
 			mgr.Update(resp.LogSources)
 			fimWatcher.UpdatePaths(resp.FimPaths)
+			hygiene.SetCustomComplianceRules(resp.CustomComplianceRules)
 		},
 		func(tasks []heartbeat.AgentTask) {
 			for _, t := range tasks {

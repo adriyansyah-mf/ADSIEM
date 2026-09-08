@@ -680,6 +680,21 @@ async def _migrate_compliance_manage_permission() -> None:
             ON CONFLICT DO NOTHING
         """))
 
+async def _migrate_custom_compliance_rules_columns() -> None:
+    """custom_compliance_controls is a table created after this project's
+    initial db/init.sql seed, so unlike columns on a seed-era table it has
+    no ALTER-TABLE precedent to follow here — but the same reasoning
+    applies: existing rows created before the rules/condition columns
+    existed need them backfilled to their schema defaults."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE custom_compliance_controls ADD COLUMN IF NOT EXISTS rules JSONB NOT NULL DEFAULT '[]'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE custom_compliance_controls ADD COLUMN IF NOT EXISTS condition VARCHAR(10)"
+        ))
+
 async def _ws_redis_listener():
     """Subscribe to Redis ws:alerts channel and broadcast to WebSocket clients."""
     import asyncio
@@ -745,6 +760,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_telemetry_columns()
         await _migrate_hygiene_hardening_column()
         await _migrate_compliance_manage_permission()
+        await _migrate_custom_compliance_rules_columns()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()

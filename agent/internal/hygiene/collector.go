@@ -29,6 +29,7 @@ func Collect(agentID, hostname string) (*Report, error) {
 	collectUsers(r)
 	collectPackages(r)
 	collectHardening(r)
+	collectCustomCompliance(r)
 	score(r)
 
 	return r, nil

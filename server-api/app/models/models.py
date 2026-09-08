@@ -579,11 +579,19 @@ class AiFeedback(Base):
 
 class CustomComplianceControl(Base):
     """User-defined compliance control scoped to a single endpoint — lets an
-    analyst track an organization-specific requirement (internal SOP,
-    contractual obligation, ...) that has no automated check, unlike the
-    framework controls in app/services/compliance.py which are always
-    derived from live agent telemetry. Status/evidence here are manually
-    attested by whoever created or last edited the control."""
+    analyst track an organization-specific requirement that the framework
+    controls in app/services/compliance.py don't cover.
+
+    Two modes, distinguished by whether `rules` is populated: manual (empty
+    `rules`) has status/evidence typed in directly by an analyst; automated
+    (non-empty `rules`) ships those rules to the owning agent over the next
+    heartbeat (see routes/ingest.py's heartbeat handler and
+    agent/internal/sca's rule DSL) for it to evaluate locally like any
+    built-in policy check, and the hygiene-ingest route
+    (routes/hygiene.py) writes the agent's verdict back into status/evidence
+    on every report — so for an automated control those two columns are
+    agent-computed, not analyst-typed, even though the schema doesn't
+    enforce that distinction structurally."""
     __tablename__ = "custom_compliance_controls"
     id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agent_id     = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
@@ -592,6 +600,8 @@ class CustomComplianceControl(Base):
     description  = Column(Text)
     status       = Column(String(20), nullable=False, default="gap")  # met | partial | gap
     evidence     = Column(Text)
+    rules        = Column(JSONB, nullable=False, default=list)  # SCA DSL rule strings — non-empty means "automated"
+    condition    = Column(String(10))  # all | any | none — how `rules` combine; only meaningful when rules is non-empty
     group_id     = Column(String(100), nullable=False, default="default")
     created_by   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     created_at   = Column(DateTime(timezone=True), default=now_utc)

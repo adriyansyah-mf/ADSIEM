@@ -7,8 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_agent, get_current_user
-from app.models.models import Agent, HygieneSnapshot, User
+from app.models.models import Agent, CustomComplianceControl, HygieneSnapshot, User
 from app.schemas.schemas import HygieneSnapshotIn, HygieneSnapshotOut
+
+_CUSTOM_CHECK_PREFIX = "custom-"
+# The agent's hardening-check Status values line up with this schema's
+# met/partial/gap vocabulary except "error", which has no faithful mapping
+# (an evaluation failure isn't really "gap" — the control genuinely
+# couldn't be checked) so it's folded into "gap" rather than left unmapped.
+_STATUS_MAP = {"pass": "met", "fail": "gap", "not_applicable": "partial", "error": "gap"}
 
 router = APIRouter(tags=["hygiene"])
 
@@ -124,6 +131,36 @@ async def ingest_hygiene(
         hardening_checks=body.hardening_checks or [],
     )
     db.add(snap)
+    await db.commit()
+
+    await _sync_custom_compliance_results(db, agent.id, body.hardening_checks or [])
+
+
+async def _sync_custom_compliance_results(db: AsyncSession, agent_id, hardening_checks: list[dict]) -> None:
+    """Write each automated custom control's agent-computed verdict back
+    into its row — see CustomComplianceControl's docstring in models.py for
+    the full round trip this closes."""
+    for check in hardening_checks:
+        check_id = check.get("id", "")
+        if not check_id.startswith(_CUSTOM_CHECK_PREFIX):
+            continue
+        control_id = check_id[len(_CUSTOM_CHECK_PREFIX):]
+        try:
+            control = await db.get(CustomComplianceControl, control_id)
+        except Exception:
+            # A cast error (malformed UUID from a misbehaving/outdated
+            # agent) leaves the transaction aborted until rolled back —
+            # never crash ingest over one bad ID, but the abort must be
+            # cleared before any further query in this loop or the final
+            # commit below.
+            await db.rollback()
+            continue
+        # Scope to this agent — a malformed/spoofed ID must never let one
+        # agent overwrite another endpoint's custom control.
+        if not control or str(control.agent_id) != str(agent_id):
+            continue
+        control.status = _STATUS_MAP.get(check.get("status"), "gap")
+        control.evidence = check.get("detail", "")
     await db.commit()
 
 

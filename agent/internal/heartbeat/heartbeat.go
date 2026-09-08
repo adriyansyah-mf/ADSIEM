@@ -23,22 +23,33 @@ type AgentTask struct {
 	Params   map[string]any `json:"params"`
 }
 
+// CustomComplianceRule is an analyst-authored SCA rule (see internal/sca's
+// rule DSL) scoped to this agent's endpoint — the automated counterpart to
+// a manually-attested custom compliance control. The agent evaluates these
+// locally every hygiene cycle exactly like its built-in policy checks.
+type CustomComplianceRule struct {
+	ID        string   `json:"id"`
+	Rules     []string `json:"rules"`
+	Condition string   `json:"condition"`
+}
+
 type HeartbeatRequest struct {
 	AgentID       string `json:"agent_id"`
 	Status        string `json:"status"`
 	Version       string `json:"version"`
 	BufferDropped int64  `json:"buffer_dropped"`
 	// P0-B fleet-health telemetry (AGENT_PRODUCTION_IMPROVEMENT_ROADMAP.md).
-	BufferDepth                    int   `json:"buffer_depth"`
-	OldestBufferedEventAgeSeconds  *int  `json:"oldest_buffered_event_age_seconds"`
-	UptimeSeconds                  int64 `json:"uptime_seconds"`
+	BufferDepth                   int   `json:"buffer_depth"`
+	OldestBufferedEventAgeSeconds *int  `json:"oldest_buffered_event_age_seconds"`
+	UptimeSeconds                 int64 `json:"uptime_seconds"`
 }
 
 type HeartbeatResponse struct {
-	ConfigHash string      `json:"config_hash"`
-	LogSources []LogSource `json:"log_sources"`
-	FimPaths   []string    `json:"fim_paths"`
-	Tasks      []AgentTask `json:"tasks"`
+	ConfigHash            string                 `json:"config_hash"`
+	LogSources            []LogSource            `json:"log_sources"`
+	FimPaths              []string               `json:"fim_paths"`
+	Tasks                 []AgentTask            `json:"tasks"`
+	CustomComplianceRules []CustomComplianceRule `json:"custom_compliance_rules"`
 }
 
 // Loop sends heartbeats every interval.

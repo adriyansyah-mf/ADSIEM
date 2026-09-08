@@ -14,9 +14,13 @@ interface FrameworkDetail {
 interface CustomControl {
   id: string; agent_id: string; framework_id: string | null; title: string
   description: string | null; status: 'met' | 'partial' | 'gap'; evidence: string | null
+  rules: string[]; condition: 'all' | 'any' | 'none' | null
   created_at: string; updated_at: string
 }
-type CustomControlForm = { framework_id: string; title: string; description: string; status: 'met' | 'partial' | 'gap'; evidence: string }
+type CustomControlForm = {
+  framework_id: string; title: string; description: string; status: 'met' | 'partial' | 'gap'; evidence: string
+  mode: 'manual' | 'auto'; rulesText: string; condition: 'all' | 'any' | 'none'
+}
 
 const STATUS_STYLE: Record<Control['status'], { color: string; label: string }> = {
   met: { color: 'var(--accent-green)', label: 'MET' },
@@ -38,7 +42,10 @@ function StatusPill({ status }: { status: Control['status'] }) {
   )
 }
 
-const EMPTY_FORM: CustomControlForm = { framework_id: '', title: '', description: '', status: 'gap', evidence: '' }
+const EMPTY_FORM: CustomControlForm = {
+  framework_id: '', title: '', description: '', status: 'gap', evidence: '',
+  mode: 'manual', rulesText: '', condition: 'all',
+}
 
 const inputStyle: CSSProperties = {
   background: 'var(--bg-panel)', color: 'var(--text-primary)', border: '1px solid var(--border)',
@@ -59,16 +66,22 @@ function CustomControlsTab({ agentId, frameworks }: { agentId: string; framework
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['compliance', 'custom', agentId] })
 
+  const toBody = (f: CustomControlForm) => ({
+    framework_id: f.framework_id || null,
+    title: f.title,
+    description: f.description,
+    status: f.status,
+    evidence: f.evidence,
+    rules: f.mode === 'auto' ? f.rulesText.split('\n').map(r => r.trim()).filter(Boolean) : [],
+    condition: f.mode === 'auto' ? f.condition : null,
+  })
+
   const create = useMutation({
-    mutationFn: (body: CustomControlForm) => api.post(`/api/compliance/endpoints/${agentId}/custom`, {
-      ...body, framework_id: body.framework_id || null,
-    }),
+    mutationFn: (body: CustomControlForm) => api.post(`/api/compliance/endpoints/${agentId}/custom`, toBody(body)),
     onSuccess: () => { invalidate(); setShowForm(false); setForm(EMPTY_FORM) },
   })
   const update = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: CustomControlForm }) => api.patch(`/api/compliance/endpoints/${agentId}/custom/${id}`, {
-      ...body, framework_id: body.framework_id || null,
-    }),
+    mutationFn: ({ id, body }: { id: string; body: CustomControlForm }) => api.patch(`/api/compliance/endpoints/${agentId}/custom/${id}`, toBody(body)),
     onSuccess: () => { invalidate(); setEditingId(null); setShowForm(false); setForm(EMPTY_FORM) },
   })
   const remove = useMutation({
@@ -78,13 +91,18 @@ function CustomControlsTab({ agentId, frameworks }: { agentId: string; framework
 
   const startEdit = (c: CustomControl) => {
     setEditingId(c.id)
-    setForm({ framework_id: c.framework_id || '', title: c.title, description: c.description || '', status: c.status, evidence: c.evidence || '' })
+    setForm({
+      framework_id: c.framework_id || '', title: c.title, description: c.description || '',
+      status: c.status, evidence: c.evidence || '',
+      mode: c.rules.length > 0 ? 'auto' : 'manual', rulesText: c.rules.join('\n'), condition: c.condition || 'all',
+    })
     setShowForm(true)
   }
   const startCreate = () => { setEditingId(null); setForm(EMPTY_FORM); setShowForm(true) }
   const cancel = () => { setShowForm(false); setEditingId(null); setForm(EMPTY_FORM) }
   const submit = () => {
     if (!form.title.trim()) return
+    if (form.mode === 'auto' && !form.rulesText.trim()) return
     if (editingId) update.mutate({ id: editingId, body: form })
     else create.mutate(form)
   }
@@ -107,25 +125,55 @@ function CustomControlsTab({ agentId, frameworks }: { agentId: string; framework
 
       {showForm && (
         <div style={{ border: '1px solid var(--border)', borderRadius: 4, padding: 12, marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 0, width: 'fit-content', borderRadius: 4, overflow: 'hidden', border: '1px solid var(--border)' }}>
+            {(['manual', 'auto'] as const).map(m => (
+              <button key={m} onClick={() => setForm({ ...form, mode: m })} style={{
+                background: form.mode === m ? 'var(--accent-blue)' : 'none', color: form.mode === m ? '#fff' : 'var(--text-secondary)',
+                border: 'none', padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              }}>
+                {m === 'manual' ? 'Manual' : 'Rule-based (SCA)'}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: form.mode === 'manual' ? '2fr 1fr 1fr' : '2fr 1fr', gap: 8 }}>
             <input placeholder="Title" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} style={inputStyle} />
             <select value={form.framework_id} onChange={e => setForm({ ...form, framework_id: e.target.value })} style={inputStyle}>
               <option value="">No framework tag</option>
               {frameworks.map(fw => <option key={fw.id} value={fw.id}>{fw.name}</option>)}
             </select>
-            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value as CustomControlForm['status'] })} style={inputStyle}>
-              <option value="met">Met</option>
-              <option value="partial">Partial</option>
-              <option value="gap">Gap</option>
-            </select>
+            {form.mode === 'manual' && (
+              <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value as CustomControlForm['status'] })} style={inputStyle}>
+                <option value="met">Met</option>
+                <option value="partial">Partial</option>
+                <option value="gap">Gap</option>
+              </select>
+            )}
           </div>
           <textarea placeholder="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
             style={{ ...inputStyle, minHeight: 50, resize: 'vertical', fontFamily: 'inherit' }} />
-          <textarea placeholder="Evidence" value={form.evidence} onChange={e => setForm({ ...form, evidence: e.target.value })}
-            style={{ ...inputStyle, minHeight: 50, resize: 'vertical', fontFamily: 'inherit' }} />
+
+          {form.mode === 'manual' ? (
+            <textarea placeholder="Evidence" value={form.evidence} onChange={e => setForm({ ...form, evidence: e.target.value })}
+              style={{ ...inputStyle, minHeight: 50, resize: 'vertical', fontFamily: 'inherit' }} />
+          ) : (
+            <>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                One SCA rule per line — same DSL as the built-in policy (f:/c:/m:/sshd: selectors). The agent evaluates these every hygiene cycle; status and evidence below become agent-computed once rules are set.
+              </div>
+              <textarea placeholder={'f:/etc/some-config -> r:some-pattern'} value={form.rulesText} onChange={e => setForm({ ...form, rulesText: e.target.value })}
+                style={{ ...inputStyle, minHeight: 80, resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: 12 }} />
+              <select value={form.condition} onChange={e => setForm({ ...form, condition: e.target.value as CustomControlForm['condition'] })} style={{ ...inputStyle, width: 160 }}>
+                <option value="all">Condition: all</option>
+                <option value="any">Condition: any</option>
+                <option value="none">Condition: none</option>
+              </select>
+            </>
+          )}
+
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button onClick={cancel} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '6px 12px', fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>Cancel</button>
-            <button onClick={submit} disabled={!form.title.trim() || create.isPending || update.isPending} style={{
+            <button onClick={submit} disabled={!form.title.trim() || (form.mode === 'auto' && !form.rulesText.trim()) || create.isPending || update.isPending} style={{
               background: 'var(--accent-blue)', color: '#fff', border: 'none', borderRadius: 4,
               padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
             }}>
@@ -147,10 +195,24 @@ function CustomControlsTab({ agentId, frameworks }: { agentId: string; framework
           }}>
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
-                {c.title}{c.framework_id && <span style={{ marginLeft: 6, fontSize: 10.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>[{c.framework_id}]</span>}
+                {c.title}
+                {c.rules.length > 0 && (
+                  <span style={{
+                    marginLeft: 6, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', padding: '1px 6px', borderRadius: 3,
+                    border: '1px solid var(--accent-blue)', color: 'var(--accent-blue)',
+                  }}>
+                    AUTO (SCA)
+                  </span>
+                )}
+                {c.framework_id && <span style={{ marginLeft: 6, fontSize: 10.5, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>[{c.framework_id}]</span>}
               </div>
               {c.description && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.5 }}>{c.description}</div>}
-              {c.evidence && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.5 }}>Evidence: {c.evidence}</div>}
+              {c.rules.length > 0 && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap' }}>
+                  ({c.condition || 'all'}) {c.rules.join(' | ')}
+                </div>
+              )}
+              {c.evidence && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.5 }}>{c.rules.length > 0 ? 'Agent evidence: ' : 'Evidence: '}{c.evidence}</div>}
             </div>
             <div style={{ textAlign: 'right', paddingTop: 2 }}>
               <StatusPill status={c.status} />

@@ -143,11 +143,21 @@ class AgentTaskDef(BaseModel):
     params: dict = {}
 
 
+class CustomComplianceRuleDef(BaseModel):
+    """One agent's-eye view of an automated custom control, delivered over
+    the heartbeat response — see HeartbeatResponse.custom_compliance_rules
+    and agent/internal/heartbeat's identically-shaped CustomComplianceRule."""
+    id: str
+    rules: list[str]
+    condition: str
+
+
 class HeartbeatResponse(BaseModel):
     config_hash: str
     log_sources: list[LogSourceOut]
     fim_paths: list[str] = []
     tasks: list[AgentTaskDef] = []
+    custom_compliance_rules: list[CustomComplianceRuleDef] = []
 
 
 # ─── Ingest ──────────────────────────────────────────────────────
@@ -560,6 +570,11 @@ class CustomComplianceControlIn(BaseModel):
     description: str | None = None
     status: Literal["met", "partial", "gap"] = "gap"
     evidence: str | None = None
+    # Non-empty rules makes this control "automated": the agent evaluates
+    # them (see agent/internal/sca's rule DSL) and status/evidence become
+    # agent-computed on every hygiene report rather than analyst-typed.
+    rules: list[str] = []
+    condition: Literal["all", "any", "none"] | None = None
 
 
 class CustomComplianceControlUpdate(BaseModel):
@@ -568,6 +583,8 @@ class CustomComplianceControlUpdate(BaseModel):
     description: str | None = None
     status: Literal["met", "partial", "gap"] | None = None
     evidence: str | None = None
+    rules: list[str] | None = None
+    condition: Literal["all", "any", "none"] | None = None
 
 
 class CustomComplianceControlOut(BaseModel):
@@ -578,6 +595,8 @@ class CustomComplianceControlOut(BaseModel):
     description: str | None
     status: str
     evidence: str | None
+    rules: list[str]
+    condition: str | None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
