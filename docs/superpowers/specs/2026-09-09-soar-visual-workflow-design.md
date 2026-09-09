@@ -156,6 +156,12 @@ executor must reuse it rather than invent parallel values: `pending`,
 destructive step is created as `pending_approval`, a non-destructive one as
 `approved` (`soar_service.py:109`).
 
+The executor adds exactly one value, `failed`, for a node whose handler raised.
+Nothing in `soar_service.py` produces it, because approval and rollback have no
+such outcome — a step there either succeeds or throws before being written. A
+graph executor must be able to record the node that broke, so this one addition
+is deliberate and is the only permitted extension of the set.
+
 ### 5.1 Concurrency
 
 Production runs **two server-api replicas** (`siem-platform-server-api-1`, `-2`),
