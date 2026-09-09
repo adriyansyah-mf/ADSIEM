@@ -55,6 +55,8 @@ structlog.configure(
     ],
 )
 
+log = structlog.get_logger()
+
 _DEFAULT_SETTINGS = [
     ("org_name",           "",                          False, "Organization name shown on generated PDF reports"),
     ("ninerouter_api_key", "",                          True,  "9router API key for AI analyst — generate via POST /api/keys against the 9router dashboard API (see docs/PROJECT_OVERVIEW.md)"),
@@ -784,9 +786,27 @@ async def lifespan(app: FastAPI):
         await lock_conn.close()
     await ensure_es_index()
     import asyncio
+    from app.services.soar_executor import soar_executor_loop
+    from app.services.soar_nodes.builtin import register_builtin_nodes
+    from app.services.soar_triggers import soar_trigger_consumer_loop
+
+    try:
+        register_builtin_nodes()
+    except ValueError:
+        # Registration already happened in this process (e.g. lifespan
+        # re-entered, as some ASGI test harnesses do). The registry is a
+        # process-wide singleton, so a repeat call is a no-op, not an error.
+        log.warning("soar_builtin_nodes_already_registered")
+
     _listener_task = asyncio.create_task(_ws_redis_listener())
+    _soar_tasks = [
+        asyncio.create_task(soar_executor_loop()),
+        asyncio.create_task(soar_trigger_consumer_loop()),
+    ]
     yield
     _listener_task.cancel()
+    for task in _soar_tasks:
+        task.cancel()
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
 

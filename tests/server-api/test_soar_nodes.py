@@ -5,6 +5,7 @@ import pytest
 from app.services.soar_nodes import clear_registry, get_node_type
 from app.services.soar_nodes.base import NodeContext
 from app.services.soar_nodes.builtin import register_builtin_nodes
+from app.services.soar_triggers import trigger_matches
 
 
 class FakeSession:
@@ -183,3 +184,25 @@ async def test_destructive_nodes_are_flagged_in_the_registry():
     assert get_node_type("block_ip").is_destructive is True
     assert get_node_type("isolate_agent").is_destructive is True
     assert get_node_type("create_case").is_destructive is False
+
+
+def test_empty_trigger_config_matches_everything():
+    assert trigger_matches({}, {"severity": "low", "title": "anything"}) is True
+
+
+def test_severity_filter_excludes_other_severities():
+    config = {"severities": ["critical", "high"]}
+    assert trigger_matches(config, {"severity": "critical", "title": "x"}) is True
+    assert trigger_matches(config, {"severity": "low", "title": "x"}) is False
+
+
+def test_title_filter_is_case_insensitive():
+    config = {"title_contains": "brute force"}
+    assert trigger_matches(config, {"severity": "high", "title": "SSH Brute Force"}) is True
+    assert trigger_matches(config, {"severity": "high", "title": "port scan"}) is False
+
+
+def test_filters_combine_with_and():
+    config = {"severities": ["critical"], "title_contains": "waf"}
+    assert trigger_matches(config, {"severity": "critical", "title": "WAF block"}) is True
+    assert trigger_matches(config, {"severity": "low", "title": "WAF block"}) is False

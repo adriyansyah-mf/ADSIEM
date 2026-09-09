@@ -571,6 +571,22 @@ async def analyze_and_maybe_create_case(
         except Exception as exc:
             log.warning("ai_soar_dispatch_failed", alert_id=alert_id, error=str(exc))
 
+    # v2 workflow engine lives in server-api (separate build context), so the
+    # hand-off is a Redis queue, matching the siem:ai-analysis pattern.
+    try:
+        from worker.redis_client import get_redis
+        _trigger_redis = await get_redis()
+        await _trigger_redis.lpush("siem:soar-triggers", json.dumps({
+            "alert_id": alert_id,
+            "group_id": group_id,
+            "severity": effective_severity,
+            "title": title,
+            "source_ip": source_ip,
+            "hostname": hostname,
+        }))
+    except Exception as exc:
+        log.warning("soar_trigger_publish_failed", alert_id=alert_id, error=str(exc))
+
     # ── 5. Update alert status berdasarkan verdict ───────────────────────────
     # Verdicts that end here never reach a case, so this is the only place
     # web research runs for them (avoids the double-run that create_case/
