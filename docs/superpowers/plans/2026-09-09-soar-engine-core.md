@@ -207,6 +207,15 @@ def test_non_template_string_passes_through():
     assert resolve_value("plain text", CONTEXT) == "plain text"
 
 
+def test_two_expressions_in_one_string_interpolate_separately():
+    # Guards a real trap: a naive "^{{...}}$" test treats this whole string
+    # as one expression whose path is `channel }} {{ trigger.alert.severity`.
+    assert (
+        resolve_value("{{ vars.channel }} {{ trigger.alert.severity }}", CONTEXT)
+        == "soc-alerts critical"
+    )
+
+
 def test_resolve_config_walks_nested_structures():
     config = {
         "title": "Alert {{ trigger.alert.severity }}",
@@ -246,7 +255,6 @@ import re
 from typing import Any
 
 _EXPRESSION = re.compile(r"\{\{(.+?)\}\}", re.DOTALL)
-_WHOLE = re.compile(r"^\s*\{\{(.+?)\}\}\s*$", re.DOTALL)
 _SEGMENT = re.compile(r"^[A-Za-z0-9_-]+$")
 _DEFAULT_CALL = re.compile(r"^default\((.*)\)$", re.DOTALL)
 
@@ -305,12 +313,19 @@ def _evaluate(expression: str, context: dict) -> Any:
 
 
 def resolve_value(template: Any, context: dict) -> Any:
-    """Resolve one config value. Non-strings pass through untouched."""
+    """Resolve one config value. Non-strings pass through untouched.
+
+    A string that is exactly one expression keeps the resolved value's type,
+    so an If node can compare numbers as numbers. The single-expression test
+    is a span check rather than an anchored regex: `^\\s*\\{\\{(.+?)\\}\\}\\s*$`
+    matches "{{a}} {{b}}" as one expression with the path `a}} {{b`.
+    """
     if not isinstance(template, str):
         return template
-    whole = _WHOLE.match(template)
-    if whole:
-        return _evaluate(whole.group(1), context)
+    stripped = template.strip()
+    matches = list(_EXPRESSION.finditer(stripped))
+    if len(matches) == 1 and matches[0].span() == (0, len(stripped)):
+        return _evaluate(matches[0].group(1), context)
 
     def _replace(match: re.Match[str]) -> str:
         resolved = _evaluate(match.group(1), context)
@@ -333,7 +348,7 @@ def resolve_config(config: Any, context: dict) -> Any:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python -m pytest tests/server-api/test_soar_expressions.py -v`
-Expected: PASS, 14 tests.
+Expected: PASS, 15 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1975,7 +1990,7 @@ def test_filters_combine_with_and():
 - [ ] **Step 5: Run the full plan's test suite**
 
 Run: `python -m pytest tests/server-api/test_soar_expressions.py tests/server-api/test_soar_registry.py tests/server-api/test_soar_traversal.py tests/server-api/test_soar_nodes.py -v`
-Expected: PASS, 52 tests (14 + 7 + 14 + 17).
+Expected: PASS, 53 tests (15 + 7 + 14 + 17).
 
 - [ ] **Step 6: Commit**
 
