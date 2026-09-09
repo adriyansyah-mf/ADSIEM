@@ -33,7 +33,7 @@ export default function MarkdownNote({ content, className, style }: Props) {
           ),
           code: ({ children }) => (
             <code style={{
-              fontFamily: 'IBM Plex Sans, sans-serif',
+              fontFamily: 'Public Sans, sans-serif',
               fontSize: '11px',
               background: 'var(--bg-panel)',
               border: '1px solid var(--border)',
@@ -52,13 +52,13 @@ export default function MarkdownNote({ content, className, style }: Props) {
             }}>{children}</blockquote>
           ),
           h1: ({ children }) => (
-            <h1 style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '15px', letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--accent-blue)', margin: '8px 0 4px 0' }}>{children}</h1>
+            <h1 style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: '15px', letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--accent-blue)', margin: '8px 0 4px 0' }}>{children}</h1>
           ),
           h2: ({ children }) => (
-            <h2 style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '13px', letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--accent-blue)', margin: '8px 0 4px 0' }}>{children}</h2>
+            <h2 style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: '13px', letterSpacing: '1px', textTransform: 'uppercase', color: 'var(--accent-blue)', margin: '8px 0 4px 0' }}>{children}</h2>
           ),
           h3: ({ children }) => (
-            <h3 style={{ fontFamily: 'IBM Plex Sans, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px', color: 'var(--text-secondary)', margin: '6px 0 3px 0' }}>{children}</h3>
+            <h3 style={{ fontFamily: 'Public Sans, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px', color: 'var(--text-secondary)', margin: '6px 0 3px 0' }}>{children}</h3>
           ),
           hr: () => (
             <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '8px 0' }} />

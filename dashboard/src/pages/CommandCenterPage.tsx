@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SituationBrief } from '@/components/command-center/SituationBrief'
+import { AlertVolumeChart } from '@/components/command-center/AlertVolumeChart'
 import { PriorityQueue } from '@/components/command-center/PriorityQueue'
 import { OperationalHealth } from '@/components/command-center/OperationalHealth'
 import { ExposureCoverage } from '@/components/command-center/ExposureCoverage'
@@ -67,6 +68,7 @@ export default function CommandCenterPage() {
       <div className="cc-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 340px', gap: 14, alignItems: 'start' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
           <SituationBrief />
+          <AlertVolumeChart alerts={alerts} />
           <PriorityQueue alerts={alerts} workload={workload} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

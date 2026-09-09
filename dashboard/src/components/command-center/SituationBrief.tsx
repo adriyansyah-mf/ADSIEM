@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Sparkles, RefreshCw } from 'lucide-react'
 import { api } from '@/api/client'
@@ -10,30 +11,50 @@ interface BriefResponse {
   brief: string | null
   cited_alert_ids: string[]
   generated_at: string | null
+  cached: boolean
 }
 
-const STALE_MS = 5 * 60_000
+// Matches the backend's _CACHE_TTL (situation_brief.py) — the brief only
+// actually regenerates (and burns LLM tokens) once per this window, so
+// "stale" here means "past the cache lifetime", not "React Query is old".
+const CACHE_TTL_MS = 24 * 60 * 60_000
 
 /** Command Center's AI Situation Brief (Ironwatch spec 4.1). Every AI
  * interaction rule applies: this never blocks manual triage — Priority Queue
  * and Operational Health render fully regardless of this panel's state. */
 export function SituationBrief() {
   const navigate = useNavigate()
-  const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery<BriefResponse>({
-    queryKey: ['command-center', 'situation-brief'],
+  const queryClient = useQueryClient()
+  const queryKey = ['command-center', 'situation-brief']
+  const { data, isLoading } = useQuery<BriefResponse>({
+    queryKey,
     queryFn: () => api.get('/api/command-center/situation-brief').then(r => r.data),
-    refetchInterval: 5 * 60_000,
+    refetchInterval: 15 * 60_000,
   })
+  const [isForcing, setIsForcing] = useState(false)
 
-  const isStale = !isFetching && dataUpdatedAt > 0 && Date.now() - dataUpdatedAt > STALE_MS
+  const isStale = data?.generated_at != null && Date.now() - new Date(data.generated_at).getTime() > CACHE_TTL_MS
+
+  // Regular refetches (mount, polling) hit the server-cached brief — cheap,
+  // no LLM call. This button is the one deliberate way to bypass that cache
+  // and pay for a fresh regeneration, e.g. after something big just happened.
+  async function forceRefresh() {
+    setIsForcing(true)
+    try {
+      const res = await api.get('/api/command-center/situation-brief', { params: { force: true } })
+      queryClient.setQueryData(queryKey, res.data)
+    } finally {
+      setIsForcing(false)
+    }
+  }
 
   return (
     <GlassCard
       title={<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Sparkles size={14} aria-hidden="true" /> AI Situation Brief</span>}
       actions={
-        <button onClick={() => refetch()} aria-label="Refresh situation brief" title="Refresh"
-          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex' }}>
-          <RefreshCw size={13} className={isFetching ? 'animate-spin' : undefined} />
+        <button onClick={forceRefresh} disabled={isForcing} aria-label="Regenerate situation brief now (uses an AI call)" title="Regenerate now — bypasses the daily cache"
+          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: isForcing ? 'default' : 'pointer', display: 'flex' }}>
+          <RefreshCw size={13} className={isForcing ? 'animate-spin' : undefined} />
         </button>
       }
     >
@@ -55,9 +76,13 @@ export function SituationBrief() {
 
       {!isLoading && data?.status === 'ok' && (
         <div>
-          {isStale && (
-            <div style={{ fontSize: 11, color: 'var(--accent-yellow)', marginBottom: 6, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Stale — generated {new Date(data.generated_at!).toLocaleTimeString()}
+          {data.generated_at && (
+            <div style={{
+              fontSize: 11, marginBottom: 6, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em',
+              color: isStale ? 'var(--accent-yellow)' : 'var(--text-muted)',
+            }}>
+              {isStale ? 'Past due for refresh — ' : 'Generated '}
+              {new Date(data.generated_at).toLocaleString()}
             </div>
           )}
           <p style={{ fontSize: 13.5, color: 'var(--text-primary)', lineHeight: 1.6, margin: 0 }}>{data.brief}</p>
