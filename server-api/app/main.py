@@ -83,6 +83,7 @@ _DEFAULT_SETTINGS = [
     ("auto_assign_alerts",       "false", False, "Assign new alerts to the least-loaded active analyst"),
     ("correlation_definitions",  "[]",    False, "JSON array of grouped sequence/threshold correlation definitions"),
     ("soar_destructive_approval_required", "true", False, "Require approval before isolate-agent or block-IP SOAR actions"),
+    ("soar_v2_enabled", "false", False, "Enable the v2 visual workflow executor (true/false)"),
 ]
 
 async def _seed_settings() -> None:
@@ -491,6 +492,22 @@ async def _migrate_soar_v2_tables() -> None:
             ON soar_run_steps(run_id, idempotency_key)
         """))
 
+async def _migrate_soar_v2_engine_columns() -> None:
+    """Graph snapshot + depth-first frontier for the v2 executor.
+
+    The snapshot makes a run immune to later edits of its workflow; see
+    docs/superpowers/specs/2026-09-09-soar-visual-workflow-design.md §5.2.
+    """
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE soar_runs ADD COLUMN IF NOT EXISTS graph_snapshot JSONB"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE soar_runs ADD COLUMN IF NOT EXISTS "
+            "pending_node_ids JSONB NOT NULL DEFAULT '[]'::jsonb"
+        ))
+
 async def _migrate_webhook_payload_format() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -751,6 +768,7 @@ async def lifespan(app: FastAPI):
         await _migrate_alerts_columns()
         await _migrate_soar_tables()
         await _migrate_soar_v2_tables()
+        await _migrate_soar_v2_engine_columns()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
         await _migrate_api_keys_permission()

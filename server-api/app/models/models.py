@@ -675,6 +675,8 @@ class SoarRun(Base):
     trigger_ref     = Column(JSONB, nullable=False, default=dict)
     current_node_id = Column(UUID(as_uuid=True), ForeignKey("soar_nodes.id"), nullable=True)
     variables       = Column(JSONB, nullable=False, default=dict)
+    graph_snapshot  = Column(JSONB, nullable=True)
+    pending_node_ids = Column(JSONB, nullable=False, default=list)
     resume_at       = Column(DateTime(timezone=True), nullable=True)
     group_id        = Column(String(100), nullable=False, default="default")
     started_at      = Column(DateTime(timezone=True), nullable=False, default=now_utc)
