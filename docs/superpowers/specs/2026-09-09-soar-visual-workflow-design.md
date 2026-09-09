@@ -42,16 +42,27 @@ edits exactly this shape.
 semantics: idempotent retry validation, approval, rollback construction, and
 rollback application.
 
+`server-api/app/api/routes/soar_executions.py` already exposes the operator half of
+that: `GET /api/soar/executions`, `POST /api/soar/executions/{id}/approve` (calling
+`approve_step` then `execute_approved_step`), and
+`POST /api/soar/executions/{id}/rollback`. All three are registered in
+`server-api/app/core/permission_matrix.py:151-153`. **Approval, destructive
+execution, and rollback are therefore already live**, including correct
+`AgentTask` queuing via `params` with `created_by` set and `agent.is_isolated`
+maintained (`soar_service.py:196-208`).
+
 **What is missing:** nothing walks the graph. No file outside `models.py`,
 `main.py` (table creation) and `scripts/migrate_soar_v1_to_v2.py` references
-`SoarNode`. There are no workflow/node/edge API routes, no node-type registry, and
-no canvas UI.
+`SoarNode`. There is no traversal, no run creation, no workflow/node/edge API
+routes, no node-type registry, and no canvas UI. The gap is narrower than it
+first appears: the dangerous half is built, the authoring and orchestration half
+is not.
 
 **Production data** (queried 2026-09-09): 2 v1 playbooks, 2 v1 actions, and zero
 v2 workflows, nodes, and runs. Migration burden is therefore negligible and v2 is
 effectively greenfield.
 
-**Pre-existing defect that this spec absorbs.** `worker/worker/soar_engine.py`'s
+**Pre-existing defect, confined to v1.** `worker/worker/soar_engine.py`'s
 `_action_isolate_agent` and `_action_block_ip` are broken in three distinct ways,
 one more than previously recorded in `docs/IMPLEMENTATION_STATUS.md`:
 
@@ -64,9 +75,12 @@ one more than previously recorded in `docs/IMPLEMENTATION_STATUS.md`:
    (`server-api/app/models/models.py:61`) but **not** in the worker's `Agent`
    model (`worker/worker/models.py:15-21`).
 
-Phase 1's Block IP and Isolate Host nodes queue work through the same
-`AgentTask` mechanism, so these defects must be fixed as part of this work rather
-than tracked separately.
+These three defects are **v1-only**. The v2 path does not share this code: its
+Block IP and Isolate Host nodes reach `AgentTask` through
+`soar_service.execute_approved_step`, which is already correct. The defects
+therefore need no fix in phase 1 — they are deleted along with the v1 engine
+during retirement (§12). They are recorded here so the deletion is understood as
+removing broken code, not working code.
 
 ## 3. Goals and non-goals
 
@@ -104,9 +118,22 @@ losing the typed, audited path for destructive operations.
 
 ## 5. Execution model
 
-The executor runs in the **worker**, as a loop alongside the existing ones in
-`worker/worker/main.py`. It does not run in server-api: workflows may wait hours
-for a delay or a human approval, which must not occupy a request handler.
+The executor runs in **server-api**, as a background asyncio loop started at
+application startup.
+
+This is deliberate and was reconsidered during planning. `server-api` and `worker`
+have separate Docker build contexts (`./server-api` and `./worker`, with worker's
+Dockerfile copying only `worker/`), so they cannot share code — which is why the
+database models are already duplicated across both. Placing the executor in the
+worker would therefore force one of two bad outcomes: duplicating the approval,
+idempotency, and rollback logic of `soar_service.py` — which is precisely how the
+v1 path rotted into the three defects of §2 — or a network hop back into
+server-api for every destructive step.
+
+The executor belongs next to the authoritative implementation of the actions it
+invokes. The earlier argument for the worker (that workflows may wait hours) does
+not survive the step-at-a-time model of this section: a waiting run occupies
+nothing, it is a row in the database.
 
 Execution is **step-at-a-time and persisted**, not a single coroutine walking the
 graph to completion. Each iteration claims a runnable run, executes exactly one
@@ -131,11 +158,11 @@ destructive step is created as `pending_approval`, a non-destructive one as
 
 ### 5.1 Concurrency
 
-Production runs **two worker replicas** (`siem-platform-worker-1`, `-2`). Without
-locking, both could claim the same run and, for example, block an IP twice. Runs
-are therefore claimed with `SELECT ... FOR UPDATE SKIP LOCKED` (PostgreSQL 16 is
-already in use). This is a correctness requirement, not an optimisation, and has a
-dedicated test (§11).
+Production runs **two server-api replicas** (`siem-platform-server-api-1`, `-2`),
+so two executor loops are live at all times. Without locking, both could claim the
+same run and, for example, block an IP twice. Runs are therefore claimed with
+`SELECT ... FOR UPDATE SKIP LOCKED` (PostgreSQL 16 is already in use). This is a
+correctness requirement, not an optimisation, and has a dedicated test (§11).
 
 ### 5.2 Graph snapshot
 
@@ -191,9 +218,15 @@ change — which is what makes the phase 2 connector catalogue cheap.
 
 ### 5.6 Triggers
 
-- **Alert Trigger** — dispatched where `ai_analyst.py` currently calls the v1
-  engine. Enabled workflows whose trigger filter matches create a `soar_runs` row
-  with `trigger_type='alert'` and `trigger_ref={'alert_id': ...}`.
+- **Alert Trigger** — alerts are created in the worker, but the executor lives in
+  server-api (§5), so the two are bridged by Redis, matching the pattern the
+  platform already uses for `siem:ai-analysis`. Where `ai_analyst.py` currently
+  calls the v1 engine it instead publishes the alert id to a `siem:soar-triggers`
+  queue; the server-api executor consumes it, matches enabled workflows' trigger
+  filters, and creates a `soar_runs` row with `trigger_type='alert'` and
+  `trigger_ref={'alert_id': ...}`. This keeps trigger evaluation — which reads
+  workflow definitions — on the side that owns them, so no SOAR model is
+  duplicated into the worker.
 - **Schedule Trigger** — a cron-style worker loop.
 - **Manual Trigger** — an API endpoint used by a "Run now" button.
 - **Inbound Webhook Trigger** — an authenticated endpoint that starts a run and
@@ -208,11 +241,10 @@ All additive, applied by the existing startup-migration pattern in
 |---|---|
 | `soar_runs.graph_snapshot` JSONB | §5.2 |
 | `soar_runs.pending_node_ids` JSONB | §5.3 |
-| `AgentTask` model added to `worker/worker/models.py` | Defect 1 of §2 |
-| `Agent.is_isolated` added to `worker/worker/models.py` | Defect 3 of §2 |
 
-No table is created or dropped. `soar_playbooks` and `soar_actions` are retained
-through this release (§12).
+No table is created or dropped, and no worker-side model changes are needed: the
+executor lives in server-api (§5), whose models are already complete.
+`soar_playbooks` and `soar_actions` are retained through this release (§12).
 
 ## 7. Node catalogue — phase 1
 
@@ -230,7 +262,12 @@ Branching nodes emit a handle name that selects the outgoing edge: If emits
 `true` / `false`; Switch emits `case_<n>` or `default`.
 
 **Block IP and Isolate Host route through `soar_service.py`**, not around it, so
-approval, idempotency, and rollback continue to apply.
+approval, idempotency, and rollback continue to apply. Concretely, these nodes
+build a `StepPreparation` and persist the step via `build_step_record`; because
+their `action_type` is in `DESTRUCTIVE_ACTIONS`, the step is created as
+`pending_approval` and the run parks in `waiting`. The already-live
+`POST /api/soar/executions/{id}/approve` route then performs the execution. No new
+destructive code path is introduced by this spec.
 
 ## 8. Frontend
 
@@ -278,10 +315,15 @@ because they execute from their snapshot (§5.2).
   sandboxed. Arbitrary execution inside the platform that is supposed to detect
   it is not a trade worth making.
 - **Expression resolution is path-only** (§5.4) for the same reason.
-- **The HTTP Request node requires SSRF protection.** In a multi-tenant security
-  platform an unrestricted HTTP node is a cannon aimed at `169.254.169.254` and at
-  the platform's own internal services. Default deny for private, loopback,
-  link-local, and cloud-metadata addresses, with a per-tenant allowlist.
+- **The HTTP Request node requires SSRF protection, and must reuse the existing
+  implementation rather than write its own.** `server-api/app/core/outbound_url.py`
+  already provides `validate_outbound_url()` plus `PinnedAsyncHTTPTransport`,
+  which pins the validated address for the actual request and so also defends
+  against DNS rebinding; it is already relied on by `routes/webhooks.py` and
+  `routes/rules.py`. In a multi-tenant security platform an unrestricted HTTP node
+  is a cannon aimed at `169.254.169.254` and at the platform's own internal
+  services — and a second, home-grown guard would inevitably drift from the
+  hardened one. This is a further reason the executor belongs in server-api (§5).
 - **Tenant isolation**: workflows, runs, and steps are all scoped by the existing
   `group_id`.
 - **Destructive actions** retain approval, idempotency, and rollback via
@@ -297,11 +339,15 @@ Test-first, matching the repository's existing workflow.
 - **Concurrency**: two executors, one run, executed exactly once — covering the
   two-replica hazard of §5.1.
 - Expression resolver, including injection attempts and missing paths.
-- SSRF guard: private, loopback, link-local, and metadata addresses.
+- HTTP node SSRF: assert it routes through `validate_outbound_url()` and the
+  pinned transport. The guard itself is already tested; what needs proving is that
+  the node cannot bypass it.
 - Per-node handler tests with mocked side effects.
-- **Regression for the §2 defects**: Block IP and Isolate Host must create an
-  `AgentTask` row populated through `params`, and must set `Agent.is_isolated`.
-  Had this test existed, the defect would not have reached production.
+- **Destructive-node contract**: Block IP and Isolate Host must produce a step
+  whose `action_type` lands in `DESTRUCTIVE_ACTIONS`, leaving it
+  `pending_approval` and the run `waiting` — never executing inline. A test that
+  a destructive node cannot self-execute is the guardrail that keeps §7's promise
+  true as the catalogue grows.
 - One end-to-end integration test against a real database: alert → trigger → run →
   steps → terminal status.
 
@@ -315,7 +361,8 @@ which has never been exercised.
 **Retirement**, only after v2 is verified in production: remove the `/playbooks`
 and `/actions` routes, the v1 path in `worker/worker/soar_engine.py`, the v1
 trigger call in `ai_analyst.py`, and `PlaybookEditor` with `ConditionRow` and
-`ActionRow`. The `soar_playbooks` and `soar_actions` **tables are retained for one
+`ActionRow`. This is where the three §2 defects disappear — by deletion rather
+than repair, since nothing in v2 depends on that code. The `soar_playbooks` and `soar_actions` **tables are retained for one
 release** and dropped in a follow-up.
 
 **Rollout.** The v2 executor sits behind a `soar_v2_enabled` platform setting,
@@ -331,8 +378,9 @@ three, each independently valuable and independently verifiable:
 1. **Engine core (headless).** Schema additions, the step executor with claiming
    and snapshotting, the node registry, the expression resolver, workflow/node/edge
    CRUD routes, and the six nodes needed for a real end-to-end run: Alert Trigger,
-   If, Create Case, Add Note, Block IP, Isolate Host — the last two carrying the §2
-   defect fixes. Verifiable entirely through tests and the API, with no UI.
+   If, Create Case, Add Note, Block IP, Isolate Host. The last two only prepare
+   steps; execution stays with the existing approve route (§7). Verifiable
+   entirely through tests and the API, with no UI.
 2. **Canvas and run inspector.** The React Flow editor, schema-driven config
    panel, and per-node run inspection.
 3. **Catalogue completion and v1 retirement.** The remaining nodes of §7, the
