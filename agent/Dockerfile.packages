@@ -1,4 +1,7 @@
+ARG VERSION=1.0.0
+
 FROM golang:1.25-alpine AS builder
+ARG VERSION
 RUN apk add --no-cache clang
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -8,9 +11,11 @@ RUN clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
     -I internal/procexec/bpf/include \
     -c internal/procexec/bpf/execve.bpf.c \
     -o internal/procexec/bpf/execve.bpf.o
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /siem-agent ./cmd/agent/
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=${VERSION}" -o /siem-agent ./cmd/agent/
 
 FROM debian:bookworm-slim
+ARG VERSION
+ENV VERSION=${VERSION}
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dpkg-dev \
     rpm \
