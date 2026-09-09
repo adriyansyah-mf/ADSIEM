@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app.services.soar_nodes import clear_registry, get_node_type
+from app.services.soar_nodes import catalogue, clear_registry, get_node_type
 from app.services.soar_nodes.base import NodeContext
 from app.services.soar_nodes.builtin import register_builtin_nodes
 from app.services.soar_triggers import trigger_matches
@@ -206,3 +206,12 @@ def test_filters_combine_with_and():
     config = {"severities": ["critical"], "title_contains": "waf"}
     assert trigger_matches(config, {"severity": "critical", "title": "WAF block"}) is True
     assert trigger_matches(config, {"severity": "low", "title": "WAF block"}) is False
+
+
+def test_register_builtin_nodes_is_idempotent_on_reentry():
+    # Simulates lifespan running twice in the same process: a second call
+    # must be a no-op, not a crash, and must leave the registry unchanged.
+    clear_registry()
+    register_builtin_nodes()
+    register_builtin_nodes()
+    assert len(catalogue()) == 6

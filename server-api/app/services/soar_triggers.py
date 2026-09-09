@@ -30,6 +30,12 @@ def trigger_matches(config: dict[str, Any], event: dict[str, Any]) -> bool:
 
 
 async def _dispatch(event: dict[str, Any]) -> None:
+    # Read the setting and find matching workflows in one short transaction,
+    # then let it end before creating any run. Each matched workflow then gets
+    # its own session/transaction below — a failed start_run() for one
+    # workflow (e.g. a misconfigured graph) must not roll back runs already
+    # started for its siblings, and the read transaction must not stay open
+    # (holding row locks) across however many start_run() calls follow.
     async with AsyncSessionLocal() as db:
         async with db.begin():
             setting = await db.get(PlatformSetting, "soar_v2_enabled")
@@ -41,6 +47,7 @@ async def _dispatch(event: dict[str, Any]) -> None:
                     SoarWorkflow.group_id == event.get("group_id", "default"),
                 )
             )).scalars().all()
+            matched = []
             for workflow in workflows:
                 triggers = (await db.execute(
                     select(SoarNode).where(
@@ -48,11 +55,19 @@ async def _dispatch(event: dict[str, Any]) -> None:
                         SoarNode.node_type == "alert_trigger",
                     )
                 )).scalars().all()
-                if not any(trigger_matches(t.config or {}, event) for t in triggers):
-                    continue
-                await start_run(db, workflow, "alert", {"alert": event})
-                log.info("soar_run_started", workflow_id=str(workflow.id),
-                         alert_id=event.get("alert_id"))
+                if any(trigger_matches(t.config or {}, event) for t in triggers):
+                    matched.append(workflow)
+
+    for workflow in matched:
+        try:
+            async with AsyncSessionLocal() as db:
+                async with db.begin():
+                    await start_run(db, workflow, "alert", {"alert": event})
+            log.info("soar_run_started", workflow_id=str(workflow.id),
+                     alert_id=event.get("alert_id"))
+        except Exception as exc:
+            log.error("soar_run_start_failed", workflow_id=str(workflow.id),
+                      alert_id=event.get("alert_id"), error=str(exc))
 
 
 async def soar_trigger_consumer_loop() -> None:

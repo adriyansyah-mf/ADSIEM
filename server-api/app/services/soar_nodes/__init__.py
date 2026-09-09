@@ -25,6 +25,7 @@ __all__ = [
     "catalogue",
     "clear_registry",
     "get_node_type",
+    "is_registered",
     "register",
 ]
 
@@ -33,6 +34,10 @@ def register(node_type: NodeType) -> None:
     if node_type.node_type in _REGISTRY:
         raise ValueError(f"node type {node_type.node_type!r} already registered")
     _REGISTRY[node_type.node_type] = node_type
+
+
+def is_registered(name: str) -> bool:
+    return name in _REGISTRY
 
 
 def get_node_type(name: str) -> NodeType:

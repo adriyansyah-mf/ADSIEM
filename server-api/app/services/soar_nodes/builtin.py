@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Case, CaseNote
 from app.services.soar_expressions import resolve_config
-from app.services.soar_nodes import NodeContext, NodeResult, NodeType, register
+from app.services.soar_nodes import NodeContext, NodeResult, NodeType, is_registered, register
 from app.services.soar_service import StepPreparation, build_step_record
 
 _SEVERITIES = ["info", "low", "medium", "high", "critical"]
@@ -220,5 +220,19 @@ _BUILTIN = [
 
 
 def register_builtin_nodes() -> None:
+    """Register the six builtin node types.
+
+    Idempotent for re-entry in the same process (e.g. `lifespan` running
+    again): a name already in the registry is skipped rather than re-raised
+    through. A genuine duplicate within `_BUILTIN` itself — a copy-paste or
+    merge mistake — is a real coding error and must still crash startup
+    loudly, rather than silently registering only the types before the
+    duplicate and leaving the rest missing.
+    """
+    names = [node_type.node_type for node_type in _BUILTIN]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate node types in _BUILTIN: {duplicates}")
     for node_type in _BUILTIN:
-        register(node_type)
+        if not is_registered(node_type.node_type):
+            register(node_type)
