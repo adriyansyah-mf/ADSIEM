@@ -330,6 +330,10 @@ async def _record_run_failure(
             )).scalars().first()
             if run is None or run.status == "failed":
                 return
+            if node_id is not None and run.current_node_id != node_id:
+                # Someone advanced this run past the node we failed on --
+                # our failure is stale; do not clobber their progress.
+                return
             if node_id is not None:
                 db.add(SoarRunStep(
                     id=uuid.uuid4(), run_id=run_id, node_id=node_id,
@@ -366,6 +370,11 @@ async def executor_tick() -> bool:
             run = await claim_runnable_run(db)
             if run is None:
                 return False
+            if run.graph_snapshot is None:
+                run.status = "failed"
+                run.finished_at = datetime.now(timezone.utc)
+                log.error("soar_run_missing_snapshot", run_id=str(run.id))
+                return True
             run_id = run.id
             node_id = run.current_node_id
             node = run.graph_snapshot["nodes"].get(str(node_id)) if node_id else None
