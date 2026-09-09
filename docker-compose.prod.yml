@@ -23,6 +23,13 @@ services:
           memory: 2g
           cpus: '1.0'
 
+  ollama:
+    deploy:
+      resources:
+        limits:
+          memory: 8g
+          cpus: '16.0'
+
   9router:
     labels:
       # Scopes Watchtower below to just this container — nothing else in the
