@@ -22,7 +22,7 @@
 - Everything ships behind the `soar_v2_enabled` platform setting, default `"false"` (spec §12).
 - Graphs are acyclic; validated on save (spec §9).
 - The executor must commit its DB transaction before any outbound HTTP or LLM call (spec §9).
-- Tests: the host Python environment lacks `asyncpg`, so **all tests in this plan are pure-logic with fakes** and run on the host. No test in this plan requires a database. (`structlog` is a real server-api dependency and is safe to import in application code.)
+- Tests: **all tests in this plan are pure-logic with fakes** and run on the host. No test needs a *running* database — but any test importing `app.models.models` transitively imports `app.core.database`, which needs the `asyncpg` driver installed to import at all. Install it if collection fails: `pip install --user asyncpg==0.30.0` (the version already pinned in `server-api/requirements.txt`). (`structlog` is a real server-api dependency and is safe to import in application code.)
 
 **Deliberately deferred from the spec, and why.** Spec §9's per-node `on_error` policy, retry-with-backoff, and per-node timeouts are *not* built here. None of slice 1's six nodes performs I/O beyond the local database session, so there is nothing to time out or retry; those mechanisms belong with the slice that introduces the HTTP Request and AI Analyze nodes, where they are load-bearing. A node that raises fails its run, which is the correct conservative default in the meantime. Spec §9's run-duration cap and per-tenant concurrency cap are deferred for the same reason; the step ceiling (`MAX_STEPS_PER_RUN`) is implemented because it is the guard against a runaway graph, which slice 1 *can* produce.
 
