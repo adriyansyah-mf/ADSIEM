@@ -180,6 +180,11 @@ async def run_hunt(hunt_id: str) -> None:
             timeline = _build_timeline(alerts, events)
             timeline_text = _timeline_to_text(hunt.ioc_type, hunt.ioc_value, timeline)
 
+            # Close the read transaction (alerts/events/FIM queries above)
+            # before the LLM call, which can take 60-90s+ on a slow/retrying
+            # provider — an open transaction that long can block unrelated
+            # DDL elsewhere (see docs/IMPLEMENTATION_STATUS.md).
+            await db.commit()
             analysis = await _call_llm(hunt.ioc_type, hunt.ioc_value, timeline_text)
 
             hunt.status = "done"

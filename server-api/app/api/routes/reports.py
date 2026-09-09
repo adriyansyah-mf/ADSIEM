@@ -91,6 +91,10 @@ Write a 3-paragraph executive summary IN {body.language.upper()} (the entire res
 
 Keep it concise — max 220 words total. No bullet points, pure paragraphs. Respond with plain text only, no markdown."""
 
+    # Close the read transaction (all the queries above) before the LLM call,
+    # which can take 60-90s+ on a slow/retrying provider — an open
+    # transaction for that long can block unrelated DDL elsewhere.
+    await db.commit()
     narrative = await generate_text(api_key, model, prompt, max_tokens=2000)
 
     pdf_bytes = build_report_pdf(

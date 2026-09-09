@@ -74,6 +74,12 @@ async def run_assistant_chat(
 ) -> dict:
     api_key = await _get_setting(db, "ninerouter_api_key", "")
     model = await _get_setting(db, "ninerouter_model", "combo")
+    # Close out the read transaction from the settings lookup before any LLM
+    # call — generate_chat below can take 60-90s+ (9router retry/backoff),
+    # and holding an open transaction that whole time blocks unrelated DDL
+    # (see docs/IMPLEMENTATION_STATUS.md: a stuck assistant request holding
+    # a transaction open blocked a migration and stalled live alert ingestion).
+    await db.commit()
 
     if not api_key:
         return {"reply": "The AI assistant isn't configured yet — an admin needs to set the 9router API key in Settings.", "tools_used": []}
@@ -135,6 +141,9 @@ async def run_assistant_chat(
         log.info("assistant_tool_call", tool=tool_name, args=tool_args)
         result = await run_tool(tool_name, tool_args, db, group_filter)
         tools_used.append(tool_name)
+        # Same reasoning as above — end this tool call's read transaction
+        # before the next (possibly slow) generate_chat round-trip.
+        await db.commit()
 
         messages.append({"role": "assistant", "content": raw})
         messages.append({"role": "user", "content": f"TOOL RESULT for {tool_name}: {json.dumps(result, default=str)[:4000]}"})
