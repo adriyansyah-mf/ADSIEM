@@ -4,11 +4,14 @@ import pytest
 
 from app.services.soar_executor import (
     CyclicWorkflowError,
+    ConvergentWorkflowError,
     advance_frontier,
     build_snapshot,
     find_entry_node_id,
     next_node_ids,
     validate_acyclic,
+    validate_graph,
+    validate_single_inbound,
 )
 
 
@@ -122,3 +125,35 @@ def test_validate_acyclic_rejects_a_self_loop():
     snapshot = build_snapshot([_node("a")], [_edge("a", "a")])
     with pytest.raises(CyclicWorkflowError):
         validate_acyclic(snapshot)
+
+
+def test_validate_single_inbound_accepts_a_tree():
+    validate_single_inbound(_branching_snapshot())
+
+
+def test_validate_single_inbound_rejects_a_reconverging_diamond():
+    snapshot = build_snapshot(
+        [_node("a"), _node("x"), _node("y"), _node("z")],
+        [_edge("a", "x"), _edge("a", "y"), _edge("x", "z"), _edge("y", "z")],
+    )
+    with pytest.raises(ConvergentWorkflowError):
+        validate_single_inbound(snapshot)
+
+
+def test_validate_graph_rejects_a_cycle():
+    snapshot = build_snapshot([_node("a")], [_edge("a", "a")])
+    with pytest.raises(CyclicWorkflowError):
+        validate_graph(snapshot)
+
+
+def test_validate_graph_rejects_a_reconverging_diamond():
+    snapshot = build_snapshot(
+        [_node("a"), _node("x"), _node("y"), _node("z")],
+        [_edge("a", "x"), _edge("a", "y"), _edge("x", "z"), _edge("y", "z")],
+    )
+    with pytest.raises(ConvergentWorkflowError):
+        validate_graph(snapshot)
+
+
+def test_validate_graph_accepts_a_valid_tree():
+    validate_graph(_branching_snapshot())

@@ -14,6 +14,12 @@ class CyclicWorkflowError(ValueError):
     """A workflow graph contains a cycle. Phase 1 supports DAGs only."""
 
 
+class ConvergentWorkflowError(ValueError):
+    """A node has more than one inbound edge. Phase 1 executes a single
+    active path with no visited-set, so a reconverging graph would run the
+    shared node once per inbound branch."""
+
+
 def build_snapshot(nodes: Iterable[Any], edges: Iterable[Any]) -> dict[str, Any]:
     return {
         "nodes": {
@@ -95,3 +101,18 @@ def validate_acyclic(snapshot: dict[str, Any]) -> None:
 
     for node_id in list(adjacency):
         walk(node_id)
+
+
+def validate_single_inbound(snapshot: dict[str, Any]) -> None:
+    seen: set[str] = set()
+    for edge in snapshot["edges"]:
+        target = edge["target_node_id"]
+        if target in seen:
+            raise ConvergentWorkflowError(f"node {target} has multiple inbound edges")
+        seen.add(target)
+
+
+def validate_graph(snapshot: dict[str, Any]) -> None:
+    """Full validation for a workflow that this executor can run."""
+    validate_acyclic(snapshot)
+    validate_single_inbound(snapshot)
