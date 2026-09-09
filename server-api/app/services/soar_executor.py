@@ -141,11 +141,26 @@ def validate_single_entry(snapshot: dict[str, Any]) -> None:
         raise DisconnectedWorkflowError(f"expected exactly one entry node, found {len(roots)}")
 
 
+class DuplicateNodeNameError(ValueError):
+    """Two nodes share a name. Expressions address nodes by name, so a
+    duplicate would resolve to whichever step the database returned first."""
+
+
+def validate_unique_names(snapshot: dict[str, Any]) -> None:
+    seen: set[str] = set()
+    for node in snapshot["nodes"].values():
+        name = node["name"]
+        if name in seen:
+            raise DuplicateNodeNameError(f"duplicate node name {name!r}")
+        seen.add(name)
+
+
 def validate_graph(snapshot: dict[str, Any]) -> None:
     """Full validation for a workflow that this executor can run."""
     validate_acyclic(snapshot)
     validate_single_inbound(snapshot)
     validate_single_entry(snapshot)
+    validate_unique_names(snapshot)
 
 
 async def start_run(
@@ -205,7 +220,9 @@ async def claim_runnable_run(db: AsyncSession) -> SoarRun | None:
 
 async def _build_context(db: AsyncSession, run: SoarRun, node_id: uuid.UUID) -> NodeContext:
     steps = (await db.execute(
-        select(SoarRunStep).where(SoarRunStep.run_id == run.id)
+        select(SoarRunStep)
+        .where(SoarRunStep.run_id == run.id)
+        .order_by(SoarRunStep.started_at)
     )).scalars().all()
     snapshot_nodes = run.graph_snapshot["nodes"]
     outputs: dict[str, Any] = {}
@@ -250,22 +267,14 @@ async def execute_one_step(db: AsyncSession, run: SoarRun) -> bool:
     run.status = "running"
     context = await _build_context(db, run, node_id)
     started_at = datetime.now(timezone.utc)
-    try:
-        node_type = get_node_type(node["node_type"])
-        result = await node_type.handler(db, context, node["config"])
-    except Exception as exc:
-        db.add(SoarRunStep(
-            id=uuid.uuid4(), run_id=run.id, node_id=node_id,
-            action_type=node["node_type"], status="failed",
-            is_destructive=False, is_reversible=False,
-            idempotency_key=f"{run.id}:{node_id}:error",
-            input_hash=input_hash({}), input={}, error=str(exc),
-            started_at=started_at, finished_at=datetime.now(timezone.utc),
-        ))
-        run.status = "failed"
-        run.finished_at = datetime.now(timezone.utc)
-        log.error("soar_node_failed", run_id=str(run.id), node=node["name"], error=str(exc))
-        return False
+    # No try/except around the handler call: a handler that hits a database
+    # error (e.g. a flush() violating a constraint) leaves this session's
+    # transaction unusable, so writing a `failed` step here would just be
+    # lost to the same rollback that dooms the run. Let it propagate --
+    # executor_tick records the failure on a fresh session instead (see
+    # _record_run_failure).
+    node_type = get_node_type(node["node_type"])
+    result = await node_type.handler(db, context, node["config"])
 
     if not node_type.is_destructive:
         db.add(SoarRunStep(
@@ -296,11 +305,60 @@ async def execute_one_step(db: AsyncSession, run: SoarRun) -> bool:
 
 async def _enabled(db: AsyncSession) -> bool:
     row = await db.get(PlatformSetting, "soar_v2_enabled")
-    return bool(row and row.value.lower() == "true")
+    return bool(row and (row.value or "").lower() == "true")
+
+
+async def _record_run_failure(
+    run_id: uuid.UUID,
+    node_id: uuid.UUID | None,
+    node_type_name: str,
+    error: str,
+) -> None:
+    """Mark a run failed from a brand-new session and transaction.
+
+    Called after the session that ran a node -- or committed its result --
+    has failed: that session's transaction is unusable, so writing the
+    failure there would just be discarded by the same rollback that doomed
+    it, leaving the run exactly where `claim_runnable_run` found it. Since
+    claiming orders by `started_at` ascending, an unrecorded failure like
+    that is reselected every tick forever, blocking every run behind it.
+    """
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            run = (await db.execute(
+                select(SoarRun).where(SoarRun.id == run_id).with_for_update()
+            )).scalars().first()
+            if run is None or run.status == "failed":
+                return
+            if node_id is not None:
+                db.add(SoarRunStep(
+                    id=uuid.uuid4(), run_id=run_id, node_id=node_id,
+                    action_type=node_type_name, status="failed",
+                    is_destructive=False, is_reversible=False,
+                    idempotency_key=f"{run_id}:{node_id}:error",
+                    input_hash=input_hash({}), input={}, error=error,
+                    started_at=datetime.now(timezone.utc),
+                    finished_at=datetime.now(timezone.utc),
+                ))
+            run.status = "failed"
+            run.finished_at = datetime.now(timezone.utc)
 
 
 async def executor_tick() -> bool:
-    """One claim-and-execute cycle. Returns True if work was done."""
+    """One claim-and-execute cycle. Returns True if work was done.
+
+    Claiming and executing are two separate transactions. The first commits
+    `running` before the node handler ever runs, so a run that dies
+    mid-handler is never left sitting in `pending` at the head of
+    `claim_runnable_run`'s ordering -- which would otherwise re-block every
+    run behind it forever. The second re-acquires the row lock with
+    SKIP LOCKED before touching the run again: if another replica grabbed it
+    in the gap between the two transactions, we back off instead of racing
+    it. Any failure from the second transaction -- from the handler itself,
+    or surfacing only at commit (e.g. a deferred foreign-key violation) --
+    is recorded by `_record_run_failure` on its own fresh session, since
+    this transaction's session may no longer be usable.
+    """
     async with AsyncSessionLocal() as db:
         async with db.begin():
             if not await _enabled(db):
@@ -308,8 +366,31 @@ async def executor_tick() -> bool:
             run = await claim_runnable_run(db)
             if run is None:
                 return False
-            await execute_one_step(db, run)
-            return True
+            run_id = run.id
+            node_id = run.current_node_id
+            node = run.graph_snapshot["nodes"].get(str(node_id)) if node_id else None
+            node_type_name = node["node_type"] if node else "unknown"
+            run.status = "running"
+
+        try:
+            async with db.begin():
+                run = (await db.execute(
+                    select(SoarRun).where(SoarRun.id == run_id)
+                    .with_for_update(skip_locked=True)
+                )).scalars().first()
+                if run is None:
+                    # Another replica claimed it in the gap between our two
+                    # transactions, or it no longer exists. Back off -- we
+                    # already made progress (the `running` commit) this tick.
+                    return True
+                await execute_one_step(db, run)
+        except Exception as exc:
+            log.error(
+                "soar_step_execution_failed", run_id=str(run_id),
+                node_id=str(node_id) if node_id else None, error=str(exc),
+            )
+            await _record_run_failure(run_id, node_id, node_type_name, str(exc))
+        return True
 
 
 async def soar_executor_loop() -> None:

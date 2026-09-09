@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_resource_group
 from app.core.rate_limit import rate_limit_by_user_group
 from app.models.models import SoarRun, SoarRunStep, User
+from app.services.soar_executor import advance_frontier
 from app.services.soar_service import (
     IdempotencyConflictError,
     RollbackNotSupportedError,
@@ -155,8 +156,30 @@ async def approve_execution(
         StepStateConflictError,
     ) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    run.status = "completed"
-    run.finished_at = step.finished_at
+    if run.graph_snapshot is None:
+        # A v1-era or manually created run has no snapshot to advance
+        # through -- there is nothing left for this executor to drive.
+        run.status = "succeeded"
+        run.finished_at = datetime.now(timezone.utc)
+    elif run.current_node_id != step.node_id:
+        # The run has already moved past this step's node -- this is an
+        # idempotent replay of an approval that already advanced it (the
+        # lookup above matches a retried request by idempotency_key against
+        # an already-approved/succeeded step). Advancing again would skip
+        # the node the run is now actually parked at.
+        pass
+    else:
+        current, pending = advance_frontier(
+            run.graph_snapshot, str(step.node_id), "out", list(run.pending_node_ids or [])
+        )
+        run.current_node_id = uuid.UUID(current) if current else None
+        run.pending_node_ids = pending
+        if current is None:
+            run.status = "succeeded"
+            run.finished_at = datetime.now(timezone.utc)
+        else:
+            run.status = "running"
+            run.finished_at = None
     await db.commit()
     await db.refresh(step)
     return _step_out(step)

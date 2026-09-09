@@ -6,6 +6,7 @@ from app.services.soar_executor import (
     CyclicWorkflowError,
     ConvergentWorkflowError,
     DisconnectedWorkflowError,
+    DuplicateNodeNameError,
     advance_frontier,
     build_snapshot,
     find_entry_node_id,
@@ -14,6 +15,7 @@ from app.services.soar_executor import (
     validate_graph,
     validate_single_entry,
     validate_single_inbound,
+    validate_unique_names,
 )
 
 
@@ -186,4 +188,26 @@ def test_validate_graph_rejects_two_disconnected_trees():
         [_edge("a", "b"), _edge("c", "d")],
     )
     with pytest.raises(DisconnectedWorkflowError):
+        validate_graph(snapshot)
+
+
+def test_validate_unique_names_accepts_distinct_names():
+    validate_unique_names(_linear_snapshot())
+
+
+def test_validate_unique_names_rejects_two_nodes_sharing_a_name():
+    snapshot = build_snapshot(
+        [_node("a", name="Enrich"), _node("b", name="Enrich")],
+        [_edge("a", "b")],
+    )
+    with pytest.raises(DuplicateNodeNameError):
+        validate_unique_names(snapshot)
+
+
+def test_validate_graph_rejects_two_nodes_sharing_a_name():
+    snapshot = build_snapshot(
+        [_node("a", name="Enrich"), _node("b", name="Enrich")],
+        [_edge("a", "b")],
+    )
+    with pytest.raises(DuplicateNodeNameError):
         validate_graph(snapshot)
