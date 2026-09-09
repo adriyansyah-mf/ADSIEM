@@ -5,12 +5,14 @@ import pytest
 from app.services.soar_executor import (
     CyclicWorkflowError,
     ConvergentWorkflowError,
+    DisconnectedWorkflowError,
     advance_frontier,
     build_snapshot,
     find_entry_node_id,
     next_node_ids,
     validate_acyclic,
     validate_graph,
+    validate_single_entry,
     validate_single_inbound,
 )
 
@@ -157,3 +159,31 @@ def test_validate_graph_rejects_a_reconverging_diamond():
 
 def test_validate_graph_accepts_a_valid_tree():
     validate_graph(_branching_snapshot())
+
+
+def test_validate_single_entry_accepts_one_root():
+    validate_single_entry(_branching_snapshot())
+
+
+def test_validate_single_entry_rejects_two_disconnected_trees():
+    snapshot = build_snapshot(
+        [_node("a"), _node("b"), _node("c"), _node("d")],
+        [_edge("a", "b"), _edge("c", "d")],
+    )
+    with pytest.raises(DisconnectedWorkflowError):
+        validate_single_entry(snapshot)
+
+
+def test_validate_single_entry_rejects_a_graph_with_no_root():
+    snapshot = build_snapshot([_node("a"), _node("b")], [_edge("a", "b"), _edge("b", "a")])
+    with pytest.raises(DisconnectedWorkflowError):
+        validate_single_entry(snapshot)
+
+
+def test_validate_graph_rejects_two_disconnected_trees():
+    snapshot = build_snapshot(
+        [_node("a"), _node("b"), _node("c"), _node("d")],
+        [_edge("a", "b"), _edge("c", "d")],
+    )
+    with pytest.raises(DisconnectedWorkflowError):
+        validate_graph(snapshot)

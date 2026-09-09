@@ -20,6 +20,11 @@ class ConvergentWorkflowError(ValueError):
     shared node once per inbound branch."""
 
 
+class DisconnectedWorkflowError(ValueError):
+    """A workflow has no entry node, or more than one. Execution starts from a
+    single root, so any other root's nodes would never run."""
+
+
 def build_snapshot(nodes: Iterable[Any], edges: Iterable[Any]) -> dict[str, Any]:
     return {
         "nodes": {
@@ -112,7 +117,15 @@ def validate_single_inbound(snapshot: dict[str, Any]) -> None:
         seen.add(target)
 
 
+def validate_single_entry(snapshot: dict[str, Any]) -> None:
+    targets = {edge["target_node_id"] for edge in snapshot["edges"]}
+    roots = [node_id for node_id in snapshot["nodes"] if node_id not in targets]
+    if len(roots) != 1:
+        raise DisconnectedWorkflowError(f"expected exactly one entry node, found {len(roots)}")
+
+
 def validate_graph(snapshot: dict[str, Any]) -> None:
     """Full validation for a workflow that this executor can run."""
     validate_acyclic(snapshot)
     validate_single_inbound(snapshot)
+    validate_single_entry(snapshot)
