@@ -194,6 +194,17 @@ class PlatformSetting(Base):
     updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     updated_by  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
+class SituationBriefCache(Base):
+    """One row per group (or "global" for the unscoped/superadmin view) —
+    Command Center's AI Situation Brief regenerates at most once per TTL
+    window (see situation_brief.py) instead of on every page load/poll."""
+    __tablename__ = "situation_brief_cache"
+    group_key        = Column(String(100), primary_key=True)
+    status           = Column(String(20), nullable=False)
+    brief            = Column(Text, nullable=True)
+    cited_alert_ids  = Column(JSONB, nullable=False, default=list)
+    generated_at     = Column(DateTime(timezone=True), nullable=False)
+
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
     id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

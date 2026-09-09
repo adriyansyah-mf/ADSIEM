@@ -20,5 +20,6 @@ async def situation_brief(
     db: Annotated[AsyncSession, Depends(get_db)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(get_current_user),
+    force: bool = False,
 ):
-    return await get_situation_brief(db, group_filter)
+    return await get_situation_brief(db, group_filter, force=force)
