@@ -158,6 +158,7 @@ async def test_block_ip_parks_the_run_and_never_executes():
         _context(),
         db,
     )
+    assert len(db.added) == 1
     step = db.added[0]
     assert result.wait is True
     assert step.action_type == "block_ip"
@@ -170,6 +171,7 @@ async def test_block_ip_parks_the_run_and_never_executes():
 async def test_isolate_agent_parks_the_run_and_is_reversible():
     db = FakeSession()
     result = await _run("isolate_agent", {"agent_id": str(uuid.uuid4())}, _context(), db)
+    assert len(db.added) == 1
     step = db.added[0]
     assert result.wait is True
     assert step.status == "pending_approval"
