@@ -7,7 +7,24 @@ make an old run unrenderable — see the design doc, section 5.2.
 """
 from __future__ import annotations
 
+import asyncio
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Iterable
+
+import structlog
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import AsyncSessionLocal
+from app.models.models import PlatformSetting, SoarEdge, SoarNode, SoarRun, SoarRunStep
+from app.services.soar_nodes import NodeContext, get_node_type
+from app.services.soar_service import input_hash
+
+log = structlog.get_logger()
+
+POLL_INTERVAL_SECONDS = 5
+MAX_STEPS_PER_RUN = 200
 
 
 class CyclicWorkflowError(ValueError):
@@ -129,3 +146,180 @@ def validate_graph(snapshot: dict[str, Any]) -> None:
     validate_acyclic(snapshot)
     validate_single_inbound(snapshot)
     validate_single_entry(snapshot)
+
+
+async def start_run(
+    db: AsyncSession,
+    workflow,
+    trigger_type: str,
+    trigger_ref: dict[str, Any],
+) -> SoarRun:
+    """Snapshot the workflow and queue a run at its entry node."""
+    nodes = (await db.execute(
+        select(SoarNode).where(SoarNode.workflow_id == workflow.id)
+    )).scalars().all()
+    edges = (await db.execute(
+        select(SoarEdge).where(SoarEdge.workflow_id == workflow.id)
+    )).scalars().all()
+    snapshot = build_snapshot(nodes, edges)
+    validate_graph(snapshot)
+    entry_node_id = find_entry_node_id(snapshot)
+    if entry_node_id is None:
+        raise ValueError(f"workflow {workflow.id} has no entry node")
+    run = SoarRun(
+        id=uuid.uuid4(),
+        workflow_id=workflow.id,
+        status="pending",
+        trigger_type=trigger_type,
+        trigger_ref=trigger_ref,
+        current_node_id=uuid.UUID(entry_node_id),
+        variables={},
+        graph_snapshot=snapshot,
+        pending_node_ids=[],
+        group_id=workflow.group_id,
+    )
+    db.add(run)
+    return run
+
+
+async def claim_runnable_run(db: AsyncSession) -> SoarRun | None:
+    """Claim one run for this replica.
+
+    Both server-api replicas run this loop, so the row lock is a
+    correctness requirement: without SKIP LOCKED two replicas could execute
+    the same node twice (design doc, section 5.1).
+    """
+    now = datetime.now(timezone.utc)
+    query = (
+        select(SoarRun)
+        .where(
+            SoarRun.status.in_(["pending", "running"])
+            | ((SoarRun.status == "waiting") & (SoarRun.resume_at != None) & (SoarRun.resume_at <= now))
+        )
+        .order_by(SoarRun.started_at)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    return (await db.execute(query)).scalars().first()
+
+
+async def _build_context(db: AsyncSession, run: SoarRun, node_id: uuid.UUID) -> NodeContext:
+    steps = (await db.execute(
+        select(SoarRunStep).where(SoarRunStep.run_id == run.id)
+    )).scalars().all()
+    snapshot_nodes = run.graph_snapshot["nodes"]
+    outputs: dict[str, Any] = {}
+    for step in steps:
+        node = snapshot_nodes.get(str(step.node_id))
+        if node is not None and step.output is not None:
+            outputs[node["name"]] = {"output": step.output}
+    return NodeContext(
+        run_id=run.id,
+        node_id=node_id,
+        group_id=run.group_id,
+        trigger=run.trigger_ref or {},
+        nodes=outputs,
+        vars=run.variables or {},
+    )
+
+
+async def execute_one_step(db: AsyncSession, run: SoarRun) -> bool:
+    """Execute exactly one node. Returns True if the run is still active."""
+    if run.current_node_id is None:
+        run.status = "succeeded"
+        run.finished_at = datetime.now(timezone.utc)
+        return False
+
+    node_id = run.current_node_id
+    node = run.graph_snapshot["nodes"].get(str(node_id))
+    if node is None:
+        run.status = "failed"
+        run.finished_at = datetime.now(timezone.utc)
+        log.error("soar_node_missing_from_snapshot", run_id=str(run.id), node_id=str(node_id))
+        return False
+
+    executed = (await db.execute(
+        select(SoarRunStep).where(SoarRunStep.run_id == run.id)
+    )).scalars().all()
+    if len(executed) >= MAX_STEPS_PER_RUN:
+        run.status = "failed"
+        run.finished_at = datetime.now(timezone.utc)
+        log.error("soar_run_step_ceiling", run_id=str(run.id))
+        return False
+
+    run.status = "running"
+    context = await _build_context(db, run, node_id)
+    started_at = datetime.now(timezone.utc)
+    try:
+        node_type = get_node_type(node["node_type"])
+        result = await node_type.handler(db, context, node["config"])
+    except Exception as exc:
+        db.add(SoarRunStep(
+            id=uuid.uuid4(), run_id=run.id, node_id=node_id,
+            action_type=node["node_type"], status="failed",
+            is_destructive=False, is_reversible=False,
+            idempotency_key=f"{run.id}:{node_id}:error",
+            input_hash=input_hash({}), input={}, error=str(exc),
+            started_at=started_at, finished_at=datetime.now(timezone.utc),
+        ))
+        run.status = "failed"
+        run.finished_at = datetime.now(timezone.utc)
+        log.error("soar_node_failed", run_id=str(run.id), node=node["name"], error=str(exc))
+        return False
+
+    if not node_type.is_destructive:
+        db.add(SoarRunStep(
+            id=uuid.uuid4(), run_id=run.id, node_id=node_id,
+            action_type=node["node_type"], status="succeeded",
+            is_destructive=False, is_reversible=False,
+            idempotency_key=f"{run.id}:{node_id}",
+            input_hash=input_hash(node["config"]), input=node["config"],
+            output=result.output,
+            started_at=started_at, finished_at=datetime.now(timezone.utc),
+        ))
+
+    if result.wait:
+        run.status = "waiting"
+        return False
+
+    current, pending = advance_frontier(
+        run.graph_snapshot, str(node_id), result.handle, list(run.pending_node_ids or [])
+    )
+    run.current_node_id = uuid.UUID(current) if current else None
+    run.pending_node_ids = pending
+    if current is None:
+        run.status = "succeeded"
+        run.finished_at = datetime.now(timezone.utc)
+        return False
+    return True
+
+
+async def _enabled(db: AsyncSession) -> bool:
+    row = await db.get(PlatformSetting, "soar_v2_enabled")
+    return bool(row and row.value.lower() == "true")
+
+
+async def executor_tick() -> bool:
+    """One claim-and-execute cycle. Returns True if work was done."""
+    async with AsyncSessionLocal() as db:
+        async with db.begin():
+            if not await _enabled(db):
+                return False
+            run = await claim_runnable_run(db)
+            if run is None:
+                return False
+            await execute_one_step(db, run)
+            return True
+
+
+async def soar_executor_loop() -> None:
+    while True:
+        try:
+            did_work = await executor_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.error("soar_executor_tick_failed", error=str(exc))
+            did_work = False
+        if not did_work:
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
