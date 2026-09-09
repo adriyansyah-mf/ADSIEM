@@ -21,6 +21,7 @@
 - The HTTP node — and any future outbound call — must use `app.core.outbound_url`, never a new guard (spec §10). *(No HTTP node in this slice; the constraint is recorded because Task 3's registry is where a later one plugs in.)*
 - Everything ships behind the `soar_v2_enabled` platform setting, default `"false"` (spec §12).
 - Graphs are acyclic; validated on save (spec §9).
+- A node may have at most one inbound edge. `validate_graph()` combines the acyclic check with that one and is what Tasks 6 and 7 call; `validate_acyclic()` remains its own function. Reconverging graphs are rejected because the frontier keeps no visited-set and would run the shared node once per inbound branch — a doubled block-IP or isolate (spec §14). Added during execution, after a review traced the double-execution.
 - The executor must commit its DB transaction before any outbound HTTP or LLM call (spec §9).
 - Tests: **all tests in this plan are pure-logic with fakes** and run on the host. No test needs a *running* database — but any test importing `app.models.models` transitively imports `app.core.database`, which needs the `asyncpg` driver installed to import at all. Install it if collection fails: `pip install --user asyncpg==0.30.0` (the version already pinned in `server-api/requirements.txt`). (`structlog` is a real server-api dependency and is safe to import in application code.)
 

@@ -309,6 +309,16 @@ because they execute from their snapshot (§5.2).
   open across a 60–90 s 9router call blocked a migration and stalled live alert
   ingestion. The AI Analyze and HTTP Request nodes are the most likely places to
   repeat it, so the rule is stated here rather than left to memory.
+
+  **Blocking precondition on the connector slice.** As built in slice 1, the
+  executor claims a run with `SELECT ... FOR UPDATE SKIP LOCKED` and holds that
+  transaction open across the node handler. That is safe only while every handler
+  is a fast local database operation, which is true of the six nodes in §7 and of
+  nothing beyond them. **The slice that introduces the HTTP Request or AI Analyze
+  node must first replace this with a lease-based claim** — mark the run
+  `running`, commit, execute unlocked, then reopen a transaction to persist the
+  result — or it will hold a row lock across a 60–90 s call and reproduce the
+  incident above. This is a precondition, not a cleanup task.
 - **Run-level guards**: maximum steps per run, maximum run duration, and maximum
   concurrent runs per workflow and per tenant.
 - **Loop protection**: graphs are validated as **acyclic on save**, with the step
@@ -400,6 +410,16 @@ tests before any of it is reachable from a UI.
 - **No parallel branches.** One active path per run; fan-out is sequential
   depth-first (§5.3). Lifting this needs a frontier table or a rethink of
   `current_node_id`.
+- **No reconverging graphs.** A node may have at most one inbound edge, enforced
+  when a workflow is saved. Found during implementation: because the frontier
+  keeps no visited-set, a diamond whose two edges leave the *same* handle and
+  meet again downstream would execute the shared node once per branch — a
+  doubled "block IP" or "isolate host", not a cosmetic bug. If-branching is
+  unaffected, since only one handle is ever followed. The traversal implements
+  tree semantics, so validation enforces tree semantics and rejects the graph at
+  authoring time rather than failing silently at run time. An author who wants a
+  shared tail step duplicates that node on each branch until a visited-set
+  arrives with parallel execution.
 - **No loops.** Graphs must be acyclic (§9).
 - **No connector catalogue and no credential store.** Phase 2. Until then external
   systems are reached through the HTTP Request node, and its credentials are a
