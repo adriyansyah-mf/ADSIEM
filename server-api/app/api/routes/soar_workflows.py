@@ -81,6 +81,8 @@ async def _require_workflow(db: AsyncSession, workflow_id: uuid.UUID, group_id: 
 async def _replace_graph(db: AsyncSession, workflow: SoarWorkflow, body: WorkflowIn) -> None:
     """Rewrite the whole graph, rejecting an invalid graph before anything is persisted."""
     id_map = {node.id or uuid.uuid4(): node for node in body.nodes}
+    if len(id_map) != len(body.nodes):
+        raise HTTPException(status_code=422, detail="Duplicate node id in request")
     staged_nodes = [
         SoarNode(
             id=node_id, workflow_id=workflow.id, node_type=node.node_type,
@@ -88,6 +90,14 @@ async def _replace_graph(db: AsyncSession, workflow: SoarWorkflow, body: Workflo
         )
         for node_id, node in id_map.items()
     ]
+    staged_ids = set(id_map)
+    for edge in body.edges:
+        for endpoint in (edge.source_node_id, edge.target_node_id):
+            if endpoint not in staged_ids:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Edge references unknown node {endpoint}",
+                )
     staged_edges = [
         SoarEdge(
             id=uuid.uuid4(), workflow_id=workflow.id,
