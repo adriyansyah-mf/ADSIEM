@@ -9,9 +9,11 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group
 from app.models.models import SoarAction, SoarPlaybook, User
 from app.api.routes.soar_executions import router as execution_router
+from app.api.routes.soar_workflows import router as workflow_router
 
 router = APIRouter(prefix="/api/soar", tags=["soar"])
 router.include_router(execution_router)
+router.include_router(workflow_router)
 
 
 class PlaybookIn(BaseModel):

@@ -83,6 +83,7 @@ _DEFAULT_SETTINGS = [
     ("auto_assign_alerts",       "false", False, "Assign new alerts to the least-loaded active analyst"),
     ("correlation_definitions",  "[]",    False, "JSON array of grouped sequence/threshold correlation definitions"),
     ("soar_destructive_approval_required", "true", False, "Require approval before isolate-agent or block-IP SOAR actions"),
+    ("soar_v2_enabled", "false", False, "Enable the v2 visual workflow executor (true/false)"),
 ]
 
 async def _seed_settings() -> None:
@@ -403,7 +404,7 @@ async def _migrate_soar_v2_tables() -> None:
                 status         VARCHAR(20) NOT NULL DEFAULT 'pending',
                 trigger_type   VARCHAR(30) NOT NULL,
                 trigger_ref    JSONB NOT NULL DEFAULT '{}'::jsonb,
-                current_node_id UUID REFERENCES soar_nodes(id),
+                current_node_id UUID,
                 variables      JSONB NOT NULL DEFAULT '{}'::jsonb,
                 resume_at      TIMESTAMPTZ,
                 group_id       VARCHAR(100) NOT NULL DEFAULT 'default',
@@ -415,7 +416,7 @@ async def _migrate_soar_v2_tables() -> None:
             CREATE TABLE IF NOT EXISTS soar_run_steps (
                 id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 run_id              UUID NOT NULL REFERENCES soar_runs(id) ON DELETE CASCADE,
-                node_id             UUID NOT NULL REFERENCES soar_nodes(id),
+                node_id             UUID NOT NULL,
                 action_type         VARCHAR(50) NOT NULL,
                 status              VARCHAR(20) NOT NULL,
                 is_destructive      BOOLEAN NOT NULL DEFAULT false,
@@ -490,6 +491,35 @@ async def _migrate_soar_v2_tables() -> None:
             CREATE UNIQUE INDEX IF NOT EXISTS uq_soar_run_steps_idempotency
             ON soar_run_steps(run_id, idempotency_key)
         """))
+
+async def _migrate_soar_v2_engine_columns() -> None:
+    """Graph snapshot + depth-first frontier for the v2 executor.
+
+    The snapshot makes a run immune to later edits of its workflow; see
+    docs/superpowers/specs/2026-09-09-soar-visual-workflow-design.md §5.2.
+    """
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE soar_runs ADD COLUMN IF NOT EXISTS graph_snapshot JSONB"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE soar_runs ADD COLUMN IF NOT EXISTS "
+            "pending_node_ids JSONB NOT NULL DEFAULT '[]'::jsonb"
+        ))
+        # Sever the FKs from soar_run_steps/soar_runs onto live soar_nodes
+        # rows. The executor traverses run.graph_snapshot, never soar_nodes
+        # (spec §5.2), so a run is meant to be immune to later edits of its
+        # workflow -- but these FKs made any node a run had touched
+        # permanently undeletable, so re-saving a workflow that had ever run
+        # raised IntegrityError -> uncaught 500 (finding I1). Constraint
+        # names verified against the live database before removal.
+        await conn.execute(text(
+            "ALTER TABLE soar_run_steps DROP CONSTRAINT IF EXISTS soar_run_steps_node_id_fkey"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE soar_runs DROP CONSTRAINT IF EXISTS soar_runs_current_node_id_fkey"
+        ))
 
 async def _migrate_webhook_payload_format() -> None:
     from sqlalchemy import text
@@ -751,6 +781,7 @@ async def lifespan(app: FastAPI):
         await _migrate_alerts_columns()
         await _migrate_soar_tables()
         await _migrate_soar_v2_tables()
+        await _migrate_soar_v2_engine_columns()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
         await _migrate_api_keys_permission()
@@ -766,9 +797,21 @@ async def lifespan(app: FastAPI):
         await lock_conn.close()
     await ensure_es_index()
     import asyncio
+    from app.services.soar_executor import soar_executor_loop
+    from app.services.soar_nodes.builtin import register_builtin_nodes
+    from app.services.soar_triggers import soar_trigger_consumer_loop
+
+    register_builtin_nodes()
+
     _listener_task = asyncio.create_task(_ws_redis_listener())
+    _soar_tasks = [
+        asyncio.create_task(soar_executor_loop()),
+        asyncio.create_task(soar_trigger_consumer_loop()),
+    ]
     yield
     _listener_task.cancel()
+    for task in _soar_tasks:
+        task.cancel()
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
 

@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - The executor runs in **server-api**, never the worker. server-api and worker have separate Docker build contexts and cannot share code (spec §5).
-- Step status values come from `soar_service.py` and must not be extended beyond the one addition the spec permits: `pending`, `pending_approval`, `approved`, `running`, `succeeded`, `rolled_back`, plus `failed` — which only the executor writes, for a node whose handler raised (spec §5).
+- Step status values come from `soar_service.py` and must not be extended beyond the two additions the spec permits: `pending`, `pending_approval`, `approved`, `running`, `succeeded`, `rolled_back`, plus `failed` — which only the executor writes, for a node whose handler raised — and `cancelled` — which only `POST /api/soar/executions/{id}/cancel` writes, for a destructive step a human declined (spec §5). *(`cancelled` added post-slice-1, during the final review, to give `waiting` an exit besides approve.)*
 - Run status values: `pending`, `running`, `waiting`, `succeeded`, `failed`, `cancelled` (spec §5).
 - The expression filter set is closed to exactly four: `default`, `lower`, `upper`, `json`. Adding one requires a spec change (spec §5.4).
 - No template engine and no `eval` in the resolver. Dotted-path lookup only (spec §5.4, §10).
@@ -21,10 +21,11 @@
 - The HTTP node — and any future outbound call — must use `app.core.outbound_url`, never a new guard (spec §10). *(No HTTP node in this slice; the constraint is recorded because Task 3's registry is where a later one plugs in.)*
 - Everything ships behind the `soar_v2_enabled` platform setting, default `"false"` (spec §12).
 - Graphs are acyclic; validated on save (spec §9).
+- A node may have at most one inbound edge. `validate_graph()` combines the acyclic check with that one and is what Tasks 6 and 7 call; `validate_acyclic()` remains its own function. Reconverging graphs are rejected because the frontier keeps no visited-set and would run the shared node once per inbound branch — a doubled block-IP or isolate (spec §14). Added during execution, after a review traced the double-execution.
 - The executor must commit its DB transaction before any outbound HTTP or LLM call (spec §9).
-- Tests: the host Python environment lacks `asyncpg`, so **all tests in this plan are pure-logic with fakes** and run on the host. No test in this plan requires a database. (`structlog` is a real server-api dependency and is safe to import in application code.)
+- Tests: **all tests in this plan are pure-logic with fakes** and run on the host. No test needs a *running* database — but any test importing `app.models.models` transitively imports `app.core.database`, which needs the `asyncpg` driver installed to import at all. Install it if collection fails: `pip install --user asyncpg==0.30.0` (the version already pinned in `server-api/requirements.txt`). (`structlog` is a real server-api dependency and is safe to import in application code.)
 
-**Deliberately deferred from the spec, and why.** Spec §9's per-node `on_error` policy, retry-with-backoff, and per-node timeouts are *not* built here. None of slice 1's six nodes performs I/O beyond the local database session, so there is nothing to time out or retry; those mechanisms belong with the slice that introduces the HTTP Request and AI Analyze nodes, where they are load-bearing. A node that raises fails its run, which is the correct conservative default in the meantime. Spec §9's run-duration cap and per-tenant concurrency cap are deferred for the same reason; the step ceiling (`MAX_STEPS_PER_RUN`) is implemented because it is the guard against a runaway graph, which slice 1 *can* produce.
+**Deliberately deferred from the spec, and why.** Spec §9's per-node `on_error` policy, retry-with-backoff, and per-node timeouts are *not* built here. None of slice 1's six nodes performs I/O beyond the local database session, so there is nothing to time out or retry; those mechanisms belong with the slice that introduces the HTTP Request and AI Analyze nodes, where they are load-bearing. A node that raises fails its run, which is the correct conservative default in the meantime. Spec §9's run-duration cap and per-tenant concurrency cap are deferred for the same reason; the step ceiling (`MAX_STEPS_PER_RUN`) is implemented as a backstop, not the primary guard against a runaway graph -- with single-inbound and acyclic enforced at save time (`validate_graph`), a run's step count is bounded by the workflow's node count, so the ceiling exists for defence in depth rather than as the mechanism actually preventing runaway execution.
 
 ---
 
@@ -207,6 +208,15 @@ def test_non_template_string_passes_through():
     assert resolve_value("plain text", CONTEXT) == "plain text"
 
 
+def test_two_expressions_in_one_string_interpolate_separately():
+    # Guards a real trap: a naive "^{{...}}$" test treats this whole string
+    # as one expression whose path is `channel }} {{ trigger.alert.severity`.
+    assert (
+        resolve_value("{{ vars.channel }} {{ trigger.alert.severity }}", CONTEXT)
+        == "soc-alerts critical"
+    )
+
+
 def test_resolve_config_walks_nested_structures():
     config = {
         "title": "Alert {{ trigger.alert.severity }}",
@@ -246,7 +256,6 @@ import re
 from typing import Any
 
 _EXPRESSION = re.compile(r"\{\{(.+?)\}\}", re.DOTALL)
-_WHOLE = re.compile(r"^\s*\{\{(.+?)\}\}\s*$", re.DOTALL)
 _SEGMENT = re.compile(r"^[A-Za-z0-9_-]+$")
 _DEFAULT_CALL = re.compile(r"^default\((.*)\)$", re.DOTALL)
 
@@ -305,12 +314,19 @@ def _evaluate(expression: str, context: dict) -> Any:
 
 
 def resolve_value(template: Any, context: dict) -> Any:
-    """Resolve one config value. Non-strings pass through untouched."""
+    """Resolve one config value. Non-strings pass through untouched.
+
+    A string that is exactly one expression keeps the resolved value's type,
+    so an If node can compare numbers as numbers. The single-expression test
+    is a span check rather than an anchored regex: `^\\s*\\{\\{(.+?)\\}\\}\\s*$`
+    matches "{{a}} {{b}}" as one expression with the path `a}} {{b`.
+    """
     if not isinstance(template, str):
         return template
-    whole = _WHOLE.match(template)
-    if whole:
-        return _evaluate(whole.group(1), context)
+    stripped = template.strip()
+    matches = list(_EXPRESSION.finditer(stripped))
+    if len(matches) == 1 and matches[0].span() == (0, len(stripped)):
+        return _evaluate(matches[0].group(1), context)
 
     def _replace(match: re.Match[str]) -> str:
         resolved = _evaluate(match.group(1), context)
@@ -333,7 +349,7 @@ def resolve_config(config: Any, context: dict) -> Any:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python -m pytest tests/server-api/test_soar_expressions.py -v`
-Expected: PASS, 14 tests.
+Expected: PASS, 15 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1975,7 +1991,7 @@ def test_filters_combine_with_and():
 - [ ] **Step 5: Run the full plan's test suite**
 
 Run: `python -m pytest tests/server-api/test_soar_expressions.py tests/server-api/test_soar_registry.py tests/server-api/test_soar_traversal.py tests/server-api/test_soar_nodes.py -v`
-Expected: PASS, 52 tests (14 + 7 + 14 + 17).
+Expected: PASS, 53 tests (15 + 7 + 14 + 17).
 
 - [ ] **Step 6: Commit**
 

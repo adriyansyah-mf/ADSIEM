@@ -160,7 +160,17 @@ The executor adds exactly one value, `failed`, for a node whose handler raised.
 Nothing in `soar_service.py` produces it, because approval and rollback have no
 such outcome — a step there either succeeds or throws before being written. A
 graph executor must be able to record the node that broke, so this one addition
-is deliberate and is the only permitted extension of the set.
+is deliberate.
+
+A second, equally deliberate extension is `cancelled`, written only by
+`POST /api/soar/executions/{id}/cancel` for a destructive step a human declined
+rather than approved (added when review found `waiting` had no exit besides
+approve). It exists so a declined action is never mistaken for a crashed one:
+`failed` means the handler raised, `cancelled` means a person looked at the
+pending approval and said no — an incident review asking why a given IP was
+never blocked needs a different answer for each, and collapsing them into one
+value would erase that distinction from the audit trail. These two are the only
+permitted extensions of the set.
 
 ### 5.1 Concurrency
 
@@ -309,6 +319,16 @@ because they execute from their snapshot (§5.2).
   open across a 60–90 s 9router call blocked a migration and stalled live alert
   ingestion. The AI Analyze and HTTP Request nodes are the most likely places to
   repeat it, so the rule is stated here rather than left to memory.
+
+  **Blocking precondition on the connector slice.** As built in slice 1, the
+  executor claims a run with `SELECT ... FOR UPDATE SKIP LOCKED` and holds that
+  transaction open across the node handler. That is safe only while every handler
+  is a fast local database operation, which is true of the six nodes in §7 and of
+  nothing beyond them. **The slice that introduces the HTTP Request or AI Analyze
+  node must first replace this with a lease-based claim** — mark the run
+  `running`, commit, execute unlocked, then reopen a transaction to persist the
+  result — or it will hold a row lock across a 60–90 s call and reproduce the
+  incident above. This is a precondition, not a cleanup task.
 - **Run-level guards**: maximum steps per run, maximum run duration, and maximum
   concurrent runs per workflow and per tenant.
 - **Loop protection**: graphs are validated as **acyclic on save**, with the step
@@ -400,6 +420,16 @@ tests before any of it is reachable from a UI.
 - **No parallel branches.** One active path per run; fan-out is sequential
   depth-first (§5.3). Lifting this needs a frontier table or a rethink of
   `current_node_id`.
+- **No reconverging graphs.** A node may have at most one inbound edge, enforced
+  when a workflow is saved. Found during implementation: because the frontier
+  keeps no visited-set, a diamond whose two edges leave the *same* handle and
+  meet again downstream would execute the shared node once per branch — a
+  doubled "block IP" or "isolate host", not a cosmetic bug. If-branching is
+  unaffected, since only one handle is ever followed. The traversal implements
+  tree semantics, so validation enforces tree semantics and rejects the graph at
+  authoring time rather than failing silently at run time. An author who wants a
+  shared tail step duplicates that node on each branch until a visited-set
+  arrives with parallel execution.
 - **No loops.** Graphs must be acyclic (§9).
 - **No connector catalogue and no credential store.** Phase 2. Until then external
   systems are reached through the HTTP Request node, and its credentials are a
@@ -407,6 +437,22 @@ tests before any of it is reachable from a UI.
   adequate home for per-workflow secrets.
 - **No workflow version history.** Runs snapshot their graph (§5.2), so history is
   inspectable per run, but there is no editable version timeline for a workflow.
+- **Runs are not FK-bound to live node rows.** `soar_run_steps.node_id` and
+  `soar_runs.current_node_id` are plain UUID columns, not foreign keys into
+  `soar_nodes`. A run only ever resolves nodes through `run.graph_snapshot`
+  (§5.2), so the FK bought no correctness and instead made any node a run had
+  touched permanently undeletable -- re-saving a workflow that had ever run
+  raised an `IntegrityError` on the delete-then-insert in `_replace_graph`.
+  Removed during a review of engine-core (finding I1); slice 2's canvas
+  depends on workflows staying editable after they've run.
+- **Node type and handle validity are checked at save time.** `validate_graph`
+  now also rejects a node whose `node_type` is not in the registry and an edge
+  whose `source_handle` its source node never emits (`validate_node_types`).
+  Previously an unknown node type saved fine and only surfaced as a `KeyError`
+  mid-run -- possibly after a destructive step downstream had already been
+  approved -- and a bad handle passed validation only to find no successor at
+  run time, leaving the run marked `succeeded` having silently skipped the
+  rest of the graph. Added during a review of engine-core (finding I2).
 
 ## 15. Phase 2 preview
 

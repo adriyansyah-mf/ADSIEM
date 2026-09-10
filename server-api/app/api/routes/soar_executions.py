@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_resource_group
 from app.core.rate_limit import rate_limit_by_user_group
 from app.models.models import SoarRun, SoarRunStep, User
+from app.services.soar_executor import advance_frontier
 from app.services.soar_service import (
     IdempotencyConflictError,
     RollbackNotSupportedError,
@@ -155,8 +156,30 @@ async def approve_execution(
         StepStateConflictError,
     ) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
-    run.status = "completed"
-    run.finished_at = step.finished_at
+    if run.graph_snapshot is None:
+        # A v1-era or manually created run has no snapshot to advance
+        # through -- there is nothing left for this executor to drive.
+        run.status = "succeeded"
+        run.finished_at = datetime.now(timezone.utc)
+    elif run.current_node_id != step.node_id:
+        # The run has already moved past this step's node -- this is an
+        # idempotent replay of an approval that already advanced it (the
+        # lookup above matches a retried request by idempotency_key against
+        # an already-approved/succeeded step). Advancing again would skip
+        # the node the run is now actually parked at.
+        pass
+    else:
+        current, pending = advance_frontier(
+            run.graph_snapshot, str(step.node_id), "out", list(run.pending_node_ids or [])
+        )
+        run.current_node_id = uuid.UUID(current) if current else None
+        run.pending_node_ids = pending
+        if current is None:
+            run.status = "succeeded"
+            run.finished_at = datetime.now(timezone.utc)
+        else:
+            run.status = "running"
+            run.finished_at = None
     await db.commit()
     await db.refresh(step)
     return _step_out(step)
@@ -222,3 +245,40 @@ async def rollback_execution(
     await db.commit()
     await db.refresh(rollback)
     return _step_out(rollback)
+
+
+@router.post("/{execution_id}/cancel")
+async def cancel_execution(
+    execution_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+) -> dict[str, str | bool | dict | None]:
+    """Let an analyst decline a parked run instead of leaving it waiting
+    forever -- `waiting` previously had no exit besides approve (finding
+    I4)."""
+    run = await _load_run(db, execution_id, group_filter)
+    steps = await _steps_for_run(db, run.id)
+    step = steps[-1] if steps else None
+    if step is None:
+        raise HTTPException(status_code=409, detail="Run has no steps to cancel")
+    if step.status == "succeeded":
+        raise HTTPException(
+            status_code=409, detail="Latest step has already succeeded; nothing to cancel"
+        )
+    now = datetime.now(timezone.utc)
+    # "cancelled" is the step-status set's second deliberate extension (the
+    # first was "failed" for a raised handler, spec §5). A human declining a
+    # destructive step is not the same fact as the system breaking, and an
+    # audit trail that conflates them is worse than one with an extra value:
+    # "why was this IP never blocked?" needs a different answer for each.
+    step.status = "cancelled"
+    step.error = "Cancelled by analyst"
+    step.actor_id = current_user.id
+    step.acted_at = now
+    step.finished_at = now
+    run.status = "cancelled"
+    run.finished_at = now
+    await db.commit()
+    await db.refresh(step)
+    return _step_out(step)
