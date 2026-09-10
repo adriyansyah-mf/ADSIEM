@@ -668,19 +668,22 @@ class SoarEdge(Base):
 
 class SoarRun(Base):
     __tablename__ = "soar_runs"
-    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workflow_id     = Column(UUID(as_uuid=True), ForeignKey("soar_workflows.id", ondelete="CASCADE"), nullable=False)
-    status          = Column(String(20), nullable=False, default="pending")
-    trigger_type    = Column(String(30), nullable=False)
-    trigger_ref     = Column(JSONB, nullable=False, default=dict)
-    current_node_id = Column(UUID(as_uuid=True), ForeignKey("soar_nodes.id"), nullable=True)
-    variables       = Column(JSONB, nullable=False, default=dict)
-    graph_snapshot  = Column(JSONB, nullable=True)
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id      = Column(UUID(as_uuid=True), ForeignKey("soar_workflows.id", ondelete="CASCADE"), nullable=False)
+    status           = Column(String(20), nullable=False, default="pending")
+    trigger_type     = Column(String(30), nullable=False)
+    trigger_ref      = Column(JSONB, nullable=False, default=dict)
+    # Not a FK: the executor traverses graph_snapshot, never soar_nodes, so a
+    # run must stay immune to later edits of (or deletes from) its workflow's
+    # live node rows (spec §5.2).
+    current_node_id  = Column(UUID(as_uuid=True), nullable=True)
+    variables        = Column(JSONB, nullable=False, default=dict)
+    graph_snapshot   = Column(JSONB, nullable=True)
     pending_node_ids = Column(JSONB, nullable=False, default=list)
-    resume_at       = Column(DateTime(timezone=True), nullable=True)
-    group_id        = Column(String(100), nullable=False, default="default")
-    started_at      = Column(DateTime(timezone=True), nullable=False, default=now_utc)
-    finished_at     = Column(DateTime(timezone=True), nullable=True)
+    resume_at        = Column(DateTime(timezone=True), nullable=True)
+    group_id         = Column(String(100), nullable=False, default="default")
+    started_at       = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    finished_at      = Column(DateTime(timezone=True), nullable=True)
 
 class SoarRunStep(Base):
     __tablename__ = "soar_run_steps"
@@ -689,7 +692,8 @@ class SoarRunStep(Base):
     )
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id      = Column(UUID(as_uuid=True), ForeignKey("soar_runs.id", ondelete="CASCADE"), nullable=False)
-    node_id     = Column(UUID(as_uuid=True), ForeignKey("soar_nodes.id"), nullable=False)
+    # Not a FK: see SoarRun.current_node_id above (spec §5.2).
+    node_id     = Column(UUID(as_uuid=True), nullable=False)
     action_type = Column(String(50), nullable=False)
     status      = Column(String(20), nullable=False)
     is_destructive = Column(Boolean, nullable=False, default=False)

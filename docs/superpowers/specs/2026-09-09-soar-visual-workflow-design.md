@@ -427,6 +427,22 @@ tests before any of it is reachable from a UI.
   adequate home for per-workflow secrets.
 - **No workflow version history.** Runs snapshot their graph (§5.2), so history is
   inspectable per run, but there is no editable version timeline for a workflow.
+- **Runs are not FK-bound to live node rows.** `soar_run_steps.node_id` and
+  `soar_runs.current_node_id` are plain UUID columns, not foreign keys into
+  `soar_nodes`. A run only ever resolves nodes through `run.graph_snapshot`
+  (§5.2), so the FK bought no correctness and instead made any node a run had
+  touched permanently undeletable -- re-saving a workflow that had ever run
+  raised an `IntegrityError` on the delete-then-insert in `_replace_graph`.
+  Removed during a review of engine-core (finding I1); slice 2's canvas
+  depends on workflows staying editable after they've run.
+- **Node type and handle validity are checked at save time.** `validate_graph`
+  now also rejects a node whose `node_type` is not in the registry and an edge
+  whose `source_handle` its source node never emits (`validate_node_types`).
+  Previously an unknown node type saved fine and only surfaced as a `KeyError`
+  mid-run -- possibly after a destructive step downstream had already been
+  approved -- and a bad handle passed validation only to find no successor at
+  run time, leaving the run marked `succeeded` having silently skipped the
+  rest of the graph. Added during a review of engine-core (finding I2).
 
 ## 15. Phase 2 preview
 

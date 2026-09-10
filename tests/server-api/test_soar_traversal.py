@@ -7,16 +7,31 @@ from app.services.soar_executor import (
     ConvergentWorkflowError,
     DisconnectedWorkflowError,
     DuplicateNodeNameError,
+    UnknownNodeTypeError,
     advance_frontier,
     build_snapshot,
     find_entry_node_id,
     next_node_ids,
     validate_acyclic,
     validate_graph,
+    validate_node_types,
     validate_single_entry,
     validate_single_inbound,
     validate_unique_names,
 )
+from app.services.soar_nodes import clear_registry
+from app.services.soar_nodes.builtin import register_builtin_nodes
+
+
+@pytest.fixture(autouse=True)
+def _registered_builtin_nodes():
+    # validate_node_types (called from validate_graph) consults the
+    # registry, so every snapshot built from real node types here needs the
+    # builtins registered -- same pattern as test_soar_nodes.py.
+    clear_registry()
+    register_builtin_nodes()
+    yield
+    clear_registry()
 
 
 def _node(node_id, node_type="if", name=None):
@@ -211,3 +226,45 @@ def test_validate_graph_rejects_two_nodes_sharing_a_name():
     )
     with pytest.raises(DuplicateNodeNameError):
         validate_graph(snapshot)
+
+
+def test_validate_node_types_rejects_an_unregistered_node_type():
+    snapshot = build_snapshot([_node("a", "does_not_exist")], [])
+    with pytest.raises(UnknownNodeTypeError):
+        validate_node_types(snapshot)
+
+
+def test_validate_node_types_rejects_an_edge_using_a_handle_the_source_never_emits():
+    # "if" only ever emits "true"/"false" (see builtin.py), so an edge
+    # routed off its default "out" handle would find no successor at run
+    # time and the run would silently stop short while reporting succeeded.
+    snapshot = build_snapshot(
+        [_node("a", "alert_trigger"), _node("b", "if"), _node("c", "create_case")],
+        [_edge("a", "b"), _edge("b", "c", "out")],
+    )
+    with pytest.raises(UnknownNodeTypeError):
+        validate_node_types(snapshot)
+
+
+def test_validate_node_types_accepts_a_graph_of_registered_types_with_correct_handles():
+    validate_node_types(_branching_snapshot())
+
+
+def test_validate_graph_rejects_an_unregistered_node_type():
+    snapshot = build_snapshot([_node("a", "does_not_exist")], [])
+    with pytest.raises(UnknownNodeTypeError):
+        validate_graph(snapshot)
+
+
+def test_validate_graph_rejects_an_edge_using_a_handle_the_source_never_emits():
+    snapshot = build_snapshot(
+        [_node("a", "alert_trigger"), _node("b", "if"), _node("c", "create_case")],
+        [_edge("a", "b"), _edge("b", "c", "out")],
+    )
+    with pytest.raises(UnknownNodeTypeError):
+        validate_graph(snapshot)
+
+
+# test_validate_graph_accepts_a_valid_tree (above) already covers a valid
+# graph built from real registered node types now that builtins are
+# registered for every test in this file.

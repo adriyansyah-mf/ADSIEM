@@ -44,7 +44,7 @@ async def _dispatch(event: dict[str, Any]) -> None:
             workflows = (await db.execute(
                 select(SoarWorkflow).where(
                     SoarWorkflow.is_enabled == True,
-                    SoarWorkflow.group_id == event.get("group_id", "default"),
+                    SoarWorkflow.group_id == (event.get("group_id") or "default"),
                 )
             )).scalars().all()
             matched = []

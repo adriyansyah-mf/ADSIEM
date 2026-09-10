@@ -7,7 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_scoped_group
+from app.core.deps import get_current_user, get_scoped_group, require_resource_group
 from app.models.models import SoarEdge, SoarNode, SoarWorkflow, User
 from app.services.soar_executor import build_snapshot, validate_graph
 from app.services.soar_nodes import catalogue
@@ -73,8 +73,10 @@ async def _load_graph(db: AsyncSession, workflow_id: uuid.UUID):
 
 async def _require_workflow(db: AsyncSession, workflow_id: uuid.UUID, group_id: Optional[str]):
     workflow = await db.get(SoarWorkflow, workflow_id)
-    if workflow is None or (group_id and workflow.group_id != group_id):
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    # Same 404-on-mismatch behaviour as require_resource_group -- delegate
+    # instead of reimplementing it (was duplicated tenant-scoping logic).
+    require_resource_group(workflow.group_id if workflow is not None else None, group_id)
+    assert workflow is not None
     return workflow
 
 

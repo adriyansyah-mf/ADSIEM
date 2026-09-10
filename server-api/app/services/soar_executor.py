@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
 from app.models.models import PlatformSetting, SoarEdge, SoarNode, SoarRun, SoarRunStep
-from app.services.soar_nodes import NodeContext, get_node_type
+from app.services.soar_nodes import NodeContext, get_node_type, is_registered
 from app.services.soar_service import input_hash
 
 log = structlog.get_logger()
@@ -155,12 +155,42 @@ def validate_unique_names(snapshot: dict[str, Any]) -> None:
         seen.add(name)
 
 
+class UnknownNodeTypeError(ValueError):
+    """A node's type is not in the registry, or an edge uses a handle its
+    source node never emits."""
+
+
+def validate_node_types(snapshot: dict[str, Any]) -> None:
+    """Catch what only the registry knows, at save time rather than run time.
+
+    An unregistered node_type would otherwise save fine and blow up as a
+    KeyError mid-run -- possibly after a human has already approved a real
+    block-IP downstream. An edge whose source_handle the source node never
+    emits would pass validation, then silently find no successor at run
+    time and leave the run marked succeeded having skipped the rest of the
+    graph.
+    """
+    for node in snapshot["nodes"].values():
+        if not is_registered(node["node_type"]):
+            raise UnknownNodeTypeError(f"unknown node type {node['node_type']!r}")
+    for edge in snapshot["edges"]:
+        source = snapshot["nodes"].get(edge["source_node_id"])
+        if source is None:
+            continue
+        handles = get_node_type(source["node_type"]).handles
+        if edge["source_handle"] not in handles:
+            raise UnknownNodeTypeError(
+                f"node {source['name']!r} does not emit handle {edge['source_handle']!r}"
+            )
+
+
 def validate_graph(snapshot: dict[str, Any]) -> None:
     """Full validation for a workflow that this executor can run."""
     validate_acyclic(snapshot)
     validate_single_inbound(snapshot)
     validate_single_entry(snapshot)
     validate_unique_names(snapshot)
+    validate_node_types(snapshot)
 
 
 async def start_run(

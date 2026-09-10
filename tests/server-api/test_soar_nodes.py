@@ -8,17 +8,32 @@ from app.services.soar_nodes.builtin import register_builtin_nodes
 from app.services.soar_triggers import trigger_matches
 
 
+class FakeResult:
+    """Stand-in for the result of db.execute() -- just enough for the
+    scalar_one_or_none() calls the node handlers make."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
 class FakeSession:
     """Captures db.add() without touching a database."""
 
-    def __init__(self):
+    def __init__(self, query_result=None):
         self.added = []
+        self._query_result = query_result
 
     def add(self, obj):
         self.added.append(obj)
 
     async def flush(self):
         return None
+
+    async def execute(self, query):
+        return FakeResult(self._query_result)
 
 
 @pytest.fixture(autouse=True)
@@ -137,7 +152,9 @@ async def test_add_note_requires_a_case_id():
 async def test_add_note_attaches_to_the_referenced_case():
     case_id = str(uuid.uuid4())
     context = _context(nodes={"open": {"output": {"case_id": case_id}}})
-    db = FakeSession()
+    # A non-None scalar_one_or_none() result stands in for "the case exists
+    # and belongs to this tenant" -- the handler only checks for None.
+    db = FakeSession(query_result=uuid.UUID(case_id))
     await _run(
         "add_note",
         {"case_id": "{{ nodes.open.output.case_id }}", "content": "sev {{ trigger.alert.severity }}"},
@@ -147,7 +164,24 @@ async def test_add_note_attaches_to_the_referenced_case():
     note = db.added[0]
     assert str(note.case_id) == case_id
     assert note.content == "sev critical"
-    assert note.is_ai_generated is False
+    assert note.is_ai_generated is True
+
+
+@pytest.mark.asyncio
+async def test_add_note_rejects_a_case_from_another_group():
+    # The tenant-scoped lookup finds nothing -- either the case doesn't
+    # exist, or it belongs to a different group_id than the run's context.
+    case_id = str(uuid.uuid4())
+    context = _context(group_id="acme", nodes={"open": {"output": {"case_id": case_id}}})
+    db = FakeSession(query_result=None)
+    with pytest.raises(ValueError, match="not found in this group"):
+        await _run(
+            "add_note",
+            {"case_id": "{{ nodes.open.output.case_id }}", "content": "hello"},
+            context,
+            db,
+        )
+    assert db.added == []
 
 
 @pytest.mark.asyncio

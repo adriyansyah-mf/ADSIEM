@@ -22,7 +22,7 @@ import structlog
 from sqlalchemy import select
 
 from worker.database import AsyncSessionLocal
-from worker.models import Alert, AlertNote, Case, CaseNote, ThreatHunt
+from worker.models import Agent, Alert, AlertNote, Case, CaseNote, ThreatHunt
 from worker.llm_client import analyze_alert_with_ai
 from worker.alert_manager import dispatch_case_webhooks
 from worker.settings_cache import get_setting
@@ -573,19 +573,37 @@ async def analyze_and_maybe_create_case(
 
     # v2 workflow engine lives in server-api (separate build context), so the
     # hand-off is a Redis queue, matching the siem:ai-analysis pattern.
-    try:
-        from worker.redis_client import get_redis
-        _trigger_redis = await get_redis()
-        await _trigger_redis.lpush("siem:soar-triggers", json.dumps({
-            "alert_id": alert_id,
-            "group_id": group_id,
-            "severity": effective_severity,
-            "title": title,
-            "source_ip": source_ip,
-            "hostname": hostname,
-        }))
-    except Exception as exc:
-        log.warning("soar_trigger_publish_failed", alert_id=alert_id, error=str(exc))
+    # Gated on soar_v2_enabled: consumer-side already checks the flag, but
+    # publishing unconditionally lets the backlog grow unbounded while
+    # server-api is down or the flag is off, and replays stale alerts the
+    # moment it's switched on.
+    if (await get_setting("soar_v2_enabled", "false")).lower() == "true":
+        try:
+            agent_id = None
+            if hostname:
+                async with AsyncSessionLocal() as agent_db:
+                    agent = (await agent_db.execute(
+                        select(Agent).where(Agent.hostname == hostname, Agent.status == "online")
+                    )).scalar_one_or_none()
+                    if agent:
+                        agent_id = str(agent.id)
+
+            from worker.redis_client import get_redis
+            _trigger_redis = await get_redis()
+            await _trigger_redis.lpush("siem:soar-triggers", json.dumps({
+                "alert_id": alert_id,
+                "group_id": group_id,
+                "severity": effective_severity,
+                "title": title,
+                "source_ip": source_ip,
+                "hostname": hostname,
+                "agent_id": agent_id,
+            }))
+            # Bound the backlog so an outage or a disabled flag can't turn
+            # into a replay flood once the consumer catches up.
+            await _trigger_redis.ltrim("siem:soar-triggers", 0, 9999)
+        except Exception as exc:
+            log.warning("soar_trigger_publish_failed", alert_id=alert_id, error=str(exc))
 
     # ── 5. Update alert status berdasarkan verdict ───────────────────────────
     # Verdicts that end here never reach a case, so this is the only place

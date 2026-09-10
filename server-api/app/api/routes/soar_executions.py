@@ -245,3 +245,39 @@ async def rollback_execution(
     await db.commit()
     await db.refresh(rollback)
     return _step_out(rollback)
+
+
+@router.post("/{execution_id}/cancel")
+async def cancel_execution(
+    execution_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+) -> dict[str, str | bool | dict | None]:
+    """Let an analyst decline a parked run instead of leaving it waiting
+    forever -- `waiting` previously had no exit besides approve (finding
+    I4)."""
+    run = await _load_run(db, execution_id, group_filter)
+    steps = await _steps_for_run(db, run.id)
+    step = steps[-1] if steps else None
+    if step is None:
+        raise HTTPException(status_code=409, detail="Run has no steps to cancel")
+    if step.status == "succeeded":
+        raise HTTPException(
+            status_code=409, detail="Latest step has already succeeded; nothing to cancel"
+        )
+    now = datetime.now(timezone.utc)
+    # "failed" is the only terminal-negative value the closed step-status set
+    # (soar_service.py / spec §5) permits; there is no dedicated "cancelled"
+    # step status, so a declined step is recorded as failed with an error
+    # explaining why.
+    step.status = "failed"
+    step.error = "Cancelled by analyst"
+    step.actor_id = current_user.id
+    step.acted_at = now
+    step.finished_at = now
+    run.status = "cancelled"
+    run.finished_at = now
+    await db.commit()
+    await db.refresh(step)
+    return _step_out(step)

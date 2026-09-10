@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Case, CaseNote
@@ -79,12 +80,20 @@ async def _add_note(db: AsyncSession, context: NodeContext, config: dict) -> Nod
     raw_case_id = resolved.get("case_id")
     if not isinstance(raw_case_id, str) or not raw_case_id:
         raise ValueError("add_note requires a case_id")
+    # Tenant check, mirroring routes/cases.py: context.group_id must own the
+    # case before this writes to it, otherwise a workflow could be pointed
+    # at another tenant's case_id and post notes into it.
+    case = (await db.execute(
+        select(Case.id).where(Case.id == uuid.UUID(raw_case_id), Case.group_id == context.group_id)
+    )).scalar_one_or_none()
+    if case is None:
+        raise ValueError(f"case {raw_case_id} not found in this group")
     note = CaseNote(
         id=uuid.uuid4(),
         case_id=uuid.UUID(raw_case_id),
         author_id=None,
         content=resolved.get("content") or "",
-        is_ai_generated=False,
+        is_ai_generated=True,
     )
     db.add(note)
     return NodeResult(output={"case_id": raw_case_id})

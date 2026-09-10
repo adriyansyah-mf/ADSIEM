@@ -150,6 +150,7 @@ ROUTE_PERMISSION_MATRIX: Final[dict[str, AccessRequirement]] = {
     "PATCH /api/soar/actions/{action_id}": RouteAccess.AUTHENTICATED,
     "GET /api/soar/executions": RouteAccess.AUTHENTICATED,
     "POST /api/soar/executions/{execution_id}/approve": RouteAccess.AUTHENTICATED,
+    "POST /api/soar/executions/{execution_id}/cancel": RouteAccess.AUTHENTICATED,
     "POST /api/soar/executions/{execution_id}/rollback": RouteAccess.AUTHENTICATED,
     "GET /api/soar/node-types": RouteAccess.AUTHENTICATED,
     "GET /api/soar/playbooks": RouteAccess.AUTHENTICATED,
