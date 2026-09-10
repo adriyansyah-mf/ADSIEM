@@ -160,7 +160,17 @@ The executor adds exactly one value, `failed`, for a node whose handler raised.
 Nothing in `soar_service.py` produces it, because approval and rollback have no
 such outcome — a step there either succeeds or throws before being written. A
 graph executor must be able to record the node that broke, so this one addition
-is deliberate and is the only permitted extension of the set.
+is deliberate.
+
+A second, equally deliberate extension is `cancelled`, written only by
+`POST /api/soar/executions/{id}/cancel` for a destructive step a human declined
+rather than approved (added when review found `waiting` had no exit besides
+approve). It exists so a declined action is never mistaken for a crashed one:
+`failed` means the handler raised, `cancelled` means a person looked at the
+pending approval and said no — an incident review asking why a given IP was
+never blocked needs a different answer for each, and collapsing them into one
+value would erase that distinction from the audit trail. These two are the only
+permitted extensions of the set.
 
 ### 5.1 Concurrency
 

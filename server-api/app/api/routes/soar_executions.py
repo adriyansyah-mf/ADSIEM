@@ -267,11 +267,12 @@ async def cancel_execution(
             status_code=409, detail="Latest step has already succeeded; nothing to cancel"
         )
     now = datetime.now(timezone.utc)
-    # "failed" is the only terminal-negative value the closed step-status set
-    # (soar_service.py / spec §5) permits; there is no dedicated "cancelled"
-    # step status, so a declined step is recorded as failed with an error
-    # explaining why.
-    step.status = "failed"
+    # "cancelled" is the step-status set's second deliberate extension (the
+    # first was "failed" for a raised handler, spec §5). A human declining a
+    # destructive step is not the same fact as the system breaking, and an
+    # audit trail that conflates them is worse than one with an extra value:
+    # "why was this IP never blocked?" needs a different answer for each.
+    step.status = "cancelled"
     step.error = "Cancelled by analyst"
     step.actor_id = current_user.id
     step.acted_at = now

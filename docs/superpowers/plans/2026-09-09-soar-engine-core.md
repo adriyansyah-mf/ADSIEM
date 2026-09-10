@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - The executor runs in **server-api**, never the worker. server-api and worker have separate Docker build contexts and cannot share code (spec §5).
-- Step status values come from `soar_service.py` and must not be extended beyond the one addition the spec permits: `pending`, `pending_approval`, `approved`, `running`, `succeeded`, `rolled_back`, plus `failed` — which only the executor writes, for a node whose handler raised (spec §5).
+- Step status values come from `soar_service.py` and must not be extended beyond the two additions the spec permits: `pending`, `pending_approval`, `approved`, `running`, `succeeded`, `rolled_back`, plus `failed` — which only the executor writes, for a node whose handler raised — and `cancelled` — which only `POST /api/soar/executions/{id}/cancel` writes, for a destructive step a human declined (spec §5). *(`cancelled` added post-slice-1, during the final review, to give `waiting` an exit besides approve.)*
 - Run status values: `pending`, `running`, `waiting`, `succeeded`, `failed`, `cancelled` (spec §5).
 - The expression filter set is closed to exactly four: `default`, `lower`, `upper`, `json`. Adding one requires a spec change (spec §5.4).
 - No template engine and no `eval` in the resolver. Dotted-path lookup only (spec §5.4, §10).
