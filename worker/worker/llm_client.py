@@ -245,7 +245,7 @@ def _fallback_verdict(severity: str) -> dict:
     }
 
 
-_CAMPAIGN_SYSTEM_PROMPT = """You are a senior SOC Threat Intelligence Analyst. You are given a chronological timeline of security alerts and UEBA anomalies all related to the same IP address or hostname within the last 24 hours.
+_CAMPAIGN_SYSTEM_PROMPT = """You are a senior SOC Threat Intelligence Analyst. You are given a chronological timeline of security alerts all related to the same IP address or hostname within the last 24 hours.
 
 Your job is to:
 1. Understand the FULL attack story — not individual alerts, but the campaign as a whole

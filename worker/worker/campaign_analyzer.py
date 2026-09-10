@@ -3,7 +3,7 @@
 Campaign Analyzer — melihat gambaran besar serangan.
 
 Setelah sebuah case dibuat oleh AI, fungsi ini mengumpulkan SEMUA alert
-dari IP/host yang sama dalam 24 jam terakhir, plus anomali UEBA terkait,
+dari IP/host yang sama dalam 24 jam terakhir,
 lalu meminta Groq membangun timeline dan narasi kampanye serangan secara utuh.
 """
 import uuid
@@ -14,7 +14,7 @@ import structlog
 from sqlalchemy import select, or_
 
 from worker.database import AsyncSessionLocal
-from worker.models import Alert, CaseNote, UebaAnomaly
+from worker.models import Alert, CaseNote
 from worker.llm_client import analyze_campaign_with_ai
 
 log = structlog.get_logger()
@@ -76,39 +76,17 @@ async def _run(
             log.debug("campaign_skip_too_few", count=len(alerts), case_id=case_id)
             return
 
-        # Kumpulkan UEBA anomalies untuk entity yang sama
-        ueba_filters = []
-        if source_ip:
-            ueba_filters.append(
-                (UebaAnomaly.entity_type == "ip") &
-                (UebaAnomaly.entity_value == source_ip)
-            )
-        if hostname:
-            ueba_filters.append(
-                (UebaAnomaly.entity_type == "hostname") &
-                (UebaAnomaly.entity_value == hostname)
-            )
-
-        ueba_rows = []
-        if ueba_filters:
-            ueba_q = (
-                select(UebaAnomaly)
-                .where(
-                    UebaAnomaly.group_id == group_id,
-                    or_(*ueba_filters),
-                )
-                .order_by(UebaAnomaly.id.desc())
-                .limit(10)
-            )
-            ueba_rows = (await db.execute(ueba_q)).scalars().all()
+        # UEBA anomalies are deliberately NOT gathered here. UEBA output is not
+        # fed to the AI and does not reach cases: its scores are advisory signals
+        # for an analyst to read on the UEBA page, not evidence for a model to
+        # narrate. Campaign analysis correlates alerts only.
 
         # Bangun timeline string untuk dikirim ke Groq
-        timeline = _build_timeline(alerts, ueba_rows)
+        timeline = _build_timeline(alerts)
 
         log.info("campaign_analyzing",
                  case_id=case_id,
                  alert_count=len(alerts),
-                 ueba_count=len(ueba_rows),
                  source_ip=source_ip,
                  hostname=hostname)
 
@@ -123,7 +101,7 @@ async def _run(
             return
 
         # Simpan hasil analisis sebagai CaseNote di case yang sudah ada
-        narrative = _format_note(analysis, alerts, ueba_rows, source_ip, hostname)
+        narrative = _format_note(analysis, alerts, source_ip, hostname)
         note = CaseNote(
             case_id=uuid.UUID(case_id),
             author_id=None,
@@ -135,8 +113,8 @@ async def _run(
         log.info("campaign_note_saved", case_id=case_id)
 
 
-def _build_timeline(alerts: list, ueba_rows: list) -> str:
-    """Buat string timeline yang terurut dari alert + anomali UEBA."""
+def _build_timeline(alerts: list) -> str:
+    """Buat string timeline yang terurut dari alert saja (UEBA tidak disertakan)."""
     events = []
 
     for a in alerts:
@@ -149,14 +127,6 @@ def _build_timeline(alerts: list, ueba_rows: list) -> str:
             + (f" | host={a.hostname}" if a.hostname else "")
         ))
 
-    for u in ueba_rows:
-        ts = "?"
-        events.append((
-            None,
-            f"[UEBA] {u.entity_type}={u.entity_value} risk_score={u.risk_score:.1f}"
-        ))
-
-    # Sort by timestamp, UEBA entries go last (no timestamp)
     events.sort(key=lambda x: x[0] or datetime.min.replace(tzinfo=timezone.utc))
     return "\n".join(e[1] for e in events)
 
@@ -164,7 +134,6 @@ def _build_timeline(alerts: list, ueba_rows: list) -> str:
 def _format_note(
     analysis: dict,
     alerts: list,
-    ueba_rows: list,
     source_ip: Optional[str],
     hostname: Optional[str],
 ) -> str:
@@ -180,7 +149,7 @@ def _format_note(
         "## 🔍 AI Campaign Analysis",
         "",
         f"**Entity:** `{entity}`  |  **Alerts analyzed:** {len(alerts)}  |  "
-        f"**UEBA anomalies:** {len(ueba_rows)}  |  **Confidence:** {confidence:.0%}",
+        f"**Confidence:** {confidence:.0%}",
         "",
         f"**Kill Chain Stage:** {kill_chain}",
         f"**Attacker Intent:** {intent}",
