@@ -268,3 +268,12 @@ def test_validate_graph_rejects_an_edge_using_a_handle_the_source_never_emits():
 # test_validate_graph_accepts_a_valid_tree (above) already covers a valid
 # graph built from real registered node types now that builtins are
 # registered for every test in this file.
+
+
+def test_validate_single_entry_accepts_an_empty_workflow():
+    # A workflow is created before it is drawn, so an empty graph must save.
+    validate_single_entry(build_snapshot([], []))
+
+
+def test_validate_graph_accepts_an_empty_workflow():
+    validate_graph(build_snapshot([], []))

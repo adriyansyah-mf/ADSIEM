@@ -135,10 +135,18 @@ def validate_single_inbound(snapshot: dict[str, Any]) -> None:
 
 
 def validate_single_entry(snapshot: dict[str, Any]) -> None:
+    # An empty workflow is a legitimate resting state: one is created before it
+    # is drawn, and the editor saves it again as the author builds it up.
+    # Emptiness is only a problem at run time, where start_run refuses a
+    # workflow with no entry node.
+    if not snapshot["nodes"]:
+        return
     targets = {edge["target_node_id"] for edge in snapshot["edges"]}
     roots = [node_id for node_id in snapshot["nodes"] if node_id not in targets]
     if len(roots) != 1:
-        raise DisconnectedWorkflowError(f"expected exactly one entry node, found {len(roots)}")
+        raise DisconnectedWorkflowError(
+            f"a workflow must start from exactly one step, but {len(roots)} steps have nothing leading into them"
+        )
 
 
 class DuplicateNodeNameError(ValueError):

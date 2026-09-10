@@ -22,9 +22,9 @@ export default function SoarWorkflowsPage() {
     const trimmed = name.trim()
     if (!trimmed) return
     setError(null)
-    // A workflow is created empty and then drawn on the canvas. The server
-    // rejects an empty graph on save, not on create, so there is nothing to
-    // validate here.
+    // A workflow is created empty and then drawn on the canvas, so the server
+    // accepts a graph with no steps. It only insists on a single entry point
+    // once steps exist.
     create.mutate(
       { name: trimmed, description: null, is_enabled: false, nodes: [], edges: [] },
       {
