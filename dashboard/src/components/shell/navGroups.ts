@@ -3,7 +3,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Server, BookOpen, Wrench, Shield, Bot,
   Users, Settings, Webhook, ClipboardList, FileBarChart, Grid3x3,
-  ShieldCheck,
+  ShieldCheck, Workflow,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -58,7 +58,8 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: 'Automation',
     items: [
-      { to: '/soar', label: 'Automation', icon: Shield },
+      { to: '/soar/workflows', label: 'SOAR Workflows', icon: Workflow },
+      { to: '/soar', label: 'SOAR Playbooks', icon: Shield },
     ],
   },
   {

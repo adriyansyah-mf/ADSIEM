@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/api/client'
@@ -30,6 +30,10 @@ import LiveResponsePage from '@/pages/LiveResponsePage'
 import YaraPage from '@/pages/YaraPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
 import SoarPage from '@/pages/SoarPage'
+import SoarWorkflowsPage from '@/pages/SoarWorkflowsPage'
+// React Flow is heavy and only this route needs it, so it stays out of the
+// main bundle for the analysts who never open the canvas.
+const SoarCanvasPage = lazy(() => import('@/pages/SoarCanvasPage'))
 import MitreHeatmapPage from '@/pages/MitreHeatmapPage'
 import AssistantPage from '@/pages/AssistantPage'
 
@@ -74,6 +78,17 @@ export default function App() {
             <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />
             <Route path="/yara" element={<YaraPage />} />
             <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />
+            <Route path="/soar/workflows" element={<ProtectedRoute minRole="analyst"><SoarWorkflowsPage /></ProtectedRoute>} />
+            <Route
+              path="/soar/workflows/:id"
+              element={
+                <ProtectedRoute minRole="analyst">
+                  <Suspense fallback={<div className="p-4 text-sm text-[var(--text-muted)]">Loading canvas…</div>}>
+                    <SoarCanvasPage />
+                  </Suspense>
+                </ProtectedRoute>
+              }
+            />
             <Route path="/audit-logs" element={<ProtectedRoute minRole="admin"><AuditLogsPage /></ProtectedRoute>} />
           </Route>
         </Route>
