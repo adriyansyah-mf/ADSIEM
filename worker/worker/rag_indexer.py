@@ -41,7 +41,7 @@ async def rag_index_loop() -> None:
                                    COALESCE(c.ioc_data->>'verdict', c.status) AS verdict,
                                    c.group_id
                             FROM cases c
-                            WHERE c.id = :case_id::uuid
+                            WHERE c.id = CAST(:case_id AS uuid)
                         """), {"case_id": case_id})).mappings().first()
                     if row:
                         await index_case(
@@ -66,7 +66,7 @@ async def rag_index_loop() -> None:
                         row = (await db.execute(text("""
                             SELECT id::text, context_text, rating, group_id
                             FROM ai_feedback
-                            WHERE id = :feedback_id::uuid
+                            WHERE id = CAST(:feedback_id AS uuid)
                         """), {"feedback_id": feedback_id})).mappings().first()
                     if row:
                         await index_feedback(
