@@ -98,6 +98,8 @@ export default function Layout() {
         if (data.type === 'new_alert') {
           queryClient.invalidateQueries({ queryKey: ['alerts-recent'] })
           queryClient.invalidateQueries({ queryKey: ['alerts-dashboard'] })
+          queryClient.invalidateQueries({ queryKey: ['alerts'] })
+          queryClient.invalidateQueries({ queryKey: ['metrics'] })
         }
       } catch {}
     }

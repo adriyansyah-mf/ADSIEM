@@ -35,6 +35,7 @@ from app.api.routes.reports import router as reports_router
 from app.api.routes.assistant import router as assistant_router
 from app.api.routes.mitre import router as mitre_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
+from app.api.routes.stream import router as stream_router
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -413,6 +414,6 @@ for router in [
     enrollment_tokens_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
-    reports_router, assistant_router, mitre_router, ws_router,
+    reports_router, assistant_router, mitre_router, ws_router, stream_router,
 ]:
     app.include_router(router)

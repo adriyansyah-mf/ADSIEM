@@ -159,3 +159,89 @@ async def quick_ti_lookup(
     # Fallback: return basic info if worker unreachable
     return {"ioc": ioc, "ioc_type": ioc_type, "status": "worker_unreachable",
             "provider_bullets": [], "overall_risk": 0.0}
+
+
+@router.get("/soc/timeseries")
+async def soc_timeseries(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(get_current_user),
+    days: int = Query(default=7, le=90),
+):
+    """Alerts bucketed by hour for the dashboard's trend chart."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    q = select(Alert).where(Alert.created_at >= since)
+    if group_filter:
+        q = q.where(Alert.group_id == group_filter)
+    alerts = (await db.execute(q)).scalars().all()
+
+    buckets: dict[str, dict] = {}
+    for a in alerts:
+        if not a.created_at:
+            continue
+        key = a.created_at.replace(minute=0, second=0, microsecond=0).isoformat()
+        slot = buckets.setdefault(key, {"t": key, "total": 0})
+        slot["total"] += 1
+        slot[a.severity] = slot.get(a.severity, 0) + 1
+
+    series = [buckets[k] for k in sorted(buckets.keys())]
+    return {"period_days": days, "points": series}
+
+
+@router.get("/soc/top-sources")
+async def soc_top_sources(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(get_current_user),
+    days: int = Query(default=7, le=90),
+    limit: int = Query(default=10, le=50),
+):
+    """Top source IPs by alert volume, for the dashboard's bar chart."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    q = (
+        select(Alert.source_ip, func.count().label("n"))
+        .where(Alert.created_at >= since, Alert.source_ip.isnot(None))
+        .group_by(Alert.source_ip)
+        .order_by(func.count().desc())
+        .limit(limit)
+    )
+    if group_filter:
+        q = q.where(Alert.group_id == group_filter)
+    rows = (await db.execute(q)).all()
+    return {"period_days": days, "sources": [{"ip": ip, "count": n} for ip, n in rows]}
+
+
+@router.get("/soc/mttr-trend")
+async def soc_mttr_trend(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(get_current_user),
+    days: int = Query(default=30, le=90),
+):
+    """Daily average acknowledge/resolve time, for the MTTD/MTTR trend chart."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    q = select(Alert).where(Alert.created_at >= since, Alert.acknowledged_at.isnot(None))
+    if group_filter:
+        q = q.where(Alert.group_id == group_filter)
+    alerts = (await db.execute(q)).scalars().all()
+
+    buckets: dict[str, dict] = {}
+    for a in alerts:
+        if not a.created_at:
+            continue
+        day = a.created_at.date().isoformat()
+        slot = buckets.setdefault(day, {"day": day, "ack": [], "mttr": []})
+        if a.acknowledged_at:
+            slot["ack"].append((a.acknowledged_at - a.created_at).total_seconds() / 60)
+        if a.resolved_at:
+            slot["mttr"].append((a.resolved_at - a.created_at).total_seconds() / 60)
+
+    points = []
+    for day in sorted(buckets.keys()):
+        slot = buckets[day]
+        points.append({
+            "day": day,
+            "avg_ack_minutes": round(sum(slot["ack"]) / len(slot["ack"]), 1) if slot["ack"] else None,
+            "avg_mttr_minutes": round(sum(slot["mttr"]) / len(slot["mttr"]), 1) if slot["mttr"] else None,
+        })
+    return {"period_days": days, "points": points}

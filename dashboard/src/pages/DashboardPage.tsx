@@ -5,6 +5,8 @@ import { api } from '@/api/client'
 import { format } from 'date-fns'
 import { Search, Loader2 } from 'lucide-react'
 import AlertDetailModal from '@/components/AlertDetailModal'
+import { AlertsOverTimeChart, SeverityBars, TopSourcesChart, MttrTrendChart } from '@/components/MetricsCharts'
+import { useSocTimeseries, useTopSources, useMttrTrend } from '@/hooks/useMetrics'
 import type { Alert, Agent, Case, Event } from '@/types'
 
 interface WorkloadItem { user_id: string; username: string; open_alerts: number; open_cases: number; total: number }
@@ -133,6 +135,10 @@ export default function DashboardPage() {
     queryFn: () => api.get('/api/metrics/soc').then(r => r.data),
     refetchInterval: 60_000,
   })
+
+  const { data: timeseries } = useSocTimeseries(7)
+  const { data: topSources } = useTopSources(7)
+  const { data: mttrTrend } = useMttrTrend(30)
 
   const { data: workload = [] } = useQuery<WorkloadItem[]>({
     queryKey: ['metrics-workload'],
@@ -304,6 +310,21 @@ export default function DashboardPage() {
 
       {/* CENTER COLUMN */}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12, marginBottom: 12 }}>
+          <SectionCard title="Alerts Over Time (7d)">
+            <AlertsOverTimeChart points={timeseries?.points ?? []} height={190} />
+          </SectionCard>
+          <SectionCard title="Severity Breakdown (7d)">
+            <SeverityBars bySeverity={socMetrics?.by_severity ?? {}} height={190} />
+          </SectionCard>
+          <SectionCard title="Top Source IPs (7d)">
+            <TopSourcesChart sources={topSources?.sources ?? []} height={190} />
+          </SectionCard>
+          <SectionCard title="Response Trend (30d)">
+            <MttrTrendChart points={mttrTrend?.points ?? []} height={190} />
+          </SectionCard>
+        </div>
+
         <div style={{
           borderRadius: '6px',
           border: '1px solid var(--border)',
