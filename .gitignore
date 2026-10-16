@@ -6,6 +6,7 @@ __pycache__/
 # Node
 node_modules/
 .next/
+*.tsbuildinfo
 
 # Env and local data
 .env

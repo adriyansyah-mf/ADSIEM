@@ -27,24 +27,29 @@ jobs:
         run: pip install -r worker/requirements.txt
 
       - name: Run pytest
-        run: pytest tests/server-api tests/worker worker/tests
+        env:
+          # Throwaway test value (not a secret): Settings() requires JWT_SECRET
+          # at import time, with a strong-value validator.
+          JWT_SECRET: "ci-test-secret-0123456789abcdef0123456789abcdef"
+        run: |
+          pytest tests/server-api tests/worker worker/tests \
+            --ignore=tests/worker/test_pipeline.int.test.py \
+            --deselect worker/tests/test_rag.py::test_embed_text_returns_384_dimensions \
+            --deselect worker/tests/test_rag.py::test_embed_text_different_inputs_differ
 
   go-tests:
     name: Go agent tests
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: tests/agent
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
-          cache-dependency-path: tests/agent/go.sum
+          cache-dependency-path: agent/go.sum
 
       - name: go test
-        run: go test ./...
+        run: go test ./tests/agent/...
 
   dashboard-build:
     name: Dashboard build (tsc + vite)

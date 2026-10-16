@@ -7,7 +7,6 @@ import json
 from typing import Generator
 
 import pytest
-from playwright.sync_api import Page, Route, sync_playwright
 
 
 # ---------------------------------------------------------------------------
@@ -15,14 +14,18 @@ from playwright.sync_api import Page, Route, sync_playwright
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="function")
-def page() -> Generator[Page, None, None]:
+def page() -> Generator["Page", None, None]:
     """
     Launch a headless Chromium browser, yield a single Page, then close.
 
     Scope is function-level so each test gets a fresh browser context with no
     shared cookies, localStorage, or network state.
     """
-    with sync_playwright() as pw:
+    playwright = pytest.importorskip(
+        "playwright.sync_api",
+        reason="browser tests need playwright: pip install playwright && playwright install chromium",
+    )
+    with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         context = browser.new_context()
         pg = context.new_page()
@@ -43,7 +46,7 @@ class MockAPI:
     dashboard SPA.
     """
 
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: "Page") -> None:
         self._page = page
         # Keep track of registered handlers so tests can inspect call counts.
         self._handlers: dict[str, list[dict]] = {}
@@ -81,7 +84,7 @@ class MockAPI:
         key = f"{method.upper()}:{url_pattern}"
         self._handlers.setdefault(key, [])
 
-        def _handler(route: Route) -> None:
+        def _handler(route: "Route") -> None:
             req_method = route.request.method.upper()
             if method != "*" and req_method != method.upper():
                 route.continue_()
@@ -115,7 +118,7 @@ class MockAPI:
 
 
 @pytest.fixture(scope="function")
-def mock_api(page: Page) -> MockAPI:
+def mock_api(page: "Page") -> MockAPI:
     """
     Return a :class:`MockAPI` bound to *page*.
 

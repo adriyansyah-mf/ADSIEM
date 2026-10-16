@@ -47,4 +47,5 @@ agent/
 - **Do not hardcode `http://`** for `server.url` — Go downgrades POST→GET across nginx's 301→405. See root AGENTS.md.
 - **Do not add a `User=` hardening to the shipped systemd unit** without accepting that isolate/block-IP and eBPF fail closed — the platform expects root.
 - **Do not commit new large binaries/bootstrap headers**; `bin/agent` and `include/bpf/vmlinux.h` are already committed artifacts and inflate the repo.
-- **Do not run `make build` expecting a working eBPF binary** — it's a plain `go build`; the clang step is manual or Dockerfile-only.
+- **`make build` now compiles the eBPF object first** (target `bpf`, requires `clang`; fails with a clear message if absent). `make package-deb`/`package-rpm` depend on it too. The `.bpf.o` is gitignored — never commit it.
+- **Windows/macOS hosts can still `go build ./...`** for editing; `hygiene/collector*.go` and `procexec/*.go` use `//go:build linux` with a no-op stub elsewhere.
