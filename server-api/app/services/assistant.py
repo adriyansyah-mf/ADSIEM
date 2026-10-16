@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.llm_client import generate_chat
+from app.core.llm_gateway import stream as gateway_stream
 from app.models.models import PlatformSetting
 from app.services.assistant_tools import TOOLS, run_tool
 
@@ -76,11 +77,7 @@ async def run_assistant_chat(
     if not api_key:
         return {"reply": "The AI assistant isn't configured yet — an admin needs to set the 9router API key in Settings.", "tools_used": []}
 
-    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-    for h in history[-10:]:
-        if h.get("role") in ("user", "assistant") and h.get("content"):
-            messages.append({"role": h["role"], "content": str(h["content"])[:2000]})
-    messages.append({"role": "user", "content": user_message[:2000]})
+    messages = _build_messages(history, user_message)
 
     tools_used: list[str] = []
     for i in range(_MAX_TOOL_ROUNDS):
@@ -94,7 +91,7 @@ async def run_assistant_chat(
                 "you've found so far even if the investigation feels incomplete — "
                 "don't call another tool."
             )})
-        raw = await generate_chat(api_key, model, messages, max_tokens=2200)
+        raw = await generate_chat(api_key, model, messages, max_tokens=2200, db=db)
         if not raw:
             return {"reply": "The AI assistant is unavailable right now — try again in a moment.", "tools_used": tools_used}
 
@@ -118,3 +115,76 @@ async def run_assistant_chat(
         messages.append({"role": "user", "content": f"TOOL RESULT for {tool_name}: {json.dumps(result, default=str)[:4000]}"})
 
     return {"reply": "I looked into this but couldn't reach a conclusive answer in time — try narrowing your question.", "tools_used": tools_used}
+
+
+def _build_messages(history: list[dict], user_message: str) -> list[dict]:
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    for h in history[-10:]:
+        if h.get("role") in ("user", "assistant") and h.get("content"):
+            messages.append({"role": h["role"], "content": str(h["content"])[:2000]})
+    messages.append({"role": "user", "content": user_message[:2000]})
+    return messages
+
+
+async def stream_assistant_chat(
+    db: AsyncSession,
+    group_filter: str | None,
+    history: list[dict],
+    user_message: str,
+):
+    """Streaming variant of run_assistant_chat for the dashboard.
+
+    The tool loop is single-pass here: the gateway streams the model's reply as
+    it arrives, and if that reply is a tool call rather than a final answer, the
+    tool runs once and its result is streamed back as a follow-up turn. This
+    keeps the read-only guarantee identical to the non-streaming path — the
+    model can only reach run_tool(), which is the same allow-list.
+    """
+    api_key = await _get_setting(db, "ninerouter_api_key", "")
+    model = await _get_setting(db, "ninerouter_model", "combo")
+
+    if not api_key:
+        yield {"type": "error", "message": "The AI assistant isn't configured yet — an admin needs to set the 9router API key in Settings."}
+        return
+
+    messages = _build_messages(history, user_message)
+
+    for i in range(_MAX_TOOL_ROUNDS):
+        buffered = ""
+        async for chunk in gateway_stream(db, messages, model=model, max_tokens=2200):
+            if chunk.get("type") == "text-delta":
+                buffered += chunk.get("text", "")
+                yield chunk
+            elif chunk.get("type") == "reasoning-delta":
+                yield chunk
+            elif chunk.get("type") == "error":
+                yield chunk
+                return
+            elif chunk.get("type") == "finish":
+                pass
+
+        action = _parse_action(buffered)
+        if not action or action.get("action") not in ("tool", "final"):
+            salvaged = _salvage_truncated_message(buffered)
+            if salvaged:
+                yield {"type": "text-delta", "text": salvaged}
+            yield {"type": "finish"}
+            return
+
+        if action["action"] == "final":
+            yield {"type": "finish"}
+            return
+
+        tool_name = str(action.get("tool", ""))
+        tool_args = action.get("args") or {}
+        log.info("assistant_tool_call", tool=tool_name, args=tool_args)
+        result = await run_tool(tool_name, tool_args, db, group_filter)
+        yield {"type": "tool-call", "tool": tool_name, "args": tool_args}
+
+        messages.append({"role": "assistant", "content": buffered})
+        messages.append({
+            "role": "user",
+            "content": f"TOOL RESULT for {tool_name}: {json.dumps(result, default=str)[:4000]}",
+        })
+
+    yield {"type": "finish"}

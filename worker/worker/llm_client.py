@@ -1,70 +1,47 @@
 # worker/worker/llm_client.py
-"""AI analyst LLM calls — routed through a local 9router instance
-(https://github.com/decolua/9router), which proxies to whichever provider is
-configured in the "combo" selected in its dashboard (currently OpenCode Free,
-a headless/no-login free model). 9router exposes an OpenAI-compatible
-/v1/chat/completions endpoint, so swapping the underlying provider/model is
-just a combo change in the 9router dashboard — no code change needed here."""
-import asyncio
+"""AI analyst prompts and their call into the shared LLM gateway.
+
+Transport (retry, 429 backoff, fallback chain, SSE-quirk parsing, usage
+accounting) lives in worker/worker/llm_gateway.py — this module owns only the
+prompts and the shaping of responses into analyst verdicts.
+"""
 import json
-import httpx
 import structlog
-from worker.config import NINEROUTER_API_KEY, NINEROUTER_BASE_URL, NINEROUTER_MODEL
+from worker.config import NINEROUTER_API_KEY, NINEROUTER_MODEL
 from worker.settings_cache import get_setting
+from worker.llm_gateway import Completion, LLMError, complete, extract_json
 
 log = structlog.get_logger()
 
-# Max 3 concurrent calls — avoid bursts that trip the combo's own rate limiting
-_llm_semaphore = asyncio.Semaphore(3)
-
-
-_MAX_RATE_LIMIT_WAIT = 20.0  # seconds — cap even if the server asks for longer,
-# so one rate-limited alert can't stall the single-consumer queue for a long
-# "retry-after" once a combo's quota is exhausted. A quota-exhausted combo won't
-# recover within a short wait either way; better to fail fast to the fallback
-# verdict and let the hourly backfill loop (worker/ai_consumer.py) retry the
-# alert once the quota resets.
-
 
 async def _llm_post(api_key: str, payload: dict, max_retries: int = 4) -> dict:
-    """POST a chat completion to 9router, retrying with exponential backoff on 429."""
-    delay = 5.0
-    url = f"{NINEROUTER_BASE_URL.rstrip('/')}/chat/completions"
-    async with _llm_semaphore:
-        for attempt in range(max_retries):
-            try:
-                async with httpx.AsyncClient(timeout=40) as client:
-                    resp = await client.post(
-                        url,
-                        headers={"Authorization": f"Bearer {api_key}",
-                                 "Content-Type": "application/json"},
-                        json=payload,
-                    )
-                    if resp.status_code == 429:
-                        retry_after = float(resp.headers.get("retry-after", delay))
-                        wait = min(max(retry_after, delay), _MAX_RATE_LIMIT_WAIT)
-                        log.warning("ninerouter_rate_limited", attempt=attempt + 1,
-                                    wait_seconds=wait, server_requested=retry_after)
-                        await asyncio.sleep(wait)
-                        delay = min(delay * 2, 60)
-                        continue
-                    resp.raise_for_status()
-                    # 9router responds with a text/event-stream body even for
-                    # non-streaming requests — a JSON object immediately
-                    # followed by a trailing "data: [DONE]" marker with no
-                    # separator. raw_decode() parses the leading JSON object
-                    # and ignores whatever comes after it.
-                    obj, _ = json.JSONDecoder().raw_decode(resp.text)
-                    return obj
-            except httpx.HTTPStatusError:
-                raise
-            except Exception as exc:
-                if attempt == max_retries - 1:
-                    raise
-                log.warning("ninerouter_retry", attempt=attempt + 1, error=str(exc))
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, 60)
-    raise RuntimeError("9router max retries exceeded")
+    """Backwards-compatible shim over llm_gateway.complete().
+
+    Legacy callers (hunter.py, report_sender.py) pass a raw OpenAI-shaped
+    payload and index into ``result["choices"][0]["message"]["content"]``.
+    This adapter preserves that contract while routing through the gateway so
+    every caller shares one retry/fallback policy.
+    """
+    messages = payload.get("messages") or []
+    completion: Completion = await complete(
+        messages,
+        model=payload.get("model"),
+        temperature=float(payload.get("temperature", 0.2)),
+        max_tokens=int(payload.get("max_tokens", 2000)),
+    )
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": completion.text,
+                    "reasoning_content": completion.reasoning,
+                    "tool_calls": completion.tool_calls,
+                }
+            }
+        ],
+        "usage": completion.usage,
+        "model": completion.model_used,
+    }
 
 _L1_SYSTEM_PROMPT = """You are an on-duty L1 SOC Analyst. You MUST triage EVERY alert — none are skipped.
 

@@ -7,11 +7,11 @@ You.com/Perplexity/SearXNG) when a "search-combo" is configured in the
 9router dashboard — same pattern as ninerouter_model for chat completions.
 Falls back to direct SearXNG (searxng_client.search_threat_intel) on any
 9router failure, so this is a pure upgrade with no new failure mode."""
-import json
 import httpx
 import structlog
 from worker.config import NINEROUTER_API_KEY, NINEROUTER_BASE_URL, NINEROUTER_SEARCH_PROVIDER
 from worker.settings_cache import get_setting
+from worker.llm_gateway import _parse_body
 
 log = structlog.get_logger()
 
@@ -31,9 +31,7 @@ async def search_via_9router(query: str, num_results: int = 5) -> list[dict]:
                 json={"provider": provider, "query": query, "max_results": num_results},
             )
             resp.raise_for_status()
-            # Same text/event-stream quirk as /v1/chat/completions — parse the
-            # leading JSON object and ignore any trailing "data: [DONE]".
-            obj, _ = json.JSONDecoder().raw_decode(resp.text)
+            obj = _parse_body(resp.text)
             results = obj.get("results", [])[:num_results]
             return [
                 {
