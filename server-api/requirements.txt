@@ -24,3 +24,5 @@ slowapi==0.1.9
 pyotp==2.9.0
 qrcode[pil]==8.0
 geoip2==4.8.0
+langgraph==1.2.15
+langgraph-checkpoint-redis==0.5.2
