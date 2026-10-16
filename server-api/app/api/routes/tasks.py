@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_agent, get_current_user
+from app.core.deps import get_agent, get_current_user, get_scoped_group, require_permission
 from app.models.models import Agent, AgentTask, FleetHunt
 from app.schemas.schemas import (
     AgentTaskCreate, AgentTaskOut, AgentTaskResultIn,
@@ -23,12 +23,15 @@ fleet_router = APIRouter(prefix="/api/fleet-hunts", tags=["fleet-hunts"])
 @router.get("", response_model=list[AgentTaskOut])
 async def list_tasks(
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(get_current_user),
     agent_id: UUID | None = None,
     status: str | None = None,
     limit: int = 50,
 ):
     q = select(AgentTask).order_by(AgentTask.created_at.desc()).limit(limit)
+    if group_filter is not None:
+        q = q.where(AgentTask.agent_id.in_(select(Agent.id).where(Agent.group_id == group_filter)))
     if agent_id:
         q = q.where(AgentTask.agent_id == agent_id)
     if status:
@@ -41,9 +44,13 @@ async def list_tasks(
 async def get_task(
     task_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(get_current_user),
 ):
-    t = (await db.execute(select(AgentTask).where(AgentTask.id == task_id))).scalar_one_or_none()
+    q = select(AgentTask).where(AgentTask.id == task_id)
+    if group_filter is not None:
+        q = q.where(AgentTask.agent_id.in_(select(Agent.id).where(Agent.group_id == group_filter)))
+    t = (await db.execute(q)).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "Task not found")
     return t
@@ -53,10 +60,14 @@ async def get_task(
 async def create_task(
     body: AgentTaskCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user=Depends(get_current_user),
+    user=Depends(require_permission("agents:manage")),
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
     if body.agent_id:
-        agent = (await db.execute(select(Agent).where(Agent.id == body.agent_id))).scalar_one_or_none()
+        aq = select(Agent).where(Agent.id == body.agent_id)
+        if group_filter is not None:
+            aq = aq.where(Agent.group_id == group_filter)
+        agent = (await db.execute(aq)).scalar_one_or_none()
         if not agent:
             raise HTTPException(404, "Agent not found")
     task = AgentTask(
@@ -75,9 +86,13 @@ async def create_task(
 async def delete_task(
     task_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(require_permission("agents:manage")),
 ):
-    t = (await db.execute(select(AgentTask).where(AgentTask.id == task_id))).scalar_one_or_none()
+    q = select(AgentTask).where(AgentTask.id == task_id)
+    if group_filter is not None:
+        q = q.where(AgentTask.agent_id.in_(select(Agent.id).where(Agent.group_id == group_filter)))
+    t = (await db.execute(q)).scalar_one_or_none()
     if not t:
         raise HTTPException(404, "Task not found")
     await db.delete(t)
@@ -126,9 +141,13 @@ async def submit_result(
 @fleet_router.get("", response_model=list[FleetHuntOut])
 async def list_fleet_hunts(
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(get_current_user),
 ):
-    result = await db.execute(select(FleetHunt).order_by(FleetHunt.created_at.desc()))
+    q = select(FleetHunt).order_by(FleetHunt.created_at.desc())
+    if group_filter is not None:
+        q = q.where(FleetHunt.group_id == group_filter)
+    result = await db.execute(q)
     return result.scalars().all()
 
 
@@ -136,9 +155,13 @@ async def list_fleet_hunts(
 async def get_fleet_hunt(
     hunt_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(get_current_user),
 ):
-    fh = (await db.execute(select(FleetHunt).where(FleetHunt.id == hunt_id))).scalar_one_or_none()
+    q = select(FleetHunt).where(FleetHunt.id == hunt_id)
+    if group_filter is not None:
+        q = q.where(FleetHunt.group_id == group_filter)
+    fh = (await db.execute(q)).scalar_one_or_none()
     if not fh:
         raise HTTPException(404, "Fleet hunt not found")
     return fh
@@ -148,8 +171,14 @@ async def get_fleet_hunt(
 async def get_fleet_hunt_tasks(
     hunt_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(get_current_user),
 ):
+    fq = select(FleetHunt).where(FleetHunt.id == hunt_id)
+    if group_filter is not None:
+        fq = fq.where(FleetHunt.group_id == group_filter)
+    if (await db.execute(fq)).scalar_one_or_none() is None:
+        raise HTTPException(404, "Fleet hunt not found")
     result = await db.execute(
         select(AgentTask).where(AgentTask.fleet_hunt_id == hunt_id).order_by(AgentTask.created_at.desc())
     )
@@ -160,12 +189,17 @@ async def get_fleet_hunt_tasks(
 async def create_fleet_hunt(
     body: FleetHuntCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user=Depends(get_current_user),
+    user=Depends(require_permission("agents:manage")),
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
+    aq = select(Agent)
     if body.agent_ids:
-        agents = (await db.execute(select(Agent).where(Agent.id.in_(body.agent_ids)))).scalars().all()
+        aq = aq.where(Agent.id.in_(body.agent_ids))
     else:
-        agents = (await db.execute(select(Agent).where(Agent.status == "online"))).scalars().all()
+        aq = aq.where(Agent.status == "online")
+    if group_filter is not None:
+        aq = aq.where(Agent.group_id == group_filter)
+    agents = (await db.execute(aq)).scalars().all()
     if not agents:
         raise HTTPException(400, "No online agents found")
 
@@ -175,6 +209,7 @@ async def create_fleet_hunt(
         task_type=body.task_type,
         params=body.params,
         total_agents=len(agents),
+        group_id=group_filter or user.group_id or "default",
         created_by=user.id,
     )
     db.add(fh)

@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_scoped_group, require_permission
+from app.core.deps import get_current_user, get_scoped_group, require_permission, fetch_scoped
 from app.models.models import Rule, User
 from app.schemas.schemas import (
     PaginatedResponse, RuleCreate, RuleOut, RuleTestRequest, RuleTestResponse, RuleUpdate
@@ -52,11 +52,9 @@ async def update_rule(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("rules:update"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Rule).where(Rule.id == rule_id))
-    rule = result.scalar_one_or_none()
-    if not rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
+    rule = await fetch_scoped(db, Rule, rule_id, group_filter, detail="Rule not found")
     updates = body.model_dump(exclude_none=True)
     if "content" in updates:
         _validate_rule_yaml(updates["content"])
@@ -74,11 +72,9 @@ async def delete_rule(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("rules:delete"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Rule).where(Rule.id == rule_id))
-    rule = result.scalar_one_or_none()
-    if not rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
+    rule = await fetch_scoped(db, Rule, rule_id, group_filter, detail="Rule not found")
     await db.delete(rule)
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "rule_deleted", "rule", str(rule_id))

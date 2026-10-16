@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_scoped_group, require_permission
+from app.core.deps import get_current_user, get_scoped_group, require_permission, fetch_scoped
 from app.core.es_client import get_log as es_get_log
 from app.core.geoip import lookup_country
 from app.models.models import AiFeedback, Alert, AlertNote, User
@@ -25,13 +25,14 @@ FEEDBACK_REINDEX_QUEUE = "siem:rag:feedback-reindex"
 
 async def _push_feedback_reindex(feedback_id: str) -> None:
     """Push feedback_id to Redis queue so the worker embeds it for RAG retrieval."""
+    import structlog
     try:
         import redis.asyncio as aioredis
         redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
         await redis.rpush(FEEDBACK_REINDEX_QUEUE, feedback_id)
         await redis.aclose()
-    except Exception:
-        pass  # non-critical: feedback row is already saved regardless
+    except Exception as exc:
+        structlog.get_logger().warning("feedback_reindex_push_failed", feedback_id=feedback_id, error=str(exc))
 
 _RESOLVED_STATUSES = {"resolved", "closed", "false_positive"}
 
@@ -142,13 +143,12 @@ async def update_alert(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("alerts:update"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(
-        select(Alert).options(selectinload(Alert.notes)).where(Alert.id == alert_id)
+    alert = await fetch_scoped(
+        db, Alert, alert_id, group_filter,
+        options=[selectinload(Alert.notes)], detail="Alert not found",
     )
-    alert = result.scalar_one_or_none()
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
 
     now = datetime.now(timezone.utc)
     new_status = body.status
@@ -190,10 +190,9 @@ async def add_note(
     alert_id: UUID, body: AlertNoteCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("alerts:update"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Alert).where(Alert.id == alert_id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Alert not found")
+    await fetch_scoped(db, Alert, alert_id, group_filter, detail="Alert not found")
     note = AlertNote(alert_id=alert_id, author_id=current_user.id, content=body.content)
     db.add(note)
     await db.commit()
@@ -206,7 +205,9 @@ async def list_alert_feedback(
     alert_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     _=Depends(require_permission("alerts:read")),
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
+    await fetch_scoped(db, Alert, alert_id, group_filter, detail="Alert not found")
     result = await db.execute(
         select(AiFeedback)
         .where(AiFeedback.entity_type == "alert", AiFeedback.entity_id == alert_id)
@@ -221,10 +222,9 @@ async def submit_alert_feedback(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("alerts:update"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    alert = (await db.execute(select(Alert).where(Alert.id == alert_id))).scalar_one_or_none()
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
+    alert = await fetch_scoped(db, Alert, alert_id, group_filter, detail="Alert not found")
 
     feedback = AiFeedback(
         entity_type="alert",

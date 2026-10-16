@@ -6,7 +6,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_scoped_group
+from app.core.deps import get_current_user, get_scoped_group, require_permission
 from app.models.models import Agent, AgentTask, YaraRule
 from app.schemas.schemas import YaraRuleCreate, YaraRuleOut, YaraScanRequest, AgentTaskOut
 
@@ -64,7 +64,7 @@ async def list_rules(
 async def create_rule(
     body: YaraRuleCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    _=Depends(require_permission("rules:create")),
 ):
     r = YaraRule(**body.model_dump())
     db.add(r)
@@ -78,7 +78,7 @@ async def update_rule(
     rule_id: UUID,
     body: YaraRuleCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    _=Depends(require_permission("rules:update")),
 ):
     r = (await db.execute(select(YaraRule).where(YaraRule.id == rule_id))).scalar_one_or_none()
     if not r:
@@ -94,7 +94,7 @@ async def update_rule(
 async def toggle_rule(
     rule_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    _=Depends(require_permission("rules:update")),
 ):
     r = (await db.execute(select(YaraRule).where(YaraRule.id == rule_id))).scalar_one_or_none()
     if not r:
@@ -109,7 +109,7 @@ async def toggle_rule(
 async def delete_rule(
     rule_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    _=Depends(require_permission("rules:delete")),
 ):
     r = (await db.execute(select(YaraRule).where(YaraRule.id == rule_id))).scalar_one_or_none()
     if not r:
@@ -122,14 +122,14 @@ async def delete_rule(
 async def trigger_scan(
     body: YaraScanRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user=Depends(get_current_user),
+    user=Depends(require_permission("agents:manage")),
     group_filter: str | None = Depends(get_scoped_group),
 ):
     agent = (await db.execute(select(Agent).where(Agent.id == body.agent_id))).scalar_one_or_none()
     if not agent:
         raise HTTPException(404, "Agent not found")
     if group_filter and agent.group_id != group_filter:
-        raise HTTPException(403, "Agent not in your group")
+        raise HTTPException(404, "Agent not found")
 
     if body.rule_ids:
         rules = (await db.execute(select(YaraRule).where(YaraRule.id.in_(body.rule_ids), YaraRule.is_enabled == True))).scalars().all()
@@ -159,7 +159,7 @@ async def list_builtins(_=Depends(get_current_user)):
 @router.post("/seed-builtins", status_code=201)
 async def seed_builtins(
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    _=Depends(require_permission("rules:create")),
 ):
     added = 0
     for r in BUILTIN_RULES:

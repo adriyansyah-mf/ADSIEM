@@ -7,7 +7,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_agent, get_current_user, get_scoped_group
+from app.core.deps import get_agent, get_current_user, get_scoped_group, require_permission
 from app.models.models import Agent, FimEvent, FimWatchPath, User
 from app.schemas.schemas import FimEventIn, FimEventOut, FimWatchPathCreate, FimWatchPathOut
 
@@ -15,11 +15,12 @@ router = APIRouter(tags=["fim"])
 
 
 # ─── Watch Paths (dashboard config) ──────────────────────────────────────────
+# Global platform config (no group_id column) — gated by agents:manage.
 
 @router.get("/api/fim/paths", response_model=list[FimWatchPathOut])
 async def list_fim_paths(
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_permission("agents:manage"))],
 ):
     result = await db.execute(select(FimWatchPath).order_by(FimWatchPath.path))
     return result.scalars().all()
@@ -29,7 +30,7 @@ async def list_fim_paths(
 async def create_fim_path(
     body: FimWatchPathCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_permission("agents:manage"))],
 ):
     existing = await db.execute(select(FimWatchPath).where(FimWatchPath.path == body.path))
     if existing.scalar_one_or_none():
@@ -45,7 +46,7 @@ async def create_fim_path(
 async def toggle_fim_path(
     path_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_permission("agents:manage"))],
 ):
     result = await db.execute(select(FimWatchPath).where(FimWatchPath.id == path_id))
     p = result.scalar_one_or_none()
@@ -61,7 +62,7 @@ async def toggle_fim_path(
 async def delete_fim_path(
     path_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(require_permission("agents:manage"))],
 ):
     result = await db.execute(select(FimWatchPath).where(FimWatchPath.id == path_id))
     p = result.scalar_one_or_none()

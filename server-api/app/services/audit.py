@@ -1,5 +1,5 @@
 from uuid import UUID
-from app.models.models import AuditLog
+from app.models.models import AuditLog, User
 
 async def audit_log(
     db,  # kept for backwards-compatible signature but ignored — opens own session
@@ -13,8 +13,14 @@ async def audit_log(
     # after the route's request-scoped session has already been closed.
     from app.core.database import AsyncSessionLocal
     async with AsyncSessionLocal() as session:
+        group_id = "default"
+        if actor_id is not None:
+            actor = await session.get(User, actor_id)
+            if actor is not None:
+                group_id = actor.group_id
         entry = AuditLog(
             actor_id=actor_id,
+            group_id=group_id,
             action=action,
             resource_type=resource_type,
             resource_id=str(resource_id) if resource_id else None,

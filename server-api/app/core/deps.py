@@ -53,6 +53,40 @@ def get_scoped_group(current_user: Annotated[User, Depends(get_current_user)]) -
         return None  # no filter
     return current_user.group_id
 
+def assert_group_access(obj, group_filter: str | None, *, detail: str = "Not found") -> None:
+    """Raise 404 if a group-scoped object belongs to another group.
+
+    Superadmin (group_filter is None) always passes. A 404 — not a 403 — is
+    deliberate: it must not confirm the existence of another tenant's object.
+    """
+    if group_filter is not None and getattr(obj, "group_id", None) != group_filter:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+async def fetch_scoped(
+    db: AsyncSession,
+    model,
+    obj_id,
+    group_filter: str | None,
+    *,
+    options: list | None = None,
+    detail: str = "Not found",
+):
+    """Load a row by primary key within the caller's group scope.
+
+    Returns the ORM instance, or raises 404 when the row is missing OR belongs
+    to another group. Use this instead of ``db.get()`` / a bare ``select`` in
+    any single-resource route so group isolation cannot be forgotten.
+    """
+    stmt = select(model).where(model.id == obj_id)
+    if group_filter is not None:
+        stmt = stmt.where(model.group_id == group_filter)
+    if options:
+        stmt = stmt.options(*options)
+    obj = (await db.execute(stmt)).scalar_one_or_none()
+    if obj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    return obj
+
 async def get_agent(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],

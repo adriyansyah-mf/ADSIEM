@@ -1,6 +1,9 @@
 # server-api/app/api/routes/agents.py
 import hashlib
+import hmac
 import os
+import secrets
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
@@ -12,9 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_permission, get_scoped_group
+from app.core.deps import get_current_user, require_permission, get_scoped_group, fetch_scoped, assert_group_access
 from app.core.security import generate_agent_token, hash_token
-from app.models.models import Agent, AgentLogSource, AgentTask, User
+from app.models.models import Agent, AgentLogSource, AgentTask, EnrollmentToken, User
 from app.schemas.schemas import (
     AgentOut, AgentUpdate, EnrollRequest, EnrollResponse,
     LogSourceIn, LogSourceOut, PaginatedResponse
@@ -101,13 +104,15 @@ async def enroll_agent(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    if body.enrollment_token != settings.AGENT_ENROLLMENT_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid enrollment token")
+    # Authorization: per-token row (hashed, expirable, single-use) first; the
+    # legacy global token is a fallback only when explicitly configured.
+    group_id, token_row = await _resolve_enrollment_token(db, body.enrollment_token)
+
     raw_token = generate_agent_token()
     # Upsert: reuse existing agent for same hostname+group to prevent duplicates on re-enrollment
     result = await db.execute(
         select(Agent).options(selectinload(Agent.log_sources))
-        .where(Agent.hostname == body.hostname, Agent.group_id == body.group)
+        .where(Agent.hostname == body.hostname, Agent.group_id == group_id)
         .order_by(Agent.enrolled_at.desc())
         .limit(1)
     )
@@ -120,27 +125,60 @@ async def enroll_agent(
     else:
         agent = Agent(
             name=body.name, hostname=body.hostname,
-            group_id=body.group, version=body.version,
+            group_id=group_id, version=body.version,
             token_hash=hash_token(raw_token), status="online",
         )
         db.add(agent)
         await db.flush()
         for src in body.log_sources:
             db.add(AgentLogSource(agent_id=agent.id, path=src.path, log_type=src.log_type, is_enabled=src.is_enabled))
+
+    if token_row is not None:
+        token_row.used_at = datetime.now(timezone.utc)
+        token_row.used_by_agent_id = agent.id
+
     await db.commit()
     background.add_task(audit_log, db, None, "agent_enrolled", "agent", str(agent.id), {"hostname": body.hostname})
     return EnrollResponse(agent_id=str(agent.id), agent_token=raw_token)
+
+
+async def _resolve_enrollment_token(db: AsyncSession, presented: str) -> tuple[str, EnrollmentToken | None]:
+    """Return (group_id, token_row) for a valid enrollment token, else raise 401."""
+    presented = (presented or "").strip()
+    if not presented:
+        raise HTTPException(status_code=401, detail="Invalid enrollment token")
+
+    token_hash = hashlib.sha256(presented.encode()).hexdigest()
+    row = (await db.execute(
+        select(EnrollmentToken).where(EnrollmentToken.token_hash == token_hash)
+    )).scalar_one_or_none()
+    if row is not None:
+        if not row.is_active:
+            raise HTTPException(status_code=401, detail="Enrollment token is no longer active")
+        if row.used_at is not None:
+            raise HTTPException(status_code=401, detail="Enrollment token has already been used")
+        if row.expires_at is not None and row.expires_at <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="Enrollment token has expired")
+        return row.group_id, row
+
+    # Legacy global fallback — only when explicitly set (no insecure default).
+    configured = (settings.AGENT_ENROLLMENT_TOKEN or "").strip()
+    if configured and configured not in ("bootstrap-token",) and hmac.compare_digest(presented, configured):
+        return "default", None
+
+    raise HTTPException(status_code=401, detail="Invalid enrollment token")
 
 @router.get("/api/agents/{agent_id}", response_model=AgentOut)
 async def get_agent(
     agent_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Agent).options(selectinload(Agent.log_sources)).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await fetch_scoped(
+        db, Agent, agent_id, group_filter,
+        options=[selectinload(Agent.log_sources)], detail="Agent not found",
+    )
     return AgentOut.model_validate(agent)
 
 @router.put("/api/agents/{agent_id}", response_model=AgentOut)
@@ -149,11 +187,12 @@ async def update_agent(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Agent).options(selectinload(Agent.log_sources)).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await fetch_scoped(
+        db, Agent, agent_id, group_filter,
+        options=[selectinload(Agent.log_sources)], detail="Agent not found",
+    )
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(agent, field, value)
     await db.commit()
@@ -167,11 +206,9 @@ async def delete_agent(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
     await db.delete(agent)
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "agent_revoked", "agent", str(agent_id))
@@ -183,7 +220,9 @@ async def get_log_sources(
     agent_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
     result = await db.execute(select(AgentLogSource).where(AgentLogSource.agent_id == agent_id))
     return [LogSourceOut.model_validate(s) for s in result.scalars().all()]
 
@@ -193,7 +232,9 @@ async def add_log_source(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
     src = AgentLogSource(agent_id=agent_id, path=body.path, log_type=body.log_type, is_enabled=body.is_enabled)
     db.add(src)
     await db.commit()
@@ -207,7 +248,9 @@ async def update_log_source(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
     result = await db.execute(
         select(AgentLogSource).where(AgentLogSource.id == source_id, AgentLogSource.agent_id == agent_id)
     )
@@ -227,7 +270,9 @@ async def delete_log_source(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
     result = await db.execute(
         select(AgentLogSource).where(AgentLogSource.id == source_id, AgentLogSource.agent_id == agent_id)
     )
@@ -238,20 +283,33 @@ async def delete_log_source(
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "log_source_deleted", "agent_log_source", str(source_id))
 
-
 @router.post("/api/agents/{agent_id}/isolate", response_model=AgentOut)
 async def isolate_agent(
     agent_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    agent = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
-    if not agent:
-        raise HTTPException(404, "Agent not found")
+    agent = await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
     if agent.status != "online":
         raise HTTPException(400, "Agent is not online")
     agent.is_isolated = True
     task = AgentTask(agent_id=agent_id, task_type="isolate_host", params={}, created_by=current_user.id)
+    db.add(task)
+    await db.commit()
+    await db.refresh(agent)
+    return agent
+
+@router.delete("/api/agents/{agent_id}/isolate", response_model=AgentOut)
+async def unisolate_agent(
+    agent_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    agent = await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    agent.is_isolated = False
+    task = AgentTask(agent_id=agent_id, task_type="unisolate_host", params={}, created_by=current_user.id)
     db.add(task)
     await db.commit()
     await db.refresh(agent)
