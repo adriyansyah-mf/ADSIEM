@@ -13,14 +13,14 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 
 @router.get("")
 async def global_search(
+    db: Annotated[AsyncSession, Depends(get_db)],
     q: str = Query(..., min_length=2, max_length=100),
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
     group_id: Annotated[Optional[str], Depends(get_scoped_group)] = None,
     _: User = Depends(get_current_user),
     limit: int = Query(default=5, le=20),
 ):
     """Search alerts and cases by title, source IP, or hostname."""
-    pattern = f"%{q}%"
+    pattern = f"%{q.replace('%', '').replace('_', '')}%"
 
     alert_q = (
         select(Alert)

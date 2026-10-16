@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
+from app.core.http_client import get_http_client
 from app.models.models import Alert, Case, User
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
@@ -144,16 +145,17 @@ async def quick_ti_lookup(
     _=Depends(get_current_user),
 ):
     """Ad-hoc threat intelligence lookup — wraps the worker TI engine via direct HTTP."""
-    import httpx, os
+    import os
     worker_url = os.environ.get("WORKER_TI_URL", "http://worker:8001")
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(f"{worker_url}/ti/quick",
-                                    params={"ioc": ioc, "ioc_type": ioc_type})
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception:
-        pass
+        client = get_http_client()
+        resp = await client.get(f"{worker_url}/ti/quick",
+                                params={"ioc": ioc, "ioc_type": ioc_type})
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as exc:
+        import structlog
+        structlog.get_logger().warning("ti_quick_lookup_failed", ioc=ioc, error=str(exc))
     # Fallback: return basic info if worker unreachable
     return {"ioc": ioc, "ioc_type": ioc_type, "status": "worker_unreachable",
             "provider_bullets": [], "overall_risk": 0.0}

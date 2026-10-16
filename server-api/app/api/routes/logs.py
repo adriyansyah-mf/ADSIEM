@@ -1,10 +1,12 @@
 # server-api/app/api/routes/logs.py
 import json
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
-from app.core.deps import require_permission
+from app.core.deps import require_permission, get_scoped_group
 from app.core.es_client import search as es_search
-from app.core.query_builder import tree_to_query
+from app.core.query_builder import tree_to_query, sanitize_query_string
 from app.schemas.schemas import PaginatedResponse, RawLogOut
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
@@ -12,6 +14,7 @@ Perm = require_permission("logs:read")
 
 @router.get("", response_model=PaginatedResponse)
 async def list_logs(
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     _=Depends(Perm),
     page_size: int = 25,
     after: str | None = None,
@@ -19,12 +22,18 @@ async def list_logs(
     filter_tree: str | None = None,
 ):
     filters: list[dict] = []
+    if group_filter is not None:
+        filters.append({"term": {"group_id": group_filter}})
     if log_type:
         filters.append({"term": {"log_type": log_type}})
     if search:
         # query_string gives the box real Lucene syntax (field:value, wildcards,
         # AND/OR/NOT, ranges, ...) — bare terms fall back to raw_message.
-        filters.append({"query_string": {"query": search, "default_field": "raw_message"}})
+        filters.append({"query_string": {
+            "query": sanitize_query_string(search),
+            "default_field": "raw_message",
+            "allow_leading_wildcard": False,
+        }})
     if filter_tree:
         q = tree_to_query(json.loads(filter_tree))
         if q:
