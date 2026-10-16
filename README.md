@@ -505,8 +505,8 @@ step 2) before bringing up `nginx` in the prod compose.
 
 ## Roadmap
 
-- [ ] Real-time dashboard via WebSocket
-- [ ] Email notification integration
+- [x] Real-time dashboard via WebSocket
+- [x] Email notification integration
 - [ ] Prometheus + Grafana dashboard
 - [ ] Agent auto-update mechanism
 - [ ] Multi-tenancy group management UI

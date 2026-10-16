@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    name: Python tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install server-api dependencies
+        run: pip install -r server-api/requirements.txt
+
+      - name: Install worker dependencies
+        run: pip install -r worker/requirements.txt
+
+      - name: Run pytest
+        run: pytest tests/server-api tests/worker worker/tests
+
+  go-tests:
+    name: Go agent tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tests/agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: tests/agent/go.sum
+
+      - name: go test
+        run: go test ./...
+
+  dashboard-build:
+    name: Dashboard build (tsc + vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
