@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Bot, X, Send, Loader2 } from 'lucide-react'
-import { api } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -22,17 +22,72 @@ export default function AssistantWidget() {
     const text = input.trim()
     if (!text || loading) return
     const next = [...messages, { role: 'user' as const, content: text }]
-    setMessages(next)
+    setMessages([...next, { role: 'assistant', content: '' }])
     setInput('')
     setLoading(true)
-    try {
-      const res = await api.post('/api/assistant/chat', {
-        message: text,
-        history: next.slice(0, -1),
+
+    const appendAssistant = (delta: string) =>
+      setMessages(m => {
+        const copy = [...m]
+        const last = copy[copy.length - 1]
+        if (last?.role === 'assistant') {
+          copy[copy.length - 1] = { ...last, content: last.content + delta }
+        }
+        return copy
       })
-      setMessages(m => [...m, { role: 'assistant', content: res.data.reply }])
+
+    try {
+      const token = useAuthStore.getState().accessToken
+      const base = import.meta.env.VITE_API_URL || ''
+      const res = await fetch(`${base}/api/assistant/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message: text, history: next.slice(0, -1) }),
+      })
+
+      if (!res.ok || !res.body) throw new Error(`stream failed: ${res.status}`)
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() ?? ''
+
+        for (const frame of frames) {
+          const line = frame.trim()
+          if (!line.startsWith('data:')) continue
+          const payload = line.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
+          try {
+            const chunk = JSON.parse(payload) as { type: string; text?: string; message?: string }
+            if (chunk.type === 'text-delta' && chunk.text) {
+              appendAssistant(chunk.text)
+            } else if (chunk.type === 'error') {
+              appendAssistant(chunk.message || 'The assistant hit an error.')
+            }
+          } catch {
+            continue
+          }
+        }
+      }
     } catch {
-      setMessages(m => [...m, { role: 'assistant', content: 'Something went wrong reaching the assistant. Try again.' }])
+      setMessages(m => {
+        const copy = [...m]
+        const last = copy[copy.length - 1]
+        if (last?.role === 'assistant' && !last.content) {
+          copy[copy.length - 1] = { ...last, content: 'Something went wrong reaching the assistant. Try again.' }
+        }
+        return copy
+      })
     } finally {
       setLoading(false)
     }
