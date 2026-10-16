@@ -10,7 +10,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    AGENT_ENROLLMENT_TOKEN: str = "bootstrap-token"
+    AGENT_ENROLLMENT_TOKEN: str = ""
+    CORS_ORIGINS: str = ""  # comma-separated allow-list; empty = same-origin only
+    ALLOW_PRIVATE_WEBHOOK_TARGETS: bool = False
     LOG_LEVEL: str = "info"
     REDIS_STREAM_KEY: str = "siem:logs"
     REDIS_CONSUMER_GROUP: str = "siem-workers"
