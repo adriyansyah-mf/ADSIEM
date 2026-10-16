@@ -20,21 +20,24 @@ def build_tools(db: AsyncSession, group_filter: str | None) -> list[StructuredTo
     for spec in TOOLS:
         name = spec["name"]
         description = spec.get("description", "")
-        params = spec.get("parameters") or {}
 
-        properties = {}
-        for param, hint in params.items():
-            properties[param] = {"type": "string", "description": str(hint)}
-
-        schema = {
-            "type": "object",
-            "properties": properties,
-            "required": ["alert_id"] if name == "get_alert" else (
-                ["case_id"] if name == "get_case" else (
-                    ["hostname"] if name == "agent_hygiene" else []
-                )
-            ),
-        }
+        if spec.get("schema"):
+            schema = spec["schema"]
+        else:
+            params = spec.get("parameters") or {}
+            properties = {
+                param: {"type": "string", "description": str(hint)}
+                for param, hint in params.items()
+            }
+            schema = {
+                "type": "object",
+                "properties": properties,
+                "required": ["alert_id"] if name == "get_alert" else (
+                    ["case_id"] if name == "get_case" else (
+                        ["hostname"] if name == "agent_hygiene" else []
+                    )
+                ),
+            }
 
         async def _run(_name=name, **kwargs):
             return await run_tool(_name, kwargs, db, group_filter)

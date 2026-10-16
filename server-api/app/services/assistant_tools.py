@@ -4,6 +4,7 @@ settings, users, and webhooks — those modules are never imported or queried
 here, so there is no code path for the assistant to reach them even if a
 prompt tried to talk it into it."""
 from __future__ import annotations
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -14,6 +15,28 @@ from app.models.models import (
     Agent, Alert, AlertNote, Case, CaseNote, FimEvent, HygieneSnapshot,
     Rule, ThreatHunt, UebaAnomaly, UebaEntityScore, YaraRule,
 )
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# Models frequently send a semantically-equivalent key instead of the exact
+# schema property name (observed: 'indicator' for 'ioc', 'entity' for 'value').
+# Accept aliases so a correct call is not rejected on a naming mismatch.
+_ARG_ALIASES = {
+    "ioc": ("ioc", "indicator", "value", "ip", "hostname"),
+    "value": ("value", "entity", "indicator", "ioc", "ip", "hostname"),
+    "hours": ("hours", "lookback_hours", "window_hours", "window", "hours_back"),
+    "case_id": ("case_id", "case", "id"),
+}
+
+
+def _arg(args: dict, key: str, default=None):
+    for alias in _ARG_ALIASES.get(key, (key,)):
+        if alias in args and args[alias] not in (None, ""):
+            return args[alias]
+    return default
 
 TOOLS: list[dict] = [
     {
@@ -79,6 +102,64 @@ TOOLS: list[dict] = [
         "name": "dashboard_stats",
         "description": "Overall counts: alerts by severity/status, open cases, online agents. Good first call for broad questions.",
         "parameters": {},
+    },
+    {
+        "name": "correlate_entity",
+        "description": (
+            "Correlate one indicator (IP or hostname) across agents within a time window — "
+            "how many alerts, which hosts, which rules, which MITRE techniques. Use this to "
+            "tell whether activity is isolated to one host or spread laterally."
+        ),
+        "parameters": {
+            "value": "IP address or hostname to correlate (required)",
+            "hours": "lookback window in hours, default 24, max 720",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string", "description": "IP address or hostname to correlate"},
+                "hours": {"type": "integer", "description": "lookback window in hours (default 24, max 720)"},
+            },
+            "required": ["value"],
+        },
+    },
+    {
+        "name": "reconstruct_timeline",
+        "description": (
+            "Build a chronological timeline for an entity or case: alerts, case notes and FIM "
+            "changes interleaved by time. Use this to explain the sequence of an intrusion."
+        ),
+        "parameters": {
+            "value": "IP or hostname (optional if case_id given)",
+            "case_id": "case UUID (optional if value given)",
+            "hours": "lookback window in hours, default 48, max 720",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string", "description": "IP or hostname"},
+                "case_id": {"type": "string", "description": "case UUID"},
+                "hours": {"type": "integer", "description": "lookback window in hours (default 48, max 720)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "pivot_ioc",
+        "description": (
+            "Pivot on an indicator: related alerts, cases referencing it, and UEBA risk score. "
+            "Use this to expand an investigation from one IOC to everything it touches."
+        ),
+        "parameters": {
+            "ioc": "the indicator value (IP, hostname) to pivot on (required)",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "ioc": {"type": "string", "description": "indicator value (IP or hostname)"},
+            },
+            "required": ["ioc"],
+        },
     },
 ]
 
@@ -271,6 +352,145 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
             "alerts_by_severity": {s: c for s, c in sev_rows},
             "open_cases": open_cases,
             "online_agents": online_agents,
+        }
+
+    if name == "correlate_entity":
+        value = str(_arg(args, "value") or "").strip()
+        if not value:
+            return {"error": "value is required"}
+        hours = clamp(_arg(args, "hours"), 24, 720)
+        since = _now() - timedelta(hours=hours)
+        q = select(Alert).where(
+            Alert.created_at >= since,
+            or_(Alert.source_ip == value, Alert.hostname == value),
+        )
+        if group_filter:
+            q = q.where(Alert.group_id == group_filter)
+        rows = (await db.execute(q.order_by(Alert.created_at.asc()).limit(200))).scalars().all()
+
+        hosts = sorted({a.hostname for a in rows if a.hostname})
+        rules = sorted({a.title for a in rows if a.title})
+        techniques = sorted({t for a in rows for t in (a.mitre_techniques or [])})
+        return {
+            "value": value,
+            "window_hours": hours,
+            "alert_count": len(rows),
+            "distinct_hosts": len(hosts),
+            "hosts": hosts[:25],
+            "top_rules": rules[:15],
+            "mitre_techniques": techniques[:25],
+            "spread_assessment": (
+                "single_host" if len(hosts) <= 1 else f"spread_across_{len(hosts)}_hosts"
+            ),
+        }
+
+    if name == "reconstruct_timeline":
+        hours = clamp(_arg(args, "hours"), 48, 720)
+        since = _now() - timedelta(hours=hours)
+        value = str(_arg(args, "value") or "").strip()
+        case_id = _arg(args, "case_id")
+
+        if not value and not case_id:
+            return {"error": "provide value or case_id"}
+
+        entity_filter = None
+        if case_id:
+            try:
+                case = await db.get(Case, UUID(str(case_id)))
+            except (ValueError, TypeError):
+                return {"error": "invalid case_id"}
+            if not case or (group_filter and case.group_id != group_filter):
+                return {"error": "not found"}
+            entity_filter = case.alert_id
+            if not value and case.alert_id:
+                trigger = await db.get(Alert, case.alert_id)
+                if trigger:
+                    value = trigger.source_ip or trigger.hostname or value
+
+        items: list[dict] = []
+
+        aq = select(Alert).where(Alert.created_at >= since)
+        if group_filter:
+            aq = aq.where(Alert.group_id == group_filter)
+        if entity_filter:
+            aq = aq.where(Alert.id == entity_filter)
+        elif value:
+            aq = aq.where(or_(Alert.source_ip == value, Alert.hostname == value))
+        for a in (await db.execute(aq.order_by(Alert.created_at.asc()).limit(100))).scalars().all():
+            items.append({
+                "ts": a.created_at.isoformat(), "type": "alert",
+                "title": a.title, "severity": a.severity, "hostname": a.hostname,
+            })
+
+        fq = select(FimEvent).where(FimEvent.detected_at >= since)
+        if group_filter:
+            fq = fq.where(FimEvent.group_id == group_filter)
+        if value:
+            fq = fq.where(FimEvent.path.ilike(f"%{value}%"))
+        for f in (await db.execute(fq.order_by(FimEvent.detected_at.asc()).limit(50))).scalars().all():
+            items.append({
+                "ts": f.detected_at.isoformat(), "type": "fim",
+                "title": f"{f.event_type} {f.path}", "hostname": None,
+            })
+
+        items.sort(key=lambda x: x["ts"])
+        return {"entity": value, "window_hours": hours, "event_count": len(items), "timeline": items[:150]}
+
+    if name == "pivot_ioc":
+        ioc = str(_arg(args, "ioc") or "").strip()
+        if not ioc:
+            return {"error": "ioc is required"}
+
+        aq = select(Alert).where(or_(Alert.source_ip == ioc, Alert.hostname == ioc))
+        if group_filter:
+            aq = aq.where(Alert.group_id == group_filter)
+        alerts = (await db.execute(aq.order_by(Alert.created_at.desc()).limit(50))).scalars().all()
+
+        cq = select(Case).where(Case.title.ilike(f"%{ioc}%"))
+        if group_filter:
+            cq = cq.where(Case.group_id == group_filter)
+        title_cases = (await db.execute(cq.order_by(Case.created_at.desc()).limit(25))).scalars().all()
+
+        linked_ids = [a.id for a in alerts[:50]]
+        alert_cases = []
+        if linked_ids:
+            acq = select(Case).where(Case.alert_id.in_(linked_ids))
+            if group_filter:
+                acq = acq.where(Case.group_id == group_filter)
+            alert_cases = (await db.execute(
+                acq.order_by(Case.created_at.desc()).limit(25)
+            )).scalars().all()
+
+        seen: set = set()
+        cases = []
+        for c in list(title_cases) + list(alert_cases):
+            if c.id not in seen:
+                seen.add(c.id)
+                cases.append(c)
+
+        risk = 0.0
+        try:
+            row = await db.get(UebaEntityScore, ("ip", ioc))
+            if row and (not group_filter or row.group_id == group_filter):
+                risk = float(row.risk_score or 0.0)
+        except Exception:
+            pass
+
+        return {
+            "ioc": ioc,
+            "alert_count": len(alerts),
+            "case_count": len(cases),
+            "ueba_risk_score": risk,
+            "alerts": [
+                {"id": str(a.id), "title": a.title, "severity": a.severity,
+                 "status": a.status, "created_at": a.created_at.isoformat()}
+                for a in alerts[:25]
+            ],
+            "cases": [
+                {"id": str(c.id), "title": c.title, "status": c.status,
+                 "created_at": c.created_at.isoformat()}
+                for c in cases[:15]
+            ],
         }
 
     return {"error": f"unknown tool: {name}"}

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     REDIS_CONSUMER_GROUP: str = "siem-workers"
     ELASTICSEARCH_URL: str = "http://elasticsearch:9200"
     NINEROUTER_BASE_URL: str = "http://9router:20128/v1"
+    LANGGRAPH_ASSISTANT_MODEL: str = ""
+    ASSISTANT_REASONING_EFFORT: str = ""
 
     @field_validator("JWT_SECRET")
     @classmethod
