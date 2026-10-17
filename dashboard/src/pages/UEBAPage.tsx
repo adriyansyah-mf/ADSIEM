@@ -89,10 +89,46 @@ function FeatureTable({ features }: { features: Record<string, number> }) {
   )
 }
 
+const AI_ACTION_COLORS: Record<string, string> = {
+  escalate: 'var(--accent-red)',
+  create_case: '#ff6b35',
+  monitor: 'var(--accent-yellow)',
+  false_positive: 'var(--accent-green)',
+}
+
+function AiAssessment({ anomaly }: { anomaly: UebaAnomaly }) {
+  if (!anomaly.ai_action && !anomaly.ai_narrative) {
+    return (
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px', fontFamily: 'Share Tech Mono, monospace' }}>
+        {anomaly.alert_id ? 'AI triage pending…' : 'No alert raised for this anomaly, so it was not sent to AI triage.'}
+      </div>
+    )
+  }
+  const color = AI_ACTION_COLORS[anomaly.ai_action ?? ''] ?? 'var(--text-muted)'
+  return (
+    <div style={{ marginTop: '10px', padding: '8px', borderRadius: '4px', background: 'var(--bg-base)', border: `1px solid ${color}55` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+        <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', letterSpacing: '1px', color: 'var(--text-muted)' }}>AI ASSESSMENT</span>
+        {anomaly.ai_action && (
+          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color, textTransform: 'uppercase' }}>
+            {anomaly.ai_action.replace('_', ' ')}
+          </span>
+        )}
+        {anomaly.case_id && (
+          <a href={`/cases/${anomaly.case_id}`} style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--accent-cyan)' }}>open case →</a>
+        )}
+      </div>
+      {anomaly.ai_narrative && (
+        <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{anomaly.ai_narrative}</div>
+      )}
+    </div>
+  )
+}
+
 function WhyAnomalous({ anomaly }: { anomaly: UebaAnomaly }) {
   const reasons = anomaly.reasons ?? []
   const mitre = anomaly.mitre_techniques ?? []
-  if (reasons.length === 0 && mitre.length === 0) return null
+  if (reasons.length === 0 && mitre.length === 0) return <AiAssessment anomaly={anomaly} />
   return (
     <div>
       <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
@@ -115,6 +151,7 @@ function WhyAnomalous({ anomaly }: { anomaly: UebaAnomaly }) {
           ))}
         </div>
       )}
+      <AiAssessment anomaly={anomaly} />
     </div>
   )
 }

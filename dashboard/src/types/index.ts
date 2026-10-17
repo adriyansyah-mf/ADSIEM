@@ -271,6 +271,9 @@ export interface UebaAnomaly {
   features: Record<string, number>
   alert_id: string | null
   mitre_techniques?: Array<{ id: string; name: string }>
+  ai_narrative?: string | null
+  ai_action?: string | null
+  case_id?: string | null
   reasons?: Array<{ feature: string; value: number; z: number; text: string }>
   detected_at: string
 }
