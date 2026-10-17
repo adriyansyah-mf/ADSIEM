@@ -395,6 +395,16 @@ def _compile_detection(detection: Any) -> Matcher:
     return compiled[0] if len(compiled) == 1 else (lambda ev: any(c(ev) for c in compiled))
 
 
+def compile_detection(detection: Any) -> Matcher:
+    """Compile a Sigma `detection` block into a predicate over a flat dict.
+
+    Public entry point for callers that filter arbitrary rows rather than log
+    events — live-response artifacts use it to filter collected rows. Raises
+    RuleError on syntax the engine can't evaluate.
+    """
+    return _compile_detection(detection)
+
+
 # ─── Rule definitions ────────────────────────────────────────────
 
 @dataclass

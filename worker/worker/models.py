@@ -27,6 +27,17 @@ class FleetHunt(Base):
     total_agents     = Column(Integer, nullable=False, default=0)
     completed_agents = Column(Integer, nullable=False, default=0)
 
+class Flow(Base):
+    __tablename__ = "flows"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id     = Column(UUID(as_uuid=True))
+    status       = Column(String(20), nullable=False, default="scheduled")
+    timeout      = Column(Integer, nullable=False)
+    error        = Column(Text)
+    created_at   = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at   = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+
 class AgentTask(Base):
     __tablename__ = "agent_tasks"
     id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

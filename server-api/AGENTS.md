@@ -28,6 +28,8 @@ server-api/app/
 | Agent log ingest | `app/api/routes/ingest.py` | `POST /api/ingest/log` |
 | Router name collisions | `app/main.py` imports | Aliased `cases_router`, `hunts_router`, `settings_router`, etc. |
 | WebSocket push | `app/api/routes/ws.py` + `_ws_redis_listener` in main | Redis pubsub channel `ws:alerts` |
+| Live-response flows | `app/api/routes/flows.py`, `app/services/flow_artifacts.py` | artifacts (built-ins in `app/artifacts/*.yaml`, custom in `flow_artifacts`) compile to plugin calls; rows are filtered server-side by each source's Sigma `detection`; agents long-poll `/api/agent/flows/poll` (woken via Redis `siem:flowq:<agent>`) |
+| Shared Sigma/decoder engines | `server-api/Dockerfile` (+ `Dockerfile.dockerignore`) | build context is the **repo root**; `worker/worker/{sigma,decoder}_engine.py` are copied in, not duplicated |
 
 ## CONVENTIONS
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"io"
 	"log/slog"
@@ -78,8 +79,13 @@ func main() {
 	// File Integrity Monitoring
 	fimWatcher := fim.Start(cfg, c)
 
-	// Task runner for live response / Velociraptor-style artifacts
+	// Legacy task runner (isolate/block-IP and pre-flow collections, via heartbeat)
 	taskRunner := task.NewRunner(cfg, c)
+
+	// Live-response flows: long-polls the server and runs artifact plugins
+	flowCtx, stopFlows := context.WithCancel(context.Background())
+	defer stopFlows()
+	go task.NewFlowRunner(c).Run(flowCtx)
 
 	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
@@ -123,6 +129,7 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	<-sigCh
 	slog.Info("shutting down")
+	stopFlows()
 	mgr.StopAll()
 	flushBuffer(buf, c, cfg)
 }

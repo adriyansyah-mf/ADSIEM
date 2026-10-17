@@ -338,6 +338,61 @@ export interface AgentTask {
   completed_at: string | null
 }
 
+export interface FlowArtifactParam {
+  name: string
+  type: 'string' | 'int' | 'bool'
+  default: string | number | boolean
+  description: string
+}
+
+export interface FlowArtifact {
+  name: string
+  description: string
+  builtin: boolean
+  parameters: FlowArtifactParam[]
+  sources: Array<{ name: string; plugin: string; filtered: boolean }>
+  timeout?: number
+  max_rows?: number
+  content: string
+  error?: string
+}
+
+export type FlowStatus = 'scheduled' | 'running' | 'finished' | 'error' | 'cancelled'
+
+export interface Flow {
+  id: string
+  agent_id: string
+  artifact: string
+  params: Record<string, unknown>
+  status: FlowStatus
+  total_rows: number
+  error: string | null
+  timeout: number
+  max_rows: number
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface FlowDetail extends Flow {
+  request: Record<string, unknown>
+  artifact_content: string
+  sources: Array<{ name: string; rows: number }>
+}
+
+export interface FlowResults {
+  source: string
+  columns: string[]
+  rows: Array<Record<string, unknown>>
+  total: number
+}
+
+export interface FlowLog {
+  ts: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+}
+
 export interface FleetHunt {
   id: string
   name: string

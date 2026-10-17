@@ -8,7 +8,7 @@ import structlog
 from sqlalchemy import and_, case, func, or_, select, update
 
 from worker.database import AsyncSessionLocal
-from worker.models import Agent, AgentTask, FleetHunt
+from worker.models import Agent, AgentTask, FleetHunt, Flow
 
 log = structlog.get_logger()
 
@@ -19,6 +19,13 @@ TASK_RESULT_TIMEOUT = 1800   # dispatched: fetched, but no result in 30 minutes
 
 PICKUP_TIMEOUT_ERROR = "Timed out: agent never picked up the task (offline or unreachable)"
 RESULT_TIMEOUT_ERROR = "Timed out: agent received the task but never reported a result"
+
+# Live-response flows wait for offline agents (like Velociraptor), but not forever;
+# a running flow gets its own timeout plus a grace period for the final upload.
+FLOW_SCHEDULE_EXPIRY = 86400
+FLOW_RESULT_GRACE = 300
+FLOW_EXPIRED_ERROR = "Expired: agent did not come online within 24h"
+FLOW_STALLED_ERROR = "Agent stopped reporting before the flow finished"
 
 
 async def _mark_offline(db) -> None:
@@ -81,12 +88,37 @@ async def _expire_stale_tasks(db) -> None:
         log.info("agent_task_timed_out", task_id=str(row[0]), agent_id=str(row[1]))
 
 
+async def _expire_stale_flows(db) -> None:
+    now = datetime.now(timezone.utc)
+    deadline = Flow.started_at + func.make_interval(0, 0, 0, 0, 0, 0, Flow.timeout + FLOW_RESULT_GRACE)
+    result = await db.execute(
+        update(Flow)
+        .where(or_(
+            and_(Flow.status == "scheduled",
+                 Flow.created_at < now - timedelta(seconds=FLOW_SCHEDULE_EXPIRY)),
+            and_(Flow.status == "running", deadline < now),
+        ))
+        .values(
+            status="error",
+            error=case((Flow.status == "scheduled", FLOW_EXPIRED_ERROR), else_=FLOW_STALLED_ERROR),
+            completed_at=now,
+        )
+        .returning(Flow.id, Flow.agent_id)
+    )
+    expired = result.fetchall()
+    if expired:
+        await db.commit()
+        for row in expired:
+            log.info("flow_expired", flow_id=str(row[0]), agent_id=str(row[1]))
+
+
 async def agent_monitor_loop() -> None:
     while True:
         try:
             async with AsyncSessionLocal() as db:
                 await _mark_offline(db)
                 await _expire_stale_tasks(db)
+                await _expire_stale_flows(db)
         except Exception as exc:
             log.error("agent_monitor_error", error=str(exc))
 

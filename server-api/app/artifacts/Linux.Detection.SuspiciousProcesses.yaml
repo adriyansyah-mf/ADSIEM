@@ -1,0 +1,21 @@
+name: Linux.Detection.SuspiciousProcesses
+description: |
+  Processes running from world-writable or memory-backed locations, deleted
+  binaries, and common reverse-shell / tunnelling tools.
+sources:
+  - name: Suspicious
+    plugin: pslist
+    detection:
+      writable_path:
+        Exe|startswith: ['/tmp/', '/var/tmp/', '/dev/shm/', '/run/user/']
+      deleted_binary:
+        Exe|endswith: ' (deleted)'
+      tools:
+        Name: ['nc', 'ncat', 'netcat', 'socat', 'chisel', 'frpc', 'ngrok', 'xmrig']
+      reverse_shell:
+        CommandLine|contains:
+          - '/dev/tcp/'
+          - 'bash -i'
+          - 'sh -i'
+      condition: 1 of them
+    fields: [Pid, Ppid, Name, Username, Exe, CommandLine]

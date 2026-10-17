@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -41,6 +42,24 @@ func (c *Client) PostRaw(path string, body *bytes.Reader) (*http.Response, error
 		req.Header.Set("X-Agent-Token", c.AgentToken)
 	}
 	return c.httpClient.Do(req)
+}
+
+// PostContext is Post bound to ctx instead of the client's 10s timeout — for
+// long polls and live-response updates, which set their own deadline.
+func (c *Client) PostContext(ctx context.Context, path string, payload any) (*http.Response, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.AgentToken != "" {
+		req.Header.Set("X-Agent-Token", c.AgentToken)
+	}
+	return http.DefaultClient.Do(req)
 }
 
 // PostWithRetry retries up to maxAttempts with exponential backoff.

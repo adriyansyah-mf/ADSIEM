@@ -31,7 +31,9 @@ agent/
 | Glob rotation logic | `internal/tailer/tailer.go` `tailGlob` | first sight → seek EOF; new rotated file → read from start |
 | Rebuild BPF object | `internal/procexec/bpf/execve.bpf.c` | clang target bpf; object is `go:embed`'d, **build fails without it** |
 | Isolate/block-IP (iptables) | `internal/task/isolation.go` | needs root |
-| Live-response collectors | `internal/task/collectors.go` | process_list, netstat, persistence_check, users_list, dmesg_tail, open_files, file_list, file_get |
+| Live-response flows (Velociraptor-style) | `internal/task/flow.go` | long-polls `/api/agent/flows/poll`, runs sources sequentially, 500-row batches to `/update`, enforces timeout/max_rows, honours server cancel; a plugin ignoring ctx is abandoned after 5s |
+| Flow plugins | `internal/task/plugins.go` | registry must match `PLUGINS` in `server-api/app/services/flow_artifacts.py`; plugins emit rows and must check ctx; glob/hash/yara never enter `/proc` `/sys` `/dev` unless the root is inside them (`/proc/kmsg` reads block forever) |
+| Legacy task collectors | `internal/task/collectors.go`, `runner.go` | fixed task types via heartbeat (isolate/block-IP still use this path) |
 | YARA scans | `internal/task/yara.go` | |
 
 ## CONVENTIONS

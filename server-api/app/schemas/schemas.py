@@ -710,3 +710,62 @@ class AssistantChatResponse(BaseModel):
     reply: str
     tools_used: list[str]
     actions: list[dict] = []
+
+# ─── Live response flows ─────────────────────────────────────────
+
+class FlowArtifactIn(BaseModel):
+    content: str = Field(max_length=100_000)
+
+class FlowCreate(BaseModel):
+    agent_id: UUID
+    artifact: str
+    params: dict[str, Any] = {}
+    timeout: int | None = None
+    max_rows: int | None = None
+
+class FlowOut(BaseModel):
+    id: UUID
+    agent_id: UUID
+    artifact: str
+    params: dict
+    status: str
+    total_rows: int
+    error: str | None
+    timeout: int
+    max_rows: int
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    model_config = {"from_attributes": True}
+
+class FlowSourceCount(BaseModel):
+    name: str
+    rows: int
+
+class FlowDetailOut(FlowOut):
+    request: dict
+    artifact_content: str
+    sources: list[FlowSourceCount] = []
+
+class FlowLogOut(BaseModel):
+    ts: datetime
+    level: str
+    message: str
+    model_config = {"from_attributes": True}
+
+class FlowResultsOut(BaseModel):
+    source: str
+    columns: list[str]
+    rows: list[dict]
+    total: int
+
+class AgentFlowLogIn(BaseModel):
+    level: Literal["debug", "info", "warn", "error"] = "info"
+    message: str = Field(max_length=4000)
+
+class AgentFlowUpdate(BaseModel):
+    state: Literal["running", "finished", "error", "cancelled"] | None = None
+    source: str | None = None
+    rows: list[dict[str, Any]] = Field(default=[], max_length=1000)
+    logs: list[AgentFlowLogIn] = Field(default=[], max_length=200)
+    error: str | None = Field(default=None, max_length=4000)
