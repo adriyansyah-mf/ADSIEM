@@ -11,6 +11,7 @@ import AgentsPage from '@/pages/AgentsPage'
 import LogSourcesPage from '@/pages/LogSourcesPage'
 import LogsPage from '@/pages/LogsPage'
 import EventsPage from '@/pages/EventsPage'
+import LiveEventsPage from '@/pages/LiveEventsPage'
 import AlertsPage from '@/pages/AlertsPage'
 import RulesPage from '@/pages/RulesPage'
 import DecodersPage from '@/pages/DecodersPage'
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/agents/:id/sources" element={<ProtectedRoute minRole="admin"><LogSourcesPage /></ProtectedRoute>} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/events" element={<EventsPage />} />
+            <Route path="/live-events" element={<LiveEventsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/cases" element={<CasesPage />} />
             <Route path="/cases/:id" element={<CaseDetailPage />} />

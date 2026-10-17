@@ -9,7 +9,7 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Server, BookOpen, Wrench, Shield,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
-  Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown,
+  Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown, Radio,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -27,6 +27,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/logs', label: 'Logs', icon: FileText },
       { to: '/events', label: 'Events', icon: Activity },
+      { to: '/live-events', label: 'Live Events', icon: Radio },
       { to: '/alerts', label: 'Alerts', icon: Bell },
       { to: '/cases', label: 'Cases', icon: FolderOpen },
     ],

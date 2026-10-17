@@ -80,3 +80,37 @@ async def search(
     total = result["hits"]["total"]["value"]
     next_cursor = hits[-1]["sort"] if len(hits) == size else None
     return [{"id": h["_id"], **h["_source"]} for h in hits], total, next_cursor
+
+
+async def aggregate(
+    query: dict,
+    aggs: dict,
+    size: int = 0,
+) -> dict:
+    """Run a search with aggregations and return just the aggregations block.
+
+    Charts are computed by Elasticsearch rather than by pulling hits into
+    Python — at real log volume the hit count is in the millions, so a
+    fetch-then-count approach would both be slow and hit memory limits.
+    """
+    client = _get_client()
+    body = {"query": query, "size": size, "aggs": aggs, "track_total_hits": True}
+    resp = await client.post(f"/{LOGS_INDEX}/_search", json=body)
+    resp.raise_for_status()
+    result = resp.json()
+    return {
+        "total": result["hits"]["total"]["value"],
+        "aggregations": result.get("aggregations", {}),
+    }
+
+
+async def index_stats() -> dict:
+    """Document count and store size for the logs index."""
+    client = _get_client()
+    resp = await client.get("/_cat/indices", params={"format": "json", "index": LOGS_INDEX})
+    if resp.status_code != 200:
+        return {"docs": 0, "size": "0b"}
+    for row in resp.json():
+        if row.get("index") == LOGS_INDEX:
+            return {"docs": int(row.get("docs.count", 0) or 0), "size": row.get("store.size", "0b")}
+    return {"docs": 0, "size": "0b"}

@@ -15,6 +15,8 @@ from app.models.models import (
     Agent, Alert, AlertNote, Case, CaseNote, FimEvent, HygieneSnapshot,
     Rule, ThreatHunt, UebaAnomaly, UebaEntityScore, YaraRule,
 )
+from app.core.es_client import aggregate as es_aggregate, search as es_search
+from app.core.query_builder import sanitize_query_string
 
 
 def _now() -> datetime:
@@ -159,6 +161,83 @@ TOOLS: list[dict] = [
                 "ioc": {"type": "string", "description": "indicator value (IP or hostname)"},
             },
             "required": ["ioc"],
+        },
+    },
+    {
+        "name": "search_events",
+        "description": (
+            "Search raw/decoded events in Elasticsearch (the log store) by free text or "
+            "filters. Use this when the analyst asks what actually appears in the logs, "
+            "rather than what raised an alert."
+        ),
+        "parameters": {
+            "search": "free-text query over decoded fields (optional)",
+            "source_ip": "exact source IP (optional)",
+            "log_type": "log source type, e.g. linux_auth (optional)",
+            "hours": "lookback window in hours, default 24, max 720",
+            "limit": "max results, default 20, max 50",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "search": {"type": "string", "description": "free-text query over decoded fields"},
+                "source_ip": {"type": "string", "description": "exact source IP"},
+                "log_type": {"type": "string", "description": "log source type"},
+                "hours": {"type": "integer", "description": "lookback hours (default 24, max 720)"},
+                "limit": {"type": "integer", "description": "max results (default 20, max 50)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "aggregate_events",
+        "description": (
+            "Count events grouped by a field over a time window — e.g. how many events per "
+            "source_ip, log_type or event_action. Use for 'how many' / 'which is top' "
+            "questions instead of fetching individual events."
+        ),
+        "parameters": {
+            "group_by": "one of: source_ip, log_type, event_action, event_category, user_name, agent_id",
+            "hours": "lookback window in hours, default 24, max 720",
+            "limit": "number of groups, default 10, max 30",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "group_by": {
+                    "type": "string",
+                    "enum": ["source_ip", "log_type", "event_action", "event_category", "user_name", "agent_id"],
+                    "description": "field to group by",
+                },
+                "hours": {"type": "integer", "description": "lookback hours (default 24, max 720)"},
+                "limit": {"type": "integer", "description": "number of groups (default 10, max 30)"},
+            },
+            "required": ["group_by"],
+        },
+    },
+    {
+        "name": "event_timeline",
+        "description": (
+            "Event counts bucketed over time for the log store — use to show when activity "
+            "spiked, or to compare a quiet window against a burst."
+        ),
+        "parameters": {
+            "hours": "lookback window in hours, default 24, max 720",
+            "interval": "bucket size: 1m, 5m, 15m, 1h or 1d",
+            "source_ip": "restrict to one source IP (optional)",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "integer", "description": "lookback hours (default 24, max 720)"},
+                "interval": {
+                    "type": "string",
+                    "enum": ["1m", "5m", "15m", "1h", "1d"],
+                    "description": "bucket size",
+                },
+                "source_ip": {"type": "string", "description": "restrict to one source IP"},
+            },
+            "required": [],
         },
     },
 ]
@@ -491,6 +570,103 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
                  "created_at": c.created_at.isoformat()}
                 for c in cases[:15]
             ],
+        }
+
+    if name == "search_events":
+        hours = clamp(_arg(args, "hours"), 24, 720)
+        limit = clamp(_arg(args, "limit"), 20, 50)
+        since_dt = _now() - timedelta(hours=hours)
+        filters: list[dict] = [{"range": {"created_at": {"gte": since_dt.isoformat()}}}]
+        if group_filter:
+            filters.append({"term": {"group_id": group_filter}})
+        if _arg(args, "source_ip"):
+            filters.append({"term": {"source_ip": str(_arg(args, "source_ip"))}})
+        if _arg(args, "log_type"):
+            filters.append({"term": {"log_type": str(_arg(args, "log_type"))}})
+        if _arg(args, "search"):
+            filters.append({
+                "query_string": {
+                    "query": sanitize_query_string(str(_arg(args, "search"))),
+                    "default_field": "decoded_fields.*",
+                    "allow_leading_wildcard": False,
+                }
+            })
+        try:
+            hits, total, _cursor = await es_search(
+                {"bool": {"filter": filters}}, size=limit, sort=[{"created_at": "desc"}]
+            )
+        except Exception as exc:
+            return {"error": f"event store unavailable: {exc}"}
+        return {
+            "window_hours": hours,
+            "total_matching": total,
+            "returned": len(hits),
+            "events": [
+                {
+                    "created_at": h.get("created_at"),
+                    "log_type": h.get("log_type"),
+                    "event_action": h.get("event_action"),
+                    "source_ip": h.get("source_ip"),
+                    "user_name": h.get("user_name"),
+                    "fields": h.get("decoded_fields") or {},
+                }
+                for h in hits
+            ],
+        }
+
+    if name == "aggregate_events":
+        group_by = str(_arg(args, "group_by") or "")
+        allowed = {"source_ip", "log_type", "event_action", "event_category", "user_name", "agent_id"}
+        if group_by not in allowed:
+            return {"error": f"group_by must be one of {sorted(allowed)}"}
+        hours = clamp(_arg(args, "hours"), 24, 720)
+        limit = clamp(_arg(args, "limit"), 10, 30)
+        since_dt = _now() - timedelta(hours=hours)
+        filters = [{"range": {"created_at": {"gte": since_dt.isoformat()}}}]
+        if group_filter:
+            filters.append({"term": {"group_id": group_filter}})
+        try:
+            result = await es_aggregate(
+                {"bool": {"filter": filters}},
+                {"g": {"terms": {"field": group_by, "size": limit}}},
+            )
+        except Exception as exc:
+            return {"error": f"event store unavailable: {exc}"}
+        buckets = result["aggregations"].get("g", {}).get("buckets", [])
+        return {
+            "group_by": group_by,
+            "window_hours": hours,
+            "total_events": result["total"],
+            "groups": [{"value": b["key"], "count": b["doc_count"]} for b in buckets],
+        }
+
+    if name == "event_timeline":
+        hours = clamp(_arg(args, "hours"), 24, 720)
+        interval = str(_arg(args, "interval") or "1h")
+        if interval not in ("1m", "5m", "15m", "1h", "1d"):
+            interval = "1h"
+        since_dt = _now() - timedelta(hours=hours)
+        filters = [{"range": {"created_at": {"gte": since_dt.isoformat()}}}]
+        if group_filter:
+            filters.append({"term": {"group_id": group_filter}})
+        if _arg(args, "source_ip"):
+            filters.append({"term": {"source_ip": str(_arg(args, "source_ip"))}})
+        try:
+            result = await es_aggregate(
+                {"bool": {"filter": filters}},
+                {"by_time": {"date_histogram": {"field": "created_at", "fixed_interval": interval}}},
+            )
+        except Exception as exc:
+            return {"error": f"event store unavailable: {exc}"}
+        buckets = result["aggregations"].get("by_time", {}).get("buckets", [])
+        points = [{"t": b["key_as_string"], "count": b["doc_count"]} for b in buckets]
+        peak = max(points, key=lambda p: p["count"]) if points else None
+        return {
+            "window_hours": hours,
+            "interval": interval,
+            "total_events": result["total"],
+            "peak": peak,
+            "points": points,
         }
 
     return {"error": f"unknown tool: {name}"}
