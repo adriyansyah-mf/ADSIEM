@@ -226,6 +226,14 @@ class NineRouterChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         url = f"{self.base_url.rstrip('/')}/chat/completions"
+
+        # Tool calls arrive as fragments (one delta per argument chunk, with
+        # empty content). They are accumulated by !index and emitted as one
+        # final chunk, because LangChain's ainvoke() aggregates this stream —
+        # if no chunk is produced at all it raises "No generations found in
+        # stream", which is what happened on every tool-calling turn.
+        pending: dict[int, dict] = {}
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             async with client.stream(
                 "POST",
@@ -242,8 +250,21 @@ class NineRouterChatModel(BaseChatModel):
                         delta = choice.get("delta") or {}
                         text = delta.get("content")
                         reasoning = delta.get("reasoning_content")
+
+                        for tc in delta.get("tool_calls") or []:
+                            idx = tc.get("index", 0)
+                            slot = pending.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                slot["arguments"] += fn["arguments"]
+
                         if not text and not reasoning:
                             continue
+
                         chunk = ChatGenerationChunk(
                             message=AIMessageChunk(
                                 content=text or "",
@@ -255,3 +276,26 @@ class NineRouterChatModel(BaseChatModel):
                         if run_manager:
                             await run_manager.on_llm_new_token(text or "", chunk=chunk)
                         yield chunk
+
+        if pending:
+            tool_calls = []
+            for idx in sorted(pending):
+                slot = pending[idx]
+                if not slot["name"]:
+                    continue
+                try:
+                    parsed_args = json.loads(slot["arguments"]) if slot["arguments"] else {}
+                except json.JSONDecodeError:
+                    parsed_args = {}
+                tool_calls.append({
+                    "id": slot["id"] or f"call_{idx}",
+                    "name": slot["name"],
+                    "args": parsed_args,
+                })
+            if tool_calls:
+                final = ChatGenerationChunk(
+                    message=AIMessageChunk(content="", tool_calls=tool_calls)
+                )
+                if run_manager:
+                    await run_manager.on_llm_new_token("", chunk=final)
+                yield final

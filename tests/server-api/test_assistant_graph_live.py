@@ -119,3 +119,55 @@ async def test_investigative_tools_discoverable():
 
     names = {t.name for t in build_tools(_EmptyDB(), "default")}
     assert {"correlate_entity", "reconstruct_timeline", "pivot_ioc"} <= names
+
+
+async def test_streaming_produces_chunks_on_a_tool_call_turn():
+    """Regression: _astream dropped tool-call deltas, which carry empty content,
+    so LangChain's ainvoke() aggregation raised "No generations found in stream"
+    on every tool-calling turn. The non-streaming path was unaffected, which is
+    why this only showed up in the SOC chat widget.
+    """
+    from langchain_core.messages import HumanMessage
+
+    from app.core.graph.chat_model import NineRouterChatModel
+    from app.core.graph.tools import build_tools
+
+    tools = build_tools(_EmptyDB(), "default")
+    model = NineRouterChatModel(
+        base_url=BASE_URL, api_key=API_KEY, model=MODEL, max_tokens=300
+    ).bind_tools(tools)
+
+    chunks = [
+        c
+        async for c in model._astream([
+            HumanMessage(content="Call list_agents now. Do not answer in text.")
+        ])
+    ]
+    assert chunks, "stream yielded no chunks — ainvoke() would raise"
+
+    calls = [tc for c in chunks for tc in (c.message.tool_calls or [])]
+    assert calls, "streamed chunks carried no tool call"
+
+
+async def test_streaming_and_blocking_return_consistent_tool_calls():
+    from langchain_core.messages import HumanMessage
+
+    from app.core.graph.chat_model import NineRouterChatModel
+    from app.core.graph.tools import build_tools
+
+    tools = build_tools(_EmptyDB(), "default")
+    model = NineRouterChatModel(
+        base_url=BASE_URL, api_key=API_KEY, model=MODEL, max_tokens=300
+    ).bind_tools(tools)
+    msg = [HumanMessage(content="Call list_agents now. Do not answer in text.")]
+
+    blocking = await model.ainvoke(msg)
+
+    collected: list[str] = []
+    async for c in model._astream(msg):
+        for tc in c.message.tool_calls or []:
+            collected.append(tc["name"])
+
+    assert blocking.tool_calls, "blocking path returned no tool call"
+    assert collected, "streaming path returned no tool call"
+    assert collected[0] == blocking.tool_calls[0]["name"]
