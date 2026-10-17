@@ -2,3 +2,4 @@
 httpx==0.28.0
 structlog==24.4.0
 pydantic>=2.7.0
+pyyaml==6.0.2

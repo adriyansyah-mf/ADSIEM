@@ -24,9 +24,13 @@ catalogue in `scenarios.py` is used instead, so the loop never stalls.
 
 The log type determines which decoder runs, and therefore which rules can fire.
 Sending `sudo` lines as `syslog` decodes them to a generic `syslog_message` and
-triggers nothing — sudo escalation only fires when sent as `linux_auth`. The
-prompt encodes this mapping and `EXPECTED_ACTIONS` in `scenario_gen.py` enforces
-it, so a scenario named "Sudo PrivEsc" cannot silently produce no alerts.
+triggers nothing — sudo escalation only fires when sent as `linux_auth`.
+
+Validation reads the **real decoder YAML files** rather than a hardcoded
+pattern, so every decoder for a log type is honoured. `linux_auth` alone has
+seven (failed login, sudo, su, useradd, cron, pam session, ssh accepted); an
+earlier version modelled only the failed-login regex and silently rejected every
+sudo and useradd scenario as unparseable.
 
 ## Configuration
 

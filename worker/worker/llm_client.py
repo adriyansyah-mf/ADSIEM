@@ -76,7 +76,19 @@ Respond ONLY with valid JSON — no markdown outside the JSON:
   "search_queries": ["<1-3 specific search queries to gather more context — write queries you would type into Google as an analyst wanting to learn more about this threat. Example: 'SSH brute force Linux MITRE T1110 defense 2024', 'Mimikatz LSASS dump detection bypass technique', 'Log4Shell CVE-2021-44228 indicators of compromise'>"]
 }
 
-IMPORTANT for search_queries: make queries SPECIFIC and USEFUL — not just the alert name. Think: what would you search online to understand this threat more deeply?"""
+IMPORTANT for search_queries: make queries SPECIFIC and USEFUL — not just the alert name. Think: what would you search online to understand this threat more deeply?
+
+CRITICAL for search_queries: each string is sent verbatim to a public web search engine (Google/Bing-class), NOT to our log store. It MUST read like something a human types into a browser address bar.
+
+Build each query as: "<generic threat technique or product name> <intent>".
+Good: "SSH brute force T1110 mitigation", "Log4Shell CVE-2021-44228 exploitation indicators", "nginx 401 brute force detection best practice", "sudo NOPASSWD privilege escalation T1548 detection".
+Bad (these will be discarded): "src_ip:203.0.113.34", "host:agent-demo AND event.outcome:failure", "source.ip:203.0.113.34 AND url.path:*ldap*", "203.0.113.34 /etc/passwd".
+
+Rules the strings must satisfy:
+- No field:value or field=value syntax of any kind (src_ip:, source.ip:, host:, hostname:, uri:, url:, event.*, http.*).
+- No IP addresses, no hostnames, no usernames, no file paths from the alert.
+- No boolean operators (AND, OR, NOT).
+- Describe the ATTACK TECHNIQUE and the PRODUCT, not our specific event, so a public search returns advisories and write-ups."""
 
 
 async def analyze_alert_with_ai(

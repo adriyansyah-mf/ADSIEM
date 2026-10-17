@@ -282,11 +282,15 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         queries = state.get("search_queries") or []
         source_ip = state.get("source_ip")
         hostname = state.get("hostname")
+        search_kwargs = {
+            "alert_title": state.get("title"),
+            "mitre_techniques": (state.get("analysis") or {}).get("mitre_techniques", []),
+        }
 
         if verdict == "false_positive":
             await deps["update_alert_status"](alert_id, "closed")
             if queries:
-                asyncio.ensure_future(deps["run_searches"](alert_id, None, queries))
+                asyncio.ensure_future(deps["run_searches"](alert_id, None, queries, **search_kwargs))
             log.info("alert_closed_as_fp", alert_id=alert_id,
                      reason=(state.get("analysis") or {}).get("false_positive_reason"))
             return {}
@@ -294,7 +298,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         if verdict == "monitor":
             await deps["update_alert_status"](alert_id, "acknowledged")
             if queries:
-                asyncio.ensure_future(deps["run_searches"](alert_id, None, queries))
+                asyncio.ensure_future(deps["run_searches"](alert_id, None, queries, **search_kwargs))
             return {}
 
         await deps["update_alert_status"](alert_id, "acknowledged")
@@ -311,7 +315,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             ))
             asyncio.ensure_future(deps["check_fleet_spread"](existing, state["title"], group_id, hostname))
             if queries:
-                asyncio.ensure_future(deps["run_searches"](alert_id, existing, queries))
+                asyncio.ensure_future(deps["run_searches"](alert_id, existing, queries, **search_kwargs))
             return {"case_id": existing}
 
         case_id = await deps["create_case_from_verdict"](
@@ -332,7 +336,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         ))
         asyncio.ensure_future(deps["check_fleet_spread"](case_id, state["title"], group_id, hostname))
         if queries:
-            asyncio.ensure_future(deps["run_searches"](alert_id, case_id, queries))
+            asyncio.ensure_future(deps["run_searches"](alert_id, case_id, queries, **search_kwargs))
 
         try:
             await deps["dispatch_case_webhooks"](

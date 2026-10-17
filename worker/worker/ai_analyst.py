@@ -14,6 +14,7 @@ Alur per alert:
 """
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -63,26 +64,107 @@ async def _build_ti_config() -> TIConfig:
     )
 
 
+_FIELD_SYNTAX = re.compile(
+    r"\b(?:src_ip|source_ip|dst_ip|dest_ip|dest_host|uri|url|hostname|host|agent_id|"
+    r"index|source\.ip|destination\.ip|http\.request\.uri|user\.name|event\.action)\b"
+    r"\s*(?:[:=]|\bCONTAINS\b|\bLIKE\b|\bMATCH\b)",
+    re.I,
+)
+_PRIVATE_IP = re.compile(
+    r"\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168|127|169\.254|192\.0\.2|198\.51\.100|203\.0\.113)\.\d{1,3}(?:\.\d{1,3})?\b"
+)
+_OUR_HOSTNAMES = re.compile(r"\bagent-demo\b", re.I)
+_SPLUNK_PIPE = re.compile(r"\|\s*(?:stats|table|eval|dedup|sort)\b", re.I)
+
+
+def _is_internal_query(query: str) -> bool:
+    return bool(
+        not query
+        or _FIELD_SYNTAX.search(query)
+        or _PRIVATE_IP.search(query)
+        or _OUR_HOSTNAMES.search(query)
+        or _SPLUNK_PIPE.search(query)
+    )
+
+
+def _derive_public_query(*parts: Optional[str]) -> Optional[str]:
+    """Build a public-safe query from an alert's own description.
+
+    Used when the model supplies only telemetry filters: the alert title and
+    MITRE technique are always safe to search for and still describe the threat,
+    so the analyst gets research instead of silence.
+    """
+    chunks: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        text = _PRIVATE_IP.sub(" ", str(part))
+        text = _OUR_HOSTNAMES.sub(" ", text)
+        text = _FIELD_SYNTAX.sub(" ", text)
+        text = _SPLUNK_PIPE.sub(" ", text)
+        text = re.sub(r"[^\w\s\-/.:]", " ", text)
+        text = " ".join(text.split())
+        if text:
+            chunks.append(text[:90])
+    if not chunks:
+        return None
+    derived = " ".join(chunks)
+    return derived if not _is_internal_query(derived) else None
+
+
+def _sanitize_search_query(query: str) -> str | None:
+    """Return the query if it is usable as a public web search, else None.
+
+    The model sometimes expresses local telemetry as a query over our own
+    fields ("src_ip=203.0.113.19 AND uri=*.env*", "index=auth host=agent-demo",
+    "| stats count by user"). Those are correct for analysis but the public
+    search backend rejects them as internal lookups, so they are discarded here
+    and _run_ai_searches falls back to a query derived from the alert itself.
+    """
+    if not query:
+        return None
+    if _is_internal_query(query):
+        return None
+    return " ".join(query.split()) or None
+
+
 async def _run_ai_searches(
     alert_id: str,
     case_id: Optional[str],
     search_queries: list[str],
+    *,
+    alert_title: Optional[str] = None,
+    mitre_techniques: Optional[list[str]] = None,
 ) -> None:
     """
     Jalankan SearXNG dengan query yang dipilih AI sendiri,
     lalu tambahkan hasilnya ke alert note (dan case note jika ada).
     """
-    if not search_queries:
-        return
+    queries = [_sanitize_search_query(q) for q in (search_queries or [])]
+    queries = [q for q in queries if q]
+
+    if not queries:
+        derived = _derive_public_query(alert_title, (mitre_techniques or [None])[0])
+        if derived:
+            queries = [derived]
+            log.info("ai_search_query_derived", alert_id=alert_id, query=derived)
+        else:
+            log.info("ai_search_no_usable_query", alert_id=alert_id)
+            return
+    else:
+        skipped = len(search_queries) - len(queries)
+        if skipped:
+            log.info("ai_search_queries_filtered", alert_id=alert_id, kept=len(queries), dropped=skipped)
+
     all_results = []
-    for query in search_queries[:3]:
+    for safe_query in queries[:3]:
         # Prefer 9router's /v1/search (multi-provider auto-fallback if a
         # search-combo is configured); fall back to direct SearXNG on failure.
-        results = await search_via_9router(query, num_results=4)
+        results = await search_via_9router(safe_query, num_results=4)
         if not results:
-            results = await search_threat_intel(query, num_results=4)
+            results = await search_threat_intel(safe_query, num_results=4)
         if results:
-            all_results.append((query, results))
+            all_results.append((safe_query, results))
         await asyncio.sleep(0.5)
 
     if not all_results:

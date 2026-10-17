@@ -10,6 +10,7 @@ stops producing traffic.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import re
@@ -21,29 +22,6 @@ import structlog
 log = structlog.get_logger()
 
 LOG_TYPES = ["linux_auth", "nginx_access_combined", "syslog"]
-
-EXPECTED_ACTIONS: dict[str, list[str]] = {
-    "linux_auth": [
-        "Failed password",
-        "TTY=",
-        "USER=root",
-        "useradd",
-        "su:",
-        "session opened",
-    ],
-    "nginx_access_combined": [
-        "HTTP/1.1\"",
-        "HTTP/2",
-    ],
-    "syslog": [
-        "CRON",
-        "insmod",
-        "modprobe",
-        "systemd",
-        "rm ",
-        "shred",
-    ],
-}
 
 _SYSTEM = """You invent realistic attack scenarios for a defensive security lab.
 
@@ -101,40 +79,55 @@ class ProposedScenario:
         return out
 
 
-def decoder_patterns() -> dict[str, str]:
-    return {
-        "linux_auth": r"Failed password for (?:invalid user )?(?P<user>\S+) from (?P<src_ip>\S+) port (?P<port>\d+)",
-        "nginx_access_combined": (
-            r'(?P<src_ip>\S+)\s+-\s+(?P<user>\S+)\s+\[.*?\]\s+"(?P<method>\S+)\s+'
-            r'(?P<request>[^"]+?)\s+HTTP/[^"]+"\s+(?P<status>\d+)'
-        ),
-    }
+def decoder_patterns() -> dict[str, list[str]]:
+    """Every decoder regex for the log types the simulator can emit.
+
+    This reads the real decoder YAML rather than hardcoding one pattern per log
+    type. linux_auth alone has several decoders (failed login, sudo, su,
+    useradd, cron, pam, ssh accepted); modelling only the failed-login regex
+    rejected every sudo and useradd scenario as unparseable.
+    """
+    import glob
+    import os
+
+    import yaml
+
+    root = os.environ.get("SIM_DECODER_DIR") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "decoders"
+    )
+    by_type: dict[str, list[str]] = {}
+    for path in sorted(glob.glob(os.path.join(root, "*.yaml"))):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                spec = yaml.safe_load(fh)
+        except Exception:
+            continue
+        if not isinstance(spec, dict) or spec.get("type") != "regex":
+            continue
+        log_type = spec.get("log_type")
+        pattern = spec.get("pattern")
+        if log_type and pattern:
+            by_type.setdefault(log_type, []).append(pattern)
+    return by_type
+
+
+def _any_match(patterns: list[str], line: str) -> bool:
+    for p in patterns:
+        try:
+            if re.search(p, line):
+                return True
+        except re.error:
+            continue
+    return False
 
 
 def validate(proposal: ProposedScenario, hostname: str, ip: str, ts: str) -> list[str]:
-    """Return the lines that actually parse with the target decoder.
-
-    Each log type also asserts the decoded event.action it should yield, so a
-    regex match on a line that decodes to nothing useful (e.g. sudo lines sent
-    as syslog, which decode to syslog_message rather than sudo_command) is not
-    accepted as a successful scenario.
-    """
-    pattern = decoder_patterns().get(proposal.log_type)
+    """Return the lines that actually parse with the target decoder."""
+    patterns = decoder_patterns().get(proposal.log_type) or []
     rendered = proposal.render_with(hostname, ip, ts)
-    if not pattern:
+    if not patterns:
         return rendered
-
-    compiled = re.compile(pattern)
-    expected = EXPECTED_ACTIONS.get(proposal.log_type)
-    kept = []
-    for line in rendered:
-        m = compiled.search(line)
-        if not m:
-            continue
-        if expected and not any(needle in line for needle in expected):
-            continue
-        kept.append(line)
-    return kept
+    return [line for line in rendered if _any_match(patterns, line)]
 
 
 def _strip_fences(content: str) -> str:
@@ -159,6 +152,7 @@ async def propose(
     avoid: list[str] | None = None,
     hint_log_type: str | None = None,
     timeout: float = 60.0,
+    rate_limit_backoff: float = 90.0,
 ) -> ProposedScenario | None:
     if not api_key:
         return None
@@ -166,8 +160,8 @@ async def propose(
     patterns = decoder_patterns()
     system = _SYSTEM.format(
         log_types=", ".join(LOG_TYPES),
-        linux_auth=patterns["linux_auth"],
-        nginx=patterns["nginx_access_combined"],
+        linux_auth=" | ".join(patterns.get("linux_auth", [])[:3]) or "<any Linux auth line>",
+        nginx=" | ".join(patterns.get("nginx_access_combined", [])[:2]) or "<any HTTP access line>",
         n=n,
     )
     user = (
@@ -193,6 +187,10 @@ async def propose(
                     "temperature": 1.0,
                 },
             )
+            if resp.status_code == 429 or (resp.status_code >= 500 and "429" in resp.text):
+                log.warning("scenario_rate_limited", status=resp.status_code, backoff=rate_limit_backoff)
+                await asyncio.sleep(rate_limit_backoff)
+                return None
             resp.raise_for_status()
             obj, _ = json.JSONDecoder().raw_decode(resp.text)
             content = obj["choices"][0]["message"]["content"]
