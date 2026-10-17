@@ -27,6 +27,9 @@ type EnrollRequest struct {
 	LogSources      []LogSourcePayload `json:"log_sources"`
 }
 
+// AgentVersion is reported at enrollment; main sets it from its -ldflags version.
+var AgentVersion = "dev"
+
 type EnrollResponse struct {
 	AgentID    string `json:"agent_id"`
 	AgentToken string `json:"agent_token"`
@@ -45,7 +48,7 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 	payload := EnrollRequest{
 		EnrollmentToken: enrollToken,
 		Hostname:        h,
-		Version:         "1.0.0",
+		Version:         AgentVersion,
 		Group:           cfg.Agent.Group,
 		Name:            cfg.Agent.Name,
 		LogSources:      sources,

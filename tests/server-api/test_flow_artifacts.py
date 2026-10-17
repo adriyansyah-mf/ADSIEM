@@ -127,6 +127,15 @@ def test_columns_follow_fields_then_plugin_order():
     assert column_order(users.content, "Users", rows) == ["Username", "Uid", "Shell", "Extra"]
 
 
+@pytest.mark.parametrize("version,ok", [
+    ("1.0.0", False), ("1.2.2", False), ("1.3.0", True), ("v1.10.1", True), ("2.0", True),
+    ("dev", True), (None, True), ("1.3.0-rc1", True),
+])
+def test_flow_support_by_agent_version(version, ok):
+    from app.api.routes.flows import agent_supports_flows
+    assert agent_supports_flows(version) is ok
+
+
 def test_yara_rules_are_injected_only_when_not_given():
     art = builtin_artifacts()["Linux.Detection.Yara"]
     rules = [{"id": "1", "name": "r", "content": "rule r { condition: true }"}]

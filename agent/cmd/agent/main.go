@@ -30,6 +30,9 @@ func main() {
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	heartbeat.AgentVersion = Version
+	enrollment.AgentVersion = Version
+	slog.Info("siem-agent starting", "version", Version)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
