@@ -338,6 +338,20 @@ async def _migrate_audit_log_group() -> None:
         await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS group_id VARCHAR(100) NOT NULL DEFAULT 'default'"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_group_created ON audit_logs(group_id, created_at DESC)"))
 
+async def _migrate_drop_alerts_event_fk() -> None:
+    """Drop the legacy alerts.event_id -> events(id) foreign key.
+
+    Events moved to Elasticsearch, so the events table no longer receives rows,
+    but databases created before that move still carry the constraint. Every
+    detection then failed to insert with a ForeignKeyViolationError, silently
+    dropping all alerts. event_id now just points at an ES document _id.
+    """
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE alerts DROP CONSTRAINT IF EXISTS alerts_event_id_fkey"
+        ))
+
 async def _ws_redis_listener():
     """Subscribe to Redis ws:alerts channel and broadcast to WebSocket clients."""
     import asyncio
@@ -385,6 +399,7 @@ async def lifespan(app: FastAPI):
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
         await _migrate_audit_log_group()
+        await _migrate_drop_alerts_event_fk()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
