@@ -71,8 +71,24 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    labels:
+      # opt in to watchtower's daily pull of :latest (only labelled containers update)
+      com.centurylinklabs.watchtower.enable: "true"
     networks:
       - siem-net
+
+  # Keeps opted-in containers (9router) on their latest image. Label-gated, so
+  # the platform's own built images are never touched.
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_SCHEDULE: ${WATCHTOWER_SCHEDULE:-0 0 19 * * *}  # 6-field cron, UTC: 02:00 WIB
+      WATCHTOWER_TIMEOUT: 60s
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   package-builder:
     build:
