@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from worker.alert_manager import create_alert
 from worker.database import AsyncSessionLocal
 from worker.models import UebaAnomaly, UebaEntityScore
-from worker.ueba.explain import assess, explain, mitre_for, next_risk
+from worker.ueba.explain import assess, explain, mitre_for, next_risk, security_reasons
 from worker.ueba.features import (
     USER_FEATURE_KEYS, IP_FEATURE_KEYS,
     update_user_counters, update_ip_counters,
@@ -149,7 +149,8 @@ async def _raise_alert(entity_type, entity_value, risk, score, reasons, mitre, f
         "high"     if risk >= 60 else
         "medium"   if risk >= 40 else "low"
     )
-    why = f" — {reasons[0]['text']}" if reasons else ""
+    lead = (security_reasons(reasons) or reasons)[:1]
+    why = f" — {lead[0]['text']}" if lead else ""
     alert_id = await create_alert(
         rule_match={
             "id":         f"ueba-{entity_type}",
