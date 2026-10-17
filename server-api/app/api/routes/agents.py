@@ -123,6 +123,15 @@ async def enroll_agent(
         agent.status = "online"
         agent.last_seen_at = datetime.now(timezone.utc)
         agent.token_hash = hash_token(raw_token)
+        # Log sources are server-driven after enrollment, so without this a
+        # re-enrolled agent (e.g. a rebuilt container) keeps its old list and
+        # never tails paths added to its config. Add what's new; leave sources
+        # an analyst added, disabled or retyped in the dashboard alone.
+        known = {s.path for s in agent.log_sources}
+        for src in body.log_sources:
+            if src.path not in known:
+                db.add(AgentLogSource(agent_id=agent.id, path=src.path, log_type=src.log_type,
+                                      is_enabled=src.is_enabled))
     else:
         # last_seen_at must be set here: agent_monitor ages agents out by it, and
         # a NULL would leave an agent that never heartbeats "online" forever.

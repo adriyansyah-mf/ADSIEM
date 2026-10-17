@@ -1,0 +1,15 @@
+name: linux_su_modern
+log_type: linux_auth
+type: regex
+# util-linux su (Debian/Ubuntu/RHEL): "su[1234]: (to root) alice on pts/0".
+# linux_su only knows the old "Successful su for root by alice" format.
+priority: 16
+enabled: true
+pattern: 'su(?:\[\d+\])?:\s+\(to (?P<target>[^)]+)\) (?P<user>\S+) on (?P<tty>\S+)'
+fields:
+  event.category: authentication
+  event.action: su_command
+  event.outcome: success
+  user.name: user
+  user.target: target
+  process.tty: tty

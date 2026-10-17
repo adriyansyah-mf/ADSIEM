@@ -1,0 +1,16 @@
+name: linux_su_pam_failure
+log_type: linux_auth
+type: regex
+# PAM's record of a wrong su password (the only one RHEL/Rocky writes to
+# /var/log/secure): "su: pam_unix(su-l:auth): authentication failure; logname=alice
+# uid=1000 euid=0 tty=pts/0 ruser=alice rhost=  user=root"
+priority: 15
+enabled: true
+pattern: 'pam_unix\((?P<service>su[^:]*):auth\): authentication failure;.*?\bruser=(?P<user>\S*).*?\buser=(?P<target>\S+)'
+fields:
+  event.category: authentication
+  event.action: su_failed
+  event.outcome: failure
+  user.name: user
+  user.target: target
+  service.name: service

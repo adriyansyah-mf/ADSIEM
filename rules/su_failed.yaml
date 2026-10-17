@@ -1,0 +1,14 @@
+title: Failed su Authentication
+id: rule-su-failed
+description: Wrong password for su — a user trying to become another account (usually root).
+logsource:
+  product: linux
+detection:
+  su_failed:
+    event.action: su_failed
+  condition: su_failed
+level: medium
+tags:
+  - attack.privilege_escalation
+  - attack.credential_access
+  - attack.t1110.001
