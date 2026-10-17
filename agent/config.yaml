@@ -10,9 +10,13 @@ server:
   heartbeat_interval: 30
 
 logs:
-  - path: /host/var/log/auth.log
+  - path: /var/log/auth.log
     type: linux_auth
-  - path: /host/var/log/syslog
+  - path: /var/log/apache2/access.log
+    type: apache_access
+  - path: /var/log/apache2/error.log
+    type: syslog
+  - path: /var/log/syslog
     type: syslog
 
 fim:

@@ -32,3 +32,5 @@ dashboard/dist/
 
 # Go workspace checksum (regenerated locally)
 go.work.sum
+
+.playwright-mcp/

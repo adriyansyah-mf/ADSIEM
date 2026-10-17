@@ -1,69 +1,101 @@
-# Attack Simulator (dev only)
+# Lab: agent-demo VM + real attacker (dev only)
 
-Continuously generates attack traffic and pushes it through the real ingest
-path, so the whole pipeline — decode → Sigma → alert → SOAR → dashboard —
-exercises itself without a real attacker.
+`agent-demo` **is** the demo VM: it runs the SIEM agent and a deliberately
+vulnerable company-profile app on the same host, so the agent tails its own
+machine exactly like a real endpoint would.
 
-## How it works
+```
+attacker --HTTP/SSH--> agent-demo:1337 / :22
+                        |- Apache + PHP-FPM + MySQL -> /var/log/apache2/*, /var/log/syslog
+                        |- sshd                      -> /var/log/auth.log
+                        +- /app/agent                -> tails those files -> server-api
+```
 
-Every cycle:
+No component fabricates log lines and nothing talks to `/api/ingest/log`
+except the agent itself.
 
-1. The LLM is asked to invent a **scenario**: name, description, MITRE
-   technique, target log source, and the raw log lines that express it.
-2. The proposal is **validated against the real decoder regex** for its log
-   type. Lines that would not parse are dropped; a scenario with no usable
-   lines is rejected outright.
-3. The lines are POSTed to `/api/ingest/log` with an agent token, exactly as
-   `siem-agent` would.
-4. Sleep, repeat.
+## Why the old simulator is gone
 
-If the model is unavailable or returns something unusable, a deterministic
-catalogue in `scenarios.py` is used instead, so the loop never stalls.
+An earlier version POSTed LLM-generated log lines straight to
+`/api/ingest/log`. It proved the pipeline worked but never exercised collection:
+a broken tailer, a bad mount, an Apache logging misconfiguration or a decoder
+mismatch all went unnoticed. Now, if the attack does not log, the SIEM stays
+empty — which is the signal a lab should give you.
 
-## Why log types matter
+## The demo app
 
-The log type determines which decoder runs, and therefore which rules can fire.
-Sending `sudo` lines as `syslog` decodes them to a generic `syslog_message` and
-triggers nothing — sudo escalation only fires when sent as `linux_auth`.
+| Path | Vuln |
+|---|---|
+| `/` | company profile index |
+| `/staff.php?id=` | concatenated SQL — UNION / SLEEP / BENCHMARK reach MySQL |
+| `/gallery.php?page=` | `include()` with no allow-list — LFI |
+| `/login.php` | weak credential form, 401 on failure |
 
-Validation reads the **real decoder YAML files** rather than a hardcoded
-pattern, so every decoder for a log type is honoured. `linux_auth` alone has
-seven (failed login, sudo, su, useradd, cron, pam session, ssh accepted); an
-earlier version modelled only the failed-login regex and silently rejected every
-sudo and useradd scenario as unparseable.
+Accounts in `company_profile.staff`: `admin/admin123`, `editor/editor123`.
+The box also runs sshd with `root:toor-lAB-demo` and `demo:demo-lAB-pass`.
 
-## Configuration
+## Attacker techniques
 
-| Variable | Default | Purpose |
+| Technique | Target | Victim log |
 |---|---|---|
-| `SIM_AGENT_TOKEN` | — | agent token used for ingest (required) |
-| `SIM_AGENT_ID` | — | agent UUID the logs are attributed to (required) |
-| `SIM_HOSTNAME` | `agent-demo` | hostname recorded on events |
-| `SIM_INTERVAL_SECONDS` | `20` | base delay between cycles |
-| `SIM_JITTER_SECONDS` | `8` | random extra delay added |
-| `SIM_LLM_ENABLED` | `true` | set `false` for catalogue-only |
-| `SIM_SCENARIOS` | — | comma-separated catalogue keys to restrict to |
-| `SIM_ATTACKER_NET` | `203.0.113.` | attacker IP prefix (RFC 5737 TEST-NET-3) |
-| `NINEROUTER_BASE_URL` | `http://9router:20128/v1` | LLM endpoint |
-| `NINEROUTER_API_KEY` | — | LLM key; without it the catalogue is used |
-| `NINEROUTER_MODEL` | `combo` | model name |
+| `web_scan` | `:1337` with `sqlmap` UA | 404/403 in `access.log` |
+| `web_bruteforce` | `POST /login.php` | 401 trail |
+| `sqli_union`, `sqli_timeblind` | `/staff.php?id=` | request + PHP/MySQL error |
+| `lfi` | `/gallery.php?page=` | 200/404 |
+| `cmd_injection` | `/contact.php?q=` | request |
+| `bad_requests` | raw `nc` HTTP | Apache `error.log` |
+| `ssh_invalid_user`, `ssh_bruteforce` | `:22` | `auth.log` failed-password burst |
+| `port_scan` | `:22` | network telemetry only |
 
 ## Running
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build attack-sim
-docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f attack-sim
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build agent-demo attacker
+
+# browse the target app
+#   http://localhost:1337/
+#   http://localhost:1337/staff.php?id=1
+#   ssh -p 2222 demo@localhost
+
+# watch the attacker
+docker compose -f docker-compose.yml -f docker-compose.dev.yml logs -f attacker
+
+# watch the logs the agent is tailing
+docker exec siem-platform-agent-demo-1 tail -f /var/log/apache2/access.log
+docker exec siem-platform-agent-demo-1 tail -f /var/log/auth.log
 ```
 
-Watch alerts appear:
+Fire one technique by hand:
 
 ```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm \
+  -e RUN_ONCE=1 -e ATTACK_TECHNIQUES="sqli_union" attacker
+```
+
+## Tuning
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ATTACK_INTERVAL` | `45` | seconds between techniques |
+| `ATTACK_JITTER` | `20` | random extra seconds |
+| `ATTACK_TECHNIQUES` | all | space-separated subset |
+| `RUN_ONCE` | `0` | `1` = one technique, then exit |
+
+## Verifying telemetry is real
+
+```bash
+# daemons must be writing real files, not /dev/stdout symlinks
+docker exec siem-platform-agent-demo-1 ls -l /var/log/apache2/access.log /var/log/auth.log
+
+# agent must be shipping events off its own box
+docker compose logs --tail 5 agent-demo | grep 'buffer stats'
+
+# alerts must carry the attacker's container IP
 docker compose exec -T postgres psql -U soc -d soc_platform \
   -c "SELECT title, severity, source_ip, created_at FROM alerts ORDER BY created_at DESC LIMIT 10;"
 ```
 
 ## Scope
 
-This is a **lab tool**. It only ever posts read-path log events through an
-agent-authenticated endpoint; it cannot change rules, users, or settings. Keep
-it out of production compose files.
+Lab only. Weak credentials and intentionally vulnerable PHP. Never expose
+`:1337` or `:2222` beyond localhost and never deploy this image outside the lab.

@@ -45,24 +45,26 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./nginx/nginx.dev.yml:/etc/nginx/nginx.conf:ro
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
 
-  attack-sim:
+  agent-demo:
+    ports:
+      - "1337:1337"
+      - "2222:22"
+
+  attacker:
     build:
-      context: ./sim
+      context: ./sim/attacker
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      SIM_API_URL: http://server-api:8000
-      SIM_AGENT_TOKEN: ${SIM_AGENT_TOKEN:-}
-      SIM_AGENT_ID: ${SIM_AGENT_ID:-}
-      SIM_HOSTNAME: agent-demo
-      SIM_INTERVAL_SECONDS: ${SIM_INTERVAL_SECONDS:-20}
-      SIM_LLM_ENABLED: ${SIM_LLM_ENABLED:-true}
-      NINEROUTER_BASE_URL: ${NINEROUTER_BASE_URL:-http://9router:20128/v1}
-      NINEROUTER_API_KEY: ${NINEROUTER_API_KEY:-}
-      NINEROUTER_MODEL: ${NINEROUTER_MODEL:-combo}
+      ATTACK_TARGET: agent-demo
+      ATTACK_WEB_PORT: "1337"
+      ATTACK_SSH_PORT: "22"
+      ATTACK_INTERVAL: ${ATTACK_INTERVAL:-45}
+      ATTACK_JITTER: ${ATTACK_JITTER:-20}
     depends_on:
-      - server-api
+      agent-demo:
+        condition: service_healthy
     networks:
       - siem-net
