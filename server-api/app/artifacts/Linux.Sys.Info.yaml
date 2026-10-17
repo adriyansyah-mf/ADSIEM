@@ -1,0 +1,5 @@
+name: Linux.Sys.Info
+description: Basic host facts — hostname, OS release, kernel, architecture and uptime.
+sources:
+  - name: Info
+    plugin: info

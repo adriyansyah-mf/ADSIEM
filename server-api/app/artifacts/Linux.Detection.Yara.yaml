@@ -1,0 +1,14 @@
+name: Linux.Detection.Yara
+description: Scan a path with every enabled YARA rule (managed on the YARA page).
+parameters:
+  - name: Path
+    default: /tmp
+  - name: Recursive
+    type: bool
+    default: true
+sources:
+  - name: Matches
+    plugin: yara
+    args:
+      path: "{{Path}}"
+      recursive: "{{Recursive}}"

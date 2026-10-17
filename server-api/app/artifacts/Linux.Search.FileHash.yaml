@@ -1,0 +1,10 @@
+name: Linux.Search.FileHash
+description: MD5 / SHA1 / SHA256 of every regular file matching a glob.
+parameters:
+  - name: Glob
+    default: /usr/local/bin/*
+sources:
+  - name: Hashes
+    plugin: hash
+    args:
+      globs: ["{{Glob}}"]

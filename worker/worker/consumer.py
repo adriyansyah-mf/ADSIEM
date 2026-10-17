@@ -101,7 +101,8 @@ async def process_message(
 
     logs_ingested.inc()
 
-    flat_event = {**decoded, "group_id": group_id, "hostname": hostname}
+    # raw_message gives Sigma `keywords` selections the original log line to search
+    flat_event = {**decoded, "group_id": group_id, "hostname": hostname, "raw_message": raw_message}
     rule_matches = await sig_engine.evaluate(flat_event)
     for match in rule_matches:
         sigma_matches.labels(rule_id=match["id"]).inc()

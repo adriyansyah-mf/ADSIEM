@@ -6,7 +6,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, get_scoped_group, require_permission
 from app.models.models import Agent, AgentTask, Artifact
 from app.schemas.schemas import ArtifactCreate, ArtifactOut, ArtifactRunRequest, AgentTaskOut
 
@@ -38,7 +38,7 @@ async def list_artifacts(
 async def create_artifact(
     body: ArtifactCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    _=Depends(require_permission("agents:manage")),
 ):
     art = Artifact(**body.model_dump())
     db.add(art)
@@ -52,7 +52,7 @@ async def update_artifact(
     artifact_id: UUID,
     body: ArtifactCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    _=Depends(require_permission("agents:manage")),
 ):
     art = (await db.execute(select(Artifact).where(Artifact.id == artifact_id))).scalar_one_or_none()
     if not art:
@@ -68,7 +68,7 @@ async def update_artifact(
 async def delete_artifact(
     artifact_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(get_current_user),
+    _=Depends(require_permission("agents:manage")),
 ):
     art = (await db.execute(select(Artifact).where(Artifact.id == artifact_id))).scalar_one_or_none()
     if not art:
@@ -82,7 +82,8 @@ async def run_artifact(
     artifact_id: UUID,
     body: ArtifactRunRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user=Depends(get_current_user),
+    user=Depends(require_permission("agents:manage")),
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
     art = (await db.execute(select(Artifact).where(Artifact.id == artifact_id))).scalar_one_or_none()
     if not art:
@@ -90,10 +91,10 @@ async def run_artifact(
 
     params = body.params if body.params is not None else art.default_params
 
-    if body.agent_ids:
-        agents = (await db.execute(select(Agent).where(Agent.id.in_(body.agent_ids)))).scalars().all()
-    else:
-        agents = (await db.execute(select(Agent).where(Agent.status == "online"))).scalars().all()
+    aq = select(Agent).where(Agent.id.in_(body.agent_ids)) if body.agent_ids else select(Agent).where(Agent.status == "online")
+    if group_filter is not None:
+        aq = aq.where(Agent.group_id == group_filter)
+    agents = (await db.execute(aq)).scalars().all()
 
     if not agents:
         raise HTTPException(400, "No agents available")

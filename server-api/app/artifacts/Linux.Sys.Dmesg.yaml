@@ -1,0 +1,11 @@
+name: Linux.Sys.Dmesg
+description: Recent kernel warnings and errors.
+parameters:
+  - name: Lines
+    type: int
+    default: 200
+sources:
+  - name: Kernel
+    plugin: dmesg
+    args:
+      lines: "{{Lines}}"

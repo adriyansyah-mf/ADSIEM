@@ -20,6 +20,7 @@ from app.api.routes.fim import router as fim_router
 from app.api.routes.hunts import router as hunts_router
 from app.api.routes.tasks import router as tasks_router, fleet_router
 from app.api.routes.artifacts import router as artifacts_router
+from app.api.routes.flows import router as flows_router, artifact_router as flow_artifacts_router, agent_router as agent_flows_router
 from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
@@ -427,6 +428,7 @@ for router in [
     logs.router, events.router, alerts.router, rules.router,
     decoders.router, webhooks.router, system.router, cases_router, settings_router, hygiene_router, ueba_router, fim_router, hunts_router,
     tasks_router, fleet_router, artifacts_router, yara_router,
+    flows_router, flow_artifacts_router, agent_flows_router,
     enrollment_tokens_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,

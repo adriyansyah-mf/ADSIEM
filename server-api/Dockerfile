@@ -2,10 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+# Build context is the repo root (see Dockerfile.dockerignore) so the API can
+# share the worker's Sigma and decoder engines instead of keeping copies.
+COPY server-api/requirements.txt .
 RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
 
-COPY app/ ./app/
+COPY worker/worker/__init__.py worker/worker/sigma_engine.py worker/worker/decoder_engine.py ./worker/
+COPY server-api/app/ ./app/
 
 EXPOSE 8000
 

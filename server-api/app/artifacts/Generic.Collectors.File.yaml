@@ -1,0 +1,14 @@
+name: Generic.Collectors.File
+description: Read one file from the endpoint (base64, capped at MaxBytes) with its SHA256.
+parameters:
+  - name: Path
+    default: /etc/passwd
+  - name: MaxBytes
+    type: int
+    default: 1048576
+sources:
+  - name: File
+    plugin: read_file
+    args:
+      path: "{{Path}}"
+      max_bytes: "{{MaxBytes}}"

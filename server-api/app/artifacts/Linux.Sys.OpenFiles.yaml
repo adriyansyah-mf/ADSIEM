@@ -1,0 +1,11 @@
+name: Linux.Sys.OpenFiles
+description: Open file descriptors per process (sockets and pipes excluded).
+parameters:
+  - name: Limit
+    type: int
+    default: 2000
+sources:
+  - name: Files
+    plugin: open_files
+    args:
+      limit: "{{Limit}}"

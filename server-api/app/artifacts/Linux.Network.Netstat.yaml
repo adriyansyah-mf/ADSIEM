@@ -1,0 +1,13 @@
+name: Linux.Network.Netstat
+description: TCP/UDP sockets with owning process, from /proc/net.
+parameters:
+  - name: StateRegex
+    description: Only return sockets whose state matches this regex (e.g. LISTEN|ESTABLISHED)
+    default: "."
+sources:
+  - name: Sockets
+    plugin: netstat
+    detection:
+      selection:
+        State|re: "{{StateRegex}}"
+      condition: selection

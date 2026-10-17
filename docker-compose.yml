@@ -86,8 +86,8 @@ services:
 
   server-api:
     build:
-      context: ./server-api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server-api/Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://soc:soc@postgres:5432/soc_platform}

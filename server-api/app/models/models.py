@@ -471,3 +471,53 @@ class SoarAction(Base):
     order_index = Column(Integer, nullable=False, default=0)
     params      = Column(JSONB, nullable=False, default=dict)
     created_at  = Column(DateTime(timezone=True), default=now_utc)
+
+# ─── Live response flows (artifact collections) ──────────────────
+
+class FlowArtifact(Base):
+    """Custom artifact YAML; built-ins live in app/artifacts/ and are never stored."""
+    __tablename__ = "flow_artifacts"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(100), unique=True, nullable=False)
+    description = Column(Text)
+    content     = Column(Text, nullable=False)
+    group_id    = Column(String(100), nullable=False, default="default")
+    created_by  = Column(UUID(as_uuid=True))
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+
+class Flow(Base):
+    """One artifact collection on one agent: scheduled → running → finished|error|cancelled."""
+    __tablename__ = "flows"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id         = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    artifact         = Column(String(100), nullable=False)
+    artifact_content = Column(Text, nullable=False)  # snapshot: later edits don't change a past flow
+    params           = Column(JSONB, nullable=False, default=dict)
+    request          = Column(JSONB, nullable=False, default=dict)
+    status           = Column(String(20), nullable=False, default="scheduled", index=True)
+    cancel_pending   = Column(Boolean, nullable=False, default=False)
+    total_rows       = Column(Integer, nullable=False, default=0)
+    error            = Column(Text)
+    timeout          = Column(Integer, nullable=False)
+    max_rows         = Column(Integer, nullable=False)
+    created_by       = Column(UUID(as_uuid=True))
+    created_at       = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at       = Column(DateTime(timezone=True))
+    completed_at     = Column(DateTime(timezone=True))
+
+class FlowRowBatch(Base):
+    __tablename__ = "flow_row_batches"
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
+    flow_id    = Column(UUID(as_uuid=True), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False, index=True)
+    source     = Column(String(64), nullable=False)
+    rows       = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+class FlowLog(Base):
+    __tablename__ = "flow_logs"
+    id      = Column(BigInteger, primary_key=True, autoincrement=True)
+    flow_id = Column(UUID(as_uuid=True), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False, index=True)
+    ts      = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    level   = Column(String(10), nullable=False, default="info")
+    message = Column(Text, nullable=False)

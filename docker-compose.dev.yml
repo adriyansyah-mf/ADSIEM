@@ -18,6 +18,7 @@ services:
       LOG_LEVEL: debug
     volumes:
       - ./server-api/app:/app/app:ro
+      - ./worker/worker:/app/worker:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   worker:
