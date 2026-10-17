@@ -209,8 +209,15 @@ async def create_flow(
     aq = select(Agent).where(Agent.id == body.agent_id)
     if group_filter is not None:
         aq = aq.where(Agent.group_id == group_filter)
-    if not (await db.execute(aq)).scalar_one_or_none():
+    target = (await db.execute(aq)).scalar_one_or_none()
+    if not target:
         raise HTTPException(404, "Agent not found")
+    # Capability, not version number: builds in the field use unrelated version
+    # schemes, but only agents with a flow runner ever long-poll for flows.
+    if target.flow_poll_at is None:
+        raise HTTPException(409, f"Agent {target.hostname} (v{target.version or '?'}) has never polled for "
+                                 "live-response flows, so it has no flow runner; update it to agent v1.3.0+ "
+                                 "(Legacy tasks still work)")
 
     art = await _load_artifact(db, body.artifact, group_filter)
     timeout = body.timeout or art.timeout
@@ -398,7 +405,8 @@ async def poll_flows(
 ):
     """Long poll: returns as soon as there is work, or empty after POLL_SECONDS."""
     agent_id = agent.id
-    await db.rollback()  # don't pin a pooled connection for the whole poll
+    await db.execute(update(Agent).where(Agent.id == agent_id).values(flow_poll_at=datetime.now(timezone.utc)))
+    await db.commit()  # also releases the pooled connection for the rest of the poll
     deadline = time.monotonic() + POLL_SECONDS
     last_check = float("-inf")
     while True:

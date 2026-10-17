@@ -333,6 +333,11 @@ async def _migrate_mfa_columns() -> None:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
 
+async def _migrate_agent_flow_poll() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS flow_poll_at TIMESTAMPTZ"))
+
 async def _migrate_audit_log_group() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -399,6 +404,7 @@ async def lifespan(app: FastAPI):
         await _migrate_soar_tables()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
+        await _migrate_agent_flow_poll()
         await _migrate_audit_log_group()
         await _migrate_drop_alerts_event_fk()
     finally:

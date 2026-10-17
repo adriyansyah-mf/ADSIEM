@@ -97,6 +97,7 @@ class AgentOut(BaseModel):
     status: str
     is_isolated: bool = False
     last_seen_at: datetime | None
+    flow_poll_at: datetime | None = None
     enrolled_at: datetime
     log_sources: list[LogSourceOut] = []
     model_config = {"from_attributes": True}
