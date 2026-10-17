@@ -20,6 +20,23 @@ class Agent(Base):
     status       = Column(String(30), nullable=False, default="online")
     last_seen_at = Column(DateTime(timezone=True))
 
+class FleetHunt(Base):
+    __tablename__ = "fleet_hunts"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    status           = Column(String(20), nullable=False, default="running")
+    total_agents     = Column(Integer, nullable=False, default=0)
+    completed_agents = Column(Integer, nullable=False, default=0)
+
+class AgentTask(Base):
+    __tablename__ = "agent_tasks"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id      = Column(UUID(as_uuid=True))
+    fleet_hunt_id = Column(UUID(as_uuid=True))
+    status        = Column(String(20), nullable=False, default="pending")
+    error         = Column(Text)
+    created_at    = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    completed_at  = Column(DateTime(timezone=True))
+
 class Rule(Base):
     __tablename__ = "rules"
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

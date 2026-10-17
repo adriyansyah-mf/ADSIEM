@@ -121,12 +121,16 @@ async def enroll_agent(
         agent.name = body.name or agent.name
         agent.version = body.version
         agent.status = "online"
+        agent.last_seen_at = datetime.now(timezone.utc)
         agent.token_hash = hash_token(raw_token)
     else:
+        # last_seen_at must be set here: agent_monitor ages agents out by it, and
+        # a NULL would leave an agent that never heartbeats "online" forever.
         agent = Agent(
             name=body.name, hostname=body.hostname,
             group_id=group_id, version=body.version,
             token_hash=hash_token(raw_token), status="online",
+            last_seen_at=datetime.now(timezone.utc),
         )
         db.add(agent)
         await db.flush()
