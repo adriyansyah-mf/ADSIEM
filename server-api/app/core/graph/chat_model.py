@@ -116,9 +116,12 @@ class NineRouterChatModel(BaseChatModel):
         payload = []
         for t in tools:
             schema = None
-            if hasattr(t, "args_schema") and t.args_schema is not None:
+            raw = getattr(t, "args_schema", None)
+            if isinstance(raw, dict):
+                schema = raw
+            elif raw is not None:
                 try:
-                    schema = t.args_schema.model_json_schema()
+                    schema = raw.model_json_schema()
                 except Exception:
                     schema = None
             payload.append({

@@ -25,6 +25,8 @@ import UEBAPage from '@/pages/UEBAPage'
 import FimPage from '@/pages/FimPage'
 import HuntsPage from '@/pages/HuntsPage'
 import ReportsPage from '@/pages/ReportsPage'
+import SopPage from '@/pages/SopPage'
+import HandoverPage from '@/pages/HandoverPage'
 import LiveResponsePage from '@/pages/LiveResponsePage'
 import YaraPage from '@/pages/YaraPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
@@ -65,6 +67,8 @@ export default function App() {
             <Route path="/fim" element={<FimPage />} />
             <Route path="/hunts" element={<HuntsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/sop" element={<SopPage />} />
+            <Route path="/handover" element={<HandoverPage />} />
             <Route path="/mitre-heatmap" element={<MitreHeatmapPage />} />
             <Route path="/live-response" element={<LiveResponsePage />} />
             <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />

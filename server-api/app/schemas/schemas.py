@@ -709,3 +709,4 @@ class AssistantChatRequest(BaseModel):
 class AssistantChatResponse(BaseModel):
     reply: str
     tools_used: list[str]
+    actions: list[dict] = []

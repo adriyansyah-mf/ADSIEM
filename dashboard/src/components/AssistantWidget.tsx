@@ -1,10 +1,17 @@
 import { useState, useRef, useEffect } from 'react'
-import { Bot, X, Send, Loader2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Bot, X, Send, Loader2, ArrowRight } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
+
+interface ChatAction {
+  label: string
+  to: string
+}
 
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  actions?: ChatAction[]
 }
 
 export default function AssistantWidget() {
@@ -13,6 +20,17 @@ export default function AssistantWidget() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const navigate = useNavigate()
+
+  const setActions = (actions: ChatAction[]) =>
+    setMessages(m => {
+      const copy = [...m]
+      const last = copy[copy.length - 1]
+      if (last?.role === 'assistant') {
+        copy[copy.length - 1] = { ...last, actions }
+      }
+      return copy
+    })
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -68,9 +86,16 @@ export default function AssistantWidget() {
           const payload = line.slice(5).trim()
           if (!payload || payload === '[DONE]') continue
           try {
-            const chunk = JSON.parse(payload) as { type: string; text?: string; message?: string }
+            const chunk = JSON.parse(payload) as {
+              type: string
+              text?: string
+              message?: string
+              actions?: ChatAction[]
+            }
             if (chunk.type === 'text-delta' && chunk.text) {
               appendAssistant(chunk.text)
+            } else if (chunk.type === 'actions' && chunk.actions) {
+              setActions(chunk.actions)
             } else if (chunk.type === 'error') {
               appendAssistant(chunk.message || 'The assistant hit an error.')
             }
@@ -153,6 +178,26 @@ export default function AssistantWidget() {
                 fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap',
               }}>
                 {m.content}
+                {m.role === 'assistant' && m.actions && m.actions.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                    {m.actions.map(a => (
+                      <button
+                        key={a.to}
+                        onClick={() => { setOpen(false); navigate(a.to) }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 4,
+                          fontSize: 11, fontFamily: 'Rajdhani, sans-serif', fontWeight: 700,
+                          letterSpacing: '0.4px', padding: '3px 9px', borderRadius: 4,
+                          border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.1)',
+                          color: 'var(--accent-cyan)', cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {a.label}
+                        <ArrowRight size={11} />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             {loading && (

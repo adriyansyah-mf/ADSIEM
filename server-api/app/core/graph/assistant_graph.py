@@ -50,6 +50,7 @@ class AssistantState(TypedDict):
     messages: Annotated[list[BaseMessage], operator.add]
     tool_rounds: NotRequired[int]
     tools_used: NotRequired[list[str]]
+    tool_calls_made: NotRequired[list[dict]]
     answer: NotRequired[str]
 
 
@@ -99,12 +100,15 @@ def build_assistant_graph(
     async def call_tools(state):
         last = state["messages"][-1]
         used = list(state.get("tools_used", []))
+        used_calls = list(state.get("tool_calls_made", []))
         out: list[BaseMessage] = []
 
         for call in getattr(last, "tool_calls", []) or []:
             name = call.get("name", "")
             args = call.get("args") or {}
             used.append(name)
+            used_calls.append({"name": name, "args": args})
+            log.info("assistant_tool_call", tool=name, args=args)
             tool = tools_by_name.get(name)
             if tool is None:
                 result = {"error": f"unknown tool {name}"}
@@ -126,6 +130,7 @@ def build_assistant_graph(
             "messages": out,
             "tool_rounds": state.get("tool_rounds", 0) + 1,
             "tools_used": used,
+            "tool_calls_made": used_calls,
         }
 
     def route(state) -> Literal["call_tools", "__end__"]:

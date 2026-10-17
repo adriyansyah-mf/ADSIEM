@@ -26,11 +26,15 @@ import redis.asyncio as aioredis
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.core.deps import get_scoped_group
+from app.core.database import get_db
 from app.core.es_client import search as es_search
 from app.core.security import decode_token
+from app.models.models import User
 
 router = APIRouter(prefix="/api/stream", tags=["stream"])
 log = structlog.get_logger()
@@ -72,19 +76,34 @@ async def stream_events(
     request: Request,
     topics: Annotated[str | None, Query(description="comma-separated: alerts,events")] = None,
     token: Annotated[str | None, Query(description="access token; EventSource cannot send headers")] = None,
-    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
     """Multiplexed SSE stream. One connection, N topics.
 
-    EventSource cannot set an Authorization header, so this endpoint accepts the
-    access token as a query parameter — the same approach /api/ws/alerts uses.
+    EventSource cannot set an Authorization header, so this endpoint
+    authenticates from the `token` query parameter — the same approach
+    /api/ws/alerts uses. The group scope comes from the user row rather than
+    Depends(get_scoped_group), which would require the header; the token itself
+    carries only sub/exp/type, so it is not enough to derive a scope.
     """
     try:
         payload = decode_token(token or "")
-        if not payload.get("sub"):
-            raise ValueError("no sub claim")
+        if payload.get("type") != "access" or not payload.get("sub"):
+            raise ValueError("invalid token")
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
+
+    user = (
+        await db.execute(
+            select(User).options(selectinload(User.role)).where(
+                User.id == payload["sub"], User.is_active == True
+            )
+        )
+    ).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found or inactive")
+
+    group_filter = None if user.role.name == "superadmin" else user.group_id
 
     selected = _parse_topics(topics)
 

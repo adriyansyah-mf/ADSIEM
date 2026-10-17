@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import (
     Agent, Alert, AlertNote, Case, CaseNote, FimEvent, HygieneSnapshot,
     Rule, ThreatHunt, UebaAnomaly, UebaEntityScore, YaraRule,
+    AgentLogSource, AgentTask, AuditLog, Decoder, ShiftHandover,
+    SoarAction, SoarPlaybook, SopDocument,
 )
 from app.core.es_client import aggregate as es_aggregate, search as es_search
 from app.core.query_builder import sanitize_query_string
@@ -236,6 +238,156 @@ TOOLS: list[dict] = [
                     "description": "bucket size",
                 },
                 "source_ip": {"type": "string", "description": "restrict to one source IP"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "mitre_coverage",
+        "description": (
+            "MITRE ATT&CK coverage: which techniques have been observed in this environment, "
+            "grouped by tactic. Use for 'which techniques do we see', 'what tactics are covered'."
+        ),
+        "parameters": {
+            "days": "lookback window in days, default 30, max 180",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "lookback days (default 30, max 180)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_soar_playbooks",
+        "description": (
+            "List SOAR playbooks and their actions. Use for 'what automated response do we have', "
+            "'which playbook handles brute force'."
+        ),
+        "parameters": {
+            "query": "optional text to match against playbook name/description",
+            "limit": "max playbooks, default 20, max 50",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "match playbook name or description"},
+                "limit": {"type": "integer", "description": "max results (default 20, max 50)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "search_sop",
+        "description": (
+            "Search the company SOP / runbook documents. Use for 'what does our procedure say "
+            "about phishing', 'how do we handle ransomware'."
+        ),
+        "parameters": {
+            "query": "text to search SOP text for",
+            "limit": "max documents, default 5, max 15",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "text to search for"},
+                "limit": {"type": "integer", "description": "max documents (default 5, max 15)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "list_decoders",
+        "description": (
+            "List configured log decoders (which log formats the platform can parse). "
+            "Use for 'do we parse nginx logs', 'which log types are supported'."
+        ),
+        "parameters": {
+            "log_type": "optional log type filter",
+            "limit": "max decoders, default 30, max 60",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "log_type": {"type": "string", "description": "filter by log type"},
+                "limit": {"type": "integer", "description": "max results (default 30, max 60)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_log_sources",
+        "description": (
+            "List agent log sources (which file paths each agent tails). Use for "
+            "'what logs is web-01 collecting', 'which paths are monitored'."
+        ),
+        "parameters": {
+            "hostname": "optional agent hostname filter",
+            "limit": "max rows, default 30, max 60",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "hostname": {"type": "string", "description": "agent hostname"},
+                "limit": {"type": "integer", "description": "max results (default 30, max 60)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_tasks",
+        "description": (
+            "List live-response tasks dispatched to agents (isolate, collect artifact, "
+            "run command) with their status. Use for 'did the isolation succeed'."
+        ),
+        "parameters": {
+            "status": "pending|running|completed|failed (optional)",
+            "limit": "max tasks, default 20, max 50",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "task status filter"},
+                "limit": {"type": "integer", "description": "max results (default 20, max 50)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "search_audit_logs",
+        "description": (
+            "Search the platform audit trail — who changed what (rules, cases, users, settings). "
+            "Use for 'who closed that case', 'what changed recently'."
+        ),
+        "parameters": {
+            "action": "optional action filter, e.g. case.update",
+            "hours": "lookback window in hours, default 72, max 720",
+            "limit": "max entries, default 20, max 50",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "action filter"},
+                "hours": {"type": "integer", "description": "lookback hours (default 72, max 720)"},
+                "limit": {"type": "integer", "description": "max results (default 20, max 50)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "handover_summary",
+        "description": (
+            "Latest shift handover notes — what the previous shift left for the next analyst. "
+            "Use for 'what happened last shift', 'anything I should know starting now'."
+        ),
+        "parameters": {
+            "limit": "max handovers, default 3, max 10",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "max handovers (default 3, max 10)"},
             },
             "required": [],
         },
@@ -667,6 +819,195 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
             "total_events": result["total"],
             "peak": peak,
             "points": points,
+        }
+
+    if name == "mitre_coverage":
+        days = clamp(_arg(args, "days"), 30, 180)
+        since_dt = _now() - timedelta(days=days)
+        q = select(Alert.mitre_techniques).where(
+            Alert.created_at >= since_dt, Alert.mitre_techniques != []
+        )
+        if group_filter:
+            q = q.where(Alert.group_id == group_filter)
+        rows = (await db.execute(q)).all()
+        counts: dict[str, int] = {}
+        for (techniques,) in rows:
+            for entry in techniques or []:
+                tech = str(entry).split(":")[0].strip() if entry else ""
+                if tech:
+                    counts[tech] = counts.get(tech, 0) + 1
+        ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+        return {
+            "window_days": days,
+            "alerts_with_mitre": len(rows),
+            "distinct_techniques": len(ranked),
+            "top_techniques": [{"technique": t, "count": c} for t, c in ranked[:15]],
+        }
+
+    if name == "list_soar_playbooks":
+        limit = clamp(_arg(args, "limit"), 20, 50)
+        q = select(SoarPlaybook)
+        if group_filter:
+            q = q.where(SoarPlaybook.group_id == group_filter)
+        if _arg(args, "query"):
+            term = f"%{_arg(args, 'query')}%"
+            q = q.where(or_(SoarPlaybook.name.ilike(term), SoarPlaybook.description.ilike(term)))
+        plays = (await db.execute(q.order_by(SoarPlaybook.created_at.desc()).limit(limit))).scalars().all()
+        out = []
+        for p in plays:
+            acts = (await db.execute(
+                select(SoarAction).where(SoarAction.playbook_id == p.id).order_by(SoarAction.order_index)
+            )).scalars().all()
+            out.append({
+                "id": str(p.id),
+                "name": p.name,
+                "description": (p.description or "")[:200],
+                "enabled": p.is_enabled,
+                "actions": [
+                    {"type": a.action_type, "order": a.order_index}
+                    for a in acts
+                ],
+            })
+        return {"playbooks": out}
+
+    if name == "search_sop":
+        query = str(_arg(args, "query") or "").strip()
+        if not query:
+            return {"error": "query is required"}
+        limit = clamp(_arg(args, "limit"), 5, 15)
+        q = select(SopDocument).where(SopDocument.raw_text.ilike(f"%{query}%"))
+        if group_filter:
+            q = q.where(SopDocument.group_id == group_filter)
+        docs = (await db.execute(q.order_by(SopDocument.created_at.desc()).limit(limit))).scalars().all()
+        return {
+            "query": query,
+            "documents": [
+                {
+                    "id": str(d.id),
+                    "filename": d.filename,
+                    "status": d.status,
+                    "excerpt": (d.raw_text or "")[:600],
+                }
+                for d in docs
+            ],
+        }
+
+    if name == "list_decoders":
+        limit = clamp(_arg(args, "limit"), 30, 60)
+        q = select(Decoder)
+        if _arg(args, "log_type"):
+            q = q.where(Decoder.log_type == str(_arg(args, "log_type")))
+        rows = (await db.execute(q.order_by(Decoder.log_type.asc(), Decoder.name.asc()).limit(limit))).scalars().all()
+        return {
+            "decoders": [
+                {"name": d.name, "log_type": d.log_type, "priority": d.priority, "enabled": d.is_enabled}
+                for d in rows
+            ],
+            "count": len(rows),
+        }
+
+    if name == "list_log_sources":
+        limit = clamp(_arg(args, "limit"), 30, 60)
+        q = select(AgentLogSource)
+        if group_filter or _arg(args, "hostname"):
+            agent_q = select(Agent.id)
+            if group_filter:
+                agent_q = agent_q.where(Agent.group_id == group_filter)
+            if _arg(args, "hostname"):
+                agent_q = agent_q.where(Agent.hostname.ilike(f"%{_arg(args, 'hostname')}%"))
+            agent_ids = list((await db.execute(agent_q)).scalars().all())
+            if not agent_ids:
+                return {"sources": [], "count": 0}
+            q = q.where(AgentLogSource.agent_id.in_(agent_ids))
+        rows = (await db.execute(q.limit(limit))).scalars().all()
+        agents = {}
+        if rows:
+            ids = {r.agent_id for r in rows}
+            for a in (await db.execute(select(Agent).where(Agent.id.in_(ids)))).scalars().all():
+                agents[a.id] = a.hostname
+        return {
+            "sources": [
+                {
+                    "hostname": agents.get(r.agent_id, "unknown"),
+                    "path": r.path,
+                    "log_type": r.log_type,
+                    "enabled": r.is_enabled,
+                }
+                for r in rows
+            ],
+            "count": len(rows),
+        }
+
+    if name == "list_tasks":
+        limit = clamp(_arg(args, "limit"), 20, 50)
+        q = select(AgentTask)
+        if group_filter:
+            scoped_agents = select(Agent.id).where(Agent.group_id == group_filter)
+            agent_ids = list((await db.execute(scoped_agents)).scalars().all())
+            if not agent_ids:
+                return {"tasks": [], "count": 0}
+            q = q.where(AgentTask.agent_id.in_(agent_ids))
+        if _arg(args, "status"):
+            q = q.where(AgentTask.status == str(_arg(args, "status")))
+        rows = (await db.execute(q.order_by(AgentTask.created_at.desc()).limit(limit))).scalars().all()
+        return {
+            "tasks": [
+                {
+                    "id": str(t.id),
+                    "type": t.task_type,
+                    "status": t.status,
+                    "error": (t.error or "")[:200] or None,
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                }
+                for t in rows
+            ],
+            "count": len(rows),
+        }
+
+    if name == "search_audit_logs":
+        hours = clamp(_arg(args, "hours"), 72, 720)
+        limit = clamp(_arg(args, "limit"), 20, 50)
+        since_dt = _now() - timedelta(hours=hours)
+        q = select(AuditLog).where(AuditLog.created_at >= since_dt)
+        if group_filter:
+            q = q.where(AuditLog.group_id == group_filter)
+        if _arg(args, "action"):
+            q = q.where(AuditLog.action.ilike(f"%{_arg(args, 'action')}%"))
+        rows = (await db.execute(q.order_by(AuditLog.created_at.desc()).limit(limit))).scalars().all()
+        return {
+            "window_hours": hours,
+            "entries": [
+                {
+                    "action": a.action,
+                    "resource_type": a.resource_type,
+                    "resource_id": str(a.resource_id) if a.resource_id else None,
+                    "detail": (str(a.detail)[:200] if a.detail else None),
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                }
+                for a in rows
+            ],
+            "count": len(rows),
+        }
+
+    if name == "handover_summary":
+        limit = clamp(_arg(args, "limit"), 3, 10)
+        q = select(ShiftHandover)
+        if group_filter:
+            q = q.where(ShiftHandover.group_id == group_filter)
+        rows = (await db.execute(q.order_by(ShiftHandover.created_at.desc()).limit(limit))).scalars().all()
+        return {
+            "handovers": [
+                {
+                    "shift_label": h.shift_label,
+                    "summary": (h.summary or "")[:800],
+                    "open_alerts": h.open_alerts,
+                    "open_cases": h.open_cases,
+                    "escalations": h.escalations,
+                    "created_at": h.created_at.isoformat() if h.created_at else None,
+                }
+                for h in rows
+            ],
+            "count": len(rows),
         }
 
     return {"error": f"unknown tool: {name}"}

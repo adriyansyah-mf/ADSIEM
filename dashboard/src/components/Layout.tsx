@@ -42,6 +42,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/hunts', label: 'Threat Hunt', icon: Crosshair },
       { to: '/mitre-heatmap', label: 'MITRE Heatmap', icon: Grid3x3 },
       { to: '/reports', label: 'Reports', icon: FileBarChart },
+      { to: '/sop', label: 'SOP', icon: BookOpen },
+      { to: '/handover', label: 'Handover', icon: ClipboardList },
     ],
   },
   {

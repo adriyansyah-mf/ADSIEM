@@ -37,8 +37,12 @@ services:
     volumes:
       - ./dashboard/src:/app/src:ro
     environment:
-      VITE_API_URL: http://server-api:8000
+      VITE_API_URL: ""
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5173/ >/dev/null 2>&1 || exit 1"]
 
   nginx:
     ports:
       - "80:80"
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
