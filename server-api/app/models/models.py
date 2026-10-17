@@ -61,6 +61,7 @@ class Agent(Base):
     status       = Column(String(20), nullable=False, default="offline")
     is_isolated  = Column(Boolean, nullable=False, default=False)
     last_seen_at = Column(DateTime(timezone=True))
+    flow_poll_at = Column(DateTime(timezone=True))  # last live-response long poll; NULL = no flow runner
     enrolled_at  = Column(DateTime(timezone=True), default=now_utc)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

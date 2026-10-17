@@ -273,7 +273,11 @@ function CollectTab({ agents, artifacts }: { agents: Agent[]; artifacts: FlowArt
           <span className="text-xs text-muted-foreground">Endpoint</span>
           <select value={agentId} onChange={e => setAgentId(e.target.value)} className={input}>
             <option value="">Select an agent…</option>
-            {sortedAgents.map(a => <option key={a.id} value={a.id}>{a.hostname} ({a.status}{a.version ? `, v${a.version}` : ''})</option>)}
+            {sortedAgents.map(a => (
+              <option key={a.id} value={a.id} disabled={!a.flow_poll_at}>
+                {a.hostname} ({a.status}{a.version ? `, v${a.version}` : ''}){a.flow_poll_at ? '' : ' — no flow runner, update agent'}
+              </option>
+            ))}
           </select>
         </label>
         <label className="block space-y-1">

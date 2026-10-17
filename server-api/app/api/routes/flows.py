@@ -38,18 +38,6 @@ artifact_router = APIRouter(prefix="/api/flow-artifacts", tags=["flows"])
 agent_router = APIRouter(prefix="/api/agent/flows", tags=["flows"])
 
 TERMINAL = ("finished", "error", "cancelled")
-FLOWS_MIN_AGENT_VERSION = "1.3.0"
-
-
-def agent_supports_flows(version: str | None) -> bool:
-    """Released agents before 1.3.0 have no flow runner (and all reported a
-    hard-coded "1.0.0"); source builds report "dev" and are assumed current."""
-    if not version:
-        return True
-    parts = version.lstrip("v").split("-")[0].split(".")
-    if not all(p.isdigit() for p in parts):
-        return True
-    return tuple(int(p) for p in parts) >= tuple(int(p) for p in FLOWS_MIN_AGENT_VERSION.split("."))
 POLL_SECONDS = 20          # agent HTTP timeout must exceed this
 POLL_DB_FALLBACK = 5       # re-check the DB this often even without a Redis wake-up
 WAKE_KEY = "siem:flowq:{}"
@@ -224,9 +212,12 @@ async def create_flow(
     target = (await db.execute(aq)).scalar_one_or_none()
     if not target:
         raise HTTPException(404, "Agent not found")
-    if not agent_supports_flows(target.version):
-        raise HTTPException(409, f"Agent {target.hostname} runs v{target.version}, which predates live-response "
-                                 f"flows; update it to {FLOWS_MIN_AGENT_VERSION} or later (Legacy tasks still work)")
+    # Capability, not version number: builds in the field use unrelated version
+    # schemes, but only agents with a flow runner ever long-poll for flows.
+    if target.flow_poll_at is None:
+        raise HTTPException(409, f"Agent {target.hostname} (v{target.version or '?'}) has never polled for "
+                                 "live-response flows, so it has no flow runner; update it to agent v1.3.0+ "
+                                 "(Legacy tasks still work)")
 
     art = await _load_artifact(db, body.artifact, group_filter)
     timeout = body.timeout or art.timeout
@@ -414,7 +405,8 @@ async def poll_flows(
 ):
     """Long poll: returns as soon as there is work, or empty after POLL_SECONDS."""
     agent_id = agent.id
-    await db.rollback()  # don't pin a pooled connection for the whole poll
+    await db.execute(update(Agent).where(Agent.id == agent_id).values(flow_poll_at=datetime.now(timezone.utc)))
+    await db.commit()  # also releases the pooled connection for the rest of the poll
     deadline = time.monotonic() + POLL_SECONDS
     last_check = float("-inf")
     while True:

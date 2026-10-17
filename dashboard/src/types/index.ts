@@ -24,6 +24,7 @@ export interface Agent {
   status: 'online' | 'offline'
   is_isolated: boolean
   last_seen_at: string | null
+  flow_poll_at?: string | null
   enrolled_at: string
   log_sources: LogSource[]
 }
