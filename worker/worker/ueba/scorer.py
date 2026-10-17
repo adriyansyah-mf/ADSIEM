@@ -158,7 +158,8 @@ async def _raise_alert(entity_type, entity_value, risk, score, reasons, mitre, f
             "tags":       ["ueba", f"ueba.{entity_type}"],
             "mitre_tags": [f"attack.{m['id'].lower()}" for m in mitre],
             # handed to the AI analyst as the event context
-            "matched_fields": {"ueba_reasons": [r["text"] for r in reasons], "ueba_features": feat,
+            "matched_fields": {"ueba_entity_type": entity_type, "ueba_entity_value": entity_value,
+                               "ueba_reasons": [r["text"] for r in reasons], "ueba_features": feat,
                                "ueba_score": round(score, 4), "ueba_risk": risk},
         },
         event_id=None, agent_id=None, group_id=group_id,

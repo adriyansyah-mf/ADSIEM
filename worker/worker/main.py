@@ -17,7 +17,7 @@ from worker.sigma_engine import SigmaEngine
 from worker.consumer import consume_loop, load_engines, reload_loop, dlq_retry_loop
 from worker.webhook_sender import webhook_retry_loop
 from worker.ai_consumer import ai_analysis_loop, ai_backfill_loop
-from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop, ueba_ai_loop
+from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop
 from worker.hunter import hunt_loop
 from worker.agent_monitor import agent_monitor_loop
 from worker.maintenance import maintenance_loop
@@ -165,7 +165,6 @@ async def main():
         _supervise("ai_backfill", ai_backfill_loop),
         _supervise("ueba_snapshot", ueba_snapshot_loop),
         _supervise("ueba_train", ueba_train_loop),
-        _supervise("ueba_ai", ueba_ai_loop),
         _supervise("hunt", hunt_loop),
         _supervise("agent_monitor", agent_monitor_loop),
         _supervise("maintenance", maintenance_loop),
