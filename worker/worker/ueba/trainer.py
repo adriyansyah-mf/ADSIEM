@@ -67,6 +67,17 @@ async def take_snapshots(redis) -> None:
     log.info("ueba_snapshots_saved", users=len(users), ips=len(ips))
 
 
+_ACTIVITY_KEY = {"user": "login_count", "ip": "total_events"}
+
+
+def active_snapshots(entity_type: str, rows):
+    """Drop hourly snapshots of entities that did nothing that hour. Their
+    counters had already expired, and keeping them drags every baseline to
+    zero — after which any active IP looks wildly abnormal."""
+    key = _ACTIVITY_KEY[entity_type]
+    return [r for r in rows if float((r.features or {}).get(key, 0) or 0) > 0]
+
+
 async def _store_entity_profiles(entity_type: str, rows, keys: list[str]) -> None:
     """Per-entity baselines (from that entity's own hourly snapshots) so an
     anomaly can be explained against the entity's normal, not just everyone's."""
@@ -118,6 +129,7 @@ async def train_models(redis) -> None:
         ("user", user_rows, USER_FEATURE_KEYS, "ueba:model:user"),
         ("ip",   ip_rows,   IP_FEATURE_KEYS,   "ueba:model:ip"),
     ]:
+        rows = active_snapshots(entity_type, rows)
         if len(rows) < MIN_SNAPSHOTS:
             log.info("ueba_cold_start", entity_type=entity_type, n=len(rows), needed=MIN_SNAPSHOTS)
             continue

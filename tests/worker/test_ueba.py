@@ -89,7 +89,8 @@ def test_normal_or_quieter_activity_has_no_reasons():
 def test_rare_hour_and_new_ip_for_a_user_use_its_own_baseline():
     own = ex.build_baseline([{
         "login_count": 10.0, "failed_ratio": 0.0, "unique_ips": 1.0, "unique_hosts": 1.0,
-        "sudo_count": 0.0, "new_ip_seen": 0.0, "hour_of_day": float(9 + i % 8), "is_weekend": 0.0,
+        # active 03:00–23:00 (21 distinct hours), never at 02:00
+        "sudo_count": 0.0, "new_ip_seen": 0.0, "hour_of_day": float(3 + i % 21), "is_weekend": 0.0,
     } for i in range(48)], USER_FEATURE_KEYS)
     feat = {"login_count": 12.0, "failed_ratio": 0.0, "unique_ips": 1.0, "unique_hosts": 1.0,
             "sudo_count": 0.0, "new_ip_seen": 1.0, "hour_of_day": 2.0, "is_weekend": 0.0}
@@ -114,6 +115,35 @@ def test_entity_profile_needs_enough_history():
 
 
 # ─── anomaly decision ────────────────────────────────────────────
+
+def test_volume_and_timing_alone_never_make_an_anomaly():
+    # production noise: busy web clients at a new hour, against a young baseline
+    volume = {"feature": "total_events", "z": 1500.0, "value": 79, "text": "events 79 vs typical 0"}
+    hour = {"feature": "hour_of_day", "z": 0.1, "value": 20, "text": "active at 20:00"}
+    assert ex.assess(-0.2, 0.0, [volume, hour]) == 0.0
+    assert ex.mitre_for("ip", [volume, hour]) == []
+    # with a real security deviation alongside, it is an anomaly
+    spray = {"feature": "unique_users", "z": 40.0, "value": 47, "text": "usernames 47 vs typical 1"}
+    assert ex.assess(0.05, 0.0, [volume, spray]) == 1.0
+    assert [m["id"] for m in ex.mitre_for("ip", [volume, spray])] == ["T1110.003"]
+
+
+def test_rare_hour_needs_a_baseline_that_has_seen_most_hours():
+    young = ex.build_baseline([{"hour_of_day": float(h)} for h in (8, 9, 10) * 20], ["hour_of_day"])
+    assert young["hour_of_day"]["hours_seen"] == 3
+    assert ex.explain("user", {"hour_of_day": 20.0}, None, young) == []
+
+
+def test_idle_snapshots_are_dropped_from_training():
+    from worker.ueba.trainer import active_snapshots
+
+    class Row:
+        def __init__(self, f):
+            self.features = f
+    rows = [Row({"total_events": 0.0}), Row({"total_events": 12.0}), Row({}), Row({"total_events": 1.0})]
+    assert [r.features["total_events"] for r in active_snapshots("ip", rows)] == [12.0, 1.0]
+    assert active_snapshots("user", [Row({"login_count": 0}), Row({"login_count": 3})])[0].features == {"login_count": 3}
+
 
 def test_assess_requires_an_explanation_and_survives_forest_saturation():
     strong = [{"feature": "failed_count", "z": 250.0, "value": 400, "text": ""}]

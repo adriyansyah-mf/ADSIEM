@@ -18,6 +18,12 @@ RARE_HOUR_FRACTION = 0.02   # an hour seen in <2% of baseline activity is unusua
 RISK_HALF_LIFE = 6 * 3600   # risk halves every 6h without new anomalies
 MAX_REASONS = 4
 MIN_RATIO_EVENTS = 10       # a ratio over fewer events (1 failure of 1) means nothing
+MIN_HOURS_FOR_TIME = 20     # distinct active hours a baseline needs before "rare hour" means anything
+
+# How busy an entity is, and when — shown as context, never an anomaly on its
+# own: a popular web client or a night-shift admin is not an attack. Anomalies
+# need a security-relevant deviation (failures, many users/hosts, sudo, new IP).
+CONTEXT_FEATURES = {"total_events", "login_count", "hour_of_day", "is_weekend"}
 
 # Features where only a *higher* value is suspicious (a quiet hour is not an attack).
 _UPWARD = {
@@ -73,7 +79,8 @@ def build_baseline(vectors: Iterable[dict], keys: list[str]) -> dict:
         col = np.array([float(r.get(key, 0.0)) for r in rows])
         if key == "hour_of_day":
             hours = np.bincount(np.clip(col.astype(int), 0, 23), minlength=24)
-            baseline[key] = {"freq": (hours / hours.sum()).round(4).tolist()}
+            baseline[key] = {"freq": (hours / hours.sum()).round(4).tolist(),
+                             "hours_seen": int((hours > 0).sum())}
             continue
         median = float(np.median(col))
         baseline[key] = {
@@ -105,7 +112,9 @@ def explain(entity_type: str, features: dict, entity_profile: dict | None, popul
         if key == "hour_of_day":
             freq = stats.get("freq") or []
             hour = int(value) % 24
-            if len(freq) == 24 and freq[hour] < RARE_HOUR_FRACTION:
+            # a baseline only a few hours old makes every other hour look rare
+            if stats.get("hours_seen", 0) >= MIN_HOURS_FOR_TIME and len(freq) == 24 \
+                    and freq[hour] < RARE_HOUR_FRACTION:
                 reasons.append({
                     "feature": key, "value": value, "z": round((RARE_HOUR_FRACTION - freq[hour]) * 100, 2),
                     "text": f"active at {hour:02d}:00 UTC, an hour that accounts for "
@@ -140,7 +149,7 @@ def explain(entity_type: str, features: dict, entity_profile: dict | None, popul
 
 def mitre_for(entity_type: str, reasons: list[dict]) -> list[dict]:
     seen, out = set(), []
-    for r in reasons:
+    for r in security_reasons(reasons):
         technique = _MITRE.get(entity_type, {}).get(r["feature"])
         if technique and technique[0] not in seen:
             seen.add(technique[0])
@@ -162,20 +171,27 @@ def anomaly_strength(score: float, threshold: float) -> float:
     return min((threshold - score) / 0.15, 1.0)
 
 
+def security_reasons(reasons: list[dict]) -> list[dict]:
+    return [r for r in reasons if r["feature"] not in CONTEXT_FEATURES]
+
+
 def deviation_strength(reasons: list[dict]) -> float:
-    """0..1 from the largest robust z-score. IsolationForest saturates outside
-    its training range (60 tried usernames scores like 3), so a large deviation
-    has to count on its own: z=3 → 0, z>=10 → 1."""
+    """0..1 from the largest robust z-score among security-relevant reasons.
+    IsolationForest saturates outside its training range (60 tried usernames
+    scores like 3), so a large deviation has to count on its own: z=3 → 0,
+    z>=10 → 1."""
+    reasons = security_reasons(reasons)
     if not reasons:
         return 0.0
     return min(max((max(abs(r["z"]) for r in reasons) - Z_THRESHOLD) / 7.0, 0.0), 1.0)
 
 
 def assess(if_score: float, if_threshold: float, reasons: list[dict]) -> float:
-    """Anomaly strength (0 = normal). Requires an explanation: an IsolationForest
-    outlier with no deviating feature is the model's ~contamination-rate noise,
-    while a strong explained deviation counts even when the forest misses it."""
-    if not reasons:
+    """Anomaly strength (0 = normal). Requires a security-relevant explanation:
+    an IsolationForest outlier with nothing deviating — or only volume/timing
+    deviating — is noise, while a strong explained deviation counts even when
+    the forest misses it."""
+    if not security_reasons(reasons):
         return 0.0
     forest = anomaly_strength(if_score, if_threshold)
     deviation = deviation_strength(reasons)
