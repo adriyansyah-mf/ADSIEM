@@ -102,6 +102,10 @@ async def _migrate_ueba_columns() -> None:
             ADD COLUMN IF NOT EXISTS feature_profile JSONB NOT NULL DEFAULT '{}'::jsonb
         """))
         await conn.execute(text("""
+            ALTER TABLE ueba_anomalies
+            ADD COLUMN IF NOT EXISTS reasons JSONB NOT NULL DEFAULT '[]'::jsonb
+        """))
+        await conn.execute(text("""
             ALTER TABLE ueba_feature_snapshots
             ADD COLUMN IF NOT EXISTS risk_score FLOAT NOT NULL DEFAULT 0.0
         """))

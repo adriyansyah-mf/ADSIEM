@@ -270,6 +270,8 @@ export interface UebaAnomaly {
   risk_score: number
   features: Record<string, number>
   alert_id: string | null
+  mitre_techniques?: Array<{ id: string; name: string }>
+  reasons?: Array<{ feature: string; value: number; z: number; text: string }>
   detected_at: string
 }
 

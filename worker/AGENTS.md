@@ -17,7 +17,7 @@ worker/worker/
 ├── llm_client.py / ai_analyst.py / ai_consumer.py  # AI triage + analyst
 ├── hunter.py / hunt_scheduler.py / campaign_analyzer.py / fleet_correlation.py
 ├── report_sender.py / email_sender.py / webhook_sender.py
-├── ueba/             # features.py, scorer.py (Isolation Forest), trainer.py, loops.py
+├── ueba/             # features.py, scorer.py (Isolation Forest + robust deviation), explain.py (reasons, MITRE, risk), trainer.py, model_codec.py (pickle-free, Tree.__setstate__), loops.py
 ├── ti/               # aggregator.py, extractor.py, mitre.py, iocs.py
 │   └── providers/    # abuseipdb, virustotal, shodan, otx, greynoise, urlhaus, geoip, whois, base
 └── models.py         # worker-side ORM (separate from server-api's models.py)
