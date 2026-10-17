@@ -1,0 +1,16 @@
+title: Interactive Switch to Root via su
+id: rule-su-to-root
+description: |
+  A user switched to the root account with su. Legitimate admin work looks the
+  same, so treat it as an audit trail — unexpected users or odd hours matter.
+logsource:
+  product: linux
+detection:
+  su_to_root:
+    event.action: su_command
+    user.target: root
+  condition: su_to_root
+level: medium
+tags:
+  - attack.privilege_escalation
+  - attack.t1078.003
