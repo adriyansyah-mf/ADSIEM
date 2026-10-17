@@ -35,6 +35,8 @@ from app.api.routes.reports import router as reports_router
 from app.api.routes.assistant import router as assistant_router
 from app.api.routes.mitre import router as mitre_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
+from app.api.routes.stream import router as stream_router
+from app.api.routes.elastic import router as elastic_router
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -330,6 +332,26 @@ async def _migrate_mfa_columns() -> None:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
 
+async def _migrate_audit_log_group() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS group_id VARCHAR(100) NOT NULL DEFAULT 'default'"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_group_created ON audit_logs(group_id, created_at DESC)"))
+
+async def _migrate_drop_alerts_event_fk() -> None:
+    """Drop the legacy alerts.event_id -> events(id) foreign key.
+
+    Events moved to Elasticsearch, so the events table no longer receives rows,
+    but databases created before that move still carry the constraint. Every
+    detection then failed to insert with a ForeignKeyViolationError, silently
+    dropping all alerts. event_id now just points at an ES document _id.
+    """
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE alerts DROP CONSTRAINT IF EXISTS alerts_event_id_fkey"
+        ))
+
 async def _ws_redis_listener():
     """Subscribe to Redis ws:alerts channel and broadcast to WebSocket clients."""
     import asyncio
@@ -376,6 +398,8 @@ async def lifespan(app: FastAPI):
         await _migrate_soar_tables()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
+        await _migrate_audit_log_group()
+        await _migrate_drop_alerts_event_fk()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
@@ -392,10 +416,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 for router in [
@@ -406,6 +430,6 @@ for router in [
     enrollment_tokens_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
-    reports_router, assistant_router, mitre_router, ws_router,
+    reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
 ]:
     app.include_router(router)

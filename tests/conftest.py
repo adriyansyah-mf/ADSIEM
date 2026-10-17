@@ -6,7 +6,6 @@ import socket
 from typing import Generator
 
 import pytest
-from playwright.sync_api import Page, sync_playwright
 
 
 # ---------------------------------------------------------------------------
@@ -14,7 +13,7 @@ from playwright.sync_api import Page, sync_playwright
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="function")
-def page() -> Generator[Page, None, None]:
+def page() -> Generator["Page", None, None]:
     """
     Launch a headless Chromium browser, yield a single Page, then close.
 
@@ -24,7 +23,11 @@ def page() -> Generator[Page, None, None]:
     Available to all tests under tests/ (including service_e2e tests that live
     at the top level, outside tests/dashboard/).
     """
-    with sync_playwright() as pw:
+    playwright = pytest.importorskip(
+        "playwright.sync_api",
+        reason="browser tests need playwright: pip install playwright && playwright install chromium",
+    )
+    with playwright.sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         context = browser.new_context()
         pg = context.new_page()

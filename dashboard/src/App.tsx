@@ -11,6 +11,7 @@ import AgentsPage from '@/pages/AgentsPage'
 import LogSourcesPage from '@/pages/LogSourcesPage'
 import LogsPage from '@/pages/LogsPage'
 import EventsPage from '@/pages/EventsPage'
+import LiveEventsPage from '@/pages/LiveEventsPage'
 import AlertsPage from '@/pages/AlertsPage'
 import RulesPage from '@/pages/RulesPage'
 import DecodersPage from '@/pages/DecodersPage'
@@ -24,6 +25,8 @@ import UEBAPage from '@/pages/UEBAPage'
 import FimPage from '@/pages/FimPage'
 import HuntsPage from '@/pages/HuntsPage'
 import ReportsPage from '@/pages/ReportsPage'
+import SopPage from '@/pages/SopPage'
+import HandoverPage from '@/pages/HandoverPage'
 import LiveResponsePage from '@/pages/LiveResponsePage'
 import YaraPage from '@/pages/YaraPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
@@ -50,6 +53,7 @@ export default function App() {
             <Route path="/agents/:id/sources" element={<ProtectedRoute minRole="admin"><LogSourcesPage /></ProtectedRoute>} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/events" element={<EventsPage />} />
+            <Route path="/live-events" element={<LiveEventsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/cases" element={<CasesPage />} />
             <Route path="/cases/:id" element={<CaseDetailPage />} />
@@ -63,6 +67,8 @@ export default function App() {
             <Route path="/fim" element={<FimPage />} />
             <Route path="/hunts" element={<HuntsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/sop" element={<SopPage />} />
+            <Route path="/handover" element={<HandoverPage />} />
             <Route path="/mitre-heatmap" element={<MitreHeatmapPage />} />
             <Route path="/live-response" element={<LiveResponsePage />} />
             <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />

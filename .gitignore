@@ -6,6 +6,7 @@ __pycache__/
 # Node
 node_modules/
 .next/
+*.tsbuildinfo
 
 # Env and local data
 .env
@@ -19,3 +20,17 @@ claude.md
 
 # MaxMind GeoLite2 databases — large binaries, EULA prohibits redistribution
 /mmdb/*.mmdb
+
+.omo/
+
+# Build artifacts (do not commit binaries / bundles)
+agent/bin/
+agent/dist/
+dashboard/dist/
+*.deb
+*.rpm
+
+# Go workspace checksum (regenerated locally)
+go.work.sum
+
+.playwright-mcp/

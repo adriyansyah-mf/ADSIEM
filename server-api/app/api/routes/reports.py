@@ -91,7 +91,7 @@ Write a 3-paragraph executive summary IN {body.language.upper()} (the entire res
 
 Keep it concise — max 220 words total. No bullet points, pure paragraphs. Respond with plain text only, no markdown."""
 
-    narrative = await generate_text(api_key, model, prompt, max_tokens=2000)
+    narrative = await generate_text(api_key, model, prompt, max_tokens=2000, db=db)
 
     pdf_bytes = build_report_pdf(
         org_name=org_name,

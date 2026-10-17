@@ -6,7 +6,8 @@ from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_agent, get_current_user, require_permission
+from app.core.deps import get_agent, get_current_user, require_permission, get_scoped_group
+from app.core.http_client import get_http_client
 from app.models.models import Agent, HygieneSnapshot, User
 from app.schemas.schemas import HygieneSnapshotIn, HygieneSnapshotOut
 
@@ -47,53 +48,54 @@ async def _query_osv(packages: list[dict]) -> list[dict]:
         return []
     vulnerable = []
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Phase 1: batch query to find which packages have vulns
-            queries = [
-                {
-                    "package": {
-                        "name": p["name"],
-                        "ecosystem": _ECOSYSTEM_MAP.get(p.get("source", ""), "Debian"),
-                    },
-                    "version": p.get("version", ""),
-                }
-                for p in packages
-            ]
-            chunk = 100
-            pkg_vuln_ids: list[tuple[dict, list[str]]] = []
-            for i in range(0, len(queries), chunk):
-                resp = await client.post(OSV_BATCH_URL, json={"queries": queries[i: i + chunk]})
-                resp.raise_for_status()
-                for j, result in enumerate(resp.json().get("results", [])):
-                    ids = [v["id"] for v in result.get("vulns", []) if "id" in v]
-                    if ids:
-                        pkg_vuln_ids.append((packages[i + j], ids))
+        client = get_http_client()
+        # Phase 1: batch query to find which packages have vulns
+        queries = [
+            {
+                "package": {
+                    "name": p["name"],
+                    "ecosystem": _ECOSYSTEM_MAP.get(p.get("source", ""), "Debian"),
+                },
+                "version": p.get("version", ""),
+            }
+            for p in packages
+        ]
+        chunk = 100
+        pkg_vuln_ids: list[tuple[dict, list[str]]] = []
+        for i in range(0, len(queries), chunk):
+            resp = await client.post(OSV_BATCH_URL, json={"queries": queries[i: i + chunk]})
+            resp.raise_for_status()
+            for j, result in enumerate(resp.json().get("results", [])):
+                ids = [v["id"] for v in result.get("vulns", []) if "id" in v]
+                if ids:
+                    pkg_vuln_ids.append((packages[i + j], ids))
 
-            # Phase 2: fetch full detail for each unique vuln ID (capped to avoid too many calls)
-            all_ids = list({vid for _, ids in pkg_vuln_ids for vid in ids[:5]})
-            id_detail: dict[str, dict] = {}
-            sem = asyncio.Semaphore(10)
+        # Phase 2: fetch full detail for each unique vuln ID (capped to avoid too many calls)
+        all_ids = list({vid for _, ids in pkg_vuln_ids for vid in ids[:5]})
+        id_detail: dict[str, dict] = {}
+        sem = asyncio.Semaphore(10)
 
-            async def fetch_one(vid: str) -> None:
-                async with sem:
-                    try:
-                        r = await client.get(f"https://api.osv.dev/v1/vulns/{vid}")
-                        if r.status_code == 200:
-                            id_detail[vid] = r.json()
-                    except Exception:
-                        pass
+        async def fetch_one(vid: str) -> None:
+            async with sem:
+                try:
+                    r = await client.get(f"https://api.osv.dev/v1/vulns/{vid}")
+                    if r.status_code == 200:
+                        id_detail[vid] = r.json()
+                except Exception:
+                    pass
 
-            await asyncio.gather(*[fetch_one(vid) for vid in all_ids])
+        await asyncio.gather(*[fetch_one(vid) for vid in all_ids])
 
-            for pkg, ids in pkg_vuln_ids:
-                vuln_items = [_parse_vuln(id_detail[vid]) for vid in ids[:5] if vid in id_detail]
-                vulnerable.append({
-                    "package": pkg,
-                    "vulns": vuln_items,
-                    "vuln_count": len(ids),
-                })
-    except Exception:
-        pass
+        for pkg, ids in pkg_vuln_ids:
+            vuln_items = [_parse_vuln(id_detail[vid]) for vid in ids[:5] if vid in id_detail]
+            vulnerable.append({
+                "package": pkg,
+                "vulns": vuln_items,
+                "vuln_count": len(ids),
+            })
+    except Exception as exc:
+        import structlog
+        structlog.get_logger().warning("osv_query_failed", error=str(exc))
     return vulnerable
 
 
@@ -129,6 +131,7 @@ async def ingest_hygiene(
 @router.get("/api/hygiene/latest", response_model=list[HygieneSnapshotOut])
 async def get_latest_snapshots(
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Latest snapshot per agent."""
@@ -141,12 +144,15 @@ async def get_latest_snapshots(
         .group_by(HygieneSnapshot.agent_id)
         .subquery()
     )
-    result = await db.execute(
+    q = (
         select(HygieneSnapshot)
         .join(sub, (HygieneSnapshot.agent_id == sub.c.agent_id) &
               (HygieneSnapshot.collected_at == sub.c.max_at))
         .order_by(desc(HygieneSnapshot.hygiene_score))
     )
+    if group_filter is not None:
+        q = q.where(HygieneSnapshot.group_id == group_filter)
+    result = await db.execute(q)
     snaps = result.scalars().all()
     return [_snap_out(s) for s in snaps]
 
@@ -155,16 +161,14 @@ async def get_latest_snapshots(
 async def get_agent_vulns(
     agent_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Query osv.dev for known CVEs in the agent's installed packages."""
-    result = await db.execute(
-        select(HygieneSnapshot)
-        .where(HygieneSnapshot.agent_id == agent_id)
-        .order_by(desc(HygieneSnapshot.collected_at))
-        .limit(1)
-    )
-    snap = result.scalar_one_or_none()
+    q = select(HygieneSnapshot).where(HygieneSnapshot.agent_id == agent_id)
+    if group_filter is not None:
+        q = q.where(HygieneSnapshot.group_id == group_filter)
+    snap = (await db.execute(q.order_by(desc(HygieneSnapshot.collected_at)).limit(1))).scalar_one_or_none()
     if not snap:
         raise HTTPException(status_code=404, detail="No hygiene snapshot found")
     packages = snap.packages or []
@@ -184,15 +188,13 @@ async def get_agent_vulns(
 async def get_agent_hygiene_history(
     agent_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    result = await db.execute(
-        select(HygieneSnapshot)
-        .where(HygieneSnapshot.agent_id == agent_id)
-        .order_by(desc(HygieneSnapshot.collected_at))
-        .limit(24)
-    )
-    snaps = result.scalars().all()
+    q = select(HygieneSnapshot).where(HygieneSnapshot.agent_id == agent_id)
+    if group_filter is not None:
+        q = q.where(HygieneSnapshot.group_id == group_filter)
+    snaps = (await db.execute(q.order_by(desc(HygieneSnapshot.collected_at)).limit(24))).scalars().all()
     return [_snap_out(s) for s in snaps]
 
 

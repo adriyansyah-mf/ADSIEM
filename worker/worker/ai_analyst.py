@@ -14,6 +14,7 @@ Alur per alert:
 """
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -63,26 +64,107 @@ async def _build_ti_config() -> TIConfig:
     )
 
 
+_FIELD_SYNTAX = re.compile(
+    r"\b(?:src_ip|source_ip|dst_ip|dest_ip|dest_host|uri|url|hostname|host|agent_id|"
+    r"index|source\.ip|destination\.ip|http\.request\.uri|user\.name|event\.action)\b"
+    r"\s*(?:[:=]|\bCONTAINS\b|\bLIKE\b|\bMATCH\b)",
+    re.I,
+)
+_PRIVATE_IP = re.compile(
+    r"\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168|127|169\.254|192\.0\.2|198\.51\.100|203\.0\.113)\.\d{1,3}(?:\.\d{1,3})?\b"
+)
+_OUR_HOSTNAMES = re.compile(r"\bagent-demo\b", re.I)
+_SPLUNK_PIPE = re.compile(r"\|\s*(?:stats|table|eval|dedup|sort)\b", re.I)
+
+
+def _is_internal_query(query: str) -> bool:
+    return bool(
+        not query
+        or _FIELD_SYNTAX.search(query)
+        or _PRIVATE_IP.search(query)
+        or _OUR_HOSTNAMES.search(query)
+        or _SPLUNK_PIPE.search(query)
+    )
+
+
+def _derive_public_query(*parts: Optional[str]) -> Optional[str]:
+    """Build a public-safe query from an alert's own description.
+
+    Used when the model supplies only telemetry filters: the alert title and
+    MITRE technique are always safe to search for and still describe the threat,
+    so the analyst gets research instead of silence.
+    """
+    chunks: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        text = _PRIVATE_IP.sub(" ", str(part))
+        text = _OUR_HOSTNAMES.sub(" ", text)
+        text = _FIELD_SYNTAX.sub(" ", text)
+        text = _SPLUNK_PIPE.sub(" ", text)
+        text = re.sub(r"[^\w\s\-/.:]", " ", text)
+        text = " ".join(text.split())
+        if text:
+            chunks.append(text[:90])
+    if not chunks:
+        return None
+    derived = " ".join(chunks)
+    return derived if not _is_internal_query(derived) else None
+
+
+def _sanitize_search_query(query: str) -> str | None:
+    """Return the query if it is usable as a public web search, else None.
+
+    The model sometimes expresses local telemetry as a query over our own
+    fields ("src_ip=203.0.113.19 AND uri=*.env*", "index=auth host=agent-demo",
+    "| stats count by user"). Those are correct for analysis but the public
+    search backend rejects them as internal lookups, so they are discarded here
+    and _run_ai_searches falls back to a query derived from the alert itself.
+    """
+    if not query:
+        return None
+    if _is_internal_query(query):
+        return None
+    return " ".join(query.split()) or None
+
+
 async def _run_ai_searches(
     alert_id: str,
     case_id: Optional[str],
     search_queries: list[str],
+    *,
+    alert_title: Optional[str] = None,
+    mitre_techniques: Optional[list[str]] = None,
 ) -> None:
     """
     Jalankan SearXNG dengan query yang dipilih AI sendiri,
     lalu tambahkan hasilnya ke alert note (dan case note jika ada).
     """
-    if not search_queries:
-        return
+    queries = [_sanitize_search_query(q) for q in (search_queries or [])]
+    queries = [q for q in queries if q]
+
+    if not queries:
+        derived = _derive_public_query(alert_title, (mitre_techniques or [None])[0])
+        if derived:
+            queries = [derived]
+            log.info("ai_search_query_derived", alert_id=alert_id, query=derived)
+        else:
+            log.info("ai_search_no_usable_query", alert_id=alert_id)
+            return
+    else:
+        skipped = len(search_queries) - len(queries)
+        if skipped:
+            log.info("ai_search_queries_filtered", alert_id=alert_id, kept=len(queries), dropped=skipped)
+
     all_results = []
-    for query in search_queries[:3]:
+    for safe_query in queries[:3]:
         # Prefer 9router's /v1/search (multi-provider auto-fallback if a
         # search-combo is configured); fall back to direct SearXNG on failure.
-        results = await search_via_9router(query, num_results=4)
+        results = await search_via_9router(safe_query, num_results=4)
         if not results:
-            results = await search_threat_intel(query, num_results=4)
+            results = await search_threat_intel(safe_query, num_results=4)
         if results:
-            all_results.append((query, results))
+            all_results.append((safe_query, results))
         await asyncio.sleep(0.5)
 
     if not all_results:
@@ -425,6 +507,14 @@ async def _maybe_enqueue_hunt(source_ip: str, group_id: str) -> None:
         log.warning("hunt_enqueue_failed", source_ip=source_ip, error=str(exc))
 
 
+async def _graph_enrich(text_blob: str, alert_title: str):
+    """Adapter so the triage graph can call TI enrichment without knowing how
+    the aggregator is constructed."""
+    cfg = await _build_ti_config()
+    aggregator = EnrichmentAggregator(cfg)
+    return await aggregator.enrich(text_blob, alert_title=alert_title)
+
+
 async def analyze_and_maybe_create_case(
     alert_id: str,
     title: str,
@@ -438,197 +528,65 @@ async def analyze_and_maybe_create_case(
     if enabled.lower() == "false":
         return
 
-    _threshold_str = await get_setting("ai_confidence_threshold", "0.0")
-    try:
-        _confidence_threshold = float(_threshold_str)
-    except (ValueError, TypeError):
-        _confidence_threshold = 0.0
+    from worker.config import NINEROUTER_API_KEY, NINEROUTER_BASE_URL, NINEROUTER_MODEL
+    from worker.graph.checkpoint import triage_lock
+    from worker.graph.triage_graph import build_triage_graph
+    from worker.redis_client import get_redis
 
-    # ── 1. TI enrichment (best-effort) ──────────────────────────────────────
-    text_blob = "\n".join(filter(None, [title, source_ip, hostname,
-                                        json.dumps(decoded_fields, default=str)[:800]]))
-    cfg = await _build_ti_config()
-    aggregator = EnrichmentAggregator(cfg)
+    api_key = await get_setting("ninerouter_api_key") or NINEROUTER_API_KEY
+    if not api_key:
+        log.warning("ai_triage_skipped", alert_id=alert_id, reason="no 9router api key")
+        return
+    model = await get_setting("ninerouter_model", NINEROUTER_MODEL)
 
-    try:
-        enrichment = await aggregator.enrich(text_blob, alert_title=title)
-    except Exception as e:
-        log.warning("enrichment_failed", error=str(e))
-        enrichment = None
-
-    # ── 2. Eskalasi severity dari TI ────────────────────────────────────────
-    effective_severity = severity
-    if enrichment and enrichment.overall_risk > 0:
-        effective_severity = _escalate_severity(severity, enrichment.overall_risk)
-        if effective_severity != severity:
-            log.info("severity_escalated", original=severity, escalated=effective_severity)
-
-    heuristic_mitre = suggest_mitre(text_blob)
-
-    # ── 2b. Auto-enqueue threat hunt for malicious IPs ───────────────────────
-    if source_ip and enrichment and enrichment.overall_risk > 0.5:
-        asyncio.ensure_future(_maybe_enqueue_hunt(source_ip, group_id))
-
-    # ── RAG — similar past cases ─────────────────────────────────────────────
-    query_text = f"{title}\n{source_ip or ''}\n{hostname or ''}"
-    similar_cases = await retrieve_similar_cases(query_text, group_id)
-    if similar_cases:
-        log.info("rag_similar_found", alert_id=alert_id, count=len(similar_cases),
-                 top_similarity=round(float(similar_cases[0].get("similarity", 0)), 2))
-
-    # ── RAG — SOP perusahaan ─────────────────────────────────────────────────
-    sop_context = await retrieve_sop_context(query_text, group_id)
-    if sop_context:
-        log.info("rag_sop_found", alert_id=alert_id, chunks=len(sop_context))
-
-    # ── RAG — analyst feedback on past AI verdicts ───────────────────────────
-    feedback_context = await retrieve_feedback_context(query_text, group_id)
-    if feedback_context:
-        log.info("rag_feedback_found", alert_id=alert_id, count=len(feedback_context))
-
-    # ── 3. Groq L1 triage — selalu dijalankan ───────────────────────────────
-    analysis = await analyze_alert_with_ai(
-        title=title,
-        severity=effective_severity,
-        source_ip=source_ip,
-        hostname=hostname,
-        decoded_fields=decoded_fields,
-        enrichment=enrichment,
-        heuristic_mitre=heuristic_mitre,
-        similar_cases=similar_cases if similar_cases else None,
-        sop_context=sop_context if sop_context else None,
-        feedback_context=feedback_context if feedback_context else None,
+    graph = build_triage_graph(
+        base_url=NINEROUTER_BASE_URL,
+        api_key=api_key,
+        model=model,
+        deps={
+            "enrich": _graph_enrich,
+            "escalate_severity": _escalate_severity,
+            "suggest_mitre": suggest_mitre,
+            "retrieve_similar_cases": retrieve_similar_cases,
+            "retrieve_sop_context": retrieve_sop_context,
+            "retrieve_feedback_context": retrieve_feedback_context,
+            "enqueue_hunt": _maybe_enqueue_hunt,
+            "get_setting": get_setting,
+            "set_alert_verdict": _set_alert_verdict,
+            "write_alert_note": _write_alert_note,
+            "tag_alert_with_mitre": _tag_alert_with_mitre,
+            "run_soar_playbooks": run_soar_playbooks,
+            "update_alert_status": _update_alert_status,
+            "run_searches": _run_ai_searches,
+            "find_existing_open_case": _find_existing_open_case,
+            "add_note_to_existing_case": _add_note_to_existing_case,
+            "create_case_from_verdict": _create_case_from_verdict,
+            "analyze_campaign": analyze_campaign,
+            "check_fleet_spread": _check_and_note_fleet_spread,
+            "dispatch_case_webhooks": dispatch_case_webhooks,
+        },
     )
 
-    verdict = analysis.get("verdict", "monitor")
-    triage_notes = analysis.get("triage_notes", "")
-    confidence = analysis.get("confidence", 0.0)
-    actions = analysis.get("immediate_actions", [])
-    search_queries = analysis.get("search_queries", [])
+    state = {
+        "alert_id": alert_id,
+        "title": title,
+        "severity": severity,
+        "source_ip": source_ip,
+        "hostname": hostname,
+        "decoded_fields": decoded_fields,
+        "group_id": group_id,
+        "similar_cases": [],
+        "sop_context": [],
+        "feedback_context": [],
+    }
 
-    if confidence < _confidence_threshold and verdict not in ("monitor", "false_positive"):
-        log.info("ai_low_confidence_downgrade",
-                 alert_id=alert_id, confidence=confidence,
-                 threshold=_confidence_threshold, original_verdict=verdict)
-        verdict = "monitor"
-
-    log.info("ai_l1_triage_done",
-             alert_id=alert_id,
-             verdict=verdict,
-             severity=effective_severity,
-             confidence=confidence)
-    if alert_id:
-        asyncio.ensure_future(_set_alert_verdict(alert_id, verdict))
-
-    # ── 4. Tulis triage notes ke alert (selalu, apapun verdictnya) ──────────
-    actions_str = ("\n\n**Immediate Actions:**\n" + "\n".join(f"- {a}" for a in actions)) if actions else ""
-    note_content = (
-        f"## 🤖 AI L1 Triage — {verdict.upper()}\n\n"
-        f"**Confidence:** {confidence:.0%}\n\n"
-        f"**Investigation Notes:**\n{triage_notes}"
-        f"{actions_str}"
-    )
-    await _write_alert_note(alert_id, note_content)
-    await _tag_alert_with_mitre(alert_id, analysis.get("mitre_techniques", []))
-
-    # ── 4c. Fire SOAR playbooks with AI context (fire-and-forget) ───────────
-    if alert_id:
-        try:
-            alert_uuid = uuid.UUID(alert_id)
-            rule_match_ctx = {
-                "level": effective_severity,
-                "title": title,
-                "tags": decoded_fields.get("tags", []),
-                "mitre_tags": analysis.get("mitre_techniques", []),
-            }
-            asyncio.ensure_future(run_soar_playbooks(
-                alert_id=alert_uuid,
-                rule_match=rule_match_ctx,
-                source_ip=source_ip,
-                hostname=hostname,
-                user_name=decoded_fields.get("user.name"),
-                group_id=group_id,
-                ai_verdict=verdict,
-                ai_confidence=confidence,
-                ti_risk_score=enrichment.overall_risk if enrichment else None,
-            ))
-        except Exception as exc:
-            log.warning("ai_soar_dispatch_failed", alert_id=alert_id, error=str(exc))
-
-    # ── 5. Update alert status berdasarkan verdict ───────────────────────────
-    # Verdicts that end here never reach a case, so this is the only place
-    # web research runs for them (avoids the double-run that create_case/
-    # escalate get further down once the case_id is known).
-    if verdict == "false_positive":
-        fp_reason = analysis.get("false_positive_reason", "Determined by AI L1")
-        await _update_alert_status(alert_id, "closed")
-        if search_queries:
-            asyncio.ensure_future(_run_ai_searches(alert_id, None, search_queries))
-        log.info("alert_closed_as_fp", alert_id=alert_id, reason=fp_reason)
-        return
-
-    if verdict == "monitor":
-        await _update_alert_status(alert_id, "acknowledged")
-        if search_queries:
-            asyncio.ensure_future(_run_ai_searches(alert_id, None, search_queries))
-        return
-
-    # verdict == "create_case" atau "escalate"
-    await _update_alert_status(alert_id, "acknowledged")
-
-    # ── 6. Cek apakah sudah ada open case untuk entity yang sama ────────────
-    existing_case_id = await _find_existing_open_case(source_ip, hostname, group_id)
-    if existing_case_id:
-        await _add_note_to_existing_case(
-            existing_case_id, alert_id, title, triage_notes, effective_severity
+    # One replica owns each alert's triage; the other skips rather than
+    # double-creating a case or double-firing SOAR actions.
+    redis = await get_redis()
+    async with triage_lock(redis, alert_id) as owned:
+        if not owned:
+            log.info("ai_triage_already_running", alert_id=alert_id)
+            return
+        await graph.ainvoke(
+            state, {"configurable": {"thread_id": f"triage-{alert_id}"}}
         )
-        asyncio.ensure_future(analyze_campaign(
-            trigger_alert_id=alert_id,
-            source_ip=source_ip,
-            hostname=hostname,
-            group_id=group_id,
-            case_id=existing_case_id,
-        ))
-        asyncio.ensure_future(_check_and_note_fleet_spread(existing_case_id, title, group_id, hostname))
-        if search_queries:
-            asyncio.ensure_future(_run_ai_searches(alert_id, existing_case_id, search_queries))
-        return
-
-    # ── 7. Buat case baru ───────────────────────────────────────────────────
-    case_id = await _create_case_from_verdict(
-        alert_id=alert_id,
-        title=title,
-        severity=effective_severity,
-        verdict=verdict,
-        analysis=analysis,
-        enrichment=enrichment,
-        group_id=group_id,
-    )
-
-    if not case_id:
-        return
-
-    # ── 8. Campaign analyzer + fleet-wide check + search results (background) ─
-    asyncio.ensure_future(analyze_campaign(
-        trigger_alert_id=alert_id,
-        source_ip=source_ip,
-        hostname=hostname,
-        group_id=group_id,
-        case_id=case_id,
-    ))
-    asyncio.ensure_future(_check_and_note_fleet_spread(case_id, title, group_id, hostname))
-    if search_queries:
-        asyncio.ensure_future(_run_ai_searches(alert_id, case_id, search_queries))
-
-    # ── 9. Webhook notification ─────────────────────────────────────────────
-    try:
-        await dispatch_case_webhooks(
-            case_id=case_id,
-            title=f"{'🚨 ESCALATED' if verdict == 'escalate' else '[AI]'} {title}",
-            severity=effective_severity,
-            description=triage_notes[:500] if triage_notes else "",
-            group_id=group_id,
-            alert_id=uuid.UUID(alert_id) if alert_id else None,
-        )
-    except Exception as exc:
-        log.warning("case_webhook_dispatch_failed", error=str(exc))

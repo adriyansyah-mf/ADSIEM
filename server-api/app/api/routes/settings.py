@@ -1,12 +1,15 @@
 # server-api/app/api/routes/settings.py
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_permission
+from app.core.deps import require_permission
 from app.models.models import PlatformSetting, User
 from app.schemas.schemas import SettingOut, SettingUpdate
+from app.services.audit import audit_log
 
 router = APIRouter(tags=["settings"])
 Perm = require_permission("settings:manage")
@@ -30,6 +33,7 @@ async def list_settings(
 @router.put("/api/settings/{key}", response_model=SettingOut)
 async def update_setting(
     key: str, body: SettingUpdate,
+    background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(Perm)],
 ):
@@ -41,4 +45,8 @@ async def update_setting(
     setting.updated_by = current_user.id
     await db.commit()
     await db.refresh(setting)
+    background.add_task(
+        audit_log, db, current_user.id, "setting_updated", "platform_setting", key,
+        {"is_secret": bool(setting.is_secret)},
+    )
     return _mask(setting)

@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_permission, get_scoped_group
+from app.core.deps import get_current_user, require_permission, get_scoped_group, fetch_scoped
 from app.models.models import AiFeedback, Alert, AlertNote, Case, CaseNote, User
 from app.schemas.schemas import (
     AiFeedbackCreate, AiFeedbackOut, CaseOut, CaseCreate, CaseUpdate,
@@ -21,21 +21,23 @@ router = APIRouter(tags=["cases"])
 
 async def _push_rag_reindex(case_id: str) -> None:
     """Push case_id to Redis reindex queue so worker indexes it immediately."""
+    import structlog
     try:
         redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
         await redis.rpush("siem:rag:reindex", case_id)
         await redis.aclose()
-    except Exception:
-        pass  # non-critical: hourly loop will catch it
+    except Exception as exc:
+        structlog.get_logger().warning("rag_reindex_push_failed", case_id=case_id, error=str(exc))
 
 async def _push_feedback_reindex(feedback_id: str) -> None:
     """Push feedback_id to Redis queue so the worker embeds it for RAG retrieval."""
+    import structlog
     try:
         redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
         await redis.rpush("siem:rag:feedback-reindex", feedback_id)
         await redis.aclose()
-    except Exception:
-        pass  # non-critical: feedback row is already saved regardless
+    except Exception as exc:
+        structlog.get_logger().warning("feedback_reindex_push_failed", feedback_id=feedback_id, error=str(exc))
 
 def _case_q(group_filter):
     q = select(Case).options(selectinload(Case.notes))
@@ -109,11 +111,12 @@ async def update_case(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("cases:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Case).options(selectinload(Case.notes)).where(Case.id == case_id))
-    case = result.scalar_one_or_none()
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = await fetch_scoped(
+        db, Case, case_id, group_filter,
+        options=[selectinload(Case.notes)], detail="Case not found",
+    )
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(case, field, value)
     await db.commit()
@@ -129,12 +132,13 @@ async def escalate_case(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("cases:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
     from datetime import datetime
-    result = await db.execute(select(Case).options(selectinload(Case.notes)).where(Case.id == case_id))
-    case = result.scalar_one_or_none()
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = await fetch_scoped(
+        db, Case, case_id, group_filter,
+        options=[selectinload(Case.notes)], detail="Case not found",
+    )
     case.status = "escalated"
     case.escalated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -147,10 +151,9 @@ async def add_note(
     case_id: UUID, body: CaseNoteCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Case).where(Case.id == case_id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Case not found")
+    await fetch_scoped(db, Case, case_id, group_filter, detail="Case not found")
     note = CaseNote(case_id=case_id, author_id=current_user.id, content=body.content, is_ai_generated=False)
     db.add(note)
     await db.commit()
@@ -162,7 +165,9 @@ async def list_case_feedback(
     case_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
+    await fetch_scoped(db, Case, case_id, group_filter, detail="Case not found")
     result = await db.execute(
         select(AiFeedback)
         .where(AiFeedback.entity_type == "case", AiFeedback.entity_id == case_id)
@@ -176,10 +181,9 @@ async def submit_case_feedback(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = await fetch_scoped(db, Case, case_id, group_filter, detail="Case not found")
 
     feedback = AiFeedback(
         entity_type="case",
@@ -204,11 +208,9 @@ async def delete_case(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("cases:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(Case).where(Case.id == case_id))
-    case = result.scalar_one_or_none()
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = await fetch_scoped(db, Case, case_id, group_filter, detail="Case not found")
     await db.delete(case)
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "case_deleted", "case", str(case_id))
@@ -216,16 +218,15 @@ async def delete_case(
 @router.get("/api/cases/{case_id}/timeline")
 async def case_timeline(
     case_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)],
     _: User = Depends(get_current_user),
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    """Return chronological related alerts and notes for a case (±24h window around case creation)."""
+    """Return chronological related alerts and notes for a case (A�24h window around case creation)."""
     import uuid as _uuid
     from datetime import timedelta
 
-    case = await db.get(Case, _uuid.UUID(case_id))
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = await fetch_scoped(db, Case, _uuid.UUID(case_id), group_filter, detail="Case not found")
 
     items = []
     window_start = case.created_at - timedelta(hours=24)
@@ -235,14 +236,15 @@ async def case_timeline(
     source_ip = None
     hostname  = None
     if case.alert_id:
-        triggering = await db.get(Alert, case.alert_id)
-        if triggering:
-            source_ip = triggering.source_ip
-            hostname  = triggering.hostname
+        triggering = await fetch_scoped(db, Alert, case.alert_id, group_filter, detail="Alert not found")
+        source_ip = triggering.source_ip
+        hostname  = triggering.hostname
 
-    # Related alerts: same source_ip or hostname within ±24h
+    # Related alerts: same source_ip or hostname within A�24h
     if source_ip or hostname:
         filters = [Alert.created_at.between(window_start, window_end)]
+        if group_filter is not None:
+            filters.append(Alert.group_id == group_filter)
         if source_ip and hostname:
             filters.append(or_(Alert.source_ip == source_ip, Alert.hostname == hostname))
         elif source_ip:

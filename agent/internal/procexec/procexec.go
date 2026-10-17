@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package procexec streams process-exec events (Sigma "process_creation"
 // logsource: Image, CommandLine, ParentImage, PPID, User) into the log
 // buffer by attaching an eBPF program to tracepoint/syscalls/sys_enter_execve.

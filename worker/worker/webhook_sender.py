@@ -9,6 +9,7 @@ from sqlalchemy import select
 from worker.config import MAX_WEBHOOK_ATTEMPTS, WEBHOOK_RETRY_INTERVAL
 from worker.database import AsyncSessionLocal
 from worker.models import WebhookConfig, WebhookDelivery
+from worker.url_guard import is_safe_outbound_url
 
 log = structlog.get_logger()
 
@@ -143,6 +144,9 @@ async def _deliver(delivery: WebhookDelivery, config: WebhookConfig) -> None:
     async with AsyncSessionLocal() as db:
         now = datetime.now(timezone.utc)
         try:
+            safe, reason = is_safe_outbound_url(config.url)
+            if not safe:
+                raise ValueError(f"webhook URL rejected by SSRF guard: {reason}")
             is_discord = "discord.com/api/webhooks" in config.url
             # Select payload format based on webhook config
             fmt = getattr(config, "payload_format", "default") or "default"

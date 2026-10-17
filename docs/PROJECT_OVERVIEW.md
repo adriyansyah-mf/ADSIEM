@@ -32,7 +32,7 @@ Platform SIEM (Security Information and Event Management) open-source yang diban
 
 ## Komponen
 
-### 1. Agent (`agent/`) — Go 1.22
+### 1. Agent (`agent/`) — Go 1.25 (go.mod)
 
 Lightweight binary yang di-deploy ke setiap endpoint yang ingin dipantau.
 
@@ -139,7 +139,7 @@ Redis Stream
 - **MITRE ATT&CK:** Mapping teknik dan taktik
 
 #### AI Analyst
-- Groq API (LLM) untuk chat analyst
+- 9router (LLM router, `NINEROUTER_*`) untuk chat analyst
 - SearXNG untuk web search dalam konteks investigasi
 - Akses ke alert, event, case sebagai konteks
 
@@ -234,7 +234,7 @@ Alert masuk ke antrian Redis
   → TI Enrichment (7 provider paralel)
   → Heuristic MITRE mapping dari teks alert
   → Severity escalation otomatis berdasarkan TI risk score
-  → LLM (Groq / LLaMA-3.3-70B) analisis sebagai SOC L1
+  → LLM (via 9router) analisis sebagai SOC L1
   → Keputusan: buat case atau abaikan
   → Jika case dibuat: simpan reasoning + TI summary + IOC
   → Dispatch webhook notifikasi case baru
@@ -301,7 +301,7 @@ Analyst submit IoC (IP / domain / hash / user)
   → Query seluruh Alert + Event historis yang mengandung IoC tersebut
   → Query FIM events (untuk hash IoC)
   → Build timeline kronologis
-  → LLM (Groq) analisis timeline sebagai threat hunter
+  → LLM (via 9router) analisis timeline sebagai threat hunter
   → Output disimpan ke DB, tampil di halaman Hunts
 ```
 
@@ -387,7 +387,7 @@ Simpan `key` dari langkah 3 ke `platform_settings.ninerouter_api_key` (lewat das
 
 | Layer | Teknologi |
 |-------|-----------|
-| Agent | Go 1.22, statically linked |
+| Agent | Go 1.25 (go.mod), statically linked |
 | API | Python 3.12, FastAPI, SQLAlchemy async, Alembic |
 | Worker | Python 3.12, asyncio, scikit-learn (Isolation Forest) |
 | Dashboard | React 18, TypeScript, Vite, TailwindCSS, Zustand, Recharts |
@@ -395,7 +395,7 @@ Simpan `key` dari langkah 3 ke `platform_settings.ninerouter_api_key` (lewat das
 | Queue | Redis 7 (Stream) |
 | Proxy | Nginx |
 | Search | SearXNG |
-| AI (LLM) | Groq API, LLaMA-3.3-70B-Versatile |
+| AI (LLM) | 9router (OpenAI-compatible), model dikonfigurasi di Settings |
 | AI (Search) | SearXNG (self-hosted) |
 | AI (TI) | AbuseIPDB, VirusTotal, OTX, GreyNoise, URLhaus, GeoIP, Whois |
 | ML (UEBA) | scikit-learn Isolation Forest |
@@ -407,21 +407,26 @@ Simpan `key` dari langkah 3 ke `platform_settings.ninerouter_api_key` (lewat das
 
 ```bash
 # Production
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 # Development
-docker compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
-Environment variables utama di `.env`:
+Environment variables utama di `.env` (lihat `.env.example` untuk daftar lengkap):
 ```
 DATABASE_URL=postgresql+asyncpg://...
 REDIS_URL=redis://redis:6379
-SECRET_KEY=...
-GROQ_API_KEY=...
-VIRUSTOTAL_API_KEY=...
-ABUSEIPDB_API_KEY=...
+JWT_SECRET=...            # wajib, `openssl rand -hex 32`
+AGENT_ENROLLMENT_TOKEN=...
+NINEROUTER_BASE_URL=http://9router:20128/v1
+NINEROUTER_API_KEY=...
+SEARXNG_URL=http://searxng:8080
 ```
+
+Catatan:
+- Queue message broker adalah **Redis Streams** (`siem:logs`), bukan NATS.
+- LLM untuk AI analyst dilayani lewat **9router** (`NINEROUTER_*`), bukan Groq langsung.
 
 ---
 

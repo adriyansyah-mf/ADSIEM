@@ -2,7 +2,7 @@ fastapi==0.115.5
 uvicorn[standard]==0.32.1
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
-redis==5.2.0
+redis==5.2.1
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 argon2-cffi==25.1.0
@@ -24,3 +24,4 @@ slowapi==0.1.9
 pyotp==2.9.0
 qrcode[pil]==8.0
 geoip2==4.8.0
+langgraph==1.2.15

@@ -11,6 +11,32 @@ Tree shape (JSON, sent by the frontend as-is):
 # term/wildcard queries work directly on these without a `.keyword` sub-field.
 _KEYWORD_FIELDS = {"log_type", "agent_id", "group_id", "event_category", "event_action", "source_ip", "user_name"}
 
+# Fields a client-supplied filter-tree condition may target. Anything outside
+# this set (plus `decoded_fields.*`) is rejected so a caller cannot probe
+# arbitrary index structure or force expensive queries on unmapped fields.
+_ALLOWED_FILTER_FIELDS = _KEYWORD_FIELDS | {"raw_message", "created_at", "hostname"}
+
+_MAX_QUERY_LENGTH = 512
+
+
+def sanitize_query_string(q: str) -> str:
+    """Constrain a user-supplied Lucene query_string.
+
+    Strips the leading-wildcard/regex constructs that make ES queries expensive
+    (search DoS) and caps length. Returns the cleaned query; callers should also
+    set allow_leading_wildcard=False on the query.
+    """
+    if q is None:
+        return ""
+    cleaned = q.strip()
+    for ch in ("*", "?", "~", "/", "\\"):
+        cleaned = cleaned.replace(ch, " ")
+    return cleaned[:_MAX_QUERY_LENGTH]
+
+
+def _field_allowed(field: str) -> bool:
+    return field in _ALLOWED_FILTER_FIELDS or field.startswith("decoded_fields.")
+
 
 def _keyword_field(field: str) -> str:
     """Field name to use for exact-match (term/wildcard) queries."""
@@ -25,7 +51,7 @@ def _keyword_field(field: str) -> str:
 
 def _condition_to_query(node: dict) -> dict | None:
     field = (node.get("field") or "").strip()
-    if not field:
+    if not field or not _field_allowed(field):
         return None
     op = node.get("operator", "contains")
     value = node.get("value", "")

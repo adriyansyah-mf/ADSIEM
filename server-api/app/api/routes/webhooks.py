@@ -6,7 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_scoped_group, require_permission, get_current_user
+from app.core.deps import get_scoped_group, require_permission, get_current_user, fetch_scoped
+from app.core.url_guard import validate_outbound_url
 from typing import Annotated
 from app.models.models import User, WebhookConfig
 from app.schemas.schemas import PaginatedResponse, WebhookCreate, WebhookOut, WebhookUpdate
@@ -38,6 +39,7 @@ async def create_webhook(
     group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
     data = body.model_dump()
+    validate_outbound_url(data.get("url"))
     if not data.get("group_id"):
         data["group_id"] = group_filter or current_user.group_id
     webhook = WebhookConfig(**data)
@@ -53,12 +55,13 @@ async def update_webhook(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("agents:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(WebhookConfig).where(WebhookConfig.id == webhook_id))
-    webhook = result.scalar_one_or_none()
-    if not webhook:
-        raise HTTPException(status_code=404, detail="Webhook not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+    webhook = await fetch_scoped(db, WebhookConfig, webhook_id, group_filter, detail="Webhook not found")
+    updates = body.model_dump(exclude_none=True)
+    if updates.get("url") is not None:
+        validate_outbound_url(updates["url"])
+    for field, value in updates.items():
         setattr(webhook, field, value)
     await db.commit()
     await db.refresh(webhook)
@@ -71,11 +74,9 @@ async def delete_webhook(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("agents:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    result = await db.execute(select(WebhookConfig).where(WebhookConfig.id == webhook_id))
-    webhook = result.scalar_one_or_none()
-    if not webhook:
-        raise HTTPException(status_code=404, detail="Webhook not found")
+    webhook = await fetch_scoped(db, WebhookConfig, webhook_id, group_filter, detail="Webhook not found")
     await db.delete(webhook)
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "webhook_deleted", "webhook", str(webhook_id))

@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import { format } from 'date-fns'
 import { Search, Loader2 } from 'lucide-react'
 import AlertDetailModal from '@/components/AlertDetailModal'
+import { AlertsOverTimeChart, SeverityBars, TopSourcesChart, MttrTrendChart } from '@/components/MetricsCharts'
+import { useSocTimeseries, useTopSources, useMttrTrend } from '@/hooks/useMetrics'
 import type { Alert, Agent, Case, Event } from '@/types'
 
 interface WorkloadItem { user_id: string; username: string; open_alerts: number; open_cases: number; total: number }
@@ -98,6 +100,16 @@ function StatRow({ label, value, color, onClick }: { label: string; value: numbe
 export default function DashboardPage() {
   const navigate = useNavigate()
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null)
+  const [wideLayout, setWideLayout] = useState(() => window.matchMedia('(min-width: 1100px)').matches)
+
+  useEffect(() => {
+    const wideQ = window.matchMedia('(min-width: 1100px)')
+    const apply = () => setWideLayout(wideQ.matches)
+    apply()
+    wideQ.addEventListener('change', apply)
+    return () => wideQ.removeEventListener('change', apply)
+  }, [])
+
   const { data: allAlerts } = useQuery({
     queryKey: ['alerts-dashboard'],
     queryFn: () => api.get('/api/alerts', { params: { page_size: 200 } }).then(r => r.data),
@@ -133,6 +145,10 @@ export default function DashboardPage() {
     queryFn: () => api.get('/api/metrics/soc').then(r => r.data),
     refetchInterval: 60_000,
   })
+
+  const { data: timeseries } = useSocTimeseries(7)
+  const { data: topSources } = useTopSources(7)
+  const { data: mttrTrend } = useMttrTrend(30)
 
   const { data: workload = [] } = useQuery<WorkloadItem[]>({
     queryKey: ['metrics-workload'],
@@ -191,9 +207,11 @@ export default function DashboardPage() {
 
   return (
     <>
-    <div style={{ display: 'flex', gap: '12px', height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: wideLayout ? 'row' : 'column', gap: '12px', height: '100%', minHeight: 0, alignItems: 'flex-start' }}>
       {/* LEFT COLUMN */}
-      <div style={{ width: '220px', flexShrink: 0, overflowY: 'auto' }}>
+      <div style={wideLayout
+        ? { width: '220px', flexShrink: 0, overflowY: 'auto', alignSelf: 'stretch' }
+        : { width: '100%' }}>
         <SectionCard title="Alert Statistics">
           <StatRow label="Critical" value={severityCounts.critical} color="#ff2244" onClick={() => navigate('/alerts?severity=critical')} />
           <StatRow label="High" value={severityCounts.high} color="#ff6b00" onClick={() => navigate('/alerts?severity=high')} />
@@ -303,7 +321,22 @@ export default function DashboardPage() {
       </div>
 
       {/* CENTER COLUMN */}
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', alignSelf: 'stretch' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: wideLayout ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)', gap: 12, marginBottom: 12, gridAutoRows: 'min-content' }}>
+          <SectionCard title="Alerts Over Time (7d)">
+            <AlertsOverTimeChart points={timeseries?.points ?? []} height={wideLayout ? 190 : 160} />
+          </SectionCard>
+          <SectionCard title="Severity Breakdown (7d)">
+            <SeverityBars bySeverity={socMetrics?.by_severity ?? {}} height={wideLayout ? 190 : 160} />
+          </SectionCard>
+          <SectionCard title="Top Source IPs (7d)">
+            <TopSourcesChart sources={topSources?.sources ?? []} height={wideLayout ? 190 : 160} />
+          </SectionCard>
+          <SectionCard title="Response Trend (30d)">
+            <MttrTrendChart points={mttrTrend?.points ?? []} height={wideLayout ? 190 : 160} />
+          </SectionCard>
+        </div>
+
         <div style={{
           borderRadius: '6px',
           border: '1px solid var(--border)',
@@ -433,7 +466,9 @@ export default function DashboardPage() {
       </div>
 
       {/* RIGHT COLUMN */}
-      <div style={{ width: '280px', flexShrink: 0, overflowY: 'auto' }}>
+      <div style={wideLayout
+        ? { width: '280px', flexShrink: 0, overflowY: 'auto', alignSelf: 'stretch' }
+        : { width: '100%' }}>
         <SectionCard title="Active Cases">
           {openCases.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No open cases</div>

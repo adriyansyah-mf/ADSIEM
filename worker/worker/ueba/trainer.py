@@ -1,7 +1,5 @@
 # worker/worker/ueba/trainer.py
 import asyncio
-import base64
-import pickle
 import structlog
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, delete
@@ -14,6 +12,7 @@ from worker.ueba.features import (
     build_user_vector_dict, build_ip_vector_dict,
     vector_from_dict,
 )
+from worker.ueba.model_codec import dumps_model
 
 log = structlog.get_logger()
 
@@ -67,7 +66,7 @@ async def take_snapshots(redis) -> None:
 
 
 async def train_models(redis) -> None:
-    """Load DB snapshots, train IsolationForest, pickle models to Redis."""
+    """Load DB snapshots, train IsolationForest, persist model state to Redis."""
     import numpy as np
     from sklearn.ensemble import IsolationForest
 
@@ -102,8 +101,8 @@ async def train_models(redis) -> None:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, model.fit, X)
 
-        pickled_b64 = base64.b64encode(pickle.dumps(model)).decode()
-        await redis.set(model_key, pickled_b64, ex=MODEL_TTL)
+        model_b64 = dumps_model(model)
+        await redis.set(model_key, model_b64, ex=MODEL_TTL)
         trained_any = True
         log.info("ueba_model_trained", entity_type=entity_type, n_samples=len(rows))
 

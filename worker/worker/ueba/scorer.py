@@ -1,6 +1,4 @@
 # worker/worker/ueba/scorer.py
-import base64
-import pickle
 import time
 import numpy as np
 import structlog
@@ -17,6 +15,7 @@ from worker.ueba.features import (
     build_user_vector_dict, build_ip_vector_dict,
     vector_from_dict,
 )
+from worker.ueba.model_codec import loads_model
 
 log = structlog.get_logger()
 
@@ -44,9 +43,9 @@ async def _load_models(redis) -> bool:
     ip_b64   = await redis.get("ueba:model:ip")
 
     if user_b64:
-        _user_model = pickle.loads(base64.b64decode(user_b64))
+        _user_model = loads_model(user_b64)
     if ip_b64:
-        _ip_model = pickle.loads(base64.b64decode(ip_b64))
+        _ip_model = loads_model(ip_b64)
 
     _model_loaded_at = time.time()
     return _user_model is not None or _ip_model is not None

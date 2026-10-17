@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_permission
+from app.core.deps import get_current_user, require_permission, get_scoped_group
 from app.models.models import UebaEntityScore, UebaAnomaly, UebaFeatureSnapshot, User
 from app.schemas.schemas import UebaEntityScoreOut, UebaEntityDetailOut, UebaStatusOut
 from app.core.config import settings
@@ -26,12 +26,15 @@ async def _get_redis() -> aioredis.Redis:
 @router.get("/api/ueba/entities", response_model=list[UebaEntityScoreOut])
 async def get_entities(
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     current_user: Annotated[User, Depends(require_permission("alerts:read"))],
     entity_type: str = Query("all"),
     min_risk: float = Query(0.0),
     limit: int = Query(50, le=200),
 ):
     q = select(UebaEntityScore).where(UebaEntityScore.risk_score >= min_risk)
+    if group_filter is not None:
+        q = q.where(UebaEntityScore.group_id == group_filter)
     if entity_type != "all":
         q = q.where(UebaEntityScore.entity_type == entity_type)
     q = q.order_by(desc(UebaEntityScore.risk_score)).limit(limit)
@@ -44,20 +47,23 @@ async def get_entity_detail(
     entity_type: str,
     entity_value: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     current_user: Annotated[User, Depends(require_permission("alerts:read"))],
 ):
     score_row = await db.get(UebaEntityScore, (entity_type, entity_value))
-    anomaly_rows = (await db.execute(
+    if score_row is None or (group_filter is not None and score_row.group_id != group_filter):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Entity not found")
+    anomaly_q = (
         select(UebaAnomaly)
         .where(UebaAnomaly.entity_type == entity_type)
         .where(UebaAnomaly.entity_value == entity_value)
-        .order_by(desc(UebaAnomaly.detected_at))
-        .limit(50)
+    )
+    if group_filter is not None:
+        anomaly_q = anomaly_q.where(UebaAnomaly.group_id == group_filter)
+    anomaly_rows = (await db.execute(
+        anomaly_q.order_by(desc(UebaAnomaly.detected_at)).limit(50)
     )).scalars().all()
-
-    if score_row is None:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Entity not found")
 
     return UebaEntityDetailOut(score=score_row, anomalies=anomaly_rows)
 
@@ -65,26 +71,24 @@ async def get_entity_detail(
 @router.get("/api/ueba/status", response_model=UebaStatusOut)
 async def get_status(
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     current_user: Annotated[User, Depends(require_permission("alerts:read"))],
 ):
     redis = await _get_redis()
     status     = await redis.get("ueba:model:status") or "cold"
     trained_at = await redis.get("ueba:model:trained_at")
 
-    user_count = (await db.execute(
-        select(func.count()).select_from(UebaFeatureSnapshot)
-        .where(UebaFeatureSnapshot.entity_type == "user")
-    )).scalar_one()
+    def _count_q(entity_type: str):
+        q = select(func.count()).select_from(UebaFeatureSnapshot).where(
+            UebaFeatureSnapshot.entity_type == entity_type
+        )
+        if group_filter is not None:
+            q = q.where(UebaFeatureSnapshot.group_id == group_filter)
+        return q
 
-    ip_count = (await db.execute(
-        select(func.count()).select_from(UebaFeatureSnapshot)
-        .where(UebaFeatureSnapshot.entity_type == "ip")
-    )).scalar_one()
-
-    host_count = (await db.execute(
-        select(func.count()).select_from(UebaFeatureSnapshot)
-        .where(UebaFeatureSnapshot.entity_type == "host")
-    )).scalar_one()
+    user_count = (await db.execute(_count_q("user"))).scalar_one()
+    ip_count = (await db.execute(_count_q("ip"))).scalar_one()
+    host_count = (await db.execute(_count_q("host"))).scalar_one()
 
     return UebaStatusOut(
         status=status,
@@ -100,6 +104,7 @@ async def entity_risk_history(
     entity_type: str,
     entity_value: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
     current_user: Annotated[User, Depends(require_permission("alerts:read"))],
     days: int = Query(default=30, le=90),
 ):
@@ -120,6 +125,8 @@ async def entity_risk_history(
         .group_by(cast(UebaAnomaly.detected_at, Date))
         .order_by(cast(UebaAnomaly.detected_at, Date).asc())
     )
+    if group_filter is not None:
+        daily_q = daily_q.where(UebaAnomaly.group_id == group_filter)
     rows = (await db.execute(daily_q)).all()
 
     return {

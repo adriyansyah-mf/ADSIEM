@@ -9,7 +9,8 @@ import {
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
   Terminal, Server, BookOpen, Wrench, Shield,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
-  Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown,
+  Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown, Radio,
+  Menu, X, LogOut,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -27,6 +28,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/', label: 'Dashboard', icon: LayoutDashboard },
       { to: '/logs', label: 'Logs', icon: FileText },
       { to: '/events', label: 'Events', icon: Activity },
+      { to: '/live-events', label: 'Live Events', icon: Radio },
       { to: '/alerts', label: 'Alerts', icon: Bell },
       { to: '/cases', label: 'Cases', icon: FolderOpen },
     ],
@@ -41,6 +43,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/hunts', label: 'Threat Hunt', icon: Crosshair },
       { to: '/mitre-heatmap', label: 'MITRE Heatmap', icon: Grid3x3 },
       { to: '/reports', label: 'Reports', icon: FileBarChart },
+      { to: '/sop', label: 'SOP', icon: BookOpen },
+      { to: '/handover', label: 'Handover', icon: ClipboardList },
     ],
   },
   {
@@ -72,8 +76,46 @@ export default function Layout() {
   const { user, logout, hasRole, accessToken } = useAuthStore()
   const queryClient = useQueryClient()
   const [clock, setClock] = useState(new Date())
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === '1')
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [isTablet, setIsTablet] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
   const [wsConnected, setWsConnected] = useState(false)
+
+  // Responsive breakpoints: <768px = mobile drawer, 768-1023px = forced icon rail, >=1024px = full sidebar.
+  useEffect(() => {
+    const tabletQ = window.matchMedia('(min-width: 768px) and (max-width: 1023px)')
+    const mobileQ = window.matchMedia('(max-width: 767px)')
+    const apply = () => {
+      setIsTablet(tabletQ.matches)
+      setIsMobile(mobileQ.matches)
+      if (mobileQ.matches) setMobileOpen(false)
+    }
+    apply()
+    tabletQ.addEventListener('change', apply)
+    mobileQ.addEventListener('change', apply)
+    return () => {
+      tabletQ.removeEventListener('change', apply)
+      mobileQ.removeEventListener('change', apply)
+    }
+  }, [])
+  useEffect(() => { setMobileOpen(false) }, [pathname])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileOpen(false)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        document.getElementById('global-search-input')?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0')
+  }, [collapsed])
 
   const { data: agentsData } = useQuery({
     queryKey: ['agents-health'],
@@ -98,6 +140,8 @@ export default function Layout() {
         if (data.type === 'new_alert') {
           queryClient.invalidateQueries({ queryKey: ['alerts-recent'] })
           queryClient.invalidateQueries({ queryKey: ['alerts-dashboard'] })
+          queryClient.invalidateQueries({ queryKey: ['alerts'] })
+          queryClient.invalidateQueries({ queryKey: ['metrics'] })
         }
       } catch {}
     }
@@ -129,21 +173,38 @@ export default function Layout() {
   const allItems = [...NAV_GROUPS.flatMap(g => g.items), ...ADMIN_ITEMS]
   const currentLabel = allItems.find(i => isActive(i.to))?.label ?? 'AD-SIEM'
 
-  const sidebarW = collapsed ? 56 : 216
+  const rail = (collapsed || isTablet) && !isMobile
+  const sidebarW = isMobile ? 216 : rail ? 56 : 216
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#0d0f14' }}>
+    <div style={{ display: 'flex', height: '100dvh', overflow: 'hidden', background: '#0d0f14' }}>
+
+      {/* ── Mobile drawer backdrop ── */}
+      {isMobile && mobileOpen && (
+        <div
+          onClick={() => setMobileOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 900,
+            background: 'rgba(0,0,0,0.6)',
+          }}
+        />
+      )}
 
       {/* ── Sidebar ── */}
       <aside style={{
         width: sidebarW,
         minWidth: sidebarW,
+        position: isMobile ? 'fixed' : 'static',
+        top: 0, bottom: 0, left: 0,
+        zIndex: 1000,
+        transform: isMobile ? (mobileOpen ? 'translateX(0)' : 'translateX(-100%)') : 'none',
+        transition: 'transform 0.2s ease, width 0.2s ease, min-width 0.2s ease',
         display: 'flex',
         flexDirection: 'column',
         background: '#111318',
         borderRight: '1px solid #1e2028',
-        transition: 'width 0.2s ease, min-width 0.2s ease',
         overflow: 'hidden',
+        boxShadow: isMobile && mobileOpen ? '4px 0 24px rgba(0,0,0,0.5)' : 'none',
       }}>
 
         {/* Logo */}
@@ -292,50 +353,52 @@ export default function Layout() {
           )}
         </nav>
 
-        {/* Bottom: agent count + collapse */}
-        <div style={{ borderTop: '1px solid #1e2028', flexShrink: 0 }}>
-          {!collapsed ? (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '10px 16px',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <span style={{
-                  width: 7, height: 7, borderRadius: '50%',
-                  background: onlineCount > 0 ? '#34d399' : '#374151',
-                  boxShadow: onlineCount > 0 ? '0 0 5px #34d399' : 'none',
-                  flexShrink: 0,
-                }} />
-                <span style={{ fontSize: 12, color: '#64748b' }}>
-                  <span style={{ color: onlineCount > 0 ? '#34d399' : '#64748b', fontWeight: 500 }}>{onlineCount}</span>
-                  <span> / {totalCount} agents</span>
-                </span>
+        {/* Bottom: agent count + collapse (hidden on tablet/mobile — their mode is viewport-driven) */}
+        {!isTablet && !isMobile && (
+          <div style={{ borderTop: '1px solid #1e2028', flexShrink: 0 }}>
+            {!collapsed ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 16px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <span style={{
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: onlineCount > 0 ? '#34d399' : '#374151',
+                    boxShadow: onlineCount > 0 ? '0 0 5px #34d399' : 'none',
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ fontSize: 12, color: '#64748b' }}>
+                    <span style={{ color: onlineCount > 0 ? '#34d399' : '#64748b', fontWeight: 500 }}>{onlineCount}</span>
+                    <span> / {totalCount} agents</span>
+                  </span>
+                </div>
+                <button
+                  onClick={() => setCollapsed(true)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', padding: '8px', borderRadius: 4 }}
+                  title="Collapse sidebar"
+                >
+                  <PanelLeftClose size={14} />
+                </button>
               </div>
+            ) : (
               <button
-                onClick={() => setCollapsed(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', padding: '8px', borderRadius: 4 }}
-                title="Collapse sidebar"
+                onClick={() => setCollapsed(false)}
+                title="Expand sidebar"
+                style={{
+                  width: '100%', background: 'none', border: 'none',
+                  cursor: 'pointer', color: '#64748b',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '14px 0',
+                }}
               >
-                <PanelLeftClose size={14} />
+                <PanelLeftOpen size={14} />
               </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setCollapsed(false)}
-              title="Expand sidebar"
-              style={{
-                width: '100%', background: 'none', border: 'none',
-                cursor: 'pointer', color: '#64748b',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: '14px 0',
-              }}
-            >
-              <PanelLeftOpen size={14} />
-            </button>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </aside>
 
       {/* ── Right side ── */}
@@ -347,13 +410,28 @@ export default function Layout() {
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
-          gap: 16,
-          padding: '0 20px',
+          gap: isMobile ? 10 : 16,
+          padding: isMobile ? '0 12px' : '0 20px',
           background: '#111318',
           borderBottom: '1px solid #1e2028',
         }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <span style={{ fontSize: 15, fontWeight: 600, color: '#e2e8f0', letterSpacing: '0.01em' }}>
+          {isMobile && (
+            <button
+              onClick={() => setMobileOpen(o => !o)}
+              aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: '#94a3b8', display: 'flex', padding: 8, borderRadius: 4,
+              }}
+            >
+              {mobileOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
+          )}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minWidth: 0 }}>
+            <span style={{
+              fontSize: 15, fontWeight: 600, color: '#e2e8f0', letterSpacing: '0.01em',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: isMobile ? 120 : undefined,
+            }}>
               {currentLabel}
             </span>
             {wsConnected && (
@@ -365,7 +443,7 @@ export default function Layout() {
           </span>
 
           {/* Global Search */}
-          <div style={{ flex: 1, maxWidth: 320, position: 'relative', margin: '0 16px' }}>
+          <div style={{ flex: 1, maxWidth: isMobile ? undefined : 480, position: 'relative', margin: isMobile ? 0 : '0 16px', minWidth: 0 }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6,
               background: '#0d0f14', border: '1px solid #1e2028',
@@ -375,14 +453,16 @@ export default function Layout() {
                 <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
               </svg>
               <input
+                id="global-search-input"
                 value={searchQuery}
                 onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true); handleSearch(e.target.value) }}
                 onFocus={() => setSearchOpen(true)}
-                onBlur={() => setTimeout(() => setSearchOpen(false), 200)}
-                placeholder="Search alerts, cases, IPs…"
+                onBlur={() => setSearchOpen(false)}
+                onKeyDown={e => { if (e.key === 'Escape') (e.target as HTMLInputElement).blur() }}
+                placeholder={isMobile ? 'Search…' : 'Search alerts, cases, IPs…'}
                 style={{
                   background: 'none', border: 'none', outline: 'none',
-                  color: '#94a3b8', fontSize: 12, width: '100%',
+                  color: '#94a3b8', fontSize: 12, width: '100%', minWidth: 0,
                 }}
               />
             </div>
@@ -433,16 +513,18 @@ export default function Layout() {
           <div style={{ width: 1, height: 24, background: '#1e2028' }} />
 
           {/* User */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: '#cbd5e1', lineHeight: 1.2 }}>
-                {user?.username ?? '—'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 10, flexShrink: 0, marginLeft: 'auto' }}>
+            {!isMobile && (
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: '#cbd5e1', lineHeight: 1.2 }}>
+                  {user?.username ?? '—'}
+                </div>
+                <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+                  {clock.toLocaleTimeString('en-US', { hour12: false })}
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
-                {clock.toLocaleTimeString('en-US', { hour12: false })}
-              </div>
-            </div>
-            {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
+            )}
+            {!isMobile && ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
               <div style={{ position: 'relative' }}>
                 <button
                   onClick={() => setAdminMenuOpen(o => !o)}
@@ -495,9 +577,11 @@ export default function Layout() {
             )}
             <button
               onClick={logout}
+              aria-label="Sign out"
               className="sign-out-btn"
+              title="Sign out"
               style={{
-                padding: '5px 12px',
+                padding: isMobile ? 8 : '5px 12px',
                 borderRadius: 5,
                 border: '1px solid #1e2028',
                 background: 'transparent',
@@ -505,9 +589,12 @@ export default function Layout() {
                 fontSize: 12,
                 fontWeight: 500,
                 cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
               }}
             >
-              Sign out
+              <LogOut size={14} />
+              {!isMobile && <span style={{ marginLeft: 6 }}>Sign out</span>}
             </button>
           </div>
         </header>

@@ -4,6 +4,7 @@ settings, users, and webhooks — those modules are never imported or queried
 here, so there is no code path for the assistant to reach them even if a
 prompt tried to talk it into it."""
 from __future__ import annotations
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -13,7 +14,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.models import (
     Agent, Alert, AlertNote, Case, CaseNote, FimEvent, HygieneSnapshot,
     Rule, ThreatHunt, UebaAnomaly, UebaEntityScore, YaraRule,
+    AgentLogSource, AgentTask, AuditLog, Decoder, ShiftHandover,
+    SoarAction, SoarPlaybook, SopDocument,
 )
+from app.core.es_client import aggregate as es_aggregate, search as es_search
+from app.core.query_builder import sanitize_query_string
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# Models frequently send a semantically-equivalent key instead of the exact
+# schema property name (observed: 'indicator' for 'ioc', 'entity' for 'value').
+# Accept aliases so a correct call is not rejected on a naming mismatch.
+_ARG_ALIASES = {
+    "ioc": ("ioc", "indicator", "value", "ip", "hostname"),
+    "value": ("value", "entity", "indicator", "ioc", "ip", "hostname"),
+    "hours": ("hours", "lookback_hours", "window_hours", "window", "hours_back"),
+    "case_id": ("case_id", "case", "id"),
+}
+
+
+def _arg(args: dict, key: str, default=None):
+    for alias in _ARG_ALIASES.get(key, (key,)):
+        if alias in args and args[alias] not in (None, ""):
+            return args[alias]
+    return default
 
 TOOLS: list[dict] = [
     {
@@ -79,6 +106,291 @@ TOOLS: list[dict] = [
         "name": "dashboard_stats",
         "description": "Overall counts: alerts by severity/status, open cases, online agents. Good first call for broad questions.",
         "parameters": {},
+    },
+    {
+        "name": "correlate_entity",
+        "description": (
+            "Correlate one indicator (IP or hostname) across agents within a time window — "
+            "how many alerts, which hosts, which rules, which MITRE techniques. Use this to "
+            "tell whether activity is isolated to one host or spread laterally."
+        ),
+        "parameters": {
+            "value": "IP address or hostname to correlate (required)",
+            "hours": "lookback window in hours, default 24, max 720",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string", "description": "IP address or hostname to correlate"},
+                "hours": {"type": "integer", "description": "lookback window in hours (default 24, max 720)"},
+            },
+            "required": ["value"],
+        },
+    },
+    {
+        "name": "reconstruct_timeline",
+        "description": (
+            "Build a chronological timeline for an entity or case: alerts, case notes and FIM "
+            "changes interleaved by time. Use this to explain the sequence of an intrusion."
+        ),
+        "parameters": {
+            "value": "IP or hostname (optional if case_id given)",
+            "case_id": "case UUID (optional if value given)",
+            "hours": "lookback window in hours, default 48, max 720",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string", "description": "IP or hostname"},
+                "case_id": {"type": "string", "description": "case UUID"},
+                "hours": {"type": "integer", "description": "lookback window in hours (default 48, max 720)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "pivot_ioc",
+        "description": (
+            "Pivot on an indicator: related alerts, cases referencing it, and UEBA risk score. "
+            "Use this to expand an investigation from one IOC to everything it touches."
+        ),
+        "parameters": {
+            "ioc": "the indicator value (IP, hostname) to pivot on (required)",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "ioc": {"type": "string", "description": "indicator value (IP or hostname)"},
+            },
+            "required": ["ioc"],
+        },
+    },
+    {
+        "name": "search_events",
+        "description": (
+            "Search raw/decoded events in Elasticsearch (the log store) by free text or "
+            "filters. Use this when the analyst asks what actually appears in the logs, "
+            "rather than what raised an alert."
+        ),
+        "parameters": {
+            "search": "free-text query over decoded fields (optional)",
+            "source_ip": "exact source IP (optional)",
+            "log_type": "log source type, e.g. linux_auth (optional)",
+            "hours": "lookback window in hours, default 24, max 720",
+            "limit": "max results, default 20, max 50",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "search": {"type": "string", "description": "free-text query over decoded fields"},
+                "source_ip": {"type": "string", "description": "exact source IP"},
+                "log_type": {"type": "string", "description": "log source type"},
+                "hours": {"type": "integer", "description": "lookback hours (default 24, max 720)"},
+                "limit": {"type": "integer", "description": "max results (default 20, max 50)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "aggregate_events",
+        "description": (
+            "Count events grouped by a field over a time window — e.g. how many events per "
+            "source_ip, log_type or event_action. Use for 'how many' / 'which is top' "
+            "questions instead of fetching individual events."
+        ),
+        "parameters": {
+            "group_by": "one of: source_ip, log_type, event_action, event_category, user_name, agent_id",
+            "hours": "lookback window in hours, default 24, max 720",
+            "limit": "number of groups, default 10, max 30",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "group_by": {
+                    "type": "string",
+                    "enum": ["source_ip", "log_type", "event_action", "event_category", "user_name", "agent_id"],
+                    "description": "field to group by",
+                },
+                "hours": {"type": "integer", "description": "lookback hours (default 24, max 720)"},
+                "limit": {"type": "integer", "description": "number of groups (default 10, max 30)"},
+            },
+            "required": ["group_by"],
+        },
+    },
+    {
+        "name": "event_timeline",
+        "description": (
+            "Event counts bucketed over time for the log store — use to show when activity "
+            "spiked, or to compare a quiet window against a burst."
+        ),
+        "parameters": {
+            "hours": "lookback window in hours, default 24, max 720",
+            "interval": "bucket size: 1m, 5m, 15m, 1h or 1d",
+            "source_ip": "restrict to one source IP (optional)",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "hours": {"type": "integer", "description": "lookback hours (default 24, max 720)"},
+                "interval": {
+                    "type": "string",
+                    "enum": ["1m", "5m", "15m", "1h", "1d"],
+                    "description": "bucket size",
+                },
+                "source_ip": {"type": "string", "description": "restrict to one source IP"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "mitre_coverage",
+        "description": (
+            "MITRE ATT&CK coverage: which techniques have been observed in this environment, "
+            "grouped by tactic. Use for 'which techniques do we see', 'what tactics are covered'."
+        ),
+        "parameters": {
+            "days": "lookback window in days, default 30, max 180",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "lookback days (default 30, max 180)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_soar_playbooks",
+        "description": (
+            "List SOAR playbooks and their actions. Use for 'what automated response do we have', "
+            "'which playbook handles brute force'."
+        ),
+        "parameters": {
+            "query": "optional text to match against playbook name/description",
+            "limit": "max playbooks, default 20, max 50",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "match playbook name or description"},
+                "limit": {"type": "integer", "description": "max results (default 20, max 50)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "search_sop",
+        "description": (
+            "Search the company SOP / runbook documents. Use for 'what does our procedure say "
+            "about phishing', 'how do we handle ransomware'."
+        ),
+        "parameters": {
+            "query": "text to search SOP text for",
+            "limit": "max documents, default 5, max 15",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "text to search for"},
+                "limit": {"type": "integer", "description": "max documents (default 5, max 15)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "list_decoders",
+        "description": (
+            "List configured log decoders (which log formats the platform can parse). "
+            "Use for 'do we parse nginx logs', 'which log types are supported'."
+        ),
+        "parameters": {
+            "log_type": "optional log type filter",
+            "limit": "max decoders, default 30, max 60",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "log_type": {"type": "string", "description": "filter by log type"},
+                "limit": {"type": "integer", "description": "max results (default 30, max 60)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_log_sources",
+        "description": (
+            "List agent log sources (which file paths each agent tails). Use for "
+            "'what logs is web-01 collecting', 'which paths are monitored'."
+        ),
+        "parameters": {
+            "hostname": "optional agent hostname filter",
+            "limit": "max rows, default 30, max 60",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "hostname": {"type": "string", "description": "agent hostname"},
+                "limit": {"type": "integer", "description": "max results (default 30, max 60)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "list_tasks",
+        "description": (
+            "List live-response tasks dispatched to agents (isolate, collect artifact, "
+            "run command) with their status. Use for 'did the isolation succeed'."
+        ),
+        "parameters": {
+            "status": "pending|running|completed|failed (optional)",
+            "limit": "max tasks, default 20, max 50",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "task status filter"},
+                "limit": {"type": "integer", "description": "max results (default 20, max 50)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "search_audit_logs",
+        "description": (
+            "Search the platform audit trail — who changed what (rules, cases, users, settings). "
+            "Use for 'who closed that case', 'what changed recently'."
+        ),
+        "parameters": {
+            "action": "optional action filter, e.g. case.update",
+            "hours": "lookback window in hours, default 72, max 720",
+            "limit": "max entries, default 20, max 50",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "action filter"},
+                "hours": {"type": "integer", "description": "lookback hours (default 72, max 720)"},
+                "limit": {"type": "integer", "description": "max results (default 20, max 50)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "handover_summary",
+        "description": (
+            "Latest shift handover notes — what the previous shift left for the next analyst. "
+            "Use for 'what happened last shift', 'anything I should know starting now'."
+        ),
+        "parameters": {
+            "limit": "max handovers, default 3, max 10",
+        },
+        "schema": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "max handovers (default 3, max 10)"},
+            },
+            "required": [],
+        },
     },
 ]
 
@@ -271,6 +583,431 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
             "alerts_by_severity": {s: c for s, c in sev_rows},
             "open_cases": open_cases,
             "online_agents": online_agents,
+        }
+
+    if name == "correlate_entity":
+        value = str(_arg(args, "value") or "").strip()
+        if not value:
+            return {"error": "value is required"}
+        hours = clamp(_arg(args, "hours"), 24, 720)
+        since = _now() - timedelta(hours=hours)
+        q = select(Alert).where(
+            Alert.created_at >= since,
+            or_(Alert.source_ip == value, Alert.hostname == value),
+        )
+        if group_filter:
+            q = q.where(Alert.group_id == group_filter)
+        rows = (await db.execute(q.order_by(Alert.created_at.asc()).limit(200))).scalars().all()
+
+        hosts = sorted({a.hostname for a in rows if a.hostname})
+        rules = sorted({a.title for a in rows if a.title})
+        techniques = sorted({t for a in rows for t in (a.mitre_techniques or [])})
+        return {
+            "value": value,
+            "window_hours": hours,
+            "alert_count": len(rows),
+            "distinct_hosts": len(hosts),
+            "hosts": hosts[:25],
+            "top_rules": rules[:15],
+            "mitre_techniques": techniques[:25],
+            "spread_assessment": (
+                "single_host" if len(hosts) <= 1 else f"spread_across_{len(hosts)}_hosts"
+            ),
+        }
+
+    if name == "reconstruct_timeline":
+        hours = clamp(_arg(args, "hours"), 48, 720)
+        since = _now() - timedelta(hours=hours)
+        value = str(_arg(args, "value") or "").strip()
+        case_id = _arg(args, "case_id")
+
+        if not value and not case_id:
+            return {"error": "provide value or case_id"}
+
+        entity_filter = None
+        if case_id:
+            try:
+                case = await db.get(Case, UUID(str(case_id)))
+            except (ValueError, TypeError):
+                return {"error": "invalid case_id"}
+            if not case or (group_filter and case.group_id != group_filter):
+                return {"error": "not found"}
+            entity_filter = case.alert_id
+            if not value and case.alert_id:
+                trigger = await db.get(Alert, case.alert_id)
+                if trigger:
+                    value = trigger.source_ip or trigger.hostname or value
+
+        items: list[dict] = []
+
+        aq = select(Alert).where(Alert.created_at >= since)
+        if group_filter:
+            aq = aq.where(Alert.group_id == group_filter)
+        if entity_filter:
+            aq = aq.where(Alert.id == entity_filter)
+        elif value:
+            aq = aq.where(or_(Alert.source_ip == value, Alert.hostname == value))
+        for a in (await db.execute(aq.order_by(Alert.created_at.asc()).limit(100))).scalars().all():
+            items.append({
+                "ts": a.created_at.isoformat(), "type": "alert",
+                "title": a.title, "severity": a.severity, "hostname": a.hostname,
+            })
+
+        fq = select(FimEvent).where(FimEvent.detected_at >= since)
+        if group_filter:
+            fq = fq.where(FimEvent.group_id == group_filter)
+        if value:
+            fq = fq.where(FimEvent.path.ilike(f"%{value}%"))
+        for f in (await db.execute(fq.order_by(FimEvent.detected_at.asc()).limit(50))).scalars().all():
+            items.append({
+                "ts": f.detected_at.isoformat(), "type": "fim",
+                "title": f"{f.event_type} {f.path}", "hostname": None,
+            })
+
+        items.sort(key=lambda x: x["ts"])
+        return {"entity": value, "window_hours": hours, "event_count": len(items), "timeline": items[:150]}
+
+    if name == "pivot_ioc":
+        ioc = str(_arg(args, "ioc") or "").strip()
+        if not ioc:
+            return {"error": "ioc is required"}
+
+        aq = select(Alert).where(or_(Alert.source_ip == ioc, Alert.hostname == ioc))
+        if group_filter:
+            aq = aq.where(Alert.group_id == group_filter)
+        alerts = (await db.execute(aq.order_by(Alert.created_at.desc()).limit(50))).scalars().all()
+
+        cq = select(Case).where(Case.title.ilike(f"%{ioc}%"))
+        if group_filter:
+            cq = cq.where(Case.group_id == group_filter)
+        title_cases = (await db.execute(cq.order_by(Case.created_at.desc()).limit(25))).scalars().all()
+
+        linked_ids = [a.id for a in alerts[:50]]
+        alert_cases = []
+        if linked_ids:
+            acq = select(Case).where(Case.alert_id.in_(linked_ids))
+            if group_filter:
+                acq = acq.where(Case.group_id == group_filter)
+            alert_cases = (await db.execute(
+                acq.order_by(Case.created_at.desc()).limit(25)
+            )).scalars().all()
+
+        seen: set = set()
+        cases = []
+        for c in list(title_cases) + list(alert_cases):
+            if c.id not in seen:
+                seen.add(c.id)
+                cases.append(c)
+
+        risk = 0.0
+        try:
+            row = await db.get(UebaEntityScore, ("ip", ioc))
+            if row and (not group_filter or row.group_id == group_filter):
+                risk = float(row.risk_score or 0.0)
+        except Exception:
+            pass
+
+        return {
+            "ioc": ioc,
+            "alert_count": len(alerts),
+            "case_count": len(cases),
+            "ueba_risk_score": risk,
+            "alerts": [
+                {"id": str(a.id), "title": a.title, "severity": a.severity,
+                 "status": a.status, "created_at": a.created_at.isoformat()}
+                for a in alerts[:25]
+            ],
+            "cases": [
+                {"id": str(c.id), "title": c.title, "status": c.status,
+                 "created_at": c.created_at.isoformat()}
+                for c in cases[:15]
+            ],
+        }
+
+    if name == "search_events":
+        hours = clamp(_arg(args, "hours"), 24, 720)
+        limit = clamp(_arg(args, "limit"), 20, 50)
+        since_dt = _now() - timedelta(hours=hours)
+        filters: list[dict] = [{"range": {"created_at": {"gte": since_dt.isoformat()}}}]
+        if group_filter:
+            filters.append({"term": {"group_id": group_filter}})
+        if _arg(args, "source_ip"):
+            filters.append({"term": {"source_ip": str(_arg(args, "source_ip"))}})
+        if _arg(args, "log_type"):
+            filters.append({"term": {"log_type": str(_arg(args, "log_type"))}})
+        if _arg(args, "search"):
+            filters.append({
+                "query_string": {
+                    "query": sanitize_query_string(str(_arg(args, "search"))),
+                    "default_field": "decoded_fields.*",
+                    "allow_leading_wildcard": False,
+                }
+            })
+        try:
+            hits, total, _cursor = await es_search(
+                {"bool": {"filter": filters}}, size=limit, sort=[{"created_at": "desc"}]
+            )
+        except Exception as exc:
+            return {"error": f"event store unavailable: {exc}"}
+        return {
+            "window_hours": hours,
+            "total_matching": total,
+            "returned": len(hits),
+            "events": [
+                {
+                    "created_at": h.get("created_at"),
+                    "log_type": h.get("log_type"),
+                    "event_action": h.get("event_action"),
+                    "source_ip": h.get("source_ip"),
+                    "user_name": h.get("user_name"),
+                    "fields": h.get("decoded_fields") or {},
+                }
+                for h in hits
+            ],
+        }
+
+    if name == "aggregate_events":
+        group_by = str(_arg(args, "group_by") or "")
+        allowed = {"source_ip", "log_type", "event_action", "event_category", "user_name", "agent_id"}
+        if group_by not in allowed:
+            return {"error": f"group_by must be one of {sorted(allowed)}"}
+        hours = clamp(_arg(args, "hours"), 24, 720)
+        limit = clamp(_arg(args, "limit"), 10, 30)
+        since_dt = _now() - timedelta(hours=hours)
+        filters = [{"range": {"created_at": {"gte": since_dt.isoformat()}}}]
+        if group_filter:
+            filters.append({"term": {"group_id": group_filter}})
+        try:
+            result = await es_aggregate(
+                {"bool": {"filter": filters}},
+                {"g": {"terms": {"field": group_by, "size": limit}}},
+            )
+        except Exception as exc:
+            return {"error": f"event store unavailable: {exc}"}
+        buckets = result["aggregations"].get("g", {}).get("buckets", [])
+        return {
+            "group_by": group_by,
+            "window_hours": hours,
+            "total_events": result["total"],
+            "groups": [{"value": b["key"], "count": b["doc_count"]} for b in buckets],
+        }
+
+    if name == "event_timeline":
+        hours = clamp(_arg(args, "hours"), 24, 720)
+        interval = str(_arg(args, "interval") or "1h")
+        if interval not in ("1m", "5m", "15m", "1h", "1d"):
+            interval = "1h"
+        since_dt = _now() - timedelta(hours=hours)
+        filters = [{"range": {"created_at": {"gte": since_dt.isoformat()}}}]
+        if group_filter:
+            filters.append({"term": {"group_id": group_filter}})
+        if _arg(args, "source_ip"):
+            filters.append({"term": {"source_ip": str(_arg(args, "source_ip"))}})
+        try:
+            result = await es_aggregate(
+                {"bool": {"filter": filters}},
+                {"by_time": {"date_histogram": {"field": "created_at", "fixed_interval": interval}}},
+            )
+        except Exception as exc:
+            return {"error": f"event store unavailable: {exc}"}
+        buckets = result["aggregations"].get("by_time", {}).get("buckets", [])
+        points = [{"t": b["key_as_string"], "count": b["doc_count"]} for b in buckets]
+        peak = max(points, key=lambda p: p["count"]) if points else None
+        return {
+            "window_hours": hours,
+            "interval": interval,
+            "total_events": result["total"],
+            "peak": peak,
+            "points": points,
+        }
+
+    if name == "mitre_coverage":
+        days = clamp(_arg(args, "days"), 30, 180)
+        since_dt = _now() - timedelta(days=days)
+        q = select(Alert.mitre_techniques).where(
+            Alert.created_at >= since_dt, Alert.mitre_techniques != []
+        )
+        if group_filter:
+            q = q.where(Alert.group_id == group_filter)
+        rows = (await db.execute(q)).all()
+        counts: dict[str, int] = {}
+        for (techniques,) in rows:
+            for entry in techniques or []:
+                tech = str(entry).split(":")[0].strip() if entry else ""
+                if tech:
+                    counts[tech] = counts.get(tech, 0) + 1
+        ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+        return {
+            "window_days": days,
+            "alerts_with_mitre": len(rows),
+            "distinct_techniques": len(ranked),
+            "top_techniques": [{"technique": t, "count": c} for t, c in ranked[:15]],
+        }
+
+    if name == "list_soar_playbooks":
+        limit = clamp(_arg(args, "limit"), 20, 50)
+        q = select(SoarPlaybook)
+        if group_filter:
+            q = q.where(SoarPlaybook.group_id == group_filter)
+        if _arg(args, "query"):
+            term = f"%{_arg(args, 'query')}%"
+            q = q.where(or_(SoarPlaybook.name.ilike(term), SoarPlaybook.description.ilike(term)))
+        plays = (await db.execute(q.order_by(SoarPlaybook.created_at.desc()).limit(limit))).scalars().all()
+        out = []
+        for p in plays:
+            acts = (await db.execute(
+                select(SoarAction).where(SoarAction.playbook_id == p.id).order_by(SoarAction.order_index)
+            )).scalars().all()
+            out.append({
+                "id": str(p.id),
+                "name": p.name,
+                "description": (p.description or "")[:200],
+                "enabled": p.is_enabled,
+                "actions": [
+                    {"type": a.action_type, "order": a.order_index}
+                    for a in acts
+                ],
+            })
+        return {"playbooks": out}
+
+    if name == "search_sop":
+        query = str(_arg(args, "query") or "").strip()
+        if not query:
+            return {"error": "query is required"}
+        limit = clamp(_arg(args, "limit"), 5, 15)
+        q = select(SopDocument).where(SopDocument.raw_text.ilike(f"%{query}%"))
+        if group_filter:
+            q = q.where(SopDocument.group_id == group_filter)
+        docs = (await db.execute(q.order_by(SopDocument.created_at.desc()).limit(limit))).scalars().all()
+        return {
+            "query": query,
+            "documents": [
+                {
+                    "id": str(d.id),
+                    "filename": d.filename,
+                    "status": d.status,
+                    "excerpt": (d.raw_text or "")[:600],
+                }
+                for d in docs
+            ],
+        }
+
+    if name == "list_decoders":
+        limit = clamp(_arg(args, "limit"), 30, 60)
+        q = select(Decoder)
+        if _arg(args, "log_type"):
+            q = q.where(Decoder.log_type == str(_arg(args, "log_type")))
+        rows = (await db.execute(q.order_by(Decoder.log_type.asc(), Decoder.name.asc()).limit(limit))).scalars().all()
+        return {
+            "decoders": [
+                {"name": d.name, "log_type": d.log_type, "priority": d.priority, "enabled": d.is_enabled}
+                for d in rows
+            ],
+            "count": len(rows),
+        }
+
+    if name == "list_log_sources":
+        limit = clamp(_arg(args, "limit"), 30, 60)
+        q = select(AgentLogSource)
+        if group_filter or _arg(args, "hostname"):
+            agent_q = select(Agent.id)
+            if group_filter:
+                agent_q = agent_q.where(Agent.group_id == group_filter)
+            if _arg(args, "hostname"):
+                agent_q = agent_q.where(Agent.hostname.ilike(f"%{_arg(args, 'hostname')}%"))
+            agent_ids = list((await db.execute(agent_q)).scalars().all())
+            if not agent_ids:
+                return {"sources": [], "count": 0}
+            q = q.where(AgentLogSource.agent_id.in_(agent_ids))
+        rows = (await db.execute(q.limit(limit))).scalars().all()
+        agents = {}
+        if rows:
+            ids = {r.agent_id for r in rows}
+            for a in (await db.execute(select(Agent).where(Agent.id.in_(ids)))).scalars().all():
+                agents[a.id] = a.hostname
+        return {
+            "sources": [
+                {
+                    "hostname": agents.get(r.agent_id, "unknown"),
+                    "path": r.path,
+                    "log_type": r.log_type,
+                    "enabled": r.is_enabled,
+                }
+                for r in rows
+            ],
+            "count": len(rows),
+        }
+
+    if name == "list_tasks":
+        limit = clamp(_arg(args, "limit"), 20, 50)
+        q = select(AgentTask)
+        if group_filter:
+            scoped_agents = select(Agent.id).where(Agent.group_id == group_filter)
+            agent_ids = list((await db.execute(scoped_agents)).scalars().all())
+            if not agent_ids:
+                return {"tasks": [], "count": 0}
+            q = q.where(AgentTask.agent_id.in_(agent_ids))
+        if _arg(args, "status"):
+            q = q.where(AgentTask.status == str(_arg(args, "status")))
+        rows = (await db.execute(q.order_by(AgentTask.created_at.desc()).limit(limit))).scalars().all()
+        return {
+            "tasks": [
+                {
+                    "id": str(t.id),
+                    "type": t.task_type,
+                    "status": t.status,
+                    "error": (t.error or "")[:200] or None,
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                }
+                for t in rows
+            ],
+            "count": len(rows),
+        }
+
+    if name == "search_audit_logs":
+        hours = clamp(_arg(args, "hours"), 72, 720)
+        limit = clamp(_arg(args, "limit"), 20, 50)
+        since_dt = _now() - timedelta(hours=hours)
+        q = select(AuditLog).where(AuditLog.created_at >= since_dt)
+        if group_filter:
+            q = q.where(AuditLog.group_id == group_filter)
+        if _arg(args, "action"):
+            q = q.where(AuditLog.action.ilike(f"%{_arg(args, 'action')}%"))
+        rows = (await db.execute(q.order_by(AuditLog.created_at.desc()).limit(limit))).scalars().all()
+        return {
+            "window_hours": hours,
+            "entries": [
+                {
+                    "action": a.action,
+                    "resource_type": a.resource_type,
+                    "resource_id": str(a.resource_id) if a.resource_id else None,
+                    "detail": (str(a.detail)[:200] if a.detail else None),
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                }
+                for a in rows
+            ],
+            "count": len(rows),
+        }
+
+    if name == "handover_summary":
+        limit = clamp(_arg(args, "limit"), 3, 10)
+        q = select(ShiftHandover)
+        if group_filter:
+            q = q.where(ShiftHandover.group_id == group_filter)
+        rows = (await db.execute(q.order_by(ShiftHandover.created_at.desc()).limit(limit))).scalars().all()
+        return {
+            "handovers": [
+                {
+                    "shift_label": h.shift_label,
+                    "summary": (h.summary or "")[:800],
+                    "open_alerts": h.open_alerts,
+                    "open_cases": h.open_cases,
+                    "escalations": h.escalations,
+                    "created_at": h.created_at.isoformat() if h.created_at else None,
+                }
+                for h in rows
+            ],
+            "count": len(rows),
         }
 
     return {"error": f"unknown tool: {name}"}

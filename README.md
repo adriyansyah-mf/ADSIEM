@@ -222,9 +222,10 @@ clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
   -o internal/procexec/bpf/execve.bpf.o
 # then: go build ...
 ```
-(`-D__TARGET_ARCH_arm64` on arm64 hosts.) `make build` in `agent/` does a plain Go
-build only — it does not run the clang step, so build the `.bpf.o` manually first if
-you're not using the Dockerfiles.
+(`-D__TARGET_ARCH_arm64` on arm64 hosts.) `make build` in `agent/` runs the clang
+step itself (target `bpf`) before the Go build, and fails with a clear message if
+`clang` is missing — so the manual command above is only needed for a bare
+`go build`. The compiled `.bpf.o` is gitignored; never commit it.
 
 ### Option C — Docker
 
@@ -505,8 +506,8 @@ step 2) before bringing up `nginx` in the prod compose.
 
 ## Roadmap
 
-- [ ] Real-time dashboard via WebSocket
-- [ ] Email notification integration
+- [x] Real-time dashboard via WebSocket
+- [x] Email notification integration
 - [ ] Prometheus + Grafana dashboard
 - [ ] Agent auto-update mechanism
 - [ ] Multi-tenancy group management UI

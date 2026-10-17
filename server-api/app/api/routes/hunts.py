@@ -6,7 +6,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_scoped_group
+from app.core.deps import get_current_user, get_scoped_group, fetch_scoped
 from app.models.models import Alert, ThreatHunt, User
 from app.schemas.schemas import ThreatHuntCreate, ThreatHuntOut
 
@@ -73,8 +73,6 @@ async def get_hunt(
     hunt_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    hunt = await db.get(ThreatHunt, hunt_id)
-    if not hunt:
-        raise HTTPException(status_code=404)
-    return hunt
+    return await fetch_scoped(db, ThreatHunt, hunt_id, group_filter, detail="Hunt not found")

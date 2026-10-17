@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, get_scoped_group
+from app.core.deps import get_current_user, get_scoped_group, require_permission
 from app.models.models import EnrollmentToken, User
 
 router = APIRouter(prefix="/api/enrollment-tokens", tags=["enrollment-tokens"])
@@ -49,7 +49,7 @@ async def list_tokens(
 async def create_token(
     body: TokenIn,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("agents:manage")),
     group_id: Optional[str] = Depends(get_scoped_group),
 ):
     raw_token = secrets.token_urlsafe(32)
@@ -71,9 +71,13 @@ async def create_token(
 async def revoke_token(
     token_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("agents:manage")),
+    group_id: Optional[str] = Depends(get_scoped_group),
 ):
-    tok = await db.get(EnrollmentToken, uuid.UUID(token_id))
+    q = select(EnrollmentToken).where(EnrollmentToken.id == uuid.UUID(token_id))
+    if group_id is not None:
+        q = q.where(EnrollmentToken.group_id == group_id)
+    tok = (await db.execute(q)).scalar_one_or_none()
     if not tok:
         raise HTTPException(status_code=404, detail="Token not found")
     tok.is_active = False
