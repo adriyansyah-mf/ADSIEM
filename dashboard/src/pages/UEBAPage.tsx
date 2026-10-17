@@ -89,6 +89,36 @@ function FeatureTable({ features }: { features: Record<string, number> }) {
   )
 }
 
+function WhyAnomalous({ anomaly }: { anomaly: UebaAnomaly }) {
+  const reasons = anomaly.reasons ?? []
+  const mitre = anomaly.mitre_techniques ?? []
+  if (reasons.length === 0 && mitre.length === 0) return null
+  return (
+    <div>
+      <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+        WHY ANOMALOUS
+      </div>
+      <ul style={{ margin: 0, paddingLeft: '14px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+        {reasons.map((r, i) => (
+          <li key={i} style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.4 }}>{r.text}</li>
+        ))}
+      </ul>
+      {mitre.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+          {mitre.map(m => (
+            <span key={m.id} title={m.name} style={{
+              fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', padding: '1px 6px', borderRadius: '3px',
+              border: '1px solid rgba(0,212,255,0.4)', color: 'var(--accent-cyan)', background: 'rgba(0,212,255,0.08)',
+            }}>
+              {m.id} · {m.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
   if (anomalies.length === 0) return <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace' }}>No anomalies recorded</div>
   return (
@@ -107,6 +137,9 @@ function AnomalyTimeline({ anomalies }: { anomalies: UebaAnomaly[] }) {
             <span style={{ marginLeft: '8px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
               score {a.anomaly_score.toFixed(3)}
             </span>
+            {a.reasons?.[0] && (
+              <div style={{ fontSize: '10px', color: 'var(--text-primary)', marginTop: '2px' }}>{a.reasons[0].text}</div>
+            )}
           </div>
           <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '9px', color: 'var(--text-muted)' }}>
             {new Date(a.detected_at).toLocaleString()}
@@ -218,6 +251,10 @@ function DetailPanel({ entityType, entityValue, onClose }: { entityType: string;
               </div>
               <RiskSparkline data={history.history} />
             </div>
+          )}
+
+          {data.anomalies.length > 0 && (
+            <WhyAnomalous anomaly={data.anomalies[0]} />
           )}
 
           {data.anomalies.length > 0 && (

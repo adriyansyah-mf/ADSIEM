@@ -468,6 +468,7 @@ class UebaAnomalyOut(BaseModel):
     features: dict
     alert_id: UUID | None
     mitre_techniques: list[dict]
+    reasons: list[dict] = []
     ai_narrative: str | None
     ai_action: str | None
     case_id: UUID | None

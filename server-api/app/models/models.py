@@ -265,6 +265,7 @@ class UebaAnomaly(Base):
     features      = Column(JSONB,       nullable=False, default=dict)
     alert_id         = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
     mitre_techniques = Column(JSONB,               nullable=False, default=list)
+    reasons          = Column(JSONB,               nullable=False, default=list)  # why it was anomalous (worker/ueba/explain.py)
     ai_narrative     = Column(Text)
     ai_action        = Column(String(20))
     case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="SET NULL"))
