@@ -79,7 +79,7 @@ async def process_message(
             if not await db.get(AgentModel, agent_id):
                 agent_id = None
 
-    decoded = dec_engine.decode(log_type, raw_message)
+    decoded, decoder_name = dec_engine.decode_named(log_type, raw_message)
     if not decoded:
         decode_failures.inc()
     else:
@@ -90,6 +90,8 @@ async def process_message(
         "agent_id": str(agent_id) if agent_id else None,
         "group_id": group_id,
         "log_type": log_type,
+        "location": data.get("location") or None,  # source file, from agents >= 1.4
+        "decoder": decoder_name,
         "raw_message": raw_message,
         "decoded_fields": decoded,
         "event_category": decoded.get("event.category"),

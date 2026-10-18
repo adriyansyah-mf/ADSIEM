@@ -93,6 +93,12 @@ export interface AlertContext {
 
 export interface AlertDetail extends Alert {
   rule: { id: string; title: string; description: string | null; level: string; tags: string[]; content: string } | null
+  rule_fired_24h: number
+  mitre: Array<{ id: string; name: string | null; tactic: string | null; url: string | null }>
+  event: {
+    id: string; timestamp: string; log_type: string | null; location: string | null; decoder: string | null
+    full_log: string | null; data: Record<string, unknown>
+  } | null
   agent: { id: string; hostname: string; name: string; version: string | null; status: string; last_seen_at: string | null } | null
   ueba: {
     entity_type: string; entity_value: string; risk_score: number; anomaly_score: number

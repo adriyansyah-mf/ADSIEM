@@ -114,7 +114,7 @@ func tailGlob(pattern, logType string, buf *buffer.Buffer, stopCh <-chan struct{
 			if len(line) > 0 {
 				line = strings.TrimRight(line, "\r\n")
 				if line != "" {
-					buf.Push(encode(logType, line))
+					buf.Push(encode(logType, currentPath, line))
 				}
 			}
 			if err == nil {
@@ -189,7 +189,7 @@ func tailFixed(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{})
 			if len(line) > 0 {
 				line = strings.TrimRight(line, "\r\n")
 				if line != "" {
-					buf.Push(encode(logType, line))
+					buf.Push(encode(logType, path, line))
 				}
 			}
 			if err == nil {
@@ -211,15 +211,20 @@ func tailFixed(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{})
 	}
 }
 
-func encode(logType, rawMessage string) string {
-	return logType + "\x00" + rawMessage
+// Buffer entries are "logType\x00location\x00line"; location is the file the
+// line came from (shown as the event's location, like Wazuh).
+func encode(logType, location, rawMessage string) string {
+	return logType + "\x00" + location + "\x00" + rawMessage
 }
 
-func Decode(entry string) (logType, rawMessage string) {
-	for i, c := range entry {
-		if c == '\x00' {
-			return entry[:i], entry[i+1:]
-		}
+// Decode also accepts the older two-field "logType\x00line" form.
+func Decode(entry string) (logType, location, rawMessage string) {
+	parts := strings.SplitN(entry, "\x00", 3)
+	switch len(parts) {
+	case 3:
+		return parts[0], parts[1], parts[2]
+	case 2:
+		return parts[0], "", parts[1]
 	}
-	return "unknown", entry
+	return "unknown", "", entry
 }

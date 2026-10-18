@@ -83,6 +83,10 @@ class DecoderEngine:
         self._decoders = sorted(decoders, key=lambda x: x.priority)
 
     def decode(self, log_type: str, raw_message: str) -> dict[str, Any]:
+        return self.decode_named(log_type, raw_message)[0]
+
+    def decode_named(self, log_type: str, raw_message: str) -> tuple[dict[str, Any], str | None]:
+        """decode() plus the name of the decoder that matched (None if none did)."""
         for decoder in self._decoders:
             if decoder.log_type != log_type:
                 continue
@@ -98,7 +102,7 @@ class DecoderEngine:
                 for output_field, group_name in decoder.fields_map.items():
                     result[output_field] = groups.get(group_name)
                 result.update(decoder.static_fields)
-                return result
+                return result, decoder.name
 
             elif decoder.decoder_type == "kv":
                 kv = _parse_kv(raw_message)
@@ -109,6 +113,6 @@ class DecoderEngine:
                     if kv_key in kv:
                         result[output_field] = kv[kv_key]
                 result.update(decoder.static_fields)
-                return result
+                return result, decoder.name
 
-        return {}
+        return {}, None

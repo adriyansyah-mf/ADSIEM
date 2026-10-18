@@ -146,12 +146,13 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		logType, rawMessage := tailer.Decode(entry)
+		logType, location, rawMessage := tailer.Decode(entry)
 		payload := map[string]interface{}{
 			"agent_id":    cfg.Agent.ID,
 			"agent_token": cfg.Agent.Token,
 			"log_type":    logType,
 			"raw_message": rawMessage,
+			"location":    location,
 			"received_at": time.Now().UTC().Format(time.RFC3339Nano),
 			"hostname":    mustHostname(),
 		}
@@ -184,12 +185,13 @@ func flushBuffer(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 		if !ok {
 			break
 		}
-		logType, rawMessage := tailer.Decode(entry)
+		logType, location, rawMessage := tailer.Decode(entry)
 		payload := map[string]interface{}{
 			"agent_id":    cfg.Agent.ID,
 			"agent_token": cfg.Agent.Token,
 			"log_type":    logType,
 			"raw_message": rawMessage,
+			"location":    location,
 			"received_at": time.Now().UTC().Format(time.RFC3339Nano),
 			"hostname":    mustHostname(),
 		}
