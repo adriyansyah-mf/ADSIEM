@@ -128,6 +128,14 @@ def test_volume_and_timing_alone_never_make_an_anomaly():
     assert [m["id"] for m in ex.mitre_for("ip", [volume, spray])] == ["T1110.003"]
 
 
+def test_small_counts_never_count_against_a_zero_baseline():
+    # web clients dominate the IP population, so its baseline for logins is 0
+    web = ex.build_baseline([{"unique_users": 0.0, "failed_count": 0.0}] * 100, ["unique_users", "failed_count"])
+    assert ex.explain("ip", {"unique_users": 1.0, "failed_count": 2.0}, None, web) == []
+    reasons = ex.explain("ip", {"unique_users": 5.0, "failed_count": 9.0}, None, web)
+    assert {r["feature"] for r in reasons} == {"unique_users", "failed_count"}
+
+
 def test_rare_hour_needs_a_baseline_that_has_seen_most_hours():
     young = ex.build_baseline([{"hour_of_day": float(h)} for h in (8, 9, 10) * 20], ["hour_of_day"])
     assert young["hour_of_day"]["hours_seen"] == 3
