@@ -53,7 +53,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/agent/flows/poll":
             time.sleep(2)
             return self._reply(200, {"flows": [], "cancel": []})
-        if path in ("/api/fim", "/api/hygiene"):
+        if path == "/api/hygiene":
+            (OUT / "hygiene.json").write_text(json.dumps(payload))
+            return self._reply(204)
+        if path == "/api/fim":
             return self._reply(204)
         return self._reply(404, {"detail": "not found"})
 

@@ -173,7 +173,9 @@ async def get_agent_vulns(
     snap = (await db.execute(q.order_by(desc(HygieneSnapshot.collected_at)).limit(1))).scalar_one_or_none()
     if not snap:
         raise HTTPException(status_code=404, detail="No hygiene snapshot found")
-    packages = snap.packages or []
+    # OSV covers Linux distro packages; Windows programs (source "windows") have no
+    # ecosystem there and would only produce false matches against Debian names.
+    packages = [p for p in (snap.packages or []) if p.get("source") in _ECOSYSTEM_MAP]
     if not packages:
         return {"agent_id": agent_id, "package_count": 0, "vulnerable": [], "checked_at": None}
 
