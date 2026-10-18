@@ -4,5 +4,6 @@
 !server-api/app
 !worker/worker/__init__.py
 !worker/worker/sigma_engine.py
+!worker/worker/sigma_logsource.py
 !worker/worker/decoder_engine.py
 **/__pycache__

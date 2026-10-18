@@ -7,7 +7,7 @@ WORKDIR /app
 COPY server-api/requirements.txt .
 RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
 
-COPY worker/worker/__init__.py worker/worker/sigma_engine.py worker/worker/decoder_engine.py ./worker/
+COPY worker/worker/__init__.py worker/worker/sigma_engine.py worker/worker/sigma_logsource.py worker/worker/decoder_engine.py ./worker/
 COPY server-api/app/ ./app/
 
 EXPOSE 8000

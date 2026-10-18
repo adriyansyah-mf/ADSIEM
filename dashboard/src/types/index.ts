@@ -139,8 +139,34 @@ export interface Rule {
   version: number
   is_enabled: boolean
   group_id: string | null
+  source?: 'custom' | 'sigmahq' | string
+  external_id?: string | null
+  sigma_status?: string | null
+  logsource?: { product?: string; service?: string; category?: string }
+  collected?: boolean
+  modified_locally?: boolean
   created_at: string
   updated_at: string
+}
+
+export interface RuleTestResult {
+  matched: boolean
+  rule_title?: string | null
+  error?: string | null
+  logsource_applies?: boolean | null
+}
+
+export interface SigmaHQImportResult {
+  release: string
+  total: number
+  created: number
+  updated: number
+  unchanged: number
+  kept_local_edits: number
+  rejected: number
+  enabled: number
+  not_collected: number
+  rejected_examples: string[]
 }
 
 export interface Decoder {

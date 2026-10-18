@@ -165,26 +165,41 @@ func userDataFields(inner []byte) map[string]string {
 }
 
 // safeKey keeps the key a single \w+ token so the server's kv parser reads it.
+// Spaces are dropped ("New Value" → NewValue), the field names Sigma rules use.
 func safeKey(k string) string {
 	var b strings.Builder
 	for _, r := range k {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
 			b.WriteRune(r)
-		case r == ' ' || r == '-' || r == '.':
+		case r == '-' || r == '.':
 			b.WriteRune('_')
 		}
 	}
 	return b.String()
 }
 
-// quote wraps a value for the kv parser (`key="..."`, backslash escapes allowed):
-// inner double quotes become single quotes and line breaks become spaces, so a
-// command line or script block can't end the value or split the event.
+// quote wraps a value for the kv parser (`key="..."`). A double quote is
+// written \" and a backslash is doubled only where it would be ambiguous —
+// before another backslash or a quote, or at the end — so Windows paths stay
+// readable while the server recovers the exact value (command lines keep
+// their quotes, which Sigma rules match on). Line breaks become spaces so a
+// script block can't split the event.
 func quote(v string) string {
-	v = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ", `"`, "'").Replace(v)
-	if strings.HasSuffix(v, `\`) {
-		v += `\` // a trailing backslash would otherwise escape the closing quote
+	v = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ", "\t", " ").Replace(v)
+	var b strings.Builder
+	b.Grow(len(v) + 2)
+	b.WriteByte('"')
+	for i := 0; i < len(v); i++ {
+		switch c := v[i]; {
+		case c == '"':
+			b.WriteString(`\"`)
+		case c == '\\' && (i+1 == len(v) || v[i+1] == '\\' || v[i+1] == '"'):
+			b.WriteString(`\\`)
+		default:
+			b.WriteByte(c)
+		}
 	}
-	return `"` + v + `"`
+	b.WriteByte('"')
+	return b.String()
 }

@@ -9,7 +9,10 @@ worker/worker/
 ├── main.py           # entry — asyncio.gather() of 15 loops + health server (:8001)
 ├── consumer.py       # stream consume → decode → sigma → alert; DLQ retry
 ├── decoder_engine.py # regex + kv YAML decoders
-├── sigma_engine.py   # rule match + threshold + suppression (Redis-backed)
+├── sigma_engine.py   # rule match + threshold + suppression (Redis-backed); compiled-rule cache across reloads
+├── sigma_logsource.py # log_type (+ Windows Channel/EventID) → Sigma product/service/category, field aliases
+│                     #   — rules only run on their logsource's events; keep in step with decoders/ and the
+│                     #   Windows agent channels (tests/sigmahq/run.sh replays SigmaHQ's regression samples)
 ├── alert_manager.py  # alert creation + webhook fire
 ├── seeder.py         # seed rules/ + decoders/ into DB (new titles only)
 ├── soar_engine.py    # playbook execution
