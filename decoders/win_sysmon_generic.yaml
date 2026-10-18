@@ -1,0 +1,21 @@
+# Any other Sysmon event
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_sysmon_generic
+log_type: windows_sysmon
+type: kv
+priority: 85
+enabled: true
+match: EventID=
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  Image: Image
+  process.name: Image
+  user.name: User
+static_fields:
+  event.category: host
+  event.action: windows_event

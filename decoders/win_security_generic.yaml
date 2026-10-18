@@ -1,0 +1,21 @@
+# Any other Security event: keeps EventID and the common fields searchable
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_security_generic
+log_type: windows_security
+type: kv
+priority: 85
+enabled: true
+match: EventID=
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  user.name: SubjectUserName
+  user.target: TargetUserName
+  source.ip: IpAddress
+static_fields:
+  event.category: host
+  event.action: windows_event

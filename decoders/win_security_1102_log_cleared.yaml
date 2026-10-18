@@ -1,0 +1,20 @@
+# Security 1102: the audit log was cleared
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_security_1102_log_cleared
+log_type: windows_security
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=1102 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  user.name: SubjectUserName
+  user.domain: SubjectDomainName
+static_fields:
+  event.category: host
+  event.action: log_cleared

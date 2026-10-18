@@ -51,6 +51,15 @@ jobs:
       - name: go test
         run: go test ./tests/agent/...
 
+      - name: Windows vet + build
+        working-directory: agent
+        env:
+          GOOS: windows
+          CGO_ENABLED: "0"
+        run: |
+          go vet ./...
+          go build -o /dev/null ./cmd/agent/
+
   dashboard-build:
     name: Dashboard build (tsc + vite)
     runs-on: ubuntu-latest

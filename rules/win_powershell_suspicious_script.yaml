@@ -1,0 +1,27 @@
+title: Suspicious PowerShell Script Block
+id: rule-win-powershell-suspicious
+description: PowerShell script block logging (4104) shows a download cradle, encoded or reflective execution, or a known offensive tool.
+logsource:
+  product: windows
+  service: powershell
+detection:
+  script:
+    event.action: powershell_script_block
+  bad:
+    powershell.script_block|contains:
+      - DownloadString
+      - DownloadFile
+      - Invoke-WebRequest
+      - 'IEX ('
+      - Invoke-Expression
+      - FromBase64String
+      - EncodedCommand
+      - Reflection.Assembly
+      - Invoke-Mimikatz
+      - Invoke-Shellcode
+      - AmsiUtils
+  condition: script and bad
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.001

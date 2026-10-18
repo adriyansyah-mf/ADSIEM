@@ -1,0 +1,25 @@
+# Sysmon 13: registry value set
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_sysmon_13_registry_set
+log_type: windows_sysmon
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=13 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  Image: Image
+  TargetObject: TargetObject
+  Details: Details
+  process.name: Image
+  registry.path: TargetObject
+  registry.data: Details
+  user.name: User
+static_fields:
+  event.category: registry
+  event.action: registry_value_set

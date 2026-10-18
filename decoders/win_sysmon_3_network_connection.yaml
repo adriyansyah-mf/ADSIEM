@@ -1,0 +1,30 @@
+# Sysmon 3: network connection
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_sysmon_3_network_connection
+log_type: windows_sysmon
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=3 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  Image: Image
+  DestinationIp: DestinationIp
+  DestinationPort: DestinationPort
+  DestinationHostname: DestinationHostname
+  SourcePort: SourcePort
+  Initiated: Initiated
+  process.name: Image
+  destination.ip: DestinationIp
+  destination.port: DestinationPort
+  destination.domain: DestinationHostname
+  network.transport: Protocol
+  user.name: User
+static_fields:
+  event.category: network
+  event.action: network_connection

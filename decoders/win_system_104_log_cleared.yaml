@@ -1,0 +1,20 @@
+# System 104: an event log was cleared
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_system_104_log_cleared
+log_type: windows_system
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=104 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  user.name: SubjectUserName
+  winlog.cleared_channel: Channel
+static_fields:
+  event.category: host
+  event.action: log_cleared

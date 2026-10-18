@@ -21,7 +21,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 // Plugin collects rows for a live-response flow source. It must call emit once
@@ -353,16 +352,21 @@ func (c ctxReader) Read(p []byte) (int, error) {
 func walkGlobs(ctx context.Context, globs []string, fn func(path string, d fs.DirEntry) error) error {
 	seen := map[string]bool{}
 	for _, g := range globs {
-		if !strings.HasPrefix(g, "/") {
+		// Matching works on forward slashes, so C:\Users\*\Downloads\** works too.
+		g = filepath.ToSlash(g)
+		if !filepath.IsAbs(filepath.FromSlash(g)) {
 			return fmt.Errorf("glob %q must be an absolute path", g)
 		}
 		re, err := globRegexp(g)
 		if err != nil {
 			return fmt.Errorf("bad glob %q: %w", g, err)
 		}
+		if runtime.GOOS == "windows" { // NTFS paths are case-insensitive
+			re = regexp.MustCompile("(?i)" + re.String())
+		}
 		recursive := strings.Contains(g, "**")
 		depth := strings.Count(g, "/")
-		root := globRoot(g)
+		root := filepath.FromSlash(globRoot(g))
 		err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
@@ -373,14 +377,15 @@ func walkGlobs(ctx context.Context, globs []string, fn func(path string, d fs.Di
 			if d.IsDir() && skipPseudoFS(root, p) {
 				return fs.SkipDir
 			}
-			if !seen[p] && re.MatchString(p) {
+			sp := filepath.ToSlash(p)
+			if !seen[p] && re.MatchString(sp) {
 				seen[p] = true
 				if err := fn(p, d); err != nil {
 					return err
 				}
 			}
 			// without ** nothing deeper than the pattern's own depth can match
-			if d.IsDir() && p != root && !recursive && strings.Count(p, "/") >= depth {
+			if d.IsDir() && p != root && !recursive && strings.Count(sp, "/") >= depth {
 				return fs.SkipDir
 			}
 			return nil
@@ -402,13 +407,9 @@ func pluginGlob(ctx context.Context, args map[string]any, emit func(map[string]a
 		if err != nil {
 			return nil
 		}
-		uid := ""
-		if st, ok := info.Sys().(*syscall.Stat_t); ok {
-			uid = strconv.Itoa(int(st.Uid))
-		}
 		if err := emit(map[string]any{
 			"Path": p, "Name": d.Name(), "Size": info.Size(), "Mode": info.Mode().String(),
-			"Uid": uid, "ModTime": info.ModTime().UTC().Format("2006-01-02T15:04:05Z"), "IsDir": d.IsDir(),
+			"Uid": fileOwnerUID(info), "ModTime": info.ModTime().UTC().Format("2006-01-02T15:04:05Z"), "IsDir": d.IsDir(),
 		}); err != nil {
 			return err
 		}
@@ -557,7 +558,7 @@ func pluginOpenFiles(ctx context.Context, args map[string]any, emit func(map[str
 // ─── yara ────────────────────────────────────────────────────────
 
 func pluginYara(ctx context.Context, args map[string]any, emit func(map[string]any) error) error {
-	root := argString(args, "path", "/tmp")
+	root := argString(args, "path", os.TempDir())
 	recursive := argBool(args, "recursive", true)
 	rulesRaw, _ := args["rules"].([]any)
 	var rules []YaraRuleDef
