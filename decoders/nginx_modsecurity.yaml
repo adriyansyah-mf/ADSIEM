@@ -1,0 +1,22 @@
+# ModSecurity (nginx connector) rule hit — 'Access denied' when it blocked
+name: nginx_modsecurity
+log_type: nginx_error
+type: regex
+priority: 5
+enabled: true
+match: 'ModSecurity:'
+pattern: '^(?=(?:.*?\[(?P<level>emerg|alert|crit|error|warn|notice|info)\])?)(?=(?:.*?with code (?P<status>\d+))?)(?=(?:.*?\[id "(?P<rule_id>\d+)"\])?)(?=(?:.*?\[msg "(?P<rule_msg>[^"]*)"\])?)(?=(?:.*?\[severity
+  "(?P<severity>[^"]*)"\])?)(?=(?:.*?client: (?P<src_ip>[^,\s]+))?)(?=(?:.*?, server: (?P<server>[^,]+))?)(?=(?:.*?request: "(?P<method>\S+) (?P<path>\S+))?).*?ModSecurity: (?P<action>Access denied|Warning)'
+fields:
+  event.category: web
+  event.action: waf_match
+  event.outcome: action
+  log.level: level
+  http.response.status_code: status
+  rule.id: rule_id
+  rule.name: rule_msg
+  waf.severity: severity
+  source.ip: src_ip
+  url.domain: server
+  http.request.method: method
+  url.path: path

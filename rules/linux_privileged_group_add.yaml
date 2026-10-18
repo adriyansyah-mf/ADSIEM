@@ -1,0 +1,24 @@
+title: User Added to Privileged Linux Group
+id: rule-linux-privileged-group-add
+description: A user was added to a group that grants root or root-equivalent access (sudo, wheel, admin, root, docker, lxd, disk, shadow).
+logsource:
+  product: linux
+detection:
+  added:
+    event.action: user_added_to_group
+  privileged:
+    group.name:
+      - sudo
+      - wheel
+      - admin
+      - root
+      - docker
+      - lxd
+      - disk
+      - shadow
+  condition: added and privileged
+level: high
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1098

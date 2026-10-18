@@ -1,0 +1,35 @@
+title: SSH Username Enumeration
+id: rule-ssh-username-enumeration-base
+name: ssh_invalid_user
+description: Login attempt for an account that doesn't exist (base rule for the enumeration correlation).
+logsource:
+  product: linux
+  service: sshd
+detection:
+  selection:
+    event.action: invalid_user
+  condition: selection
+level: low
+tags:
+  - attack.discovery
+  - attack.t1087.001
+---
+title: SSH Username Enumeration
+id: rule-ssh-username-enumeration
+description: One source tried five or more different non-existent usernames over SSH within 10 minutes.
+correlation:
+  type: value_count
+  rules:
+    - ssh_invalid_user
+  group-by:
+    - source.ip
+  timespan: 10m
+  condition:
+    field: user.name
+    gte: 5
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1110.001
+  - attack.discovery
+  - attack.t1087.001

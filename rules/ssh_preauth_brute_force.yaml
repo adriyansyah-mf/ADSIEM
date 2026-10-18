@@ -1,0 +1,22 @@
+title: SSH Brute Force (pre-authentication)
+id: rule-ssh-preauth-brute-force
+description: Many SSH connections from one source dropped before authenticating. On key-only servers this is the only trace of password guessing, since no 'Failed password' line is written.
+logsource:
+  product: linux
+  service: sshd
+detection:
+  selection:
+    event.action:
+      - preauth_disconnect
+      - max_auth_exceeded
+  condition: selection
+threshold:
+  count: 15
+  timewindow: 300
+  group_by: source.ip
+suppression:
+  timewindow: 3600
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1110.001

@@ -16,6 +16,8 @@ def _parse_kv(raw: str) -> dict[str, str]:
     for key, val in _KV_RE.findall(raw):
         if len(val) >= 2 and val.startswith('"') and val.endswith('"'):
             val = _KV_UNESCAPE_RE.sub(r"\1", val[1:-1])
+        elif val.endswith("'") and val.count("'") == 1:
+            val = val[:-1]  # last field inside auditd's msg='...' wrapper: res=failed'
         result[key] = val
     return result
 

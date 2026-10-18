@@ -1,0 +1,16 @@
+title: Sudo Command Denied by Sudoers
+id: rule-sudo-denied
+description: A user tried to run sudo but is not in sudoers or not allowed that command — a privilege escalation attempt or a compromised low-privilege account.
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: sudo_denied
+  condition: selection
+suppression:
+  timewindow: 600
+  group_by: [hostname, user.name]
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.003

@@ -1,0 +1,21 @@
+title: FortiGate VPN / Admin Login Brute Force
+id: rule-fortigate-login-brute-force
+description: Repeated failed SSL-VPN or administrator logins on a FortiGate from one source.
+logsource:
+  product: fortigate
+detection:
+  selection:
+    event.action: login_failed
+  condition: selection
+threshold:
+  count: 10
+  timewindow: 300
+  group_by: source.ip
+suppression:
+  timewindow: 3600
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1110
+  - attack.initial_access
+  - attack.t1133

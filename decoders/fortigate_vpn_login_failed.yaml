@@ -1,0 +1,20 @@
+# FortiGate SSL/IPsec VPN login failure
+name: fortigate_vpn_login_failed
+log_type: fortigate_traffic
+type: kv
+priority: 8
+enabled: true
+match: action="ssl-login-fail"
+fields:
+  user.name: user
+  source.ip: remip
+  event.reason: reason
+  event.type: subtype
+  observer.hostname: devname
+  network.tunnel_type: tunneltype
+  log.level: level
+static_fields:
+  event.category: authentication
+  event.action: login_failed
+  event.outcome: failure
+  event.dataset: fortigate.vpn

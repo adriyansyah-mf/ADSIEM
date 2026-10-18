@@ -6,7 +6,7 @@ type: regex
 # uid=1000 euid=0 tty=pts/0 ruser=alice rhost=  user=root"
 priority: 15
 enabled: true
-pattern: 'pam_unix\((?P<service>su[^:]*):auth\): authentication failure;.*?\bruser=(?P<user>\S*).*?\buser=(?P<target>\S+)'
+pattern: 'pam_unix\((?P<service>su(?:-l)?):auth\): authentication failure;.*?\bruser=(?P<user>\S*).*?\buser=(?P<target>\S+)'
 fields:
   event.category: authentication
   event.action: su_failed
