@@ -123,6 +123,7 @@ class Alert(Base):
     mitre_techniques = Column(JSONB, nullable=False, default=list)
     kill_chain_stage = Column(String(50))
     ai_verdict       = Column(String(50))  # escalate/create_case/monitor/false_positive from AI L1 triage
+    context          = Column(JSONB, nullable=False, default=dict)  # why it fired: rule tags, threshold counts, UEBA reasons
     created_at       = Column(DateTime(timezone=True), default=now_utc)
     updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     notes            = relationship("AlertNote", back_populates="alert", cascade="all, delete-orphan")

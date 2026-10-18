@@ -249,8 +249,12 @@ async def _tag_alert_with_mitre(alert_id: str, mitre_techniques: list[str]) -> N
         async with AsyncSessionLocal() as db:
             alert = await db.get(Alert, uuid.UUID(alert_id))
             if alert:
-                alert.mitre_techniques = mitre_techniques
-                alert.kill_chain_stage = stage_for_techniques(mitre_techniques)
+                # keep the detecting rule's techniques; the AI's entry wins per technique id
+                ai_ids = {str(t).split(":")[0].strip().upper() for t in mitre_techniques}
+                kept = [t for t in (alert.mitre_techniques or [])
+                        if str(t).split(":")[0].strip().upper() not in ai_ids]
+                alert.mitre_techniques = list(mitre_techniques) + kept
+                alert.kill_chain_stage = stage_for_techniques(alert.mitre_techniques)
                 await db.commit()
     except Exception as exc:
         log.warning("alert_mitre_tag_failed", alert_id=alert_id, error=str(exc))
