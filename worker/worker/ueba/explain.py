@@ -25,6 +25,12 @@ MIN_HOURS_FOR_TIME = 20     # distinct active hours a baseline needs before "rar
 # need a security-relevant deviation (failures, many users/hosts, sudo, new IP).
 CONTEXT_FEATURES = {"total_events", "login_count", "hour_of_day", "is_weekend"}
 
+# Smallest count that can be suspicious at all, whatever the baseline says.
+_MIN_VALUE = {
+    "unique_users": 3, "failed_count": 5, "unique_target_hosts": 3,
+    "sudo_count": 3, "unique_ips": 3, "unique_hosts": 3,
+}
+
 # Features where only a *higher* value is suspicious (a quiet hour is not an attack).
 _UPWARD = {
     "login_count", "failed_ratio", "unique_ips", "unique_hosts", "sudo_count",
@@ -134,6 +140,10 @@ def explain(entity_type: str, features: dict, entity_profile: dict | None, popul
         median, scale = float(stats.get("median", 0.0)), float(stats.get("scale", 1.0)) or 1.0
         z = (value - median) / scale
         if key in _UPWARD and z < 0:
+            continue
+        # most IPs are web clients that never log in, so one login is "infinitely"
+        # above a baseline of 0; a count has to reach a meaningful size first
+        if value < _MIN_VALUE.get(key, 0):
             continue
         if abs(z) >= Z_THRESHOLD and value > float(stats.get("p95", median)):
             label = _LABELS.get(key, key)
