@@ -1,0 +1,14 @@
+title: Windows Account Locked Out
+id: rule-win-account-locked
+description: An account was locked out (4740) after repeated failed logons — often the visible end of password guessing.
+logsource:
+  product: windows
+  service: security
+detection:
+  locked:
+    event.action: account_locked
+  condition: locked
+level: low
+tags:
+  - attack.credential_access
+  - attack.t1110

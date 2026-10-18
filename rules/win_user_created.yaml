@@ -1,0 +1,14 @@
+title: Windows Local or Domain User Created
+id: rule-win-user-created
+description: A user account was created (4720). Expected during onboarding; unexpected accounts are a persistence technique.
+logsource:
+  product: windows
+  service: security
+detection:
+  created:
+    event.action: user_created
+  condition: created
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1136.001

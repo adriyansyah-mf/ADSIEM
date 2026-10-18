@@ -1,11 +1,11 @@
+//go:build !windows
+
 // agent/internal/task/isolation.go
 package task
 
 import (
 	"fmt"
 	"log"
-	"net"
-	"net/url"
 	"os/exec"
 )
 
@@ -75,20 +75,4 @@ func blockIP(ip string, durationSeconds int) error {
 	exec.Command("sh", "-c", fmt.Sprintf("echo '%s' | at now + %d seconds 2>/dev/null || true", atCmd, durationSeconds)).Run()
 	log.Printf("[task] blocked IP %s (requested duration: %ds, auto-unblock via `at` if available)", ip, durationSeconds)
 	return nil
-}
-
-func resolveSIEMIP(serverURL string) (string, error) {
-	u, err := url.Parse(serverURL)
-	if err != nil {
-		return "", err
-	}
-	host := u.Hostname()
-	if net.ParseIP(host) != nil {
-		return host, nil
-	}
-	addrs, err := net.LookupHost(host)
-	if err != nil || len(addrs) == 0 {
-		return "", fmt.Errorf("cannot resolve %s", host)
-	}
-	return addrs[0], nil
 }

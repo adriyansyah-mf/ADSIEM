@@ -1,0 +1,28 @@
+# Security 4688: a new process has been created (enable command line auditing for CommandLine)
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_security_4688_process_created
+log_type: windows_security
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=4688 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  Image: NewProcessName
+  CommandLine: CommandLine
+  ParentImage: ParentProcessName
+  User: SubjectUserName
+  process.name: NewProcessName
+  process.executable: NewProcessName
+  process.command_line: CommandLine
+  process.parent.name: ParentProcessName
+  user.name: SubjectUserName
+  user.domain: SubjectDomainName
+static_fields:
+  event.category: process
+  event.action: process_created

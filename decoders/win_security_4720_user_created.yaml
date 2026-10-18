@@ -1,0 +1,21 @@
+# Security 4720: a user account was created
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_security_4720_user_created
+log_type: windows_security
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=4720 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  user.name: SubjectUserName
+  user.target: TargetUserName
+  user.domain: TargetDomainName
+static_fields:
+  event.category: iam
+  event.action: user_created

@@ -1,0 +1,18 @@
+# Application log events
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_application_generic
+log_type: windows_application
+type: kv
+priority: 85
+enabled: true
+match: EventID=
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+static_fields:
+  event.category: host
+  event.action: windows_event

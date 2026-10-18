@@ -69,7 +69,7 @@ Agents page).
 - Ports 80/443 free (nginx), or adjust `docker-compose.prod.yml`
 
 **Endpoint agent host:**
-- Linux (the agent is Linux-only — no Windows/macOS build)
+- Linux, or Windows 10 / Server 2016 and later (see [Windows](#windows) — no macOS build)
 - To run as a systemd service: any systemd-based distro (Debian/Ubuntu → `.deb`, RHEL/Fedora/Rocky/Alma → `.rpm`)
 - For the eBPF process-exec monitor specifically (optional, degrades gracefully without it):
   - Kernel with BTF: `ls /sys/kernel/btf/vmlinux` must exist (`CONFIG_DEBUG_INFO_BTF=y`) — true on any mainstream distro kernel from the last ~5 years
@@ -203,6 +203,30 @@ i.e. **as root**, which is what live-response (`iptables` isolate/block-IP) and 
 monitor need. If you harden the unit to run as `siem-agent`, isolate/block-IP and
 process-exec monitoring will fail closed (logged as warnings, not fatal) — everything
 else (log tailing, FIM, hygiene) still works unprivileged.
+
+### Windows
+
+Each tagged release also ships `siem-agent-windows-amd64-<version>.zip` (build it
+yourself with `cd agent && VERSION=x.y.z bash packaging/build-windows.sh`). Unzip it and,
+in an **elevated** PowerShell in that folder:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 `
+  -ServerUrl https://siem.example.com -EnrollmentToken <token> -EnableAuditing
+```
+
+This installs `C:\Program Files\SIEMAgent\siem-agent.exe` as the auto-start `SIEMAgent`
+service (runs as LocalSystem) with its config and `agent.log` in `C:\ProgramData\SIEMAgent`.
+Running `install.ps1` again upgrades the binary and keeps the config/token; `uninstall.ps1 [-Purge]`
+removes it.
+
+The agent reads the Security, System, Application, Sysmon and PowerShell/Operational event
+logs (log source paths `eventlog:<channel>`), decoded by `decoders/win_*.yaml`. `-EnableAuditing`
+turns on logon / process-creation (with command line) / account-management auditing and
+PowerShell script block logging; install [Sysmon](https://learn.microsoft.com/sysinternals/downloads/sysmon)
+for process, network, file, registry and DNS events. Live response (process/network/user/persistence
+listing, file collection, YARA) works; host isolation and block-IP use Windows Defender Firewall.
+There is no eBPF process monitor or package inventory on Windows.
 
 ### Option B — Build from source
 

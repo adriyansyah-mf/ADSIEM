@@ -26,15 +26,41 @@ import (
 var Version = "dev"
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "path to config file")
+	configPath := flag.String("config", defaultConfigPath(), "path to config file")
+	install := flag.Bool("install", false, "install the agent as a Windows service (Windows only)")
+	uninstall := flag.Bool("uninstall", false, "remove the Windows service (Windows only)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	if *install || *uninstall {
+		if err := manageService(*install, *configPath); err != nil {
+			slog.Error("service command failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// Started by the Windows Service Control Manager: it decides when to stop.
+	if runAsService(func(stop <-chan struct{}) { run(*configPath, stop) }) {
+		return
+	}
+
+	stop := make(chan struct{})
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+		<-sigCh
+		close(stop)
+	}()
+	run(*configPath, stop)
+}
+
+// run starts every agent subsystem and blocks until stop is closed.
+func run(configPath string, stop <-chan struct{}) {
 	heartbeat.AgentVersion = Version
 	enrollment.AgentVersion = Version
 	slog.Info("siem-agent starting", "version", Version)
 
-	cfg, err := config.Load(*configPath)
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
@@ -49,7 +75,7 @@ func main() {
 	}
 
 	if cfg.Agent.Token == "" {
-		if err := enrollment.Enroll(cfg, *configPath, enrollToken); err != nil {
+		if err := enrollment.Enroll(cfg, configPath, enrollToken); err != nil {
 			slog.Error("enrollment failed", "err", err)
 			os.Exit(1)
 		}
@@ -67,7 +93,7 @@ func main() {
 	mgr.Update(initialSources)
 
 	// fsnotify for bootstrap fields only (agent.name, agent.group, server.url)
-	if err := config.Watch(*configPath, func(newCfg *config.Config) {
+	if err := config.Watch(configPath, func(newCfg *config.Config) {
 		cfg.Agent.Name = newCfg.Agent.Name
 		cfg.Agent.Group = newCfg.Agent.Group
 		cfg.Server.URL = newCfg.Server.URL
@@ -127,10 +153,7 @@ func main() {
 		}
 	}()
 
-	// signal handler
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	<-sigCh
+	<-stop
 	slog.Info("shutting down")
 	stopFlows()
 	mgr.StopAll()

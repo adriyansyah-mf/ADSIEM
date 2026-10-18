@@ -1,0 +1,14 @@
+title: New Windows Service Installed
+id: rule-win-service-installed
+description: A service was installed (System 7045). Attackers install services for persistence and remote execution (PsExec).
+logsource:
+  product: windows
+  service: system
+detection:
+  installed:
+    event.action: service_installed
+  condition: installed
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1543.003

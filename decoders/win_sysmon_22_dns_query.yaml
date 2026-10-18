@@ -1,0 +1,25 @@
+# Sysmon 22: DNS query
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_sysmon_22_dns_query
+log_type: windows_sysmon
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=22 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  Image: Image
+  QueryName: QueryName
+  QueryResults: QueryResults
+  process.name: Image
+  dns.question.name: QueryName
+  dns.answers: QueryResults
+  user.name: User
+static_fields:
+  event.category: network
+  event.action: dns_query
