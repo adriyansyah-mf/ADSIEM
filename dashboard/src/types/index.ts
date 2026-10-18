@@ -11,7 +11,7 @@ export interface User {
 
 export interface AgentPackage {
   filename: string
-  type: 'deb' | 'rpm' | 'windows'
+  type: 'deb' | 'rpm' | 'windows' | 'msi'
   version: string
   arch: string
   size_bytes: number

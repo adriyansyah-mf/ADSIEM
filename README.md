@@ -239,19 +239,36 @@ else (log tailing, FIM, hygiene) still works unprivileged.
 
 ### Windows
 
-Each tagged release also ships `siem-agent-windows-amd64-<version>.zip` (build it
-yourself with `cd agent && VERSION=x.y.z bash packaging/build-windows.sh`). Unzip it and,
-in an **elevated** PowerShell in that folder:
+Each tagged release ships **`siem-agent-<version>-x64.msi`**. It is built with WiX on a
+Windows runner, and before publishing the release workflow installs it there and
+checks enrollment and event shipping (`tests/windows/smoke-msi.ps1`). Install it like
+Wazuh's, from an elevated prompt or any deployment tool (Intune, SCCM, PDQ…):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1 `
-  -ServerUrl https://siem.example.com -EnrollmentToken <enrollment key> -EnableAuditing
+msiexec /i siem-agent-<version>-x64.msi /qn SERVER_URL=https://siem.example.com ENROLLMENT_KEY=<key> ENABLE_AUDITING=1
 ```
 
-This installs `C:\Program Files\SIEMAgent\siem-agent.exe` as the auto-start `SIEMAgent`
-service (runs as LocalSystem) with its config and `agent.log` in `C:\ProgramData\SIEMAgent`.
-Running `install.ps1` again upgrades the binary and keeps the config/token; `uninstall.ps1 [-Purge]`
-removes it.
+| Property | |
+|---|---|
+| `SERVER_URL` | SIEM server, as the host reaches it (required on first install) |
+| `ENROLLMENT_KEY` | enrollment key (required on first install; a new one re-enrolls the agent) |
+| `AGENT_NAME` | optional, default: hostname |
+| `ENABLE_AUDITING` | `1` turns on logon / process-creation (with command line) / account auditing and PowerShell script block logging |
+
+The MSI installs `C:\Program Files\SIEMAgent\siem-agent.exe` as the auto-start
+`SIEMAgent` service. The service runs as LocalSystem and restarts itself if it crashes.
+Its config and `agent.log` live in `C:\ProgramData\SIEMAgent`, which only SYSTEM and
+Administrators can read.
+
+- **Upgrade:** a newer MSI, with or without properties, keeps the config and the agent token.
+- **Uninstall:** `msiexec /x` or *Apps & features* removes the service and binary and
+  leaves `C:\ProgramData\SIEMAgent`.
+- **Re-point an agent** at another server without reinstalling:
+  `siem-agent.exe -configure -server … -key …`.
+
+The release also has the older `siem-agent-windows-amd64-<version>.zip`, holding the exe,
+`install.ps1` and `uninstall.ps1`, for hosts where an MSI can't be used:
+`powershell -ExecutionPolicy Bypass -File install.ps1 -ServerUrl … -EnrollmentToken … -EnableAuditing`.
 
 The agent reads the Security, System, Application, Sysmon and PowerShell/Operational event
 logs (log source paths `eventlog:<channel>`), decoded by `decoders/win_*.yaml`. `-EnableAuditing`

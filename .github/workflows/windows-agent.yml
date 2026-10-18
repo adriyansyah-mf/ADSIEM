@@ -1,0 +1,45 @@
+name: Windows agent
+
+# Builds the MSI and installs it on a real Windows runner: service, enrollment
+# (against tests/windows/mock_siem.py), event log shipping, uninstall.
+on:
+  pull_request:
+    paths:
+      - "agent/**"
+      - "tests/windows/**"
+      - ".github/workflows/windows-agent.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  msi-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build MSI
+        working-directory: agent
+        shell: pwsh
+        run: ./packaging/build-msi.ps1 -Version 0.0.1
+
+      - name: Install, enroll, ship an event, uninstall
+        shell: pwsh
+        run: ./tests/windows/smoke-msi.ps1 -Msi agent/dist/packages/siem-agent-0.0.1-x64.msi
+
+      - name: Keep the MSI
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: siem-agent-msi
+          path: agent/dist/packages/*.msi

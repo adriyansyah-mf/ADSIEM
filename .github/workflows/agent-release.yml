@@ -125,8 +125,48 @@ jobs:
           name: packages-windows-amd64
           path: agent/dist/packages/*
 
+  build-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#agent-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build MSI
+        working-directory: agent
+        shell: pwsh
+        run: ./packaging/build-msi.ps1 -Version ${{ steps.version.outputs.version }}
+
+      # the release MSI must install, enroll and ship events before it's published
+      - name: Smoke test
+        shell: pwsh
+        run: ./tests/windows/smoke-msi.ps1 -Msi agent/dist/packages/siem-agent-${{ steps.version.outputs.version }}-x64.msi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows-msi
+          path: agent/dist/packages/*.msi
+
   release:
-    needs: [build, build-windows]
+    needs: [build, build-windows, build-msi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

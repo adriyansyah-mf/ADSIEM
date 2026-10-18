@@ -29,9 +29,23 @@ func main() {
 	configPath := flag.String("config", defaultConfigPath(), "path to config file")
 	install := flag.Bool("install", false, "install the agent as a Windows service (Windows only)")
 	uninstall := flag.Bool("uninstall", false, "remove the Windows service (Windows only)")
+	doConfigure := flag.Bool("configure", false, "write -server/-key/-name into the config file and exit (used by the MSI)")
+	var opts configureOptions
+	flag.StringVar(&opts.server, "server", "", "with -configure: SIEM server URL")
+	flag.StringVar(&opts.key, "key", "", "with -configure: enrollment key (clears any previous enrollment)")
+	flag.StringVar(&opts.name, "name", "", "with -configure: agent name (default: hostname)")
+	flag.StringVar(&opts.auditing, "enable-auditing", "", "with -configure on Windows: 1 to turn on logon/process/account auditing and PowerShell script block logging")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	if *doConfigure {
+		if err := configure(*configPath, opts); err != nil {
+			slog.Error("configure failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("configured", "config", *configPath)
+		return
+	}
 	if *install || *uninstall {
 		if err := manageService(*install, *configPath); err != nil {
 			slog.Error("service command failed", "err", err)
