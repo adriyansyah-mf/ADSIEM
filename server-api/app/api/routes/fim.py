@@ -80,6 +80,8 @@ async def ingest_fim(
     db: Annotated[AsyncSession, Depends(get_db)],
     agent: Annotated[Agent, Depends(get_agent)],
 ):
+    if not agent.approved:
+        return
     for ev in body.events[:200]:
         detected_at = datetime.now(timezone.utc)
         if ev.detected_at:

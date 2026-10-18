@@ -59,6 +59,9 @@ class Agent(Base):
     token_hash   = Column(Text, nullable=False)
     version      = Column(String(50))
     status       = Column(String(20), nullable=False, default="offline")
+    # False while waiting for approval (enrolled with a key that requires it):
+    # heartbeats are accepted, logs are dropped and no tasks are sent
+    approved     = Column(Boolean, nullable=False, default=True, server_default="true")
     is_isolated  = Column(Boolean, nullable=False, default=False)
     last_seen_at = Column(DateTime(timezone=True))
     flow_poll_at = Column(DateTime(timezone=True))  # last live-response long poll; NULL = no flow runner
@@ -372,7 +375,13 @@ class EnrollmentToken(Base):
     group_id         = Column(String(100), nullable=False, default="default")
     expires_at       = Column(DateTime(timezone=True), nullable=True)
     is_active        = Column(Boolean, nullable=False, default=True)
-    used_at          = Column(DateTime(timezone=True), nullable=True)
+    # how many agents may enroll with it; NULL = unlimited (a deployment key).
+    # No ORM default: SQLAlchemy would apply it to an explicit None too.
+    max_uses         = Column(Integer, nullable=True)
+    use_count        = Column(Integer, nullable=False, default=0, server_default="0")
+    # agents enrolled with it stay pending until approved in the dashboard
+    require_approval = Column(Boolean, nullable=False, default=False, server_default="false")
+    used_at          = Column(DateTime(timezone=True), nullable=True)  # last use
     used_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime(timezone=True), default=now_utc)

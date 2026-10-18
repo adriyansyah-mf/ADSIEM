@@ -1,5 +1,8 @@
-FROM golang:1.25-alpine AS builder
-RUN apk add --no-cache clang
+# Builds the agent packages the dashboard serves (Agents → Deploy agent):
+# the same scripts as the release workflow — .deb, .rpm and the Windows zip.
+FROM golang:1.25-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends clang llvm rpm zip \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -8,14 +11,9 @@ RUN clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
     -I internal/procexec/bpf/include \
     -c internal/procexec/bpf/execve.bpf.c \
     -o internal/procexec/bpf/execve.bpf.o
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /siem-agent ./cmd/agent/
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    dpkg-dev \
-    rpm \
-    && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /siem-agent /tmp/siem-agent
-COPY packaging/build.sh /tmp/build.sh
-RUN chmod +x /tmp/build.sh
-CMD ["/tmp/build.sh"]
+RUN export VERSION="$(cat VERSION)" \
+    && bash packaging/build-deb.sh >/dev/null \
+    && ARCH=x86_64 bash packaging/build-rpm.sh >/dev/null \
+    && ARCH=amd64 bash packaging/build-windows.sh
+# /output is the agent_packages volume: replace the previous build's files
+CMD ["sh", "-c", "rm -f /output/siem-agent* && cp dist/packages/siem-agent* /output/ && ls -l /output"]

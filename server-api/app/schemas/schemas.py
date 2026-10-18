@@ -95,6 +95,7 @@ class AgentOut(BaseModel):
     group_id: str
     version: str | None
     status: str
+    approved: bool = True
     is_isolated: bool = False
     last_seen_at: datetime | None
     flow_poll_at: datetime | None = None

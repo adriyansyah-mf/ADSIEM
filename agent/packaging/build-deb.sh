@@ -28,6 +28,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build \
 echo "==> Staging package layout"
 rm -rf "$STAGE"
 install -Dm755 "dist/siem-agent-${GOARCH}"              "${STAGE}/usr/bin/siem-agent"
+install -Dm755 packaging/siem-agent-configure            "${STAGE}/usr/sbin/siem-agent-configure"
 install -Dm644 packaging/siem-agent.service              "${STAGE}/lib/systemd/system/siem-agent.service"
 install -Dm644 packaging/config.yaml                     "${STAGE}/etc/siem-agent/config.yaml"
 install -d                                               "${STAGE}/var/lib/siem-agent"
@@ -72,8 +73,15 @@ case "$1" in
 
     systemctl daemon-reload
     systemctl enable siem-agent.service
-    echo "siem-agent installed. Edit /etc/siem-agent/config.yaml then:"
-    echo "  sudo systemctl start siem-agent"
+    if [ -n "${SIEM_SERVER_URL:-}" ] || [ -n "${SIEM_ENROLLMENT_KEY:-}" ]; then
+      # one-line install from the dashboard: configure, enroll and start now
+      /usr/sbin/siem-agent-configure --if-env
+    elif [ -n "$2" ] && grep -Eq '^[[:space:]]*token: *"?[A-Za-z0-9_-]{8,}' /etc/siem-agent/config.yaml; then
+      systemctl restart siem-agent.service || true   # upgrade of an enrolled agent
+    else
+      echo "siem-agent installed. Point it at your server and enroll it with:"
+      echo "  sudo siem-agent-configure --server https://<siem-server> --key <enrollment key>"
+    fi
     ;;
 esac
 EOF

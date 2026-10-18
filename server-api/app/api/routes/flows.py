@@ -404,6 +404,10 @@ async def poll_flows(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     """Long poll: returns as soon as there is work, or empty after POLL_SECONDS."""
+    if not agent.approved:
+        # no live response before approval; wait out the poll so the agent doesn't spin
+        await asyncio.sleep(POLL_SECONDS)
+        return {"flows": [], "cancel": []}
     agent_id = agent.id
     await db.execute(update(Agent).where(Agent.id == agent_id).values(flow_poll_at=datetime.now(timezone.utc)))
     await db.commit()  # also releases the pooled connection for the rest of the poll
