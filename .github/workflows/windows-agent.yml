@@ -7,6 +7,7 @@ on:
     paths:
       - "agent/**"
       - "tests/windows/**"
+      - "dashboard/src/lib/deployCommands.ts"
       - ".github/workflows/windows-agent.yml"
   workflow_dispatch:
 
@@ -27,6 +28,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install smoke-test dependencies
+        run: pip install cryptography
 
       - name: Build MSI
         working-directory: agent

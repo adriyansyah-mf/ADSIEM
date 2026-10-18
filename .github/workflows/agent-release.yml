@@ -139,6 +139,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install smoke-test dependencies
+        run: pip install cryptography
+
       - name: Resolve version
         id: version
         shell: bash
