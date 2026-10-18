@@ -90,6 +90,12 @@ class Rule(Base):
     version     = Column(Integer, nullable=False, default=1)
     is_enabled  = Column(Boolean, nullable=False, default=True)
     group_id    = Column(String(100))
+    # "custom" (written here / shipped in rules/) or "sigmahq" (imported ruleset)
+    source        = Column(String(20), nullable=False, default="custom", server_default="custom")
+    external_id   = Column(String(255))  # the Sigma rule id for imported rules
+    sigma_status  = Column(String(20))   # stable / test / experimental
+    # sha256 of the content as last imported; differs from content once edited locally
+    upstream_hash = Column(String(64))
     created_at  = Column(DateTime(timezone=True), default=now_utc)
     updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 

@@ -98,7 +98,7 @@ def test_benign_events_do_not_alert(engines):
     assert name == "win_security_4732_group_member_added"
     assert "User Added to Windows Administrators Group" not in titles
     _, _, titles = _run(engines, "windows_powershell",
-                        'EventID=4104 Channel="Microsoft-Windows-PowerShell/Operational" ScriptBlockText="Get-ChildItem C:\\"')
+                        'EventID=4104 Channel="Microsoft-Windows-PowerShell/Operational" ScriptBlockText="Get-ChildItem C:\\\\"')
     assert "Suspicious PowerShell Script Block" not in titles
 
 

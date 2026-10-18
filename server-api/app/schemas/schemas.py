@@ -191,9 +191,17 @@ class RuleOut(BaseModel):
     version: int
     is_enabled: bool
     group_id: str | None
+    source: str = "custom"
+    external_id: str | None = None
+    sigma_status: str | None = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+class RuleListItem(RuleOut):
+    logsource: dict[str, Any] = {}
+    collected: bool = True             # some log source on this platform can feed the rule
+    modified_locally: bool = False     # imported rule edited since its last import
 
 class RuleTestRequest(BaseModel):
     content: str
@@ -203,6 +211,25 @@ class RuleTestResponse(BaseModel):
     matched: bool
     rule_title: str | None = None
     error: str | None = None
+    logsource_applies: bool | None = None  # only known when sample_event has a log_type
+
+class SigmaHQImportRequest(BaseModel):
+    ruleset: str = "core"                  # core, core+, core++, emerging_threats, all
+    release: str = "latest"                # a SigmaHQ release tag such as r2026-07-01
+    enable_levels: list[str] = ["high", "critical"]
+    enable_statuses: list[str] = ["stable", "test"]
+
+class SigmaHQImportResult(BaseModel):
+    release: str
+    total: int
+    created: int
+    updated: int
+    unchanged: int
+    kept_local_edits: int
+    rejected: int
+    enabled: int
+    not_collected: int
+    rejected_examples: list[str] = []
 
 # ─── Decoders ────────────────────────────────────────────────────
 
