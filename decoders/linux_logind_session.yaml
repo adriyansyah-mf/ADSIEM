@@ -1,0 +1,13 @@
+# systemd-logind: a login session started
+name: linux_logind_session
+log_type: linux_auth
+type: regex
+priority: 30
+enabled: true
+match: New session
+pattern: 'systemd-logind\[\d+\]: New session (?P<session>\S+) of user (?P<user>[^.\s]+)\.'
+fields:
+  event.category: session
+  event.action: session_opened
+  user.name: user
+  session.id: session

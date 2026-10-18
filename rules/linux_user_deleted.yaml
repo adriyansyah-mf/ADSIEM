@@ -1,0 +1,13 @@
+title: Local User Account Deleted
+id: rule-linux-user-deleted
+description: A local account was deleted — routine offboarding, or an attacker covering tracks / disrupting access.
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: user_deleted
+  condition: selection
+level: low
+tags:
+  - attack.impact
+  - attack.t1531

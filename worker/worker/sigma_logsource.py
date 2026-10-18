@@ -197,6 +197,10 @@ SOURCES: list[Source] = [
     Source("nginx", None, "webserver", log_types=("nginx_access*",), aliases=_WEB_ALIASES),
     Source("apache", None, "webserver", log_types=("apache_access*",), aliases=_WEB_ALIASES),
     Source(None, None, "firewall", log_types=_FW),
+    # FortiGate syslog carries traffic, event and utm records in one stream
+    Source("fortigate", log_types=("fortigate_*",), raw_kv=True),
+    Source("fortigate", "event", log_types=("fortigate_*",), when=(("type", "eq", ("event",)),), raw_kv=True),
+    Source("fortigate", "utm", log_types=("fortigate_*",), when=(("type", "eq", ("utm",)),), raw_kv=True),
     # The platform's own rules predate this table and use these as products.
     Source("webserver", log_types=_WEB, aliases=_WEB_ALIASES),
     Source("firewall", log_types=_FW),

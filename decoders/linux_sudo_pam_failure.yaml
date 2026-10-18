@@ -1,0 +1,15 @@
+# sudo via PAM: wrong password (logged alongside 'incorrect password attempts')
+name: linux_sudo_pam_failure
+log_type: linux_auth
+type: regex
+priority: 13
+enabled: true
+match: pam_unix(sudo
+pattern: 'pam_unix\((?P<service>sudo[^:]*):auth\): authentication failure;.*?\bruser=(?P<user>\S*).*?\buser=(?P<target>\S+)'
+fields:
+  event.category: authentication
+  event.outcome: failure
+  event.action: sudo_auth_failure
+  user.name: user
+  user.target: target
+  service.name: service

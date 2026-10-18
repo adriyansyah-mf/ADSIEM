@@ -1,0 +1,15 @@
+# sshd via PAM: wrong password (logged alongside 'Failed password')
+name: ssh_pam_auth_failure
+log_type: linux_auth
+type: regex
+priority: 13
+enabled: true
+match: pam_unix(sshd:auth)
+pattern: 'sshd\[\d+\]: pam_unix\(sshd:auth\): authentication failure;.*?\brhost=(?P<src_ip>\S*)(?:\s+user=(?P<user>\S+))?'
+fields:
+  event.category: authentication
+  event.outcome: failure
+  event.action: pam_auth_failure
+  source.ip: src_ip
+  user.name: user
+  service.name: sshd

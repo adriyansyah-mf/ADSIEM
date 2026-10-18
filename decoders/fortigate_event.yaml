@@ -1,0 +1,20 @@
+# FortiGate system/VPN/user events
+name: fortigate_event
+log_type: fortigate_traffic
+type: kv
+priority: 12
+enabled: true
+match: type="event"
+fields:
+  event.type: subtype
+  event.outcome: action
+  user.name: user
+  source.ip: srcip
+  event.reason: logdesc
+  message: msg
+  log.level: level
+  observer.hostname: devname
+static_fields:
+  event.category: host
+  event.action: fortigate_event
+  event.dataset: fortigate.event

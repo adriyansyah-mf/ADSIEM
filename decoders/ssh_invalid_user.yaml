@@ -1,0 +1,15 @@
+# sshd: login attempt for an account that doesn't exist (username enumeration)
+name: ssh_invalid_user
+log_type: linux_auth
+type: regex
+priority: 11
+enabled: true
+match: 'Invalid user '
+pattern: 'sshd\[\d+\]: Invalid user (?P<user>.*?) from (?P<src_ip>\S+)(?: port (?P<port>\d+))?\s*$'
+fields:
+  event.category: authentication
+  event.outcome: failure
+  event.action: invalid_user
+  user.name: user
+  source.ip: src_ip
+  source.port: port

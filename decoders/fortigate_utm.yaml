@@ -1,0 +1,27 @@
+# FortiGate UTM: IPS, antivirus, web filter, application control
+name: fortigate_utm
+log_type: fortigate_traffic
+type: kv
+priority: 9
+enabled: true
+match: type="utm"
+fields:
+  event.type: subtype
+  event.outcome: action
+  source.ip: srcip
+  source.port: srcport
+  destination.ip: dstip
+  destination.port: dstport
+  rule.name: attack
+  threat.name: virus
+  url.domain: hostname
+  url.path: url
+  event.reason: msg
+  log.level: level
+  observer.hostname: devname
+  network.application: app
+  user.name: user
+static_fields:
+  event.category: intrusion_detection
+  event.action: utm_event
+  event.dataset: fortigate.utm

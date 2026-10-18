@@ -1,0 +1,13 @@
+# groupadd: a group was created
+name: linux_groupadd
+log_type: linux_auth
+type: regex
+priority: 15
+enabled: true
+match: groupadd[
+pattern: 'groupadd\[\d+\]: new group: name=(?P<group>[^,]+), GID=(?P<gid>\d+)'
+fields:
+  event.category: iam
+  event.action: group_created
+  group.name: group
+  group.id: gid

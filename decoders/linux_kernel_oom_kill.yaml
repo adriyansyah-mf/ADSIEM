@@ -1,0 +1,13 @@
+# kernel OOM killer terminated a process
+name: linux_kernel_oom_kill
+log_type: syslog
+type: regex
+priority: 50
+enabled: true
+match: Out of memory
+pattern: 'kernel: (?:\[\s*[\d.]+\]\s+)?Out of memory: Kill(?:ed)? process (?P<pid>\d+) \((?P<proc>[^)]+)\)'
+fields:
+  event.category: host
+  event.action: oom_kill
+  process.pid: pid
+  process.name: proc

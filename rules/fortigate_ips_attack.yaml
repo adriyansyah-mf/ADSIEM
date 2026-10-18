@@ -1,0 +1,17 @@
+title: FortiGate IPS Detected an Attack
+id: rule-fortigate-ips-attack
+description: The FortiGate IPS engine matched an attack signature.
+logsource:
+  product: fortigate
+detection:
+  selection:
+    event.action: utm_event
+    event.type: ips
+  condition: selection
+suppression:
+  timewindow: 1800
+  group_by: [source.ip, rule.name]
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190

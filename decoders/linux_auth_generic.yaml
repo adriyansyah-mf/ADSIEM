@@ -1,0 +1,14 @@
+# auth.log / secure lines no specific decoder knows: keeps program, pid and host
+name: linux_auth_generic
+log_type: linux_auth
+type: regex
+priority: 190
+enabled: true
+pattern: ^(?:\w{3}\s+\d+\s+[\d:]+|\d{4}-\d\d-\d\dT\S+)\s+(?P<host>\S+)\s+(?P<prog>[\w.\-/]+?)(?:\[(?P<pid>\d+)\])?:\s+(?P<msg>.*)$
+fields:
+  event.category: authentication
+  event.action: auth_message
+  host.hostname: host
+  process.name: prog
+  process.pid: pid
+  message: msg

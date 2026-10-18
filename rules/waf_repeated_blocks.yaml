@@ -1,0 +1,20 @@
+title: WAF Blocking Repeated Attacks From One Source
+id: rule-waf-repeated-blocks
+description: ModSecurity denied many requests from the same client — an active scan or exploitation attempt.
+logsource:
+  product: nginx
+detection:
+  selection:
+    event.action: waf_match
+    event.outcome: Access denied
+  condition: selection
+threshold:
+  count: 20
+  timewindow: 300
+  group_by: source.ip
+suppression:
+  timewindow: 3600
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190

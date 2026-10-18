@@ -1,0 +1,17 @@
+# sudo: user tried a command sudoers doesn't grant them
+name: linux_sudo_not_allowed
+log_type: linux_auth
+type: regex
+priority: 14
+enabled: true
+match: ; TTY=
+pattern: 'sudo(?:\[\d+\])?:\s+(?P<user>\S+) : (?P<reason>user NOT in sudoers|user NOT authorized on host|command not allowed) ; TTY=(?P<tty>\S+) ; PWD=(?P<pwd>.*?) ; USER=(?P<target>\S+) ; COMMAND=(?P<cmd>.*)'
+fields:
+  event.category: iam
+  event.outcome: failure
+  event.action: sudo_denied
+  user.name: user
+  user.target: target
+  event.reason: reason
+  process.tty: tty
+  process.command_line: cmd

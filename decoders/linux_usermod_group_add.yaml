@@ -1,0 +1,13 @@
+# usermod -aG: a user was added to a group
+name: linux_usermod_group_add
+log_type: linux_auth
+type: regex
+priority: 15
+enabled: true
+match: usermod[
+pattern: 'usermod\[\d+\]: add ''(?P<user>[^'']+)'' to (?:shadow )?group ''(?P<group>[^'']+)'''
+fields:
+  event.category: iam
+  event.action: user_added_to_group
+  user.target: user
+  group.name: group

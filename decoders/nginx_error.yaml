@@ -1,0 +1,17 @@
+# nginx error.log (access forbidden, upstream errors, ...)
+name: nginx_error
+log_type: nginx_error
+type: regex
+priority: 20
+enabled: true
+pattern: '^(?P<ts>\d{4}/\d\d/\d\d \d\d:\d\d:\d\d) \[(?P<level>\w+)\] \d+#\d+: (?:\*\d+ )?(?P<msg>.*?)(?:, client: (?P<src_ip>[^,]+))?(?:, server: (?P<server>[^,]*))?(?:, request: \"(?P<method>\S+) (?P<path>\S+)[^\"]*\")?(?:,
+  .*)?$'
+fields:
+  event.category: web
+  event.action: web_error
+  log.level: level
+  message: msg
+  source.ip: src_ip
+  url.domain: server
+  http.request.method: method
+  url.path: path
