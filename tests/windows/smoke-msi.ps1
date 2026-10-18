@@ -35,8 +35,27 @@ function Invoke-Msiexec([string[]]$msiArgs, [string]$logName) {
     return $p.ExitCode
 }
 
-$mock = Start-Process python -PassThru -NoNewWindow -ArgumentList @("tests\windows\mock_siem.py", $port, "`"$mockOut`"")
+# The mock serves HTTPS with a self-signed certificate, like a platform on a bare IP.
+$tls = Join-Path $work "tls"
+python tests\windows\make_cert.py $tls
+if ($LASTEXITCODE -ne 0) { throw "make_cert.py failed" }
+$mock = Start-Process python -PassThru -NoNewWindow -ArgumentList @("tests\windows\mock_siem.py", $port, "`"$mockOut`"",
+                                                                    "`"$tls\cert.pem`"", "`"$tls\key.pem`"")
+$caCert = $null
 try {
+    Start-Sleep 2
+    # 0. Untrusted at first; the Deploy agent wizard's trust lines (dashboard/src/lib/deployCommands.ts
+    #    trustCommand) put it in LocalMachine\Root, after which PowerShell and the agent accept it.
+    curl.exe -fsS -o NUL "https://127.0.0.1:$port/health" 2>$null
+    if ($LASTEXITCODE -eq 0) { Fail "the self-signed mock was trusted before importing its certificate" }
+    $b64 = ((Get-Content "$tls\cert.pem") -notmatch "-----") -join ""
+    $ca = [Security.Cryptography.X509Certificates.X509Certificate2]::new([Convert]::FromBase64String($b64))
+    $st = [Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine'); $st.Open('ReadWrite'); $st.Add($ca); $st.Close()
+    $caCert = $ca
+    $health = Invoke-WebRequest -UseBasicParsing "https://127.0.0.1:$port/health"
+    if ($health.StatusCode -ne 200) { Fail "health over TLS returned $($health.StatusCode)" }
+    Write-Host "ok: self-signed server certificate trusted after the wizard's import"
+
     # 1. A first install without the server/key must fail cleanly (and roll back).
     $code = Invoke-Msiexec @("/i", "`"$Msi`"") "install-noprops.log"
     if ($code -eq 0) { Fail "install without SERVER_URL/ENROLLMENT_KEY succeeded" }
@@ -44,7 +63,7 @@ try {
     Write-Host "ok: install without properties refused (exit $code)"
 
     # 2. Install the way the dashboard tells you to.
-    $code = Invoke-Msiexec @("/i", "`"$Msi`"", "SERVER_URL=http://127.0.0.1:$port", "ENROLLMENT_KEY=ci-smoke-key-123",
+    $code = Invoke-Msiexec @("/i", "`"$Msi`"", "SERVER_URL=https://127.0.0.1:$port", "ENROLLMENT_KEY=ci-smoke-key-123",
                              "AGENT_NAME=ci-windows", "ENABLE_AUDITING=1") "install.log"
     if ($code -ne 0) { Fail "msiexec /i exited $code" }
     $svc = Get-Service SIEMAgent -ErrorAction SilentlyContinue
@@ -97,4 +116,7 @@ try {
 }
 finally {
     Stop-Process -Id $mock.Id -Force -ErrorAction SilentlyContinue
+    if ($caCert) {  # don't leave the throwaway test CA trusted on the machine
+        $st = [Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine'); $st.Open('ReadWrite'); $st.Remove($caCert); $st.Close()
+    }
 }

@@ -355,7 +355,23 @@ both sides in sync.
 
 If the platform's TLS cert isn't from a public CA (see step 2 of
 [Server Installation](#server-installation)), every agent host needs that cert added to
-its own trust store, or all agent→server traffic will fail TLS verification:
+its own trust store, or all agent→server traffic will fail TLS verification. On Windows
+the download in the install command fails first, with *Could not establish trust
+relationship for the SSL/TLS secure channel*.
+
+**Agents → Deploy agent handles this.** nginx serves the certificate (not the key) at
+`/api/agents/platform-ca.pem`, and the wizard puts it into the command it generates, so
+the host trusts it before downloading anything:
+
+- Windows: imports into `LocalMachine\Root`.
+- Debian: `update-ca-certificates`.
+- RHEL: `update-ca-trust`.
+
+For an `https://<IP>` server this is on by default. The wizard shows the certificate's
+SHA-256 fingerprint; check it against
+`openssl x509 -noout -fingerprint -sha256 -in nginx/certs/cert.pem` on the server.
+
+By hand:
 
 ```bash
 # fetch the cert from the server, e.g.:
@@ -374,7 +390,12 @@ sudo cp adsiem-ca.pem /etc/pki/ca-trust/source/anchors/adsiem-platform.pem
 sudo update-ca-trust extract
 ```
 
-Then restart the agent: `sudo systemctl restart siem-agent`.
+**Windows** (elevated PowerShell):
+```powershell
+Import-Certificate -FilePath .\adsiem-ca.pem -CertStoreLocation Cert:\LocalMachine\Root
+```
+
+Then restart the agent: `sudo systemctl restart siem-agent` (Windows: `Restart-Service SIEMAgent`).
 
 ### Verifying an agent is fully working
 

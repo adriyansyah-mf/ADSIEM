@@ -5,8 +5,7 @@ import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 import { useAuthStore } from '@/stores/auth'
 import type { AgentPackage, EnrollmentKey } from '@/types'
-
-type Target = 'deb' | 'rpm' | 'windows'
+import { firstCertB64, installCommand, isIpHost, sha256Fingerprint, type Target } from '@/lib/deployCommands'
 
 const TARGETS: { value: Target; label: string; hint: string }[] = [
   { value: 'deb', label: 'Linux (DEB)', hint: 'Debian, Ubuntu, Kali' },
@@ -16,34 +15,6 @@ const TARGETS: { value: Target; label: string; hint: string }[] = [
 
 function fmt(bytes: number) {
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${(bytes / 1024).toFixed(0)} KB`
-}
-
-// single-quoted shell / PowerShell literal
-const q = (s: string) => `'${s.replace(/'/g, "'\\''")}'`
-
-export function installCommand(target: Target, pkg: AgentPackage, server: string, key: string, name: string): string {
-  const url = `${server}/api/agents/packages/${pkg.filename}`
-  if (pkg.type === 'msi') {
-    // same properties work for Intune / SCCM / any software deployment tool
-    const props = [`SERVER_URL=${server}`, `ENROLLMENT_KEY=${key}`, 'ENABLE_AUDITING=1'].join(' ')
-    return [
-      '# elevated PowerShell',
-      `$m = "$env:TEMP\\siem-agent.msi"; Invoke-WebRequest -UseBasicParsing ${q(url)} -OutFile $m`,
-      `Start-Process msiexec.exe -Wait -ArgumentList "/i \`"$m\`" /qn ${props}"`,
-    ].join('\n')
-  }
-  if (target === 'windows') {
-    return [
-      '# elevated PowerShell',
-      `$z = "$env:TEMP\\siem-agent.zip"; Invoke-WebRequest -UseBasicParsing ${q(url)} -OutFile $z`,
-      'Expand-Archive $z "$env:TEMP\\siem-agent" -Force',
-      `powershell -ExecutionPolicy Bypass -File "$env:TEMP\\siem-agent\\install.ps1" -ServerUrl ${q(server)} -EnrollmentToken ${q(key)} -EnableAuditing`,
-    ].join('\n')
-  }
-  const file = `/tmp/${pkg.filename}`
-  const env = [`SIEM_SERVER_URL=${q(server)}`, `SIEM_ENROLLMENT_KEY=${q(key)}`, ...(name ? [`SIEM_AGENT_NAME=${q(name)}`] : [])].join(' ')
-  const install = target === 'deb' ? `dpkg -i ${file}` : `rpm -Uvh ${file}`
-  return `curl -fsSLo ${file} ${q(url)} && sudo ${env} ${install}`
 }
 
 export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
@@ -68,6 +39,19 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
   const [approval, setApproval] = useState(false)
   const [group, setGroup] = useState(user?.group_id || 'default')
   const [copied, setCopied] = useState(false)
+  // nginx serves the platform certificate (prod config); absent on plain-HTTP setups
+  const { data: cert } = useQuery<{ b64: string; fingerprint: string } | null>({
+    queryKey: ['platform-ca'],
+    queryFn: async () => {
+      const r = await fetch('/api/agents/platform-ca.pem')
+      const b64 = r.ok ? firstCertB64(await r.text()) : null
+      return b64 ? { b64, fingerprint: await sha256Fingerprint(b64) } : null
+    },
+    staleTime: Infinity,
+  })
+  // default on for https://<IP>: an IP address can't have a publicly trusted certificate
+  const [trustCert, setTrustCert] = useState<boolean | null>(null)
+  const trusting = Boolean(cert) && (trustCert ?? (server.startsWith('https:') && isIpHost(server)))
 
   const createKey = useMutation({
     mutationFn: () => api.post('/api/enrollment-tokens', {
@@ -95,8 +79,11 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
     ?? packages.find(p => p.type === target)
   const serverClean = server.trim().replace(/\/+$/, '')
   const command = useMemo(
-    () => (pkg && key ? installCommand(target, pkg, serverClean, key.trim(), target === 'windows' ? '' : name.trim()) : ''),
-    [pkg, key, target, serverClean, name],
+    () => (pkg && key
+      ? installCommand(target, pkg, serverClean, key.trim(), target === 'windows' ? '' : name.trim(),
+                       trusting && cert ? cert.b64 : null)
+      : ''),
+    [pkg, key, target, serverClean, name, trusting, cert],
   )
 
   const copy = async () => {
@@ -152,6 +139,23 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
               </div>
             )}
           </div>
+          {cert && (
+            <div className="rounded border border-border p-2 text-xs space-y-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={trusting} onChange={e => setTrustCert(e.target.checked)} />
+                <span>
+                  Make the host trust this server&apos;s certificate (needed for a self-signed one — otherwise the
+                  download and the agent fail TLS verification)
+                </span>
+              </label>
+              {trusting && (
+                <div className="text-muted-foreground break-all">
+                  SHA-256 <span className="font-mono">{cert.fingerprint}</span> — compare with{' '}
+                  <span className="font-mono">openssl x509 -noout -fingerprint -sha256 -in nginx/certs/cert.pem</span> on the server
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 3. Key */}
           <div>

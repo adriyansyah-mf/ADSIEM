@@ -4,10 +4,11 @@ Answers the agent's endpoints like server-api does and records what arrives:
 <out>/enroll.json (the enrollment request) and <out>/logs.jsonl (one ingested
 log per line). Stdlib only.
 
-    python mock_siem.py <port> <out dir>
+    python mock_siem.py <port> <out dir> [<cert.pem> <key.pem>]   (TLS with the cert when given)
 """
 import json
 import os
+import ssl
 import sys
 import time
 import uuid
@@ -56,8 +57,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._reply(204)
         return self._reply(404, {"detail": "not found"})
 
+    def do_GET(self):  # noqa: N802 — lets the smoke test check TLS trust with Invoke-WebRequest
+        return self._reply(200, {"status": "ok"}) if self.path == "/health" else self._reply(404, {})
+
     def log_message(self, fmt, *args):
         sys.stderr.write("mock: " + (fmt % args) + "\n")
 
 
-ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+if len(sys.argv) >= 5:
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(sys.argv[3], sys.argv[4])
+    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+server.serve_forever()
