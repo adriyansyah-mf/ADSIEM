@@ -43,10 +43,10 @@ async def load_engines(db: AsyncSession) -> tuple[DecoderEngine, SigmaEngine]:
     dec_engine.load_from_yaml_list(decoder_yamls)
 
     result = await db.execute(select(Rule).where(Rule.is_enabled == True))
-    rule_yamls = [r.content for r in result.scalars().all()]
+    rule_rows = result.scalars().all()
     redis = await get_redis()
     sig_engine = SigmaEngine(redis=redis)
-    sig_engine.load_from_yaml_list(rule_yamls)
+    sig_engine.load_from_yaml_list([r.content for r in rule_rows], [str(r.id) for r in rule_rows])
 
     return dec_engine, sig_engine
 

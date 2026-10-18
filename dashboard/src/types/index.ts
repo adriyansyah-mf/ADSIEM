@@ -70,9 +70,38 @@ export interface Alert {
   hostname: string | null
   assignee_id: string | null
   ai_verdict: string | null
+  duplicate_count?: number
+  mitre_techniques?: string[]
+  kill_chain_stage?: string | null
+  context?: AlertContext
   created_at: string
   updated_at: string
   notes: AlertNote[]
+}
+
+export interface AlertContext {
+  rule_ref?: string
+  tags?: string[]
+  correlation_hit_count?: number
+  correlation_group?: string
+  correlation_window?: number
+  correlation_group_by?: string | null
+  correlation_type?: string
+  correlation_rules?: string[]
+  matched_fields?: Record<string, unknown>
+}
+
+export interface AlertDetail extends Alert {
+  rule: { id: string; title: string; description: string | null; level: string; tags: string[]; content: string } | null
+  agent: { id: string; hostname: string; name: string; version: string | null; status: string; last_seen_at: string | null } | null
+  ueba: {
+    entity_type: string; entity_value: string; risk_score: number; anomaly_score: number
+    reasons: Array<{ feature: string; value: number; z: number; text: string }>
+    mitre_techniques: Array<{ id: string; name: string }>
+    features: Record<string, number>
+    ai_action: string | null; ai_narrative: string | null
+  } | null
+  related: Array<Pick<Alert, 'id' | 'title' | 'severity' | 'status' | 'source_ip' | 'hostname' | 'created_at'> & { duplicate_count: number }>
 }
 
 export interface AiFeedback {

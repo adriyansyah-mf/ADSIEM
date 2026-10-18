@@ -272,10 +272,58 @@ class AlertOut(BaseModel):
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None
     ai_verdict: str | None = None
+    mitre_techniques: list = []
+    kill_chain_stage: str | None = None
+    context: dict = {}
     created_at: datetime
     updated_at: datetime
     notes: list[AlertNoteOut] = []
     model_config = {"from_attributes": True}
+
+class AlertRuleInfo(BaseModel):
+    id: UUID
+    title: str
+    description: str | None
+    level: str
+    tags: list[str] = []
+    content: str
+
+class AlertAgentInfo(BaseModel):
+    id: UUID
+    hostname: str
+    name: str
+    version: str | None
+    status: str
+    last_seen_at: datetime | None
+
+class AlertRelatedOut(BaseModel):
+    id: UUID
+    title: str
+    severity: str
+    status: str
+    source_ip: str | None
+    hostname: str | None
+    duplicate_count: int = 0
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class AlertUebaInfo(BaseModel):
+    entity_type: str
+    entity_value: str
+    risk_score: float
+    anomaly_score: float
+    reasons: list[dict] = []
+    mitre_techniques: list[dict] = []
+    features: dict = {}
+    ai_action: str | None = None
+    ai_narrative: str | None = None
+    model_config = {"from_attributes": True}
+
+class AlertDetailOut(AlertOut):
+    rule: AlertRuleInfo | None = None
+    agent: AlertAgentInfo | None = None
+    ueba: AlertUebaInfo | None = None
+    related: list[AlertRelatedOut] = []
 
 # ─── AI feedback (analyst rating of an AI triage verdict) ────────
 

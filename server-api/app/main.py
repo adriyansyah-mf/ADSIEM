@@ -123,6 +123,12 @@ async def _migrate_ueba_columns() -> None:
             ON ueba_anomalies(case_id)
             WHERE case_id IS NOT NULL
         """))
+        # alert detail looks up the anomaly that raised a UEBA alert
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ueba_anomalies_alert_id
+            ON ueba_anomalies(alert_id)
+            WHERE alert_id IS NOT NULL
+        """))
         # Performance indexes for multi-tenant queries and sorted lists
         await conn.execute(text("""
             CREATE INDEX IF NOT EXISTS ix_ueba_entity_scores_group_risk
@@ -149,7 +155,8 @@ async def _migrate_alerts_columns() -> None:
             ADD COLUMN IF NOT EXISTS duplicate_count INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ,
-            ADD COLUMN IF NOT EXISTS ai_verdict VARCHAR(50)
+            ADD COLUMN IF NOT EXISTS ai_verdict VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS context JSONB NOT NULL DEFAULT '{}'::jsonb
         """))
         await conn.execute(text("""
             ALTER TABLE cases

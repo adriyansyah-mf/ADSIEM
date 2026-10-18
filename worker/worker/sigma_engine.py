@@ -420,6 +420,7 @@ class RuleDef:
     suppression: dict | None
     name: str | None = None
     matcher: Matcher = field(default=lambda ev: False, repr=False)
+    db_id: str | None = None  # rules.id of the row this came from, so alerts link to their rule
 
     @property
     def refs(self) -> set[str]:
@@ -443,6 +444,7 @@ class CorrelationDef:
     bound: int
     value_field: str | None
     generate: bool
+    db_id: str | None = None
 
 
 _TIMESPAN_RE = re.compile(r"^(\d+)\s*([smhdw]?)$")
@@ -548,11 +550,14 @@ class SigmaEngine:
         self._local_suppressed: dict[str, float] = {}
         self._local_windows: dict[str, dict[str, float]] = {}
 
-    def load_from_yaml_list(self, yaml_contents: list[str]) -> None:
+    def load_from_yaml_list(self, yaml_contents: list[str], rule_ids: list[str | None] | None = None) -> None:
+        """rule_ids, aligned with yaml_contents, are the DB ids of the rule rows;
+        matches carry them as rule_db_id."""
         rules: list[RuleDef] = []
         correlations: list[CorrelationDef] = []
         errors: list[tuple[str, str]] = []
-        for content in yaml_contents:
+        for idx, content in enumerate(yaml_contents):
+            db_id = rule_ids[idx] if rule_ids and idx < len(rule_ids) else None
             try:
                 docs = [doc for doc in yaml.safe_load_all(content) if doc]
             except yaml.YAMLError as exc:
@@ -565,8 +570,10 @@ class SigmaEngine:
                         raise RuleError("rule must be a YAML mapping")
                     if "correlation" in doc:
                         correlations.append(_compile_correlation(doc))
+                        correlations[-1].db_id = db_id
                     else:
                         rules.append(_compile_rule(doc))
+                        rules[-1].db_id = db_id
                 except (RuleError, TypeError, ValueError) as exc:
                     errors.append((title, str(exc)))
 
@@ -616,6 +623,7 @@ class SigmaEngine:
             title = rule.title
             match: dict[str, Any] = {
                 "id": rule.id,
+                "rule_db_id": rule.db_id,
                 "title": title,
                 "level": rule.level,
                 "tags": rule.tags,
@@ -623,6 +631,8 @@ class SigmaEngine:
             }
             if corr_result:
                 hit_count, group_val = corr_result
+                match["correlation_window"] = int(rule.threshold.get("timewindow", 300))  # type: ignore[union-attr]
+                match["correlation_group_by"] = rule.threshold.get("group_by")  # type: ignore[union-attr]
                 tw = rule.threshold.get("timewindow", 300)  # type: ignore[union-attr]
                 suffix = f" from {group_val}" if group_val != "_all" else ""
                 match["title"] = f"{title} [{hit_count}x in {tw}s{suffix}]"
@@ -673,12 +683,17 @@ class SigmaEngine:
         suffix = f" for {group_val}" if group_val != "_all" else ""
         return {
             "id": corr.id,
+            "rule_db_id": corr.db_id,
             "title": f"{corr.title} [{count} {unit} in {corr.timespan}s{suffix}]",
             "level": corr.level,
             "tags": corr.tags,
             "mitre_tags": corr.mitre_tags,
             "correlation_hit_count": count,
             "correlation_group": group_val,
+            "correlation_window": corr.timespan,
+            "correlation_group_by": ", ".join(corr.group_by) or None,
+            "correlation_type": corr.type,
+            "correlation_rules": corr.rules,
         }
 
     async def _window_add(self, key: str, members: list[str], now: float, span: int) -> int:
