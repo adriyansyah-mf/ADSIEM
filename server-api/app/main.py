@@ -355,6 +355,21 @@ async def _migrate_audit_log_group() -> None:
         await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS group_id VARCHAR(100) NOT NULL DEFAULT 'default'"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_group_created ON audit_logs(group_id, created_at DESC)"))
 
+async def _migrate_agent_enrollment_columns() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            ALTER TABLE enrollment_tokens
+            ADD COLUMN IF NOT EXISTS max_uses INTEGER DEFAULT 1,
+            ADD COLUMN IF NOT EXISTS use_count INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS require_approval BOOLEAN NOT NULL DEFAULT false
+        """))
+        # tokens used before use_count existed were single-use and are spent
+        await conn.execute(text(
+            "UPDATE enrollment_tokens SET use_count = 1 WHERE used_at IS NOT NULL AND use_count = 0"
+        ))
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT true"))
+
 async def _migrate_rule_source_columns() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -433,6 +448,7 @@ async def lifespan(app: FastAPI):
         await _migrate_mfa_columns()
         await _migrate_agent_flow_poll()
         await _migrate_audit_log_group()
+        await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
     finally:

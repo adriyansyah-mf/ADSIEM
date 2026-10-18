@@ -67,6 +67,16 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if resp.StatusCode == 409 {
+			// another agent with this hostname is still connected (e.g. the old
+			// install on a rebuilt host); the server lets us in once it goes quiet
+			slog.Warn("enrollment deferred", "reason", string(body), "retry_in", backoff)
+			time.Sleep(backoff)
+			if backoff < 5*time.Minute {
+				backoff *= 2
+			}
+			continue
+		}
 		if resp.StatusCode != 201 {
 			return fmt.Errorf("enrollment rejected (status %d): %s", resp.StatusCode, body)
 		}

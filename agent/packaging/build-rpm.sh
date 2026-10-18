@@ -31,6 +31,7 @@ mkdir -p "${RPMBUILD_ROOT}"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 cp "dist/siem-agent-${GOARCH}"        "${RPMBUILD_ROOT}/SOURCES/siem-agent"
 cp "packaging/siem-agent.service"      "${RPMBUILD_ROOT}/SOURCES/siem-agent.service"
 cp "packaging/config.yaml"             "${RPMBUILD_ROOT}/SOURCES/config.yaml"
+cp "packaging/siem-agent-configure"    "${RPMBUILD_ROOT}/SOURCES/siem-agent-configure"
 cp "packaging/siem-agent.spec"         "${RPMBUILD_ROOT}/SPECS/siem-agent.spec"
 
 echo "==> Building .rpm"

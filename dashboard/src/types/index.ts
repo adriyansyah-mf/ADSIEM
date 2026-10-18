@@ -11,8 +11,23 @@ export interface User {
 
 export interface AgentPackage {
   filename: string
-  type: 'deb' | 'rpm'
+  type: 'deb' | 'rpm' | 'windows'
+  version: string
+  arch: string
   size_bytes: number
+}
+
+export interface EnrollmentKey {
+  id: string
+  label: string
+  group_id: string
+  expires_at: string | null
+  is_active: boolean
+  max_uses: number | null
+  use_count: number
+  require_approval: boolean
+  used_at: string | null
+  created_at: string | null
 }
 
 export interface Agent {
@@ -22,6 +37,7 @@ export interface Agent {
   group_id: string
   version: string | null
   status: 'online' | 'offline'
+  approved?: boolean
   is_isolated: boolean
   last_seen_at: string | null
   flow_poll_at?: string | null

@@ -1,0 +1,84 @@
+#!/bin/sh
+# siem-agent-configure — point the agent at a SIEM server, (re-)enroll and start it.
+#
+#   siem-agent-configure --server https://siem.example.com --key <enrollment key> [--name NAME] [--no-start]
+#
+# The package's install scripts run it with --if-env, reading the same values
+# from SIEM_SERVER_URL / SIEM_ENROLLMENT_KEY / SIEM_AGENT_NAME, so a single
+#   sudo SIEM_SERVER_URL=... SIEM_ENROLLMENT_KEY=... dpkg -i siem-agent.deb
+# installs, enrolls and starts the agent (the dashboard's Deploy agent builds it).
+# The agent's group comes from the enrollment key.
+set -eu
+
+CONF="${SIEM_AGENT_CONFIG:-/etc/siem-agent/config.yaml}"
+server="${SIEM_SERVER_URL:-}"
+key="${SIEM_ENROLLMENT_KEY:-}"
+name="${SIEM_AGENT_NAME:-}"
+start=1
+if_env=0
+
+usage() {
+  sed -n '2,10s/^# \{0,1\}//p' "$0"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --server)   server="${2:-}"; shift 2 ;;
+    --key)      key="${2:-}"; shift 2 ;;
+    --name)     name="${2:-}"; shift 2 ;;
+    --no-start) start=0; shift ;;
+    --if-env)   if_env=1; shift ;;
+    -h|--help)  usage; exit 0 ;;
+    *)          echo "siem-agent-configure: unknown option $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [ -z "$server" ] && [ -z "$key" ]; then
+  [ "$if_env" = 1 ] && exit 0   # plain package install/upgrade: nothing to configure
+  usage >&2
+  exit 2
+fi
+if [ -z "$server" ] || [ -z "$key" ]; then
+  echo "siem-agent-configure: both the server URL and the enrollment key are needed" >&2
+  exit 2
+fi
+# The values go into YAML through sed: accept only what a URL / key / name can hold.
+echo "$server" | grep -Eq '^https?://[A-Za-z0-9._~:@%-]+(/[A-Za-z0-9._~/%-]*)?$' || {
+  echo "siem-agent-configure: '$server' doesn't look like http(s)://host[:port]" >&2; exit 2; }
+echo "$key" | grep -Eq '^[A-Za-z0-9_-]{8,256}$' || {
+  echo "siem-agent-configure: the enrollment key has unexpected characters" >&2; exit 2; }
+if [ -n "$name" ]; then
+  echo "$name" | grep -Eq '^[A-Za-z0-9._-]{1,128}$' || {
+    echo "siem-agent-configure: the agent name may only use letters, digits, '.', '_' and '-'" >&2; exit 2; }
+fi
+[ -f "$CONF" ] || { echo "siem-agent-configure: $CONF not found" >&2; exit 1; }
+server="${server%/}"
+
+# Forget any previous enrollment so the agent enrolls with the new key.
+# [[:space:]]* — the agent re-indents the file when it saves its token.
+sed -i \
+  -e "s|^\([[:space:]]*url:\).*|\1 $server|" \
+  -e "s|^\([[:space:]]*enrollment_token:\).*|\1 \"$key\"|" \
+  -e "s|^\([[:space:]]*token:\).*|\1 \"\"|" \
+  -e "s|^\([[:space:]]*id:\).*|\1 \"\"|" \
+  "$CONF"
+if [ -n "$name" ]; then
+  sed -i -e "s|^\([[:space:]]*name:\).*|\1 \"$name\"|" "$CONF"
+fi
+
+# RHEL-family hosts log to secure/messages, not auth.log/syslog.
+if [ ! -e /var/log/auth.log ] && [ -e /var/log/secure ]; then
+  sed -i -e 's|path: /var/log/auth.log|path: /var/log/secure|' "$CONF"
+fi
+if [ ! -e /var/log/syslog ] && [ -e /var/log/messages ]; then
+  sed -i -e 's|path: /var/log/syslog|path: /var/log/messages|' "$CONF"
+fi
+chmod 600 "$CONF"
+
+echo "siem-agent: configured for $server"
+if [ "$start" = 1 ] && command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+  systemctl enable siem-agent.service >/dev/null 2>&1 || true
+  systemctl restart siem-agent.service
+  echo "siem-agent: started — it appears under Agents once enrolled (journalctl -u siem-agent to follow)"
+fi

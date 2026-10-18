@@ -3,7 +3,7 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import uuid
 from datetime import datetime, timezone
@@ -19,6 +19,10 @@ class TokenIn(BaseModel):
     label: str = ""
     group_id: Optional[str] = None
     expires_at: Optional[datetime] = None
+    # 1 = single-use (default); a number = that many agents; None = unlimited
+    # (a deployment key for the install one-liner — revoke it when done)
+    max_uses: Optional[int] = Field(default=1, ge=1)
+    require_approval: bool = False
 
 
 @router.get("")
@@ -38,6 +42,9 @@ async def list_tokens(
             "group_id": r.group_id,
             "expires_at": r.expires_at.isoformat() if r.expires_at else None,
             "is_active": r.is_active,
+            "max_uses": r.max_uses,
+            "use_count": r.use_count or 0,
+            "require_approval": r.require_approval,
             "used_at": r.used_at.isoformat() if r.used_at else None,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
@@ -57,14 +64,18 @@ async def create_token(
     tok = EnrollmentToken(
         token_hash=token_hash,
         label=body.label,
-        group_id=body.group_id or group_id or current_user.group_id or "default",
+        # a group-scoped admin can only mint keys for their own group
+        group_id=group_id if group_id is not None else (body.group_id or current_user.group_id or "default"),
         expires_at=body.expires_at,
+        max_uses=body.max_uses,
+        require_approval=body.require_approval,
         created_by=current_user.id,
     )
     db.add(tok)
     await db.commit()
     await db.refresh(tok)
-    return {"id": str(tok.id), "token": raw_token, "label": tok.label, "group_id": tok.group_id}
+    return {"id": str(tok.id), "token": raw_token, "label": tok.label, "group_id": tok.group_id,
+            "max_uses": tok.max_uses, "require_approval": tok.require_approval}
 
 
 @router.delete("/{token_id}", status_code=204)

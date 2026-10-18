@@ -105,6 +105,8 @@ async def ingest_hygiene(
     db: Annotated[AsyncSession, Depends(get_db)],
     agent: Annotated[Agent, Depends(get_agent)],
 ):
+    if not agent.approved:
+        return
     snap = HygieneSnapshot(
         agent_id=agent.id,
         hostname=body.hostname or agent.hostname,

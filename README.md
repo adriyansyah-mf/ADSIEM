@@ -173,28 +173,61 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 ## Agent Installation
 
-The agent is a single static Go binary. Three ways to get it onto a host, in order of
-convenience:
+The agent is a single static Go binary for Linux and Windows. The quickest way onto a
+host is the dashboard's deploy command; the options below cover doing it by hand.
+
+### Deploy from the dashboard (recommended)
+
+**Agents → Deploy agent** works like Wazuh's *Deploy new agent*. You pick the OS
+(DEB, RPM or Windows), check the server address the host will use, and create an
+**enrollment key**. You then get one command to run on the host, which downloads the
+package from this server, installs it, enrolls the agent and starts it:
+
+```bash
+curl -fsSLo /tmp/siem-agent_1.5.0_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.5.0_amd64.deb' \
+  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.5.0_amd64.deb
+```
+
+The RPM command is the same with `rpm -Uvh`. On Windows, an elevated PowerShell
+downloads the zip and runs `install.ps1 -ServerUrl … -EnrollmentToken …`.
+
+**Enrollment keys** (Agents → Deploy agent, or `POST /api/enrollment-tokens`):
+
+- A key decides the agent's **group**. A group-scoped admin can only create keys for
+  their own group.
+- *Max agents*: `1` gives a single-use key. A number allows that many hosts. Blank means
+  unlimited, which suits a deployment key you paste into Ansible, GPO or a golden image.
+  Uses are counted atomically, so parallel installs can't go over the limit.
+- *Expires in* and **revoke** limit how long a key can be used. Revoking a key doesn't
+  touch agents already enrolled with it.
+- *New agents wait for approval*: agents enrolled with such a key show as **PENDING**.
+  Their heartbeats are accepted, but their logs are dropped and they get no
+  live-response tasks until someone clicks **Approve**. Wazuh's open enrollment has no
+  equivalent; it trusts anyone holding the password.
+
+Re-enrolling a hostname reuses that agent's record, so a rebuilt host doesn't leave a
+duplicate behind. This is only allowed once the old agent has been silent for 2 minutes.
+While it is still connected the server answers 409 and the new install keeps retrying.
+This stops anyone holding a key from taking over a live agent by reporting its hostname.
 
 ### Option A — Prebuilt package (`.deb` / `.rpm`)
 
-The platform builds these itself on every stack start (`package-builder` service) and
-serves them from the dashboard: **Agents → Download Agent**. Or fetch a tagged GitHub
-release (`.github/workflows/agent-release.yml`, triggered by pushing a tag like `agent-v1.1.0`).
+The platform builds the packages on every stack start: the `package-builder` service
+runs the same scripts as the release, at the version in `agent/VERSION`. The dashboard
+serves them, and so does each tagged GitHub release
+(`.github/workflows/agent-release.yml`, triggered by a tag like `agent-v1.5.0`).
 
-**Debian/Ubuntu/Kali:**
 ```bash
-sudo dpkg -i siem-agent_<version>_amd64.deb
-sudo vi /etc/siem-agent/config.yaml   # set server.url and enrollment token — see below
-sudo systemctl enable --now siem-agent
+sudo dpkg -i siem-agent_<version>_amd64.deb          # or: sudo rpm -Uvh siem-agent-<version>-1.x86_64.rpm
+sudo siem-agent-configure --server https://siem.example.com --key <enrollment key>
 ```
 
-**RHEL/Fedora/Rocky/Alma:**
-```bash
-sudo rpm -i siem-agent-<version>-1.x86_64.rpm
-sudo vi /etc/siem-agent/config.yaml
-sudo systemctl enable --now siem-agent
-```
+`siem-agent-configure` writes the server and key into `/etc/siem-agent/config.yaml`,
+clears any earlier enrollment, and on RHEL-family hosts switches the log paths to
+`/var/log/secure` and `/var/log/messages`. It then enables and starts the service. Run
+it again whenever an installed agent should point at another server. Setting
+`SIEM_SERVER_URL`/`SIEM_ENROLLMENT_KEY` (and optionally `SIEM_AGENT_NAME`) while
+installing the package does the same thing, which is what the one-line command relies on.
 
 Both packages install to `/usr/bin/siem-agent`, `/etc/siem-agent/config.yaml`, and a
 `siem-agent.service` unit. The packaged `postinst` creates an unprivileged `siem-agent`
@@ -212,7 +245,7 @@ in an **elevated** PowerShell in that folder:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1 `
-  -ServerUrl https://siem.example.com -EnrollmentToken <token> -EnableAuditing
+  -ServerUrl https://siem.example.com -EnrollmentToken <enrollment key> -EnableAuditing
 ```
 
 This installs `C:\Program Files\SIEMAgent\siem-agent.exe` as the auto-start `SIEMAgent`
@@ -558,6 +591,7 @@ step 2) before bringing up `nginx` in the prod compose.
 - [x] Real-time dashboard via WebSocket
 - [x] Email notification integration
 - [ ] Prometheus + Grafana dashboard
+- [x] One-command agent deployment with reusable enrollment keys and approval
 - [ ] Agent auto-update mechanism
 - [ ] Multi-tenancy group management UI
 - [x] Sigma rule import from community repos (SigmaHQ)
