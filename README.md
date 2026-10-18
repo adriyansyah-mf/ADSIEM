@@ -419,6 +419,31 @@ Sigma's own standard field names (`Image`, `CommandLine`, `ParentImage`, `User`,
 `ProcessId`, `ParentProcessId`) instead of ECS — that's what lets you drop in public
 SigmaHQ `process_creation` rules unmodified.
 
+A rule only sees events from its `logsource` (`worker/worker/sigma_logsource.py` maps
+each decoder `log_type` — plus, for Windows, the event's channel and EventID — to
+Sigma's product/service/category; any other `log_type` like `fortigate_traffic` is
+read as product `fortigate`, service `traffic`). Rules without a logsource see every event.
+
+### SigmaHQ ruleset
+
+**Dashboard → Rules → Import SigmaHQ** downloads an official
+[SigmaHQ release](https://github.com/SigmaHQ/sigma/releases) (Core, Core+, Core++,
+Emerging Threats or All) and imports it; servers without internet access can upload
+the release zip instead. Run it again to update: rules are matched by their Sigma id,
+upstream changes are applied, and rules you edited in the dashboard are left alone.
+New rules are enabled when their level and status pass the policy you pick (default:
+high/critical, stable/test) and a log source here can feed them — cloud, macOS and
+other sources the agents don't collect are imported disabled and marked
+*not collected*.
+
+Windows events keep their native field names (Sysmon/Security `EventData`, e.g.
+`Image`, `TargetObject`, `NewValue`), so SigmaHQ's Windows rules run unmodified.
+Compatibility is checked by replaying SigmaHQ's own regression samples — real `.evtx`
+events paired with the rule that must match — through agent formatting → decoders →
+engine (`tests/sigmahq/run.sh`, `.github/workflows/sigmahq-compat.yml`): all 3,768
+rules load and 469/471 samples give the exact expected match count (the other two
+samples hold two matching events where the reference counts one).
+
 Also addable via API or **Dashboard → Rules → New Rule** (write YAML → Test → Save):
 ```bash
 curl -X POST http://localhost/api/rules \
@@ -569,6 +594,7 @@ step 2) before bringing up `nginx` in the prod compose.
 - [x] One-command agent deployment with reusable enrollment keys and approval
 - [ ] Agent auto-update mechanism
 - [ ] Multi-tenancy group management UI
-- [ ] Sigma rule import from community repos
-- [ ] Windows/macOS endpoint agent
+- [x] Sigma rule import from community repos (SigmaHQ)
+- [x] Windows endpoint agent
+- [ ] macOS endpoint agent
 - [ ] Let's Encrypt automation for the platform's own TLS cert

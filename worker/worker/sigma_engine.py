@@ -9,8 +9,15 @@ platform's own `threshold` / `suppression` extensions.
 
 A rule using syntax the engine can't evaluate is rejected at load time and
 reported in `load_errors`, instead of loading fine and silently never matching.
+
+Rules are only evaluated against events from their `logsource` (see
+sigma_logsource), which is what lets SigmaHQ's ruleset load as-is: events
+carrying a `log_type` are matched to sources, sources to rules, and the
+candidate list per source combination is cached. Events without a log_type
+(rule tests, artifact rows) see every rule.
 """
 import base64
+import dataclasses
 import fnmatch
 import ipaddress
 import operator
@@ -23,7 +30,14 @@ from typing import Any, Callable
 import structlog
 import yaml
 
+from worker.sigma_logsource import (
+    Source, apply_aliases, has_logsource, logsource_matches, parse_kv, sources_for_log_type, when_holds,
+)
+
 log = structlog.get_logger()
+
+# libyaml when available: loading thousands of SigmaHQ rules is mostly YAML parsing.
+_YamlLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 Matcher = Callable[[dict], bool]
 
@@ -58,6 +72,30 @@ def _values(value: Any) -> list:
     return [value]
 
 
+class _Event(dict):
+    """The event as rules see it, with a per-event cache of each field's
+    lowercased string values: a thousand rules testing CommandLine lower it once."""
+    __slots__ = ("_lc",)
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self._lc: dict[str, list[str]] = {}
+
+
+def _field_strings(ev: dict, name: str) -> list[str]:
+    return [_to_str(v) for v in _values(_lookup(ev, name))]
+
+
+def _field_lowered(ev: dict, name: str) -> list[str]:
+    cache = getattr(ev, "_lc", None)
+    if cache is None:
+        return [s.lower() for s in _field_strings(ev, name)]
+    got = cache.get(name)
+    if got is None:
+        got = cache[name] = [s.lower() for s in _field_strings(ev, name)]
+    return got
+
+
 def _to_str(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -74,8 +112,27 @@ _COMPARE = {"lt": operator.lt, "lte": operator.le, "gt": operator.gt, "gte": ope
 _RE_FLAGS = {"i": re.IGNORECASE, "m": re.MULTILINE, "s": re.DOTALL}
 _KNOWN_MODIFIERS = (
     set(_MATCH_KINDS) | _TRANSFORMS | set(_COMPARE) | set(_RE_FLAGS)
-    | {"all", "re", "cidr", "exists", "cased", "fieldref"}
+    | {"all", "re", "cidr", "exists", "cased", "fieldref", "expand"}
 )
+
+# Values for `|expand` placeholders (%name%), e.g. {"admin_hosts": ["dc01", "dc02"]}.
+# A placeholder with no configured values matches nothing, so a SigmaHQ
+# `filter_main_*` built on one simply doesn't filter. Set via SigmaEngine(placeholders=...).
+_placeholders: dict[str, list[str]] = {}
+_PLACEHOLDER_RE = re.compile(r"%(\w+)%")
+
+
+def _expand(values: list[Any]) -> list[Any]:
+    out: list[Any] = []
+    for v in values:
+        if v is None or not isinstance(v, str) or not _PLACEHOLDER_RE.search(v):
+            out.append(v)
+            continue
+        variants = [v]
+        for name in dict.fromkeys(_PLACEHOLDER_RE.findall(v)):
+            variants = [x.replace(f"%{name}%", str(rep)) for x in variants for rep in _placeholders.get(name, [])]
+        out.extend(variants)
+    return out
 _DASHES = ("-", "/", "–", "—", "―")
 _WINDASH_RE = re.compile(r"\B[-/]\b")
 
@@ -134,6 +191,61 @@ def _wildcard_regex(pattern: str, kind: str, cased: bool) -> re.Pattern:
     if kind in ("contains", "startswith"):
         body += ".*"
     return re.compile(body, re.DOTALL | (0 if cased else re.IGNORECASE))
+
+
+def _literal(pattern: str) -> str | None:
+    """The pattern as a plain string when it has no unescaped wildcard, else None."""
+    out = []
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "\\" and i + 1 < len(pattern) and pattern[i + 1] in "*?\\":
+            out.append(pattern[i + 1])
+            i += 2
+            continue
+        if ch in "*?":
+            return None
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _any_of(preds: list[Callable[[str], bool]]) -> Callable[[str], bool]:
+    if len(preds) == 1:
+        return preds[0]
+    a, b, *rest = preds
+    if not rest:
+        return lambda s: a(s) or b(s)
+    return lambda s: any(p(s) for p in preds)
+
+
+def _combined_predicate(patterns: list[str], kind: str) -> Callable[[str], bool]:
+    """One predicate for "any of these patterns", as few C-level calls as possible.
+
+    Callers fold case beforehand (both patterns and subject) unless the rule is cased."""
+    literals = [lit for p in patterns if (lit := _literal(p)) is not None]
+    wildcards = [p for p in patterns if _literal(p) is None]
+    preds: list[Callable[[str], bool]] = []
+    if literals:
+        if kind == "equals":
+            pool = frozenset(literals)
+            preds.append(lambda s: s in pool)
+        elif kind == "startswith":
+            tup = tuple(literals)
+            preds.append(lambda s: s.startswith(tup))
+        elif kind == "endswith":
+            tup = tuple(literals)
+            preds.append(lambda s: s.endswith(tup))
+        elif len(literals) == 1:
+            lit = literals[0]
+            preds.append(lambda s: lit in s)
+        else:
+            rx = re.compile("|".join(re.escape(lit) for lit in sorted(set(literals), key=len, reverse=True)))
+            preds.append(lambda s: rx.search(s) is not None)
+    if wildcards:
+        rx_wild = re.compile("|".join(f"(?:{_wildcard_regex(p, kind, True).pattern})" for p in wildcards), re.DOTALL)
+        preds.append(lambda s: rx_wild.fullmatch(s) is not None)
+    return _any_of(preds)
 
 
 def _string_matcher(pattern: str, kind: str, cased: bool) -> Callable[[str], bool]:
@@ -208,6 +320,11 @@ def _compile_field(key: str, raw: Any) -> Matcher:
         raise RuleError(f"'{key}' combines more than one of contains/startswith/endswith")
 
     raw_values = raw if isinstance(raw, list) else [raw]
+    if "expand" in mods:
+        raw_values = _expand(raw_values)
+        mods = [m for m in mods if m != "expand"]
+        if not raw_values:
+            return lambda ev: False
 
     if "exists" in mods:
         if len(raw_values) != 1 or not isinstance(raw_values[0], bool):
@@ -216,27 +333,52 @@ def _compile_field(key: str, raw: Any) -> Matcher:
         return lambda ev: (_lookup(ev, name) not in (_MISSING, None)) == want
 
     if "fieldref" in mods:
-        if any(m in mods for m in (*_MATCH_KINDS, "re", "cidr", *_COMPARE)):
-            raise RuleError(f"'{key}': fieldref only supports equality")
+        if any(m in mods for m in ("re", "cidr", *_COMPARE)):
+            raise RuleError(f"'{key}': fieldref supports equality, contains, startswith and endswith")
         refs = [_to_str(v) for v in raw_values]
-        cased = "cased" in mods
+        ref_getter = _field_strings if "cased" in mods else _field_lowered
+        compare: Callable[[str, str], bool] = {
+            "contains": lambda mine, theirs: theirs in mine,
+            "startswith": str.startswith,
+            "endswith": str.endswith,
+        }.get(next((m for m in mods if m in _MATCH_KINDS), ""), operator.eq)
 
-        def ref_eq(ev: dict) -> bool:
-            mine = [_to_str(v) for v in _values(_lookup(ev, name))]
-            if not cased:
-                mine = [v.lower() for v in mine]
+        def ref_match(ev: dict) -> bool:
+            mine = ref_getter(ev, name)
             results = []
             for ref in refs:
-                theirs = [_to_str(v) for v in _values(_lookup(ev, ref))]
-                if not cased:
-                    theirs = [v.lower() for v in theirs]
-                results.append(bool(set(mine) & set(theirs)))
+                theirs = ref_getter(ev, ref)
+                results.append(any(compare(m, t) for m in mine for t in theirs))
             return all(results) if "all" in mods else any(results)
-        return ref_eq
+        return ref_match
 
     want_null = any(v is None for v in raw_values)
-    preds = [_value_predicate(v, mods) for v in raw_values if v is not None]
     match_all = "all" in mods
+
+    if not match_all and not any(m in mods for m in ("re", "cidr", *_COMPARE)):
+        # Plain string matching (the bulk of SigmaHQ): fold every value of the
+        # list into one predicate over the event's (lowercased) strings.
+        cased = "cased" in mods
+        kind = next((m for m in mods if m in _MATCH_KINDS), "equals")
+        patterns = [p for v in raw_values if v is not None for p in _apply_transforms(v, mods)]
+        if not cased:
+            patterns = [p.lower() for p in patterns]
+        pred = _combined_predicate(patterns, kind) if patterns else None
+        getter = _field_strings if cased else _field_lowered
+
+        def match_any(ev: dict) -> bool:
+            strs = getter(ev, name)
+            if not strs:
+                return want_null
+            if pred is None:
+                return False
+            for s in strs:
+                if pred(s):
+                    return True
+            return False
+        return match_any
+
+    preds = [_value_predicate(v, mods) for v in raw_values if v is not None]
 
     def match(ev: dict) -> bool:
         vals = _values(_lookup(ev, name))
@@ -258,30 +400,57 @@ _KEYWORD_FIELDS = ("raw_message", "message", "event.original", "log.original")
 
 
 def _compile_keyword(keyword: Any) -> Matcher:
-    if isinstance(keyword, (dict, list)) or keyword is None:
-        raise RuleError(f"invalid keyword {keyword!r}")
-    pred = _string_matcher(_to_str(keyword), "contains", cased=False)
+    return _compile_keywords([keyword])
+
+
+def _compile_keywords(keywords: list[Any]) -> Matcher:
+    """Any of these keywords in the event text (see _KEYWORD_FIELDS)."""
+    for kw in keywords:
+        if isinstance(kw, (dict, list)) or kw is None:
+            raise RuleError(f"invalid keyword {kw!r}")
+    pred = _combined_predicate([_to_str(kw).lower() for kw in keywords], "contains")
 
     def match(ev: dict) -> bool:
         texts = [ev[f] for f in _KEYWORD_FIELDS if isinstance(ev.get(f), str)]
         if not texts:
             texts = [v for v in ev.values() if isinstance(v, str)]
-        return any(pred(t) for t in texts)
+        for t in texts:
+            if pred(t.lower()):
+                return True
+        return False
     return match
+
+
+def _all_of(parts: list[Matcher]) -> Matcher:
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        a, b = parts
+        return lambda ev: a(ev) and b(ev)
+    return lambda ev: all(p(ev) for p in parts)
+
+
+def _either(parts: list[Matcher]) -> Matcher:
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        a, b = parts
+        return lambda ev: a(ev) or b(ev)
+    return lambda ev: any(p(ev) for p in parts)
 
 
 def _compile_selection(name: str, sel: Any) -> Matcher:
     if isinstance(sel, dict):
         if not sel:
             raise RuleError(f"selection '{name}' is empty")
-        fields = [_compile_field(k, v) for k, v in sel.items()]
-        return lambda ev: all(f(ev) for f in fields)
+        return _all_of([_compile_field(k, v) for k, v in sel.items()])
     if isinstance(sel, list):
         if not sel:
             raise RuleError(f"selection '{name}' is empty")
         # list of maps → OR of ANDs; list of scalars → keyword search
-        items = [_compile_selection(name, i) if isinstance(i, dict) else _compile_keyword(i) for i in sel]
-        return lambda ev: any(i(ev) for i in items)
+        maps = [_compile_selection(name, i) for i in sel if isinstance(i, dict)]
+        scalars = [i for i in sel if not isinstance(i, dict)]
+        return _either(maps + ([_compile_keywords(scalars)] if scalars else []))
     return _compile_keyword(sel)
 
 
@@ -318,14 +487,14 @@ class _ConditionParser:
         while self._peek() == "or":
             self._take()
             parts.append(self._and())
-        return parts[0] if len(parts) == 1 else (lambda ev: any(p(ev) for p in parts))
+        return _either(parts)
 
     def _and(self) -> Matcher:
         parts = [self._not()]
         while self._peek() == "and":
             self._take()
             parts.append(self._not())
-        return parts[0] if len(parts) == 1 else (lambda ev: all(p(ev) for p in parts))
+        return _all_of(parts)
 
     def _not(self) -> Matcher:
         if self._peek() == "not":
@@ -358,9 +527,9 @@ class _ConditionParser:
                 raise RuleError(f"'{quant} of {target}' matches no selection")
             members = [self.selections[n] for n in names]
             if quant == "all":
-                return lambda ev: all(m(ev) for m in members)
+                return _all_of(members)
             if quant in ("1", "any"):
-                return lambda ev: any(m(ev) for m in members)
+                return _either(members)
             if quant.isdigit():
                 need = int(quant)
                 return lambda ev: sum(1 for m in members if m(ev)) >= need
@@ -467,12 +636,17 @@ def _tags(d: dict) -> tuple[list[str], list[str]]:
 def _compile_rule(d: dict) -> RuleDef:
     if "detection" not in d:
         raise RuleError("rule has no 'detection' block")
+    logsource = d.get("logsource") or {}
+    if not isinstance(logsource, dict):
+        raise RuleError("'logsource' must be a mapping")
+    if d.get("suppression") is not None and not isinstance(d["suppression"], dict):
+        raise RuleError("'suppression' must be a mapping")
     tags, mitre = _tags(d)
     return RuleDef(
-        id=d.get("id", d.get("title", "unknown")),
+        id=str(d.get("id", d.get("title", "unknown"))),
         title=d.get("title", "Untitled"),
         level=d.get("level", "medium"),
-        logsource=d.get("logsource", {}),
+        logsource=logsource,
         detection=d["detection"],
         tags=tags,
         mitre_tags=mitre,
@@ -536,10 +710,52 @@ def _compile_correlation(d: dict) -> CorrelationDef:
     )
 
 
+def _suppression_group(suppression: dict, event: dict) -> str:
+    """suppression.group_by (a field or list of fields); by default the source IP,
+    or the host for events without one, so one noisy host doesn't mute the rule fleet-wide."""
+    group_by = suppression.get("group_by")
+    if group_by:
+        fields = [group_by] if isinstance(group_by, str) else list(group_by)
+    else:
+        fields = ["source.ip"] if event.get("source.ip") else ["hostname"]
+    return "|".join(_to_str(v) if (v := _lookup(event, f)) not in (_MISSING, None) else "_" for f in fields)
+
+
 # ─── Engine ──────────────────────────────────────────────────────
 
+# Compiled form of each rule file's content, shared across engine instances so
+# the worker's periodic reload only compiles rules that changed.
+_compile_cache: dict[str, list[tuple[str, Any]]] = {}
+
+
+def _compile_content(content: str) -> list[tuple[str, Any]]:
+    """[(kind, value)]: kind "rule"/"corr" with the compiled def, or "error" with (title, message)."""
+    try:
+        docs = [doc for doc in yaml.load_all(content, Loader=_YamlLoader) if doc]
+    except yaml.YAMLError as exc:
+        return [("error", ("<unparseable YAML>", str(exc)))]
+    out: list[tuple[str, Any]] = []
+    for doc in docs:
+        title = doc.get("title", "Untitled") if isinstance(doc, dict) else "<invalid>"
+        try:
+            if not isinstance(doc, dict):
+                raise RuleError("rule must be a YAML mapping")
+            if "correlation" in doc:
+                out.append(("corr", _compile_correlation(doc)))
+            else:
+                out.append(("rule", _compile_rule(doc)))
+        except (RuleError, TypeError, ValueError, AttributeError) as exc:
+            out.append(("error", (title, str(exc))))
+    return out
+
+
 class SigmaEngine:
-    def __init__(self, redis=None):
+    def __init__(self, redis=None, placeholders: dict[str, list[str]] | None = None):
+        global _placeholders, _compile_cache
+        wanted = {k: [str(v) for v in (vs if isinstance(vs, list) else [vs])] for k, vs in (placeholders or {}).items()}
+        if wanted != _placeholders:
+            _placeholders = wanted
+            _compile_cache = {}  # compiled |expand values depend on them
         self._rules: list[RuleDef] = []
         self._correlations: list[CorrelationDef] = []
         self._silenced: set[str] = set()
@@ -549,33 +765,40 @@ class SigmaEngine:
         self._local_hits: dict[str, list[float]] = {}
         self._local_suppressed: dict[str, float] = {}
         self._local_windows: dict[str, dict[str, float]] = {}
+        self._reset_index()
+
+    def _reset_index(self) -> None:
+        self._generic: list[int] = [i for i, r in enumerate(self._rules) if not has_logsource(r.logsource)]
+        self._lt_sources: dict[str, list[Source]] = {}
+        self._source_rules: dict[Source, list[int]] = {}
+        self._candidates: dict[tuple[Source, ...], list[RuleDef]] = {}
+
+    @property
+    def rules(self) -> list[RuleDef]:
+        return self._rules
 
     def load_from_yaml_list(self, yaml_contents: list[str], rule_ids: list[str | None] | None = None) -> None:
         """rule_ids, aligned with yaml_contents, are the DB ids of the rule rows;
         matches carry them as rule_db_id."""
+        global _compile_cache
         rules: list[RuleDef] = []
         correlations: list[CorrelationDef] = []
         errors: list[tuple[str, str]] = []
+        cache: dict[str, list[tuple[str, Any]]] = {}
         for idx, content in enumerate(yaml_contents):
             db_id = rule_ids[idx] if rule_ids and idx < len(rule_ids) else None
-            try:
-                docs = [doc for doc in yaml.safe_load_all(content) if doc]
-            except yaml.YAMLError as exc:
-                errors.append(("<unparseable YAML>", str(exc)))
-                continue
-            for doc in docs:
-                title = doc.get("title", "Untitled") if isinstance(doc, dict) else "<invalid>"
-                try:
-                    if not isinstance(doc, dict):
-                        raise RuleError("rule must be a YAML mapping")
-                    if "correlation" in doc:
-                        correlations.append(_compile_correlation(doc))
-                        correlations[-1].db_id = db_id
-                    else:
-                        rules.append(_compile_rule(doc))
-                        rules[-1].db_id = db_id
-                except (RuleError, TypeError, ValueError) as exc:
-                    errors.append((title, str(exc)))
+            compiled = cache.get(content) or _compile_cache.get(content)
+            if compiled is None:
+                compiled = _compile_content(content)
+            cache[content] = compiled
+            for kind, value in compiled:
+                if kind == "rule":
+                    rules.append(dataclasses.replace(value, db_id=db_id))
+                elif kind == "corr":
+                    correlations.append(dataclasses.replace(value, db_id=db_id))
+                else:
+                    errors.append(value)
+        _compile_cache = cache  # drop entries for rules that were removed
 
         known = set().union(*(r.refs for r in rules)) if rules else set()
         valid_corrs = []
@@ -590,13 +813,52 @@ class SigmaEngine:
         self._correlations = valid_corrs
         self._silenced = {ref for c in valid_corrs if not c.generate for ref in c.rules}
         self.load_errors = errors
+        self._reset_index()
         for title, err in errors:
             log.warning("sigma_rule_rejected", rule=title, error=err)
 
+    def _rules_for_source(self, src: Source) -> list[int]:
+        idx = self._source_rules.get(src)
+        if idx is None:
+            idx = self._source_rules[src] = [
+                i for i, r in enumerate(self._rules)
+                if has_logsource(r.logsource) and logsource_matches(r.logsource, src)
+            ]
+        return idx
+
+    def candidates(self, event: dict[str, Any]) -> tuple[list[RuleDef], dict[str, Any]]:
+        """(rules whose logsource covers the event, the event as those rules see it).
+
+        The view adds the raw line's key=value pairs and Sigma field aliases
+        for the event's sources, without overwriting decoded fields."""
+        log_type = event.get("log_type")
+        if not log_type:
+            return self._rules, _Event(event)
+        srcs = self._lt_sources.get(log_type)
+        if srcs is None:
+            srcs = self._lt_sources[log_type] = sources_for_log_type(str(log_type))
+        raw = event.get("raw_message")
+        if isinstance(raw, str) and any(s.raw_kv for s in srcs):
+            view = _Event({**parse_kv(raw), **event})
+        else:
+            view = _Event(event)
+        active = tuple(s for s in srcs if when_holds(s, view))
+        aliases = tuple(a for s in active for a in s.aliases)
+        if aliases:
+            apply_aliases(view, aliases)
+        rules = self._candidates.get(active)
+        if rules is None:
+            idx = set(self._generic)
+            for s in active:
+                idx.update(self._rules_for_source(s))
+            rules = self._candidates[active] = [self._rules[i] for i in sorted(idx)]
+        return rules, view
+
     async def evaluate(self, event: dict[str, Any]) -> list[dict]:
         now = time.time()
+        rules, event = self.candidates(event)
         fired: list[RuleDef] = []
-        for rule in self._rules:
+        for rule in rules:
             try:
                 if rule.matcher(event):
                     fired.append(rule)
@@ -615,7 +877,7 @@ class SigmaEngine:
                     continue
 
             if rule.suppression:
-                sup_key = f"siem:suppress:{rule.id}:{event.get('source.ip', '_')}"
+                sup_key = f"siem:suppress:{rule.id}:{_suppression_group(rule.suppression, event)}"
                 sup_window = rule.suppression.get("timewindow", 3600)
                 if not await self._acquire_suppression(sup_key, sup_window):
                     continue

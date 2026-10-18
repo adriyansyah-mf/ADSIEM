@@ -370,6 +370,22 @@ async def _migrate_agent_enrollment_columns() -> None:
         ))
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT true"))
 
+async def _migrate_rule_source_columns() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            ALTER TABLE rules
+            ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'custom',
+            ADD COLUMN IF NOT EXISTS external_id VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS sigma_status VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS upstream_hash VARCHAR(64)
+        """))
+        # SigmaHQ import upserts by rule id
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_rules_source_external_id
+            ON rules(source, external_id) WHERE external_id IS NOT NULL
+        """))
+
 async def _migrate_drop_alerts_event_fk() -> None:
     """Drop the legacy alerts.event_id -> events(id) foreign key.
 
@@ -433,6 +449,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_flow_poll()
         await _migrate_audit_log_group()
         await _migrate_agent_enrollment_columns()
+        await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})

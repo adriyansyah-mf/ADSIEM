@@ -5,13 +5,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _KV_RE = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
+_KV_UNESCAPE_RE = re.compile(r'\\(["\\])')
 
 def _parse_kv(raw: str) -> dict[str, str]:
-    """Extract key=value and key="value" pairs from a FortiGate-style log line."""
+    """Extract key=value and key="value" pairs from a FortiGate-style log line.
+
+    Inside quotes \\" is a quote and \\\\ a backslash (the Windows agent's
+    escaping); any other backslash is literal, so C:\\Windows stays as is."""
     result = {}
     for key, val in _KV_RE.findall(raw):
-        if val.startswith('"') and val.endswith('"'):
-            val = val[1:-1]
+        if len(val) >= 2 and val.startswith('"') and val.endswith('"'):
+            val = _KV_UNESCAPE_RE.sub(r"\1", val[1:-1])
         result[key] = val
     return result
 
