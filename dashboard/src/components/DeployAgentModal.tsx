@@ -23,6 +23,15 @@ const q = (s: string) => `'${s.replace(/'/g, "'\\''")}'`
 
 export function installCommand(target: Target, pkg: AgentPackage, server: string, key: string, name: string): string {
   const url = `${server}/api/agents/packages/${pkg.filename}`
+  if (pkg.type === 'msi') {
+    // same properties work for Intune / SCCM / any software deployment tool
+    const props = [`SERVER_URL=${server}`, `ENROLLMENT_KEY=${key}`, 'ENABLE_AUDITING=1'].join(' ')
+    return [
+      '# elevated PowerShell',
+      `$m = "$env:TEMP\\siem-agent.msi"; Invoke-WebRequest -UseBasicParsing ${q(url)} -OutFile $m`,
+      `Start-Process msiexec.exe -Wait -ArgumentList "/i \`"$m\`" /qn ${props}"`,
+    ].join('\n')
+  }
   if (target === 'windows') {
     return [
       '# elevated PowerShell',
@@ -80,7 +89,10 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['enrollment-tokens'] }),
   })
 
-  const pkg = packages.find(p => p.type === target && (p.arch === 'amd64' || p.arch === 'x86_64')) ?? packages.find(p => p.type === target)
+  // Windows: the MSI when the server has one, else the zip + install.ps1
+  const pkg = (target === 'windows' ? packages.find(p => p.type === 'msi') : undefined)
+    ?? packages.find(p => p.type === target && (p.arch === 'amd64' || p.arch === 'x86_64'))
+    ?? packages.find(p => p.type === target)
   const serverClean = server.trim().replace(/\/+$/, '')
   const command = useMemo(
     () => (pkg && key ? installCommand(target, pkg, serverClean, key.trim(), target === 'windows' ? '' : name.trim()) : ''),
@@ -113,7 +125,8 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
             <div className={label_}>1. Operating system</div>
             <div className="grid grid-cols-3 gap-2">
               {TARGETS.map(t => {
-                const p = packages.find(x => x.type === t.value)
+                const p = (t.value === 'windows' ? packages.find(x => x.type === 'msi') : undefined)
+                  ?? packages.find(x => x.type === t.value)
                 return (
                   <button key={t.value} onClick={() => setTarget(t.value)} disabled={!p}
                     className={`text-left px-3 py-2 rounded border ${target === t.value ? 'border-primary bg-primary/10' : 'border-border'} disabled:opacity-40`}>
@@ -195,7 +208,7 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
             </pre>
             <div className="text-xs text-muted-foreground mt-1">
               {target === 'windows'
-                ? 'Installs the SIEMAgent service; config and agent.log in C:\\ProgramData\\SIEMAgent. -EnableAuditing turns on logon/process/PowerShell auditing.'
+                ? `${pkg?.type === 'msi' ? 'MSI: the same msiexec line works from Intune/SCCM.' : 'Zip + install.ps1.'} Installs the SIEMAgent service; config and agent.log in C:\\ProgramData\\SIEMAgent. Auditing of logons, processes and PowerShell is switched on.`
                 : 'Re-point an installed agent with: sudo siem-agent-configure --server <url> --key <key> · logs: journalctl -u siem-agent -f'}
             </div>
           </div>

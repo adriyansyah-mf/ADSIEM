@@ -34,12 +34,14 @@ _MEDIA_TYPES = {
     ".deb": "application/vnd.debian.binary-package",
     ".rpm": "application/x-rpm",
     ".zip": "application/zip",
+    ".msi": "application/x-msi",
 }
-# Names written by agent/packaging/build-{deb,rpm,windows}.sh
+# Names written by agent/packaging/build-{deb,rpm,windows}.sh and build-msi.ps1
 _PACKAGE_NAMES = [
     ("deb", re.compile(r"^siem-agent_(?P<version>[^_]+)_(?P<arch>[^_.]+)\.deb$")),
     ("rpm", re.compile(r"^siem-agent-(?P<version>[^-]+)-[^.]+\.(?P<arch>[^.]+)\.rpm$")),
     ("windows", re.compile(r"^siem-agent-windows-(?P<arch>[^-]+)-(?P<version>.+)\.zip$")),
+    ("msi", re.compile(r"^siem-agent-(?P<version>\d[\d.]*)-(?P<arch>x64)\.msi$")),  # build-msi.ps1
 ]
 
 
