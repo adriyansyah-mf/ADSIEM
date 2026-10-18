@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission, fetch_scoped
 from app.core.es_client import get_log as es_get_log
 from app.core.geoip import lookup_country
+from app.core.mitre_names import technique_info
 from app.models.models import Agent, AiFeedback, Alert, AlertNote, Rule, UebaAnomaly, User
 from app.schemas.schemas import (
     AiFeedbackCreate, AiFeedbackOut, AlertAgentInfo, AlertDetailOut, AlertNoteCreate, AlertNoteOut,
@@ -123,6 +124,38 @@ async def get_alert(
     )).scalar_one_or_none()
     if anomaly:
         out.ueba = AlertUebaInfo.model_validate(anomaly)
+
+    techniques = list(alert.mitre_techniques or [])
+    if anomaly:
+        techniques += [m.get("id") for m in (anomaly.mitre_techniques or []) if m.get("id")]
+    seen: set[str] = set()
+    for info in map(technique_info, techniques):
+        if info["id"] not in seen:
+            seen.add(info["id"])
+            out.mitre.append(info)
+
+    if rule or alert.rule_id:
+        same_rule = Alert.rule_id == rule.id if rule else Alert.rule_id == alert.rule_id
+        if rule:  # older alerts only match by title
+            same_rule = or_(same_rule, Alert.title == rule.title, Alert.title.like(f"{rule.title} [%"))
+        out.rule_fired_24h = int((await db.execute(
+            select(func.coalesce(func.sum(Alert.duplicate_count + 1), 0))
+            .where(same_rule, Alert.group_id == alert.group_id,
+                   Alert.created_at >= datetime.now(timezone.utc) - RELATED_WINDOW)
+        )).scalar() or 0)
+
+    if alert.event_id:
+        doc = await es_get_log(str(alert.event_id))
+        if doc:
+            out.event = {
+                "id": doc.get("id"),
+                "timestamp": doc.get("created_at"),
+                "log_type": doc.get("log_type"),
+                "location": doc.get("location"),
+                "decoder": doc.get("decoder"),
+                "full_log": doc.get("raw_message"),
+                "data": doc.get("decoded_fields") or {},
+            }
 
     entity_filters = []
     if alert.source_ip:

@@ -32,6 +32,7 @@ async def ingest_log(
         "log_type": body.log_type,
         "raw_message": body.raw_message,
         "received_at": body.received_at.isoformat(),
+        "location": body.location or "",
     })
     return {"status": "queued"}
 

@@ -127,6 +127,7 @@ class LogIngestRequest(BaseModel):
     raw_message: str
     received_at: datetime
     hostname: str
+    location: str | None = Field(default=None, max_length=1024)  # source file (agent >= 1.4)
 
     @field_validator("log_type", "raw_message")
     @classmethod
@@ -321,8 +322,11 @@ class AlertUebaInfo(BaseModel):
 
 class AlertDetailOut(AlertOut):
     rule: AlertRuleInfo | None = None
+    rule_fired_24h: int = 0  # occurrences of the same rule in the last 24h, duplicates included
     agent: AlertAgentInfo | None = None
     ueba: AlertUebaInfo | None = None
+    mitre: list[dict] = []   # [{id, name, tactic, url}]
+    event: dict | None = None  # the triggering log document (full_log, location, decoder, decoded fields)
     related: list[AlertRelatedOut] = []
 
 # ─── AI feedback (analyst rating of an AI triage verdict) ────────
