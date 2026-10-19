@@ -91,6 +91,48 @@ Rules the strings must satisfy:
 - Describe the ATTACK TECHNIQUE and the PRODUCT, not our specific event, so a public search returns advisories and write-ups."""
 
 
+def rag_sections(similar_cases: list[dict] | None, sop_context: list[str] | None,
+                 feedback_context: list[dict] | None) -> str:
+    """The RAG part of the L1 triage prompt (worker/rag.py retrievals): closed
+    cases like this one, the company SOP chunks that apply, and analyst
+    corrections of similar past verdicts. Empty when nothing was retrieved."""
+    out = ""
+    if similar_cases:
+        lines = []
+        for i, c in enumerate(similar_cases[:3], 1):
+            sim_pct = int(float(c.get("similarity", 0)) * 100)
+            desc = (c.get("description") or "")[:200]
+            lines.append(
+                f"{i}. [{c.get('status','?').upper()}] {c.get('title','?')} "
+                f"(similarity: {sim_pct}%)\n   {desc}"
+            )
+        out += "\n\nLEARNINGS FROM PREVIOUS CASES:\n" + "\n".join(lines)
+
+    if sop_context:
+        lines = "\n\n".join(f"- {chunk}" for chunk in sop_context[:3])
+        out += f"\n\nCOMPANY SOP — INCIDENT RESPONSE GUIDE:\n{lines}"
+
+    if feedback_context:
+        lines = []
+        for f in feedback_context[:3]:
+            sim_pct = int(float(f.get("similarity", 0)) * 100)
+            if f.get("rating") == "incorrect":
+                correction = f.get("correct_verdict") or "?"
+                note = f" — {f['note']}" if f.get("note") else ""
+                lines.append(
+                    f"An analyst marked a similar AI triage as INCORRECT (similarity: {sim_pct}%). "
+                    f"AI said '{f.get('ai_verdict','?')}', should have been '{correction}'{note}"
+                )
+            else:
+                lines.append(
+                    f"An analyst confirmed a similar AI triage was CORRECT (similarity: {sim_pct}%): "
+                    f"verdict '{f.get('ai_verdict','?')}'"
+                )
+        out += ("\n\nANALYST FEEDBACK ON PAST SIMILAR TRIAGES (adjust your verdict if it applies here):\n"
+                + "\n".join(lines))
+    return out
+
+
 async def analyze_alert_with_ai(
     title: str,
     severity: str,
@@ -132,48 +174,14 @@ async def analyze_alert_with_ai(
         iocs = [f"{i.type.value}:{i.value}" for i in enrichment.iocs[:10]]
         ioc_list = f"\nExtracted IOCs: {', '.join(iocs)}"
 
-    similar_cases_section = ""
-    if similar_cases:
-        lines = []
-        for i, c in enumerate(similar_cases[:3], 1):
-            sim_pct = int(float(c.get("similarity", 0)) * 100)
-            desc = (c.get("description") or "")[:200]
-            lines.append(
-                f"{i}. [{c.get('status','?').upper()}] {c.get('title','?')} "
-                f"(similarity: {sim_pct}%)\n   {desc}"
-            )
-        similar_cases_section = "\n\nLEARNINGS FROM PREVIOUS CASES:\n" + "\n".join(lines)
-
-    sop_section = ""
-    if sop_context:
-        lines = "\n\n".join(f"- {chunk}" for chunk in sop_context[:3])
-        sop_section = f"\n\nCOMPANY SOP — INCIDENT RESPONSE GUIDE:\n{lines}"
-
-    feedback_section = ""
-    if feedback_context:
-        lines = []
-        for f in feedback_context[:3]:
-            sim_pct = int(float(f.get("similarity", 0)) * 100)
-            if f.get("rating") == "incorrect":
-                correction = f.get("correct_verdict") or "?"
-                note = f" — {f['note']}" if f.get("note") else ""
-                lines.append(
-                    f"⚠️ An analyst marked a similar AI triage as INCORRECT (similarity: {sim_pct}%). "
-                    f"AI said '{f.get('ai_verdict','?')}', should have been '{correction}'{note}"
-                )
-            else:
-                lines.append(
-                    f"✓ An analyst confirmed a similar AI triage was CORRECT (similarity: {sim_pct}%): "
-                    f"verdict '{f.get('ai_verdict','?')}'"
-                )
-        feedback_section = "\n\nANALYST FEEDBACK ON PAST SIMILAR TRIAGES (adjust your verdict if it applies here):\n" + "\n".join(lines)
+    rag_context = rag_sections(similar_cases, sop_context, feedback_context)
 
     prompt = f"""ALERT TO TRIAGE:
 Title    : {title}
 Severity : {severity}
 Source IP: {source_ip or 'unknown'}
 Hostname : {hostname or 'unknown'}
-Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{similar_cases_section}{sop_section}{feedback_section}
+Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{rag_context}
 
 Perform triage and provide your verdict as an L1 analyst."""
 

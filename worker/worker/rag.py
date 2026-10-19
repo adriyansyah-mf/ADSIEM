@@ -1,5 +1,6 @@
 """RAG — embed resolved cases and retrieve similar ones at triage time."""
 from __future__ import annotations
+import os
 import uuid
 from typing import Optional
 
@@ -10,6 +11,7 @@ from worker.database import AsyncSessionLocal
 
 log = structlog.get_logger()
 
+EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # 384 dims, matches the vector(384) columns
 _embedder = None
 
 
@@ -17,7 +19,9 @@ def _get_embedder():
     global _embedder
     if _embedder is None:
         from fastembed import TextEmbedding
-        _embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        # the image bakes the model into FASTEMBED_CACHE_PATH (worker/Dockerfile),
+        # so RAG works without reaching HuggingFace at runtime
+        _embedder = TextEmbedding(model_name=EMBED_MODEL, cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
     return _embedder
 
 

@@ -285,8 +285,8 @@ TOOLS: list[dict] = [
             "about phishing', 'how do we handle ransomware'."
         ),
         "parameters": {
-            "query": "text to search SOP text for",
-            "limit": "max documents, default 5, max 15",
+            "query": "what you need, in words (semantic search over the SOP passages)",
+            "limit": "max passages, default 5, max 15",
         },
         "schema": {
             "type": "object",
@@ -397,6 +397,39 @@ TOOLS: list[dict] = [
 
 def _severity_ok(v: Any) -> bool:
     return isinstance(v, str) and v.lower() in ("info", "low", "medium", "high", "critical")
+
+
+async def _search_sop(db: AsyncSession, query: str, limit: int, group_filter: str | None) -> dict:
+    """The SOP passages that answer `query`: vector search over the chunks the
+    worker indexed (worker/worker/rag.py), keyword match on them when the
+    embedding model isn't available."""
+    from sqlalchemy import text as sql
+
+    from app.models.models import SopChunk
+    from app.services.embeddings import embed
+
+    vector = await embed(query)
+    if vector is not None:
+        rows = (await db.execute(sql(
+            "SELECT sd.id::text AS document_id, sd.filename, sc.chunk_text, "
+            "       1 - (sc.embedding <=> CAST(:e AS vector)) AS similarity "
+            "FROM sop_chunks sc JOIN sop_documents sd ON sd.id = sc.document_id "
+            "WHERE sd.status = 'indexed' AND (CAST(:g AS text) IS NULL OR sc.group_id = :g) "
+            "ORDER BY sc.embedding <=> CAST(:e AS vector) LIMIT :k"
+        ), {"e": str(vector), "g": group_filter, "k": limit})).mappings().all()
+        return {"query": query, "mode": "semantic", "passages": [
+            {"document_id": r["document_id"], "filename": r["filename"],
+             "similarity": round(float(r["similarity"]), 3), "text": r["chunk_text"]}
+            for r in rows]}
+
+    q = (select(SopChunk.chunk_text, SopDocument.id, SopDocument.filename)
+         .join(SopDocument, SopDocument.id == SopChunk.document_id)
+         .where(SopChunk.chunk_text.ilike(f"%{query}%")))
+    if group_filter:
+        q = q.where(SopChunk.group_id == group_filter)
+    rows = (await db.execute(q.limit(limit))).all()
+    return {"query": query, "mode": "keyword", "passages": [
+        {"document_id": str(doc_id), "filename": filename, "text": chunk} for chunk, doc_id, filename in rows]}
 
 
 async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | None) -> dict:
@@ -875,22 +908,7 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
         if not query:
             return {"error": "query is required"}
         limit = clamp(_arg(args, "limit"), 5, 15)
-        q = select(SopDocument).where(SopDocument.raw_text.ilike(f"%{query}%"))
-        if group_filter:
-            q = q.where(SopDocument.group_id == group_filter)
-        docs = (await db.execute(q.order_by(SopDocument.created_at.desc()).limit(limit))).scalars().all()
-        return {
-            "query": query,
-            "documents": [
-                {
-                    "id": str(d.id),
-                    "filename": d.filename,
-                    "status": d.status,
-                    "excerpt": (d.raw_text or "")[:600],
-                }
-                for d in docs
-            ],
-        }
+        return await _search_sop(db, query, limit, group_filter)
 
     if name == "list_decoders":
         limit = clamp(_arg(args, "limit"), 30, 60)

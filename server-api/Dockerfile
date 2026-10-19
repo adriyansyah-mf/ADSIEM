@@ -7,6 +7,12 @@ WORKDIR /app
 COPY server-api/requirements.txt .
 RUN pip install --no-cache-dir --retries 5 --timeout 120 -r requirements.txt
 
+# Embedding model for semantic SOP search (app/services/embeddings.py), same
+# one the worker indexes with; baked in so search works offline
+ENV FASTEMBED_CACHE_PATH=/opt/fastembed
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='/opt/fastembed')" \
+ && chmod -R a+rX /opt/fastembed
+
 COPY worker/worker/__init__.py worker/worker/sigma_engine.py worker/worker/sigma_logsource.py worker/worker/decoder_engine.py ./worker/
 COPY server-api/app/ ./app/
 
