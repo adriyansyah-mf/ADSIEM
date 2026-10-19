@@ -17,3 +17,7 @@ def test_every_imported_worker_module_is_copied_into_the_image():
     copied = set(re.findall(r"worker/worker/(\w+)\.py", dockerfile))
     assert imported, "expected server-api to import worker modules"
     assert imported <= copied, f"server-api/Dockerfile doesn't copy {sorted(imported - copied)}"
+    # the build context is a whitelist: a copied file it doesn't let through fails the build
+    ignore = (ROOT / "server-api" / "Dockerfile.dockerignore").read_text()
+    allowed = set(re.findall(r"^!worker/worker/(\w+)\.py$", ignore, re.M))
+    assert copied <= allowed, f"Dockerfile.dockerignore doesn't let through {sorted(copied - allowed)}"
