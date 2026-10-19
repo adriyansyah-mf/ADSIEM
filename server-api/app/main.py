@@ -310,34 +310,6 @@ async def _migrate_alerts_columns() -> None:
             WITH (lists = 10)
         """))
 
-async def _migrate_knowledge() -> None:
-    """Knowledge base (analyst notes, PayloadsAllTheThings) chunks with embeddings,
-    and HNSW instead of IVFFlat on every RAG table: IVFFlat built on an empty
-    table has meaningless centroids and silently misses rows; HNSW needs no training."""
-    from sqlalchemy import text
-    async with engine.begin() as conn:
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS knowledge_chunks (
-                id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                entry_id     UUID NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
-                group_id     VARCHAR(100) NOT NULL DEFAULT 'default',
-                kind         VARCHAR(20) NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT NOT NULL,
-                embedding    vector(384) NOT NULL
-            )
-        """))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_entry ON knowledge_chunks(entry_id)"))
-        for table in ("knowledge_chunks", "case_embeddings", "sop_chunks", "feedback_embeddings"):
-            if not (await conn.execute(text(
-                "SELECT 1 FROM information_schema.columns WHERE table_name = :t AND column_name = 'embedding'"
-            ), {"t": table})).first():
-                continue
-            await conn.execute(text(f"DROP INDEX IF EXISTS idx_{table}_ivfflat"))
-            await conn.execute(text(
-                f"CREATE INDEX IF NOT EXISTS idx_{table}_hnsw ON {table} USING hnsw (embedding vector_cosine_ops)"))
-
-
 async def _migrate_soar_tables() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -498,7 +470,8 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
-        await _migrate_knowledge()
+        from app.services.knowledge_schema import migrate_knowledge
+        await migrate_knowledge()
         from app.services.investigator import mark_stale_interrupted
         await mark_stale_interrupted()
     finally:

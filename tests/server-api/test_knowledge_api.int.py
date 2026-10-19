@@ -26,7 +26,7 @@ def env():
     from sqlalchemy import text
 
     from app.core.database import Base, engine
-    from app.main import _migrate_knowledge
+    from app.services.knowledge_schema import migrate_knowledge
     import app.models.models  # noqa: F401
 
     async def setup():
@@ -39,7 +39,7 @@ def env():
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(), feedback_id UUID NOT NULL REFERENCES ai_feedback(id),
                 group_id VARCHAR(100) NOT NULL DEFAULT 'default', embedding vector(384) NOT NULL,
                 rating VARCHAR(20) NOT NULL, summary_text TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT now())"""))
-        await _migrate_knowledge()
+        await migrate_knowledge()
     _run(setup())
     yield
     _run(engine.dispose())
