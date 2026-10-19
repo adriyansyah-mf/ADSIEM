@@ -4,6 +4,7 @@
 image (server-api/Dockerfile)."""
 import asyncio
 import os
+import time
 
 import structlog
 
@@ -13,11 +14,21 @@ EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # must match worker/worker/rag.py
 _embedder = None
 
 
+EMBED_RETRY_SECONDS = 600  # after a failed load, keyword search until then instead of a slow retry
+_failed_at = 0.0
+
+
 def _embed_sync(text: str) -> list[float]:
-    global _embedder
+    global _embedder, _failed_at
     if _embedder is None:
+        if _failed_at and time.monotonic() - _failed_at < EMBED_RETRY_SECONDS:
+            raise RuntimeError("embedding model unavailable; retrying later")
         from fastembed import TextEmbedding
-        _embedder = TextEmbedding(model_name=EMBED_MODEL, cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
+        try:
+            _embedder = TextEmbedding(model_name=EMBED_MODEL, cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
+        except Exception:
+            _failed_at = time.monotonic()
+            raise
     return list(_embedder.embed([text]))[0].tolist()
 
 

@@ -104,6 +104,8 @@ services:
     build:
       context: .
       dockerfile: server-api/Dockerfile
+      args:
+        HF_ENDPOINT: ${HF_ENDPOINT:-}  # optional mirror for the RAG embedding model download
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://soc:soc@postgres:5432/soc_platform}
@@ -149,6 +151,8 @@ services:
     build:
       context: ./worker
       dockerfile: Dockerfile
+      args:
+        HF_ENDPOINT: ${HF_ENDPOINT:-}  # optional mirror for the RAG embedding model download
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://soc:soc@postgres:5432/soc_platform}
