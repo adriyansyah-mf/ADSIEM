@@ -22,6 +22,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 
 from worker.graph.chat_model import NineRouterChatModel
+from worker.llm_client import rag_sections
 
 log = structlog.get_logger()
 
@@ -205,6 +206,10 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                 "\nUEBA BEHAVIOUR CONTEXT (statistical anomaly, not a signature hit — judge whether "
                 "the deviation is malicious or a benign change in behaviour):\n" + state["ueba_context"]
             )
+        # RAG: similar closed cases, company SOP, analyst corrections (retrieve node)
+        rag = rag_sections(state.get("similar_cases"), state.get("sop_context"), state.get("feedback_context"))
+        if rag:
+            prompt_parts.append(rag)
 
         try:
             reply = await llm.ainvoke([
