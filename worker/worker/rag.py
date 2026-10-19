@@ -41,6 +41,22 @@ def embed_text(text: str) -> list[float]:
     return vectors[0].tolist()
 
 
+def embed_texts(texts: list[str], batch_size: int = 64) -> list[list[float]]:
+    """Embed many texts in batches (indexing thousands of reference chunks)."""
+    embedder = _get_embedder()
+    return [v.tolist() for v in embedder.embed(texts, batch_size=batch_size)]
+
+
+async def embed_or_none(text_: str) -> list[float] | None:
+    """For retrieval: the vector, or None when the model isn't available (callers degrade)."""
+    import asyncio
+    try:
+        return await asyncio.to_thread(embed_text, text_)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("rag_embed_query_failed", error=str(exc))
+        return None
+
+
 async def index_case(
     case_id: str,
     title: str,

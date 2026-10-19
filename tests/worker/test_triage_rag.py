@@ -87,3 +87,22 @@ async def test_nothing_retrieved_adds_nothing(monkeypatch):
     prompt = await _prompt(monkeypatch, [], [], [], "rag-2")
     assert "LEARNINGS FROM PREVIOUS CASES" not in prompt and "COMPANY SOP" not in prompt
     assert rag_sections(None, None, None) == ""
+
+
+async def test_knowledge_hook_reaches_the_prompt(monkeypatch):
+    _FakeLLM.prompts = []
+    monkeypatch.setattr(triage_graph, "NineRouterChatModel", _FakeLLM)
+    seen = {}
+
+    async def knowledge(title, source_ip, hostname, fields, gid):
+        seen.update(title=title, ip=source_ip, host=hostname, gid=gid)
+        return {"notes": [{"title": "web01 runs our pentest tool on Fridays", "content": "Expected scans.",
+                           "matched": ["host web01"]}], "references": []}
+
+    deps = _deps([], [], [])
+    deps["retrieve_knowledge"] = knowledge
+    graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
+    await graph.ainvoke(_state(), {"configurable": {"thread_id": "rag-3"}})
+    assert seen == {"title": "Successful Login After Brute Force", "ip": "203.0.113.9", "host": "web01",
+                    "gid": "default"}
+    assert "web01 runs our pentest tool on Fridays (matches host web01)" in _FakeLLM.prompts[0]

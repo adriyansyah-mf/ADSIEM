@@ -28,6 +28,7 @@ import FimPage from '@/pages/FimPage'
 import HuntsPage from '@/pages/HuntsPage'
 import ReportsPage from '@/pages/ReportsPage'
 import SopPage from '@/pages/SopPage'
+import KnowledgePage from '@/pages/KnowledgePage'
 import HandoverPage from '@/pages/HandoverPage'
 import LiveResponsePage from '@/pages/LiveResponsePage'
 import YaraPage from '@/pages/YaraPage'
@@ -72,6 +73,7 @@ export default function App() {
             <Route path="/hunts" element={<HuntsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/sop" element={<SopPage />} />
+            <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/handover" element={<HandoverPage />} />
             <Route path="/mitre-heatmap" element={<MitreHeatmapPage />} />
             <Route path="/live-response" element={<LiveResponsePage />} />

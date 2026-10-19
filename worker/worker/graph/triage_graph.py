@@ -73,6 +73,7 @@ class TriageState(TypedDict):
     similar_cases: NotRequired[list]
     sop_context: NotRequired[list[str]]
     feedback_context: NotRequired[list]
+    knowledge: NotRequired[dict]
     ueba_context: NotRequired[str]  # entity history for UEBA alerts (ai_analyst._ueba_context)
 
     analysis: NotRequired[dict]
@@ -172,6 +173,12 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             out["feedback_context"] = await deps["retrieve_feedback_context"](query_text, gid)
         except Exception as exc:
             log.warning("rag_retrieval_failed", error=str(exc))
+        if "retrieve_knowledge" in deps:
+            try:
+                out["knowledge"] = await deps["retrieve_knowledge"](
+                    state["title"], state.get("source_ip"), state.get("hostname"), state.get("decoded_fields"), gid)
+            except Exception as exc:
+                log.warning("knowledge_retrieval_failed", error=str(exc))
 
         if state.get("source_ip") and enrichment and getattr(enrichment, "overall_risk", 0) > 0.5:
             asyncio.ensure_future(deps["enqueue_hunt"](state["source_ip"], gid))
@@ -207,7 +214,8 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                 "the deviation is malicious or a benign change in behaviour):\n" + state["ueba_context"]
             )
         # RAG: similar closed cases, company SOP, analyst corrections (retrieve node)
-        rag = rag_sections(state.get("similar_cases"), state.get("sop_context"), state.get("feedback_context"))
+        rag = rag_sections(state.get("similar_cases"), state.get("sop_context"), state.get("feedback_context"),
+                           state.get("knowledge"))
         if rag:
             prompt_parts.append(rag)
 
