@@ -7,6 +7,13 @@ set -e
 mkdir -p /run/sshd /run/mysqld /var/log /var/log/apache2
 chown mysql:mysql /run/mysqld || true
 
+# eBPF programs attach through tracefs. Containers do not mount it by default,
+# and without it both procexec and netwatch fail with "neither debugfs nor
+# tracefs are mounted". Best-effort: a host that forbids it just loses eBPF.
+mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null \
+  || mount -t debugfs none /sys/kernel/debug 2>/dev/null \
+  || echo "tracefs unavailable; eBPF collectors will fall back"
+
 if [ ! -d /var/lib/mysql/mysql ]; then
   mysql_install_db --user=mysql --datadir=/var/lib/mysql >/dev/null 2>&1
 fi

@@ -13,7 +13,8 @@ from app.core.database import get_db
 from app.core.deps import get_agent
 from app.core.redis_client import get_redis
 from app.core.security import hash_token
-from app.models.models import Agent, AgentLogSource, AgentTask, FimWatchPath
+from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
+                            FimWatchPath)
 from app.schemas.schemas import AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
 from app.services.ingest import enqueue_log
 
@@ -72,8 +73,32 @@ async def heartbeat(
         await db.commit()
 
     sources_data = [{"path": s.path, "log_type": s.log_type, "is_enabled": s.is_enabled} for s in sources]
+
+    fw_result = await db.execute(
+        select(AgentFirewallRule)
+        .where(AgentFirewallRule.agent_id == agent.id, AgentFirewallRule.is_enabled == True)
+        .order_by(AgentFirewallRule.created_at)
+    )
+    fw_rules = fw_result.scalars().all()
+    firewall_data = [
+        {
+            "id": str(r.id),
+            "action": r.action,
+            "cidr": r.cidr,
+            "proto": r.proto,
+            "port": r.port,
+            "direction": r.direction,
+            "ttl_seconds": r.ttl_seconds,
+            "reason": r.reason,
+        }
+        for r in fw_rules
+    ]
+
     config_hash = hashlib.sha256(
-        json.dumps({"sources": sources_data, "fim_paths": fim_paths}, sort_keys=True).encode()
+        json.dumps(
+            {"sources": sources_data, "fim_paths": fim_paths, "firewall": firewall_data},
+            sort_keys=True,
+        ).encode()
     ).hexdigest()
 
     return HeartbeatResponse(
@@ -81,4 +106,5 @@ async def heartbeat(
         log_sources=[LogSourceOut.model_validate(s) for s in sources],
         fim_paths=fim_paths,
         tasks=[AgentTaskDef(id=t.id, task_type=t.task_type, params=t.params or {}) for t in pending_tasks],
+        firewall=firewall_data,
     )

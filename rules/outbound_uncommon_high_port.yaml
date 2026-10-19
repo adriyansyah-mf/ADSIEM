@@ -1,0 +1,17 @@
+title: Outbound Connection to Uncommon High Port
+id: rule-net-uncommon-high-port
+description: A process opened an outbound TCP connection to a high port that is rarely used by legitimate services (common C2 / reverse-shell range)
+logsource:
+  product: linux_network
+detection:
+  selection:
+    event.action: network_connect
+    network.transport: tcp
+    destination.private: "false"
+    destination.port|gte: 4444
+    destination.port|lte: 4450
+  condition: selection
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1571

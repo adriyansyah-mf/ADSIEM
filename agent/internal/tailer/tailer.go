@@ -212,6 +212,13 @@ func tailFixed(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{})
 }
 
 func encode(logType, rawMessage string) string {
+	return Encode(logType, rawMessage)
+}
+
+// Encode packs a log type and raw message into one buffer entry. Subsystems
+// outside the tailer (procexec, firewall) push events through the same codec
+// so the sender treats every entry identically.
+func Encode(logType, rawMessage string) string {
 	return logType + "\x00" + rawMessage
 }
 

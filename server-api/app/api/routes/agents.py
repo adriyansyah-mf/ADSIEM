@@ -17,10 +17,11 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_scoped_group, fetch_scoped, assert_group_access
 from app.core.security import generate_agent_token, hash_token
-from app.models.models import Agent, AgentLogSource, AgentTask, EnrollmentToken, User
+from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
+                            EnrollmentToken, User)
 from app.schemas.schemas import (
     AgentOut, AgentUpdate, EnrollRequest, EnrollResponse,
-    LogSourceIn, LogSourceOut, PaginatedResponse
+    FirewallRuleIn, FirewallRuleOut, LogSourceIn, LogSourceOut, PaginatedResponse
 )
 from app.services.audit import audit_log
 
@@ -282,6 +283,99 @@ async def delete_log_source(
     await db.delete(src)
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "log_source_deleted", "agent_log_source", str(source_id))
+
+# --- Firewall policy --------------------------------------------
+
+def _rule_payload(rule: AgentFirewallRule) -> dict:
+    return {
+        "id": str(rule.id),
+        "action": rule.action,
+        "cidr": rule.cidr,
+        "proto": rule.proto,
+        "port": rule.port,
+        "direction": rule.direction,
+        "ttl": rule.ttl_seconds,
+        "reason": rule.reason,
+    }
+
+@router.get("/api/agents/{agent_id}/firewall", response_model=list[FirewallRuleOut])
+async def list_firewall_rules(
+    agent_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    result = await db.execute(
+        select(AgentFirewallRule)
+        .where(AgentFirewallRule.agent_id == agent_id)
+        .order_by(AgentFirewallRule.created_at.desc())
+    )
+    return [FirewallRuleOut.model_validate(r) for r in result.scalars().all()]
+
+@router.post("/api/agents/{agent_id}/firewall", response_model=FirewallRuleOut, status_code=201)
+async def add_firewall_rule(
+    agent_id: UUID, body: FirewallRuleIn,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    rule = AgentFirewallRule(agent_id=agent_id, created_by=current_user.id, **body.model_dump())
+    db.add(rule)
+    await db.commit()
+    await db.refresh(rule)
+    background.add_task(audit_log, db, current_user.id, "firewall_rule_added",
+                        "agent_firewall_rule", str(rule.id), {"cidr": rule.cidr})
+    return FirewallRuleOut.model_validate(rule)
+
+@router.put("/api/agents/{agent_id}/firewall/{rule_id}", response_model=FirewallRuleOut)
+async def update_firewall_rule(
+    agent_id: UUID, rule_id: UUID, body: FirewallRuleIn,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    result = await db.execute(
+        select(AgentFirewallRule).where(
+            AgentFirewallRule.id == rule_id, AgentFirewallRule.agent_id == agent_id
+        )
+    )
+    rule = result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(404, "Firewall rule not found")
+    for field, value in body.model_dump().items():
+        setattr(rule, field, value)
+    await db.commit()
+    await db.refresh(rule)
+    background.add_task(audit_log, db, current_user.id, "firewall_rule_updated",
+                        "agent_firewall_rule", str(rule_id))
+    return FirewallRuleOut.model_validate(rule)
+
+@router.delete("/api/agents/{agent_id}/firewall/{rule_id}", status_code=204)
+async def delete_firewall_rule(
+    agent_id: UUID, rule_id: UUID,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    result = await db.execute(
+        select(AgentFirewallRule).where(
+            AgentFirewallRule.id == rule_id, AgentFirewallRule.agent_id == agent_id
+        )
+    )
+    rule = result.scalar_one_or_none()
+    if not rule:
+        raise HTTPException(404, "Firewall rule not found")
+    await db.delete(rule)
+    await db.commit()
+    background.add_task(audit_log, db, current_user.id, "firewall_rule_deleted",
+                        "agent_firewall_rule", str(rule_id))
 
 @router.post("/api/agents/{agent_id}/isolate", response_model=AgentOut)
 async def isolate_agent(

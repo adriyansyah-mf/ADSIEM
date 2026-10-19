@@ -27,3 +27,25 @@ fim:
     - /sbin
     - /usr/bin
     - /usr/sbin
+
+firewall:
+  enabled: true
+  backend: auto
+  dry_run: false
+  protected_ips: []
+  state_path: /var/lib/siem-agent/firewall.json
+
+netwatch:
+  enabled: true
+  snapshot_fallback: true
+
+detect:
+  enabled: true
+  rules:
+    - ssh_bruteforce
+    - port_scan
+  max_blocked: 5000
+  max_blocks_per_minute: 10
+
+buffer:
+  spill_path: /var/lib/siem-agent/spill.log

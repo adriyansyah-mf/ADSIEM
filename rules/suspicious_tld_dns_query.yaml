@@ -1,0 +1,24 @@
+title: DNS Query for Suspicious TLD
+id: rule-net-dns-suspicious-tld
+description: A process resolved a name under a TLD commonly abused for malware distribution and C2
+logsource:
+  product: linux_network
+detection:
+  selection:
+    event.action: dns_query
+  tld:
+    dns.question.name|endswith:
+      - ".top"
+      - ".xyz"
+      - ".tk"
+      - ".ml"
+      - ".ga"
+      - ".cf"
+      - ".gq"
+      - ".work"
+      - ".click"
+  condition: selection and tld
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1071.004

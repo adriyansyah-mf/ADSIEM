@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 # ─── Auth ────────────────────────────────────────────────────────
 
@@ -65,6 +65,46 @@ class LogSourceIn(BaseModel):
     log_type: str
     is_enabled: bool = True
 
+class FirewallRuleIn(BaseModel):
+    action: Literal["block", "allow"] = "block"
+    cidr: str
+    proto: Literal["any", "tcp", "udp", "icmp"] = "any"
+    port: int = Field(0, ge=0, le=65535)
+    direction: Literal["inbound", "outbound", "both"] = "both"
+    ttl_seconds: int = Field(0, ge=0, le=2592000)
+    reason: str = ""
+    is_enabled: bool = True
+
+    @field_validator("cidr")
+    @classmethod
+    def _valid_cidr(cls, v: str) -> str:
+        import ipaddress
+        try:
+            ipaddress.ip_network(v, strict=False)
+        except ValueError as exc:
+            raise ValueError(f"invalid cidr: {v}") from exc
+        return v
+
+    @model_validator(mode="after")
+    def _port_needs_proto(self):
+        if self.port and self.proto not in ("tcp", "udp"):
+            raise ValueError("port requires proto tcp or udp")
+        return self
+
+class FirewallRuleOut(BaseModel):
+    id: UUID
+    agent_id: UUID
+    action: str
+    cidr: str
+    proto: str
+    port: int
+    direction: str
+    ttl_seconds: int
+    reason: str
+    is_enabled: bool
+    created_at: datetime | None = None
+    model_config = ConfigDict(from_attributes=True)
+
 class EnrollRequest(BaseModel):
     enrollment_token: str = ""
     hostname: str
@@ -117,6 +157,7 @@ class HeartbeatResponse(BaseModel):
     log_sources: list[LogSourceOut]
     fim_paths: list[str] = []
     tasks: list[AgentTaskDef] = []
+    firewall: list[dict] = []
 
 # ─── Ingest ──────────────────────────────────────────────────────
 
