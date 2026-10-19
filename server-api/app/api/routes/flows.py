@@ -253,6 +253,40 @@ async def schedule_flow(
     return flow
 
 
+COMMAND_ARTIFACT = "AI.Command"
+_COMMAND_CONTENT = """name: AI.Command
+description: A command an analyst approved for an AI investigation (agent exec plugin).
+sources:
+  - name: Output
+    plugin: exec
+"""
+
+
+async def schedule_command_flow(
+    db: AsyncSession, redis: aioredis.Redis, *, agent: Agent, command: str, args: list[str],
+    timeout: int, created_by: UUID | None, scheduled_by: str,
+) -> Flow:
+    """Queue one approved command for the agent's exec plugin. Built here, not
+    from an artifact: exec is in no saved artifact (flow_artifacts.INTERNAL_PLUGINS)."""
+    if agent.flow_poll_at is None:
+        raise HTTPException(409, f"Agent {agent.hostname} has no flow runner; update it")
+    flow_id = uuid.uuid4()
+    flow_timeout = timeout + 30  # the agent kills the command first and still reports
+    request = {"id": str(flow_id), "artifact": COMMAND_ARTIFACT, "timeout": flow_timeout,
+               "max_rows": DEFAULT_MAX_ROWS,
+               "sources": [{"name": "Output", "plugin": "exec",
+                            "args": {"command": command, "args": args, "timeout": timeout}}]}
+    flow = Flow(id=flow_id, agent_id=agent.id, artifact=COMMAND_ARTIFACT, artifact_content=_COMMAND_CONTENT,
+                params={"command": command, "args": args}, request=request, timeout=flow_timeout,
+                max_rows=DEFAULT_MAX_ROWS, created_by=created_by)
+    db.add(flow)
+    db.add(FlowLog(flow_id=flow_id, level="info", message=f"Scheduled by {scheduled_by}"))
+    await db.commit()
+    await db.refresh(flow)
+    await _wake(redis, agent.id)
+    return flow
+
+
 @router.post("", response_model=FlowOut, status_code=201)
 async def create_flow(
     body: FlowCreate,

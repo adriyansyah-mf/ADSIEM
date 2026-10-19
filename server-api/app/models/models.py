@@ -269,6 +269,32 @@ class CaseInvestigation(Base):
     created_at       = Column(DateTime(timezone=True), default=now_utc)
     updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     finished_at      = Column(DateTime(timezone=True))
+    commands         = relationship("InvestigationCommand", order_by="InvestigationCommand.created_at",
+                                    lazy="selectin", passive_deletes=True)
+
+class InvestigationCommand(Base):
+    """A command the AI investigator asked to run on a host. Nothing runs until
+    a person approves it (or it matches the admin's auto-approve list); the
+    approved argv then goes to the agent's exec plugin as a flow."""
+    __tablename__ = "investigation_commands"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    group_id         = Column(String(100), nullable=False, default="default")
+    agent_id         = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    hostname         = Column(String(255))
+    command          = Column(Text, nullable=False)
+    args             = Column(JSONB, nullable=False, default=list)
+    timeout          = Column(Integer, nullable=False, default=60)
+    reason           = Column(Text)
+    # pending → approved | rejected | expired (the investigation ended first)
+    status           = Column(String(20), nullable=False, default="pending", index=True)
+    auto_approved    = Column(Boolean, nullable=False, default=False)
+    decided_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at       = Column(DateTime(timezone=True))
+    decision_note    = Column(Text)
+    flow_id          = Column(UUID(as_uuid=True))
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
 
 class CaseNote(Base):
     __tablename__ = "case_notes"

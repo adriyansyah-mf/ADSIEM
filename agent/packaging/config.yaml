@@ -19,3 +19,9 @@ logs:
     type: linux_auth
   - path: /var/log/syslog
     type: syslog
+
+# AI investigations can ask to run commands on this host once an analyst
+# approves them on the server (Settings → ai_command_execution). To refuse
+# them on this host regardless, uncomment:
+# live_response:
+#   disable_commands: true

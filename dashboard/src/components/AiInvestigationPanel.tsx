@@ -15,6 +15,19 @@ interface Step {
   [key: string]: unknown
 }
 
+interface Command {
+  id: string
+  hostname: string | null
+  command: string
+  args: string[]
+  timeout: number
+  reason: string | null
+  status: 'pending' | 'approved' | 'rejected' | 'expired'
+  auto_approved: boolean
+  flow_id: string | null
+  created_at: string
+}
+
 interface Investigation {
   id: string
   case_id: string
@@ -24,8 +37,13 @@ interface Investigation {
   report: string | null
   error: string | null
   steps: Step[]
+  commands: Command[]
   created_at: string
   finished_at: string | null
+}
+
+function commandLine(c: Pick<Command, 'command' | 'args'>): string {
+  return [c.command, ...c.args.map(a => (a === '' || /[\s"]/.test(a) ? JSON.stringify(a) : a))].join(' ')
 }
 
 const ACTIVE = new Set(['queued', 'running'])
@@ -83,7 +101,25 @@ function describe(step: Step, open: boolean, toggle: () => void): Row | null {
   const s = step as Record<string, any>
   switch (step.kind) {
     case 'started':
-      return { icon: <Play size={13} />, title: 'Started', detail: `by ${s.by} · ${s.model}` }
+      return { icon: <Play size={13} />, title: 'Started',
+        detail: `by ${s.by} · ${s.model}${s.commands ? ' · commands need approval' : ''}` }
+    case 'command':
+      return {
+        icon: <Terminal size={13} />, tone: 'var(--accent-orange)',
+        title: <>{s.auto_approved ? 'Command (auto-approved)' : 'Asked to run'} on <b>{s.host}</b></>,
+        detail: <>{s.command}{s.reason ? ` · ${s.reason}` : ''}</>,
+      }
+    case 'command_decision':
+      return {
+        icon: s.status === 'approved' ? <CheckCircle2 size={13} /> : <Ban size={13} />,
+        tone: s.status === 'approved' ? 'var(--accent-green)' : 'var(--accent-red)',
+        title: `Command ${s.status}`, detail: s.note ?? undefined,
+      }
+    case 'command_result':
+      return {
+        icon: <CheckCircle2 size={13} />, title: `Command ${s.status}`,
+        detail: <>{s.exit ?? s.error ?? ''}{` · ${s.lines} lines · `}<a href={`/live-response?flow=${s.flow_id}`} style={{ color: 'var(--accent-cyan)' }}>output</a></>,
+      }
     case 'context':
       return { icon: <FileText size={13} />, title: 'Read the case',
         detail: s.hosts?.length ? `hosts: ${s.hosts.join(', ')}` : 'no linked hosts' }
@@ -111,7 +147,7 @@ function describe(step: Step, open: boolean, toggle: () => void): Row | null {
       return { icon: <AlertTriangle size={13} />, tone: 'var(--accent-yellow)', title: 'Warning', detail: s.text }
     case 'finished':
       return { icon: <CheckCircle2 size={13} />, tone: 'var(--accent-green)', title: 'Finished',
-        detail: `${s.flows} live-response runs · ${s.artifacts} new artifacts` }
+        detail: `${s.flows} live-response runs · ${s.artifacts} new artifacts${s.commands ? ` · ${s.commands} commands` : ''}` }
     case 'cancelled':
       return { icon: <CircleStop size={13} />, title: 'Cancelled', detail: s.reason }
     case 'error':
@@ -149,6 +185,46 @@ function Timeline({ steps, showReasoning }: { steps: Step[]; showReasoning: bool
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function PendingCommand({ cmd, onDecided }: { cmd: Command; onDecided: () => void }) {
+  const [note, setNote] = useState('')
+  const decide = useMutation({
+    mutationFn: (approve: boolean) =>
+      api.post(`/api/investigation-commands/${cmd.id}/decision`, { approve, note: note || null }).then(r => r.data),
+    onSuccess: onDecided,
+    onError: (e) => { emitToast(detail(e, 'Could not record the decision'), 'error'); onDecided() },
+  })
+  const btn: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '5px 12px', borderRadius: '4px',
+    fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px', cursor: 'pointer',
+  }
+  return (
+    <div style={{ border: '1px solid var(--accent-orange)', borderRadius: '4px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <span style={{ ...label, color: 'var(--accent-orange)' }}>Approval needed</span>
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+          runs on <b style={{ color: 'var(--text-primary)' }}>{cmd.hostname}</b> as root / SYSTEM, up to {cmd.timeout}s
+        </span>
+      </div>
+      <pre style={{ ...mono, fontSize: '12px', margin: 0, padding: '8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)' }}>
+        {commandLine(cmd)}
+      </pre>
+      {cmd.reason && <div style={{ fontSize: '12px', color: 'var(--text-secondary, var(--text-muted))' }}>Reason: {cmd.reason}</div>}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Note to the AI (optional)" maxLength={1000}
+          style={{ ...mono, flex: '1 1 200px', fontSize: '12px', padding: '5px 8px', background: 'var(--bg-base)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px' }} />
+        <button onClick={() => decide.mutate(true)} disabled={decide.isPending}
+          style={{ ...btn, border: '1px solid var(--accent-green)', background: 'transparent', color: 'var(--accent-green)' }}>
+          <CheckCircle2 size={13} /> APPROVE
+        </button>
+        <button onClick={() => decide.mutate(false)} disabled={decide.isPending}
+          style={{ ...btn, border: '1px solid var(--accent-red)', background: 'transparent', color: 'var(--accent-red)' }}>
+          <Ban size={13} /> REJECT
+        </button>
+      </div>
     </div>
   )
 }
@@ -230,7 +306,8 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
       {!current && (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
           Reads the case and its alerts, searches the logs, and collects evidence from the case&apos;s hosts with
-          live-response artifacts (writing new ones if needed). The findings are added to the case as a note.
+          live-response artifacts (writing new ones if needed). When AI commands are enabled in Settings, it can
+          also ask to run a program on a host — you approve each one here first. The findings are added to the case as a note.
           Response actions — isolate, kill, quarantine, block — are left to you.
         </div>
       )}
@@ -240,6 +317,9 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
           {current.error && current.status !== 'finished' && (
             <div style={{ ...mono, fontSize: '12px', color: 'var(--accent-red)' }}>{current.error}</div>
           )}
+          {(current.commands ?? []).filter(c => c.status === 'pending').map(c => (
+            <PendingCommand key={c.id} cmd={c} onDecided={() => qc.invalidateQueries({ queryKey: ['investigations', caseId] })} />
+          ))}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={label}>Activity</span>
             {thoughts > 0 && (

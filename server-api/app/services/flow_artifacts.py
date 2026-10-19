@@ -39,6 +39,9 @@ PLUGINS = {
     "persistence", "dmesg", "open_files", "yara",
     "eventlog", "services", "programs",  # Windows agents only
 }
+# Plugins no saved artifact may use: exec runs an operator-approved command
+# (investigator.run_command) and only appears in the flows that runs.
+INTERNAL_PLUGINS = {"exec"}
 
 # Display order for each plugin's columns. Rows are stored as JSONB, which does
 # not keep key order, so results are re-ordered by this (or a source's `fields`).
@@ -58,6 +61,7 @@ PLUGIN_COLUMNS = {
     "eventlog": ["TimeCreated", "EventID", "Channel", "Provider", "Computer", "RecordID", "Level"],
     "services": ["Name", "DisplayName", "State", "StartMode", "Account", "Pid", "PathName", "Description"],
     "programs": ["Name", "Version", "Publisher", "InstallDate", "InstallLocation", "Scope", "UninstallString"],
+    "exec": ["Stream", "Line", "Text", "ExitCode"],
 }
 
 DEFAULT_TIMEOUT = 600
@@ -183,7 +187,9 @@ def _bounded_int(raw: Any, default: int, maximum: int, what: str) -> int:
     return value
 
 
-def parse_artifact(content: str, builtin: bool = False) -> ArtifactDef:
+def parse_artifact(content: str, builtin: bool = False, internal: bool = False) -> ArtifactDef:
+    """internal=True also accepts INTERNAL_PLUGINS — only for re-reading the
+    snapshot of a flow the server built itself, never for saved artifacts."""
     try:
         doc = yaml.safe_load(content)
     except yaml.YAMLError as exc:
@@ -223,7 +229,7 @@ def parse_artifact(content: str, builtin: bool = False) -> ArtifactDef:
         if not isinstance(sname, str) or not _SOURCE_RE.match(sname):
             raise ArtifactError("each source needs a name of letters, digits or '_'")
         plugin = raw.get("plugin")
-        if plugin not in PLUGINS:
+        if plugin not in PLUGINS and not (internal and plugin in INTERNAL_PLUGINS):
             raise ArtifactError(f"source '{sname}': unknown plugin {plugin!r} (available: {sorted(PLUGINS)})")
         args = raw.get("args") or {}
         if not isinstance(args, dict):
@@ -311,7 +317,7 @@ def column_order(content: str, source: str, rows: list[dict]) -> list[str]:
     order, then any remaining keys alphabetically."""
     preferred: list[str] = []
     try:
-        src = next((s for s in parse_artifact(content).sources if s.name == source), None)
+        src = next((s for s in parse_artifact(content, internal=True).sources if s.name == source), None)
         if src:
             preferred = src.fields or PLUGIN_COLUMNS.get(src.plugin, [])
     except ArtifactError:
@@ -321,7 +327,7 @@ def column_order(content: str, source: str, rows: list[dict]) -> list[str]:
 
 
 def build_row_filter(content: str, params: dict) -> RowFilter:
-    art = parse_artifact(content)
+    art = parse_artifact(content, internal=True)  # reads flow snapshots, incl. command flows
     return RowFilter(
         matchers={s.name: _compile_source_filter(s, params) for s in art.sources},
         fields={s.name: s.fields for s in art.sources},
