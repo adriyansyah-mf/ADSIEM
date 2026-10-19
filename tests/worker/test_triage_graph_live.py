@@ -81,11 +81,12 @@ def _recording_deps(calls, verdict_override=None):
     async def run_searches(aid, cid, queries):
         calls.append("run_searches")
 
-    async def find_case(ip, host, gid, family=None):
-        return None
+    async def find_case(keys, host, gid):
+        return None, []
 
-    async def add_note(cid, aid, title, notes, sev):
-        calls.append("add_note_to_existing_case")
+    async def join_case(**kwargs):
+        calls.append("join_campaign_case")
+        return {}
 
     async def create_case(**kwargs):
         calls.append(("create_case", kwargs.get("verdict")))
@@ -115,8 +116,8 @@ def _recording_deps(calls, verdict_override=None):
         "run_soar_playbooks": run_soar,
         "update_alert_status": update_status,
         "run_searches": run_searches,
-        "find_existing_open_case": find_case,
-        "add_note_to_existing_case": add_note,
+        "find_campaign_case": find_case,
+        "join_campaign_case": join_case,
         "create_case_from_verdict": create_case,
         "analyze_campaign": campaign,
         "check_fleet_spread": fleet,

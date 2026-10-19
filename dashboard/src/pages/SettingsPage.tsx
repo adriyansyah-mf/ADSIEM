@@ -11,6 +11,8 @@ const SETTING_LABELS: Record<string, string> = {
   ninerouter_model: '9router Combo',
   investigation_model: 'AI Investigation Model',
   bruteforce_digest_enabled: 'Brute-Force Daily Digest',
+  case_ioc_exclusions: 'Case Grouping: Excluded IOCs',
+  case_ioc_window_days: 'Case Grouping Window (days)',
   ai_command_execution: 'AI Investigation Commands',
   ai_command_autoapprove: 'AI Commands Without Approval',
   agent_log_silence_minutes: 'Agent Log Silence Alert (minutes)',
@@ -43,6 +45,8 @@ const SETTING_HINTS: Record<string, string> = {
   ninerouter_model: 'Combo name created in the 9router dashboard, e.g. "combo"',
   investigation_model: 'Model for "Investigate with AI" on cases, through 9router — pick a frontier model with native tool calling and a long context. Empty = the combo above',
   bruteforce_digest_enabled: 'Collect failed-only brute force from public IPs into one AI case per day (true / false)',
+  case_ioc_exclusions: 'IPs, CIDRs and domains that never tie alerts into one campaign case: your own public IPs, proxies, shared SaaS. Public DNS resolvers and big update/CDN domains are excluded already',
+  case_ioc_window_days: 'A case keeps collecting alerts with the same IOCs (from any host) while not resolved and active within this many days',
   ai_command_execution: 'off, or approval: investigations may ask to run a program on a host; someone with agents:manage approves each one on the case before it runs (as root / SYSTEM). Needs agent v1.6.0+',
   ai_command_autoapprove: 'Comma-separated programs that run without asking, e.g. whoami,hostname,ipconfig. Shells and interpreters (bash, powershell, cmd, python, …) and credential paths always need approval',
   agent_log_silence_minutes: 'Alert when an agent still heartbeats but has sent no logs for this long (log sources removed, shipping blocked). 0 = off',
@@ -74,7 +78,7 @@ const MASKED = '••••••••'
 // settings whose value is a 9router model or combo: offer what 9router lists
 const MODEL_KEYS = new Set(['ninerouter_model', 'investigation_model'])
 // settings where an empty value means something (none auto-approved)
-const EMPTY_OK_KEYS = new Set(['ai_command_autoapprove'])
+const EMPTY_OK_KEYS = new Set(['ai_command_autoapprove', 'case_ioc_exclusions'])
 
 function SettingRow({ setting }: { setting: Setting }) {
   const [value, setValue] = useState(setting.is_secret ? '' : setting.value)

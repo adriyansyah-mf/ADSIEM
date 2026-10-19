@@ -94,9 +94,13 @@ def _deps(calls, tags, related=None, existing=None):
     async def alert_tags(alert_id):
         return tags
 
-    async def find_case(ip, host, gid, family=None):
-        calls.append(("find", family))
-        return existing
+    async def find_case(keys, host, gid):
+        calls.append(("find", keys))
+        return existing, []
+
+    async def join_case(**kwargs):
+        calls.append(("join", kwargs))
+        return {"escalated": False}
 
     async def related_cases(ip, host, gid):
         return related or []
@@ -109,26 +113,23 @@ def _deps(calls, tags, related=None, existing=None):
         calls.append(("digest", kwargs))
         return "case-digest"
 
-    async def add_note(*a):
-        calls.append(("note", a[0]))
-
     return {
         "enrich": enrich, "escalate_severity": lambda base, risk: base,
         "suggest_mitre": lambda text: [], "retrieve_similar_cases": empty,
         "retrieve_sop_context": empty, "retrieve_feedback_context": empty,
         "enqueue_hunt": noop, "get_setting": get_setting, "set_alert_verdict": noop,
         "write_alert_note": noop, "tag_alert_with_mitre": noop, "run_soar_playbooks": noop,
-        "update_alert_status": noop, "run_searches": noop, "find_existing_open_case": find_case,
-        "add_note_to_existing_case": add_note, "create_case_from_verdict": create_case,
+        "update_alert_status": noop, "run_searches": noop, "find_campaign_case": find_case,
+        "join_campaign_case": join_case, "create_case_from_verdict": create_case,
         "analyze_campaign": noop, "check_fleet_spread": noop, "dispatch_case_webhooks": noop,
         "alert_tags": alert_tags, "related_open_cases": related_cases, "add_to_bruteforce_digest": digest,
     }
 
 
-def _run(deps, title, ip, host="web01", severity="high"):
+def _run(deps, title, ip, host="web01", severity="high", fields=None):
     graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
     state = {"alert_id": "11111111-1111-1111-1111-111111111111", "title": title, "severity": severity,
-             "source_ip": ip, "hostname": host, "decoded_fields": {}, "group_id": "default"}
+             "source_ip": ip, "hostname": host, "decoded_fields": fields or {}, "group_id": "default"}
     return asyncio.run(graph.ainvoke(state, {"configurable": {"thread_id": f"t-{title}-{ip}"}}))
 
 
@@ -145,31 +146,75 @@ def test_public_bruteforce_goes_to_the_daily_digest():
 def test_internal_bruteforce_and_escalations_still_get_cases():
     calls = []
     _run(_deps(calls, BF_TAGS), "SSH Brute Force Attack", "10.0.0.7")  # lateral, worth a case
-    assert ("find", "credential_access") in calls and any(c[0] == "create" for c in calls)
+    assert ("find", []) in calls and any(c[0] == "create" for c in calls)  # a private IP is no campaign key
     calls = []
     _FakeLLM.verdict = "escalate"
     _run(_deps(calls, BF_TAGS), "SSH Brute Force Attack", "80.94.92.27")
     assert not any(c[0] == "digest" for c in calls) and any(c[0] == "create" for c in calls)
 
 
-def test_a_new_family_on_the_same_host_gets_its_own_linked_case():
+def test_a_new_campaign_is_linked_to_others_on_the_same_host():
     calls = []
     _FakeLLM.threat_type = "privilege_escalation"
     related = [{"case_id": "case-bf", "family": "credential_access", "title": "[AI] SSH Brute Force"}]
     _run(_deps(calls, ["attack.persistence", "attack.privilege_escalation"], related=related),
          "User Added to Privileged Linux Group", "10.0.0.7")
-    assert ("find", "privilege_escalation") in calls
     created = next(c[1] for c in calls if c[0] == "create")
     assert created["family"] == "privilege_escalation" and created["related"] == related
-    assert created["hostname"] == "web01"
+    assert created["hostname"] == "web01" and created["keys"] == []
 
 
-def test_same_family_joins_the_open_case():
+def test_an_alert_joins_the_campaign_its_iocs_point_to():
     calls = []
-    final = _run(_deps(calls, ["attack.execution"], existing="case-exec"), "Suspicious PowerShell Script Block",
-                 "10.0.0.7")
-    assert final["case_id"] == "case-exec" and ("note", "case-exec") in calls
-    assert not any(c[0] == "create" for c in calls)
+    final = _run(_deps(calls, ["attack.execution"], existing="case-x"), "Download and Execute", "80.94.92.27",
+                 host="web02", fields={"Hashes": "SHA256=" + "a" * 64})
+    assert final["case_id"] == "case-x" and not any(c[0] == "create" for c in calls)
+    joined = next(c[1] for c in calls if c[0] == "join")
+    assert joined["keys"] == ["hash:" + "a" * 64, "ip:80.94.92.27"]
+    assert joined["hostname"] == "web02" and joined["family"] == "execution"
+
+
+# ─── campaign keys ───────────────────────────────────────────────
+
+from worker.case_grouping import further_stage, ioc_keys, parse_exclusions  # noqa: E402
+
+EXCL = parse_exclusions("198.51.200.0/24, corp.example")
+
+
+def test_inbound_alerts_are_keyed_by_the_attacker_not_by_us():
+    # a web attack on our server: the source is the attacker; our server's IP/domain never become keys
+    fields = {"destination.ip": "80.94.1.1", "url.domain": "shop.corp.example"}
+    assert ioc_keys("initial_access", "80.94.92.27", fields, None, EXCL) == ["ip:80.94.92.27"]
+    # private, documentation and excluded sources are no keys
+    assert ioc_keys("credential_access", "10.0.0.7", {}, None, EXCL) == []
+    assert ioc_keys("credential_access", "198.51.200.9", {}, None, EXCL) == []  # admin-excluded range
+
+
+def test_outbound_alerts_are_keyed_by_what_they_contact():
+    fields = {"destination.ip": "45.9.20.1", "dns.question.name": "c2.badcdn.top",
+              "url.full": "http://45.9.20.1/x.sh"}
+    assert ioc_keys("command_and_control", "10.0.0.7", fields, None, EXCL) == [
+        "domain:c2.badcdn.top", "ip:45.9.20.1", "url:http://45.9.20.1/x.sh"]
+    # resolvers, update/CDN domains and the admin's own domains don't chain campaigns
+    shared = {"destination.ip": "8.8.8.8", "dns.question.name": "update.microsoft.com",
+              "url.full": "https://api.corp.example/v1"}
+    assert ioc_keys("command_and_control", "10.0.0.7", shared, None, EXCL) == []
+
+
+def test_hashes_and_extracted_iocs():
+    from worker.ti.iocs import IOC, IOCType
+    extracted = [IOC(type=IOCType.hash_sha256, value="B" * 64), IOC(type=IOCType.domain, value="evil.top"),
+                 IOC(type=IOCType.ipv4, value="80.94.92.27")]
+    # hashes always count; contacted domains only for outbound behaviour
+    assert ioc_keys("persistence", None, {}, extracted, EXCL) == ["hash:" + "b" * 64]
+    assert ioc_keys("exfiltration", None, {}, extracted, EXCL) == [
+        "domain:evil.top", "hash:" + "b" * 64, "ip:80.94.92.27"]
+
+
+def test_further_stage():
+    assert further_stage("credential_access", "persistence") == "persistence"
+    assert further_stage("persistence", "credential_access") == "persistence"
+    assert further_stage(None, "execution") == "execution" and further_stage("other", "discovery") == "discovery"
 
 
 # ─── the rule ────────────────────────────────────────────────────

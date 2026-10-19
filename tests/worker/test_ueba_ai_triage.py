@@ -40,6 +40,9 @@ def _deps(calls):
     async def empty(*a, **k):
         return []
 
+    async def no_case(*a, **k):
+        return None, []
+
     async def enrich(text_blob, title):
         return _Enrichment()
 
@@ -62,8 +65,8 @@ def _deps(calls):
         "retrieve_sop_context": empty, "retrieve_feedback_context": empty,
         "enqueue_hunt": noop, "get_setting": get_setting, "set_alert_verdict": noop,
         "write_alert_note": noop, "tag_alert_with_mitre": noop, "run_soar_playbooks": noop,
-        "update_alert_status": noop, "run_searches": noop, "find_existing_open_case": noop,
-        "add_note_to_existing_case": noop, "create_case_from_verdict": create_case,
+        "update_alert_status": noop, "run_searches": noop, "find_campaign_case": no_case,
+        "join_campaign_case": noop, "create_case_from_verdict": create_case,
         "analyze_campaign": noop, "check_fleet_spread": noop, "dispatch_case_webhooks": noop,
         "ueba_context": ueba_context, "record_outcome": record_outcome,
     }

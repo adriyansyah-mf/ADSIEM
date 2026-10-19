@@ -56,7 +56,7 @@ def _deps(cases, sop, feedback):
         "retrieve_feedback_context": returns(feedback),
         "enqueue_hunt": noop, "get_setting": get_setting, "set_alert_verdict": noop, "write_alert_note": noop,
         "tag_alert_with_mitre": noop, "run_soar_playbooks": noop, "update_alert_status": noop, "run_searches": noop,
-        "find_existing_open_case": noop, "add_note_to_existing_case": noop, "create_case_from_verdict": noop,
+        "find_campaign_case": returns((None, [])), "join_campaign_case": noop, "create_case_from_verdict": noop,
         "analyze_campaign": noop, "check_fleet_spread": noop, "dispatch_case_webhooks": noop,
     }
 
