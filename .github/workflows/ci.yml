@@ -43,6 +43,8 @@ jobs:
           # at import time, with a strong-value validator.
           JWT_SECRET: "ci-test-secret-0123456789abcdef0123456789abcdef"
           TEST_DATABASE_URL: "postgresql+asyncpg://soc:soc@localhost:5432/test"
+          # the investigator test drives the app's own engine, bound from DATABASE_URL
+          DATABASE_URL: "postgresql+asyncpg://soc:soc@localhost:5432/test"
         run: |
           pytest tests/server-api tests/worker worker/tests \
             --ignore=tests/worker/test_pipeline.int.test.py \

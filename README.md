@@ -24,6 +24,18 @@ respond from — without needing Splunk/QRadar-scale infrastructure or licensing
   risk score over time.
 - **Case management** — alerts roll up into investigations with AI-assisted triage
   notes, an attack graph view, and MITRE ATT&CK tagging throughout.
+- **AI investigation** — the **Investigate with AI** button on a case lets an LLM agent
+  work the case like a DFIR analyst:
+  - It reads the case's alerts, IOCs and hosts, and searches the logs.
+  - It runs live-response artifacts on the affected endpoints, and writes new `AI.*`
+    artifacts when none fits.
+  - It pivots on what it finds, then adds a report to the case (summary, evidence with
+    flow ids, indicators, timeline, recommended actions, verdict).
+
+  It can only collect. The response actions — isolate, kill, quarantine, block — stay
+  with the operator. `read_file` is refused on credential stores. Every run is scoped
+  to the case's group, has budgets, and shows each step live (`services/investigator.py`).
+  Starting a run needs `cases:manage` plus `agents:manage`.
 - **AI SOC assistant** — a read-only chat assistant embedded in the dashboard that
   can look up alerts, cases, agents, UEBA scores, FIM changes, and rules on request —
   scoped so it can never touch settings, users, or webhook config.

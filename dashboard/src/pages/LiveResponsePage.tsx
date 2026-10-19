@@ -236,7 +236,8 @@ function CollectTab({ agents, artifacts }: { agents: Agent[]; artifacts: FlowArt
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [timeout, setTimeoutValue] = useState('')
   const [maxRows, setMaxRows] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
+  // ?flow=<id> opens that flow (linked from AI investigations)
+  const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get('flow'))
   const { data: flows = [] } = useFlows(agentId || undefined)
   const createFlow = useCreateFlow()
 

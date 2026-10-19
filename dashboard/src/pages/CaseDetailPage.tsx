@@ -11,6 +11,7 @@ import MarkdownNote from '@/components/MarkdownNote'
 import AttackGraph from '@/components/AttackGraph'
 import AlertDetailModal from '@/components/AlertDetailModal'
 import AiFeedbackWidget from '@/components/AiFeedbackWidget'
+import AiInvestigationPanel from '@/components/AiInvestigationPanel'
 
 const severityColors = {
   critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
@@ -321,6 +322,13 @@ export default function CaseDetailPage() {
       <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
         {/* Left column (wider) */}
         <div style={{ flex: 1, minWidth: 0 }}>
+          {/* AI investigation: the AI works the case on the endpoints */}
+          {id && (
+            <Box title="AI Investigation">
+              <AiInvestigationPanel caseId={id} />
+            </Box>
+          )}
+
           {/* AI Analysis */}
           <Box title="AI Analysis">
             {caseData.ai_reasoning ? (

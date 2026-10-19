@@ -197,16 +197,15 @@ async def _get_flow(db: AsyncSession, flow_id: UUID, group_filter: str | None) -
     return flow
 
 
-@router.post("", response_model=FlowOut, status_code=201)
-async def create_flow(
-    body: FlowCreate,
-    background: BackgroundTasks,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    redis: Annotated[aioredis.Redis, Depends(get_redis)],
-    user: Annotated[User, Depends(require_permission("agents:manage"))],
-    group_filter: Annotated[str | None, Depends(get_scoped_group)],
-):
-    aq = select(Agent).where(Agent.id == body.agent_id)
+async def schedule_flow(
+    db: AsyncSession, redis: aioredis.Redis, *, agent_id: UUID, artifact: str, params: dict,
+    group_filter: str | None, created_by: UUID | None, scheduled_by: str,
+    timeout: int | None = None, max_rows: int | None = None,
+) -> Flow:
+    """Validate and queue one flow, then wake the agent. Raises HTTPException
+    (404 agent/artifact, 409 no flow runner, 422 bad params). Shared by the
+    API and the AI investigator, so both go through the same checks."""
+    aq = select(Agent).where(Agent.id == agent_id)
     if group_filter is not None:
         aq = aq.where(Agent.group_id == group_filter)
     target = (await db.execute(aq)).scalar_one_or_none()
@@ -219,9 +218,9 @@ async def create_flow(
                                  "live-response flows, so it has no flow runner; update it to agent v1.3.0+ "
                                  "(Legacy tasks still work)")
 
-    art = await _load_artifact(db, body.artifact, group_filter)
-    timeout = body.timeout or art.timeout
-    max_rows = body.max_rows or art.max_rows
+    art = await _load_artifact(db, artifact, group_filter)
+    timeout = timeout or art.timeout
+    max_rows = max_rows or art.max_rows
     if not 1 <= timeout <= MAX_TIMEOUT:
         raise HTTPException(422, f"timeout must be between 1 and {MAX_TIMEOUT} seconds")
     if not 1 <= max_rows <= MAX_MAX_ROWS:
@@ -236,23 +235,40 @@ async def create_flow(
 
     flow_id = uuid.uuid4()
     try:
-        params = resolve_params(art, body.params)
+        params = resolve_params(art, params)
         build_row_filter(art.content, params)  # detection must compile with these values
         request = compile_request(art, str(flow_id), params, timeout, max_rows, yara_rules)
     except ArtifactError as exc:
         raise _bad_request(exc)
 
     flow = Flow(
-        id=flow_id, agent_id=body.agent_id, artifact=art.name, artifact_content=art.content,
-        params=params, request=request, timeout=timeout, max_rows=max_rows, created_by=user.id,
+        id=flow_id, agent_id=agent_id, artifact=art.name, artifact_content=art.content,
+        params=params, request=request, timeout=timeout, max_rows=max_rows, created_by=created_by,
     )
     db.add(flow)
-    db.add(FlowLog(flow_id=flow_id, level="info", message=f"Scheduled by {user.username}"))
+    db.add(FlowLog(flow_id=flow_id, level="info", message=f"Scheduled by {scheduled_by}"))
     await db.commit()
     await db.refresh(flow)
-    await _wake(redis, body.agent_id)
-    background.add_task(audit_log, db, user.id, "flow_created", "flow", str(flow_id),
-                        {"artifact": art.name, "agent_id": str(body.agent_id)})
+    await _wake(redis, agent_id)
+    return flow
+
+
+@router.post("", response_model=FlowOut, status_code=201)
+async def create_flow(
+    body: FlowCreate,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    user: Annotated[User, Depends(require_permission("agents:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    flow = await schedule_flow(
+        db, redis, agent_id=body.agent_id, artifact=body.artifact, params=body.params,
+        group_filter=group_filter, created_by=user.id, scheduled_by=user.username,
+        timeout=body.timeout, max_rows=body.max_rows,
+    )
+    background.add_task(audit_log, db, user.id, "flow_created", "flow", str(flow.id),
+                        {"artifact": flow.artifact, "agent_id": str(body.agent_id)})
     return flow
 
 
