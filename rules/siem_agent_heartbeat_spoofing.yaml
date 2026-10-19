@@ -1,0 +1,21 @@
+title: SIEM Agent Heartbeat Spoofing
+id: rule-siem-agent-heartbeat-spoofing
+description: >-
+  Two processes are sending heartbeats with this agent's token (its sessions
+  interleave), or a heartbeat was replayed (its sequence number went back).
+  Typical of a copied agent token keeping a disabled agent looking alive.
+  Re-enroll the host and investigate who read the agent's config (T1562.001).
+logsource:
+  product: siem
+  service: agent
+detection:
+  spoofed:
+    event.action: agent_heartbeat_anomaly
+    agent.anomaly:
+      - duplicate_session
+      - replay
+  condition: spoofed
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

@@ -57,6 +57,7 @@ _DEFAULT_SETTINGS = [
     ("investigation_model", "",                          False, "9router model/combo for AI case investigations — pick one with native tool calling and a large context window; empty = ninerouter_model"),
     ("ai_command_execution", "off",                     False, "Let AI investigations ask to run commands on endpoints: off, or approval (an analyst with agents:manage approves each command before it runs)"),
     ("ai_command_autoapprove", "",                      False, "Comma-separated programs AI commands may run without approval (e.g. whoami,hostname,ipconfig); shells and interpreters always need approval"),
+    ("agent_log_silence_minutes", "240",                False, "Alert when an agent still heartbeats but has sent no logs for this many minutes (0 = off)"),
     ("ninerouter_search_provider", "searxng",            False, "9router /v1/search provider/combo for AI research queries (searxng, tavily, or a dashboard search-combo for multi-provider auto-fallback)"),
     ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
     ("ai_confidence_threshold","0.0",                    False, "Minimum AI confidence (0.0-1.0) to create/escalate a case — notes always written regardless"),

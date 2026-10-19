@@ -1,6 +1,7 @@
 # server-api/app/api/routes/ingest.py
 import hashlib
 import json
+import time
 from datetime import datetime, timezone
 from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends
@@ -8,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
+import structlog
 
 from app.core.database import get_db
 from app.core.deps import get_agent
@@ -16,10 +18,33 @@ from app.core.security import hash_token
 from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
                             FimWatchPath)
 from app.schemas.schemas import AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
-from app.services.agent_tamper import check_integrity
+from app.services.agent_tamper import check_integrity, heartbeat_anomaly, uninstall_token_sha256
 from app.services.ingest import enqueue_log
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
+log = structlog.get_logger()
+
+# Shared with worker/worker/agent_monitor.py (it reads LAST_LOG_KEY).
+LAST_LOG_KEY = "siem:agent:lastlog:{}"
+HB_STATE_KEY = "siem:agent:hb:{}"
+HB_ANOMALY_KEY = "siem:agent:hb_anomaly:{}:{}"  # one event per agent and kind per 10 min
+
+
+async def _session_anomaly(redis: aioredis.Redis, agent_id, body: HeartbeatRequest) -> str | None:
+    """Heartbeat continuity (agent_tamper.heartbeat_anomaly), state kept in Redis.
+    Best-effort: Redis trouble must never fail a heartbeat."""
+    if not body.session:
+        return None
+    try:
+        key = HB_STATE_KEY.format(agent_id)
+        state, anomaly = heartbeat_anomaly(await redis.hgetall(key) or {}, body.session, body.seq, time.time())
+        await redis.hset(key, mapping={k: str(v) for k, v in state.items()})
+        await redis.expire(key, 86400)
+        if anomaly and await redis.set(HB_ANOMALY_KEY.format(agent_id, anomaly), "1", ex=600, nx=True):
+            return anomaly
+    except Exception as exc:  # noqa: BLE001
+        log.warning("heartbeat_session_check_failed", agent_id=str(agent_id), error=str(exc))
+    return None
 
 @router.post("/log", status_code=202)
 async def ingest_log(
@@ -39,6 +64,10 @@ async def ingest_log(
         "received_at": body.received_at.isoformat(),
         "location": body.location or "",
     })
+    try:  # for "heartbeat alive, logs stopped" (worker agent_monitor)
+        await redis.set(LAST_LOG_KEY.format(agent.id), int(time.time()), ex=30 * 86400)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("last_log_mark_failed", agent_id=str(agent.id), error=str(exc))
     return {"status": "queued"}
 
 @router.post("/heartbeat", response_model=HeartbeatResponse)
@@ -55,6 +84,10 @@ async def heartbeat(
         return health_event(event, agent_id=agent.id, group_id=agent.group_id, hostname=agent.hostname, **fields)
 
     now = datetime.now(timezone.utc)
+    anomaly = await _session_anomaly(redis, agent.id, body)
+    if anomaly and agent.approved:
+        await enqueue_log(redis, health("agent_heartbeat_anomaly", kind=anomaly, session=body.session,
+                                        seq=body.seq, version=body.version))
     if body.status == "stopping":
         # Offline now; the worker reports the stop only if the agent stays down
         # (a restart or an upgrade comes back within seconds and clears it).
@@ -133,4 +166,5 @@ async def heartbeat(
         fim_paths=fim_paths,
         tasks=[AgentTaskDef(id=t.id, task_type=t.task_type, params=t.params or {}) for t in pending_tasks],
         firewall=firewall_data,
+        uninstall_token_sha256=uninstall_token_sha256(agent.id),
     )

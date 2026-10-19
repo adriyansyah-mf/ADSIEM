@@ -23,9 +23,25 @@ class _BG:
 class _Redis:
     def __init__(self):
         self.items = []
+        self.kv = {}
 
     async def xadd(self, *a, **kw):
         self.items.append(a)
+
+    async def hgetall(self, key):
+        return dict(self.kv.get(key) or {})
+
+    async def hset(self, key, mapping):
+        self.kv.setdefault(key, {}).update(mapping)
+
+    async def expire(self, key, seconds):
+        pass
+
+    async def set(self, key, value, ex=None, nx=False):
+        if nx and key in self.kv:
+            return None
+        self.kv[key] = value
+        return True
 
 
 _LOOP = asyncio.new_event_loop()  # one loop: the engine's connections are bound to it
@@ -247,3 +263,16 @@ def test_heartbeat_integrity_and_stop_notice(env):
     hb(version="1.8.0")  # restarted
     agent = _agent(env, res.agent_id)
     assert (agent.status, agent.stop_reason) == ("online", None)
+
+    # the response carries the uninstall token's hash, never the token
+    from app.services.agent_tamper import uninstall_token, uninstall_token_sha256
+    resp = hb(version="1.8.0")
+    assert resp.uninstall_token_sha256 == uninstall_token_sha256(res.agent_id)
+    assert uninstall_token(res.agent_id) not in resp.model_dump_json()
+
+    # a second sender with the same token: sessions interleave → one event (rate-limited)
+    redis.items.clear()
+    for session, seq in (("real", 1), ("real", 2), ("fake", 1), ("real", 3), ("fake", 2), ("real", 4)):
+        hb(version="1.8.0", session=session, seq=seq)
+    anomalies = [i[1]["raw_message"] for i in redis.items]
+    assert anomalies == [anomalies[0]] and "kind=duplicate_session" in anomalies[0]

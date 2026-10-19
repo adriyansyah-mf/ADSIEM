@@ -8,6 +8,8 @@
   %ProgramData%\SIEMAgent\config.yaml before the service starts. Upgrades
   (a newer MSI, properties optional) keep that config and its agent token;
   uninstall removes the service and binary but leaves %ProgramData%\SIEMAgent.
+  Uninstalling needs the agent's uninstall token (dashboard → Agents):
+    msiexec /x siem-agent-<version>-x64.msi /qn UNINSTALL_TOKEN=<token>
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
@@ -20,6 +22,7 @@
     <Property Id="ENROLLMENT_KEY" Secure="yes" Hidden="yes" />
     <Property Id="AGENT_NAME" Secure="yes" />
     <Property Id="ENABLE_AUDITING" Secure="yes" />
+    <Property Id="UNINSTALL_TOKEN" Secure="yes" Hidden="yes" />
     <Property Id="ARPCOMMENTS" Value="Log collection and response agent for the SIEM platform" />
     <Property Id="ARPNOMODIFY" Value="1" />
 
@@ -47,7 +50,16 @@
     <CustomAction Id="ConfigureAgent" FileRef="AgentExe" Execute="deferred" Impersonate="no"
                   Return="check" HideTarget="yes"
                   ExeCommand="-configure -config &quot;[CommonAppDataFolder]SIEMAgent\config.yaml&quot; -server &quot;[SERVER_URL]&quot; -key &quot;[ENROLLMENT_KEY]&quot; -name &quot;[AGENT_NAME]&quot; -enable-auditing &quot;[ENABLE_AUDITING]&quot;" />
+    <!-- Anti-tamper: a real uninstall (not a major upgrade removing the old
+         version) needs this agent's uninstall token from the dashboard:
+         msiexec /x siem-agent.msi UNINSTALL_TOKEN=<token>. Without it the
+         installed agent exits non-zero and the uninstall stops here. -->
+    <CustomAction Id="VerifyUninstallToken" FileRef="AgentExe" Execute="immediate"
+                  Return="check" HideTarget="yes"
+                  ExeCommand="-verify-uninstall -config &quot;[CommonAppDataFolder]SIEMAgent\config.yaml&quot; -token &quot;[UNINSTALL_TOKEN]&quot;" />
     <InstallExecuteSequence>
+      <Custom Action="VerifyUninstallToken" Before="InstallInitialize"
+              Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="ConfigureAgent" After="InstallFiles" Condition="NOT (REMOVE~=&quot;ALL&quot;)" />
     </InstallExecuteSequence>
 

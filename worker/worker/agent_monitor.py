@@ -12,6 +12,7 @@ from worker.config import REDIS_STREAM_KEY
 from worker.database import AsyncSessionLocal
 from worker.models import Agent, AgentTask, FleetHunt, Flow
 from worker.redis_client import get_redis
+from worker.settings_cache import get_setting
 
 log = structlog.get_logger()
 
@@ -19,6 +20,12 @@ OFFLINE_AFTER_SECONDS = 300  # 5 minutes without heartbeat → offline
 CHECK_INTERVAL = 60
 STOP_GRACE = 120             # a stop notice not followed by a heartbeat in this long is reported
 MASS_OFFLINE_MIN = 5         # this many (and half the fleet) silent at once → one fleet event
+FLOW_POLL_STALE = 600        # heartbeating but no live-response poll for this long
+
+# Redis keys: LAST_LOG_KEY is written by server-api's ingest route.
+LAST_LOG_KEY = "siem:agent:lastlog:{}"
+LOGS_SILENT_FLAG = "siem:agent:logs_silent:{}"
+NO_POLL_FLAG = "siem:agent:no_poll:{}"
 TASK_PICKUP_TIMEOUT = 600    # pending: no heartbeat fetched it in 10 minutes
 TASK_RESULT_TIMEOUT = 1800   # dispatched: fetched, but no result in 30 minutes
 
@@ -78,6 +85,57 @@ async def _mark_offline(db) -> None:
             "agent_offline", agent_id=agent_id, group_id=group_id, hostname=hostname,
             last_seen=last_seen.isoformat(), silent_seconds=OFFLINE_AFTER_SECONDS,
         ))
+
+
+async def _flag_once(redis, key: str, on: bool) -> bool:
+    """True the first sweep a condition holds; cleared once it stops holding."""
+    if not on:
+        await redis.delete(key)
+        return False
+    return bool(await redis.set(key, "1", nx=True))
+
+
+async def _check_quiet_agents(db) -> None:
+    """Agents that heartbeat but whose logs stopped (log sources removed, the
+    shipping path blocked) or whose live-response polling stopped (a script
+    replaying heartbeats with a copied token doesn't poll). One event when it
+    starts; none again until it recovers. Many agents at once is a server-side
+    problem, not tampering, and is only logged."""
+    now = datetime.now(timezone.utc)
+    agents = (await db.execute(
+        select(Agent.id, Agent.hostname, Agent.group_id, Agent.flow_poll_at)
+        .where(Agent.status == "online", Agent.approved.is_(True),
+               Agent.last_seen_at >= now - timedelta(seconds=120))
+    )).all()
+    if not agents:
+        return
+    try:
+        silence = int(await get_setting("agent_log_silence_minutes", "240") or 0) * 60
+    except ValueError:
+        silence = 240 * 60
+    redis = await get_redis()
+    found: dict[str, list] = {"logs": [], "poll": []}
+    for agent_id, hostname, group_id, polled in agents:
+        if silence > 0:
+            last = await redis.get(LAST_LOG_KEY.format(agent_id))
+            quiet = last is not None and now.timestamp() - float(last) > silence
+            if await _flag_once(redis, LOGS_SILENT_FLAG.format(agent_id), quiet):
+                found["logs"].append((agent_id, hostname, group_id, {
+                    "silent_minutes": int((now.timestamp() - float(last)) // 60),
+                    "last_log": datetime.fromtimestamp(float(last), timezone.utc).isoformat()}))
+        stale = polled is not None and (now - polled).total_seconds() > FLOW_POLL_STALE
+        if await _flag_once(redis, NO_POLL_FLAG.format(agent_id), stale):
+            found["poll"].append((agent_id, hostname, group_id, {
+                "kind": "no_flow_poll", "last_poll": polled.isoformat()}))
+
+    for what, rows in found.items():
+        if len(rows) >= MASS_OFFLINE_MIN and len(rows) * 2 >= len(agents):
+            log.warning("agents_quiet_together", what=what, count=len(rows), total=len(agents))
+            continue
+        event = "agent_logs_silent" if what == "logs" else "agent_heartbeat_anomaly"
+        for agent_id, hostname, group_id, fields in rows:
+            await redis.xadd(REDIS_STREAM_KEY, health_event(
+                event, agent_id=agent_id, group_id=group_id, hostname=hostname, **fields))
 
 
 async def _report_stops(db) -> None:
@@ -178,6 +236,7 @@ async def agent_monitor_loop() -> None:
             async with AsyncSessionLocal() as db:
                 await _mark_offline(db)
                 await _report_stops(db)
+                await _check_quiet_agents(db)
                 await _expire_stale_tasks(db)
                 await _expire_stale_flows(db)
         except Exception as exc:

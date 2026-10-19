@@ -178,9 +178,20 @@ try {
     if (-not $hashed) { Fail "no heartbeat carried the binary/config hashes" }
     Write-Host "ok: heartbeats carry integrity hashes"
 
-    # 5. Uninstall removes the service but keeps the config (and its token).
-    $code = Invoke-Msiexec @("/x", "`"$Msi`"") "uninstall.log"
-    if ($code -ne 0) { Fail "msiexec /x exited $code" }
+    # 5. Uninstall needs the agent's uninstall token (the mock hands out its hash).
+    $hashFile = Join-Path $dataDir "uninstall.sha256"
+    for ($i = 0; $i -lt 30 -and -not (Test-Path $hashFile); $i++) { Start-Sleep 2 }
+    if (-not (Test-Path $hashFile)) { Fail "the agent never stored the uninstall token hash" }
+    $code = Invoke-Msiexec @("/x", "`"$Msi`"") "uninstall-notoken.log"
+    if ($code -eq 0) { Fail "msiexec /x without UNINSTALL_TOKEN succeeded" }
+    if (-not (Get-Service SIEMAgent -ErrorAction SilentlyContinue)) { Fail "service gone after a refused uninstall" }
+    $code = Invoke-Msiexec @("/x", "`"$Msi`"", "UNINSTALL_TOKEN=WRONG-TOKEN") "uninstall-badtoken.log"
+    if ($code -eq 0) { Fail "msiexec /x with a wrong UNINSTALL_TOKEN succeeded" }
+    Write-Host "ok: uninstall refused without / with a wrong token (exit $code)"
+
+    # ... and with it, removes the service but keeps the config (and its agent token).
+    $code = Invoke-Msiexec @("/x", "`"$Msi`"", "UNINSTALL_TOKEN=SMOKE-UNINS-TALLT-OKEN1") "uninstall.log"
+    if ($code -ne 0) { Fail "msiexec /x with the uninstall token exited $code" }
     if (Get-Service SIEMAgent -ErrorAction SilentlyContinue) { Fail "service still present after uninstall" }
     if (-not (Test-Path (Join-Path $dataDir "config.yaml"))) { Fail "config removed on uninstall" }
     Write-Host "ok: uninstalled; config kept in $dataDir"

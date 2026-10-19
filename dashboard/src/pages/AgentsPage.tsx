@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, ShieldOff, ShieldCheck, Check } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Plus, ShieldOff, ShieldCheck, Check, KeyRound, X } from 'lucide-react'
 import DataTable from '@/components/DataTable'
 import StatusBadge from '@/components/StatusBadge'
 import { useAgents } from '@/hooks/useAgents'
@@ -15,6 +15,7 @@ export default function AgentsPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [showInstall, setShowInstall] = useState(false)
+  const [tokenFor, setTokenFor] = useState<Agent | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -90,6 +91,14 @@ export default function AgentsPage() {
           {r.is_isolated ? <><ShieldCheck size={11} /> LIFT</> : <><ShieldOff size={11} /> ISOLATE</>}
         </button>
       ),
+    }, {
+      key: 'uninstall', header: 'Uninstall', render: (r: Agent) => (
+        <button onClick={e => { e.stopPropagation(); setTokenFor(r) }}
+          title="Show the token needed to uninstall this agent (agent 1.8.0+)"
+          className="flex items-center gap-1 px-2 py-0.5 rounded border border-border text-xs hover:bg-muted">
+          <KeyRound size={11} /> Token
+        </button>
+      ),
     }] : []),
   ]
 
@@ -136,6 +145,51 @@ export default function AgentsPage() {
       )}
 
       {showInstall && <DeployAgentModal onClose={() => setShowInstall(false)} />}
+      {tokenFor && <UninstallTokenModal agent={tokenFor} onClose={() => setTokenFor(null)} />}
+    </div>
+  )
+}
+
+interface UninstallToken {
+  token: string
+  commands: { windows: string; debian: string; rhel: string }
+}
+
+function UninstallTokenModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
+  const { data, error, isLoading } = useQuery<UninstallToken>({
+    queryKey: ['uninstall-token', agent.id],
+    queryFn: () => api.get(`/api/agents/${agent.id}/uninstall-token`).then(r => r.data),
+    gcTime: 0,
+  })
+  const mono: React.CSSProperties = { fontFamily: 'Share Tech Mono, monospace' }
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '16px' }}>
+      <div onClick={e => e.stopPropagation()} className="rounded border border-border bg-background"
+        style={{ width: 'min(640px, 100%)', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold">Uninstall token · {agent.hostname}</h2>
+          <button onClick={onClose} className="text-muted-foreground"><X size={16} /></button>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Removing the agent package (1.8.0+) is refused without this token, so a local admin can&apos;t quietly
+          uninstall it. Viewing it is recorded in the audit log.
+        </p>
+        {isLoading && <div className="text-sm text-muted-foreground">Loading…</div>}
+        {error && <div className="text-sm" style={{ color: 'var(--accent-red)' }}>Could not load the token</div>}
+        {data && (
+          <>
+            <div style={{ ...mono, fontSize: '18px', letterSpacing: '1px', padding: '8px 10px', border: '1px solid var(--border)', borderRadius: '4px' }}>
+              {data.token}
+            </div>
+            {([['Windows', data.commands.windows], ['Debian / Ubuntu', data.commands.debian], ['RHEL / Fedora', data.commands.rhel]] as const).map(([os, cmd]) => (
+              <div key={os}>
+                <div className="text-xs text-muted-foreground">{os}</div>
+                <pre style={{ ...mono, fontSize: '12px', margin: 0, padding: '6px 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', border: '1px solid var(--border)', borderRadius: '4px' }}>{cmd}</pre>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   )
 }

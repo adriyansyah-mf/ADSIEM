@@ -66,6 +66,7 @@ if ($EnableAuditing) {
     auditpol /set /subcategory:"{0CCE9235-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable | Out-Null  # User Account Management
     auditpol /set /subcategory:"{0CCE9237-69AE-11D9-BED3-505054503030}" /success:enable | Out-Null                  # Security Group Management
     auditpol /set /subcategory:"{0CCE9227-69AE-11D9-BED3-505054503030}" /success:enable | Out-Null                  # Other Object Access (scheduled tasks)
+    auditpol /set /subcategory:"{0CCE9233-69AE-11D9-BED3-505054503030}" /success:enable | Out-Null                  # Filtering Platform Policy Change (WFP filters)
     $audit = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit"
     New-Item -Force -Path $audit | Out-Null
     Set-ItemProperty -Path $audit -Name ProcessCreationIncludeCmdLine_Enabled -Value 1 -Type DWord

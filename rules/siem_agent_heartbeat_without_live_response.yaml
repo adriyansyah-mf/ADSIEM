@@ -1,0 +1,19 @@
+title: SIEM Agent Heartbeat Without Live Response
+id: rule-siem-agent-heartbeat-without-live-response
+description: >-
+  The agent heartbeats but stopped polling for live-response flows 10+ minutes
+  ago. A real agent does both; something that only replays heartbeats (with a
+  copied token) doesn't. Also seen when a proxy kills long polls — check the
+  agent log (T1562.001).
+logsource:
+  product: siem
+  service: agent
+detection:
+  no_poll:
+    event.action: agent_heartbeat_anomaly
+    agent.anomaly: no_flow_poll
+  condition: no_poll
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

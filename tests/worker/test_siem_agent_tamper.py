@@ -56,6 +56,13 @@ def test_health_lines_quote_what_the_kv_parser_unescapes(engines):
      "SIEM Agent Binary Modified"),
     (health_line("agent_integrity_changed", file="config", previous="a" * 64, current="b" * 64),
      "SIEM Agent Config Modified"),
+    (health_line("agent_logs_silent", silent_minutes=300, last_log="2026-10-19T05:00:00+00:00"),
+     "SIEM Agent Logs Stopped"),
+    (health_line("agent_heartbeat_anomaly", kind="duplicate_session", session="ab12", seq=7),
+     "SIEM Agent Heartbeat Spoofing"),
+    (health_line("agent_heartbeat_anomaly", kind="replay", session="ab12", seq=3), "SIEM Agent Heartbeat Spoofing"),
+    (health_line("agent_heartbeat_anomaly", kind="no_flow_poll", last_poll="2026-10-19T05:00:00+00:00"),
+     "SIEM Agent Heartbeat Without Live Response"),
 ])
 def test_health_events_alert(engines, line, title):
     event, titles = _titles(engines, LOG_TYPE, line)
@@ -106,6 +113,18 @@ def test_tamper_commands_alert(engines, log_type, line):
 ])
 def test_queries_and_upgrades_are_not_tampering(engines, log_type, line):
     assert "SIEM Agent Tampering Command" not in _titles(engines, log_type, line)[1]
+
+
+def test_wfp_filters_and_blocks_against_the_agent(engines):
+    title = "SIEM Agent Network Blocked by WFP"
+    filt = ('EventID=5447 Channel="Security" Computer="WIN01" ChangeType="Add" FilterName="Custom Outbound Filter" '
+            'Conditions="Application Name: \\\\device\\\\harddiskvolume3\\\\program files\\\\siemagent\\\\{}"')
+    assert title in _titles(engines, "windows_security", filt.format("siem-agent.exe"))[1]
+    assert title not in _titles(engines, "windows_security", filt.format("chrome.exe"))[1]
+    blocked = ('EventID=5157 Channel="Security" Computer="WIN01" Direction="%%14593" '
+               'Application="\\\\device\\\\harddiskvolume3\\\\program files\\\\siemagent\\\\siem-agent.exe" '
+               'DestAddress="203.0.113.10" DestPort="443"')
+    assert title in _titles(engines, "windows_security", blocked)[1]
 
 
 def test_windows_service_start_type_and_registry(engines):

@@ -91,6 +91,17 @@ cat > "${STAGE}/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
 set -e
 case "$1" in
+  remove)
+    # anti-tamper: removal needs this agent's uninstall token (dashboard →
+    # Agents → Uninstall token), passed as SIEM_UNINSTALL_TOKEN
+    if [ -x /usr/bin/siem-agent ] && \
+       ! /usr/bin/siem-agent -verify-uninstall -config /etc/siem-agent/config.yaml; then
+      echo "Run: sudo SIEM_UNINSTALL_TOKEN=<token> apt remove siem-agent" >&2
+      exit 1
+    fi
+    ;;
+esac
+case "$1" in
   remove|upgrade|deconfigure)
     systemctl stop siem-agent.service  2>/dev/null || true
     systemctl disable siem-agent.service 2>/dev/null || true

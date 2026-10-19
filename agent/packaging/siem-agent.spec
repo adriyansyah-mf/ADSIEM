@@ -48,6 +48,12 @@ fi
 
 %preun
 if [ "$1" -eq 0 ]; then
+  # anti-tamper: removal (not upgrade) needs this agent's uninstall token
+  if [ -x /usr/bin/siem-agent ] && \
+     ! /usr/bin/siem-agent -verify-uninstall -config /etc/siem-agent/config.yaml; then
+    echo "Run: sudo SIEM_UNINSTALL_TOKEN=<token> dnf remove siem-agent" >&2
+    exit 1
+  fi
   systemctl disable --now siem-agent.service >/dev/null 2>&1 || :
 fi
 
