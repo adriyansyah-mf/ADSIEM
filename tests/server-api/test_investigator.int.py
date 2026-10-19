@@ -254,3 +254,40 @@ def test_cancel_stops_the_run(env, monkeypatch):
     inv, _ = _investigate(script, monkeypatch, user_id, case_id, cancel_after=1.0)
     assert inv.status == "cancelled"
     assert inv.steps[-1]["kind"] == "cancelled"
+
+
+def test_text_tool_calls_run_and_garbled_output_never_reaches_the_case(env, monkeypatch):
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseNote
+
+    user_id, _, case_id = _seed()
+    garbled = "Searching for the IP 80.94.92.27 and the destination is" + "<unk>" * 200
+
+    def script(turn, results):
+        if turn == 1:  # a model that writes its tool call as Qwen-style text
+            return ("The host is offline; list the hosts first.\n<tool_call>\n<function=list_hosts>\n"
+                    "<parameter=hostname_contains>\nweb\n</parameter>\n</function>\n</tool_call>")
+        if turn == 2:
+            assert results[-1]["hosts"][0]["hostname"] == "web01"  # the text call really ran
+            return garbled
+        if turn == 3:
+            return garbled  # the retry degenerates too
+        if turn == 4:
+            return "## Summary\nBrute force from 80.94.92.27; host offline, nothing collected.\nVERDICT: inconclusive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, model = _investigate(script, monkeypatch, user_id, case_id)
+    assert inv.status == "finished" and inv.verdict == "inconclusive"
+    assert "<unk>" not in inv.report
+    kinds = [s["kind"] for s in inv.steps]
+    assert kinds.count("warning") == 2 and "tool" in kinds
+    assert not any("<unk>" in json.dumps(s) for s in inv.steps)
+    assert "Stop investigating" in model.seen[-1][-1].content
+
+    async def check():
+        async with AsyncSessionLocal() as db:
+            notes = (await db.execute(select(CaseNote).where(CaseNote.case_id == case_id))).scalars().all()
+            assert len(notes) == 1 and "<unk>" not in notes[0].content
+    _run(check())
