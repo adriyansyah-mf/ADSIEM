@@ -26,8 +26,8 @@ logs:
   - path: eventlog:Microsoft-Windows-PowerShell/Operational
     type: windows_powershell
 
-# AI investigations can ask to run commands on this host once an analyst
-# approves them on the server (Settings → ai_command_execution). To refuse
-# them on this host regardless, uncomment:
-# live_response:
-#   disable_commands: true
+# AI investigations can ask to run commands on a host once an analyst
+# approves them on the server (Settings → ai_command_execution). This host
+# refuses them unless disable_commands is false. Commands run as SYSTEM.
+live_response:
+  disable_commands: true

@@ -42,7 +42,7 @@ const SETTING_HINTS: Record<string, string> = {
   ninerouter_model: 'Combo name created in the 9router dashboard, e.g. "combo"',
   investigation_model: 'Model for "Investigate with AI" on cases, through 9router — pick a frontier model with native tool calling and a long context. Empty = the combo above',
   bruteforce_digest_enabled: 'Collect failed-only brute force from public IPs into one AI case per day (true / false)',
-  ai_command_execution: 'off, or approval: investigations may ask to run a program on a host; someone with agents:manage approves each one on the case before it runs (as root / SYSTEM). Needs agent v1.6.0+',
+  ai_command_execution: 'off, or approval: investigations may ask to run a program on a host; someone with agents:manage approves each one on the case before it runs (as root / SYSTEM). Each host must also opt in: agent v1.6.0+ with live_response.disable_commands: false in its config',
   ai_command_autoapprove: 'Comma-separated programs that run without asking, e.g. whoami,hostname,ipconfig. Shells and interpreters (bash, powershell, cmd, python, …) and credential paths always need approval',
   searxng_url: 'Internal URL of your SearXNG instance',
   ai_analyst_enabled: 'Enable or disable automated AI triage (true / false)',

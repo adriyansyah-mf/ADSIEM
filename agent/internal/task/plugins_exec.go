@@ -14,7 +14,8 @@ import (
 // (server-api/app/services/investigator.py run_command). It is never part of
 // an artifact: the server only sends it for an approved command request.
 // No shell: command is the program and args its argv, so nothing is
-// re-parsed here. Set live_response.disable_commands to refuse it.
+// re-parsed here. Refused unless the agent config sets
+// live_response.disable_commands: false (see WithoutCommands).
 
 const (
 	execDefaultTimeout = 60
@@ -102,12 +103,12 @@ func pluginExec(ctx context.Context, args map[string]any, emit func(map[string]a
 	return emit(map[string]any{"Stream": "exit", "Line": 0, "Text": summary, "ExitCode": exitCode})
 }
 
-// WithoutCommands is the registry minus exec, for live_response.disable_commands.
+// WithoutCommands is the registry with exec refused (live_response.disable_commands, the default).
 func WithoutCommands(plugins map[string]Plugin) map[string]Plugin {
 	out := make(map[string]Plugin, len(plugins))
 	for name, p := range plugins {
 		out[name] = p
 	}
-	out["exec"] = unsupported("commands are disabled on this agent (live_response.disable_commands in its config)")
+	out["exec"] = unsupported("commands are disabled on this agent; to allow them set live_response.disable_commands: false in its config and restart it")
 	return out
 }
