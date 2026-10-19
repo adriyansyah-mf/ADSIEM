@@ -24,6 +24,7 @@ from worker.maintenance import maintenance_loop
 from worker.report_sender import report_loop
 from worker.hunt_scheduler import hunt_scheduler_loop
 from worker.rag_indexer import rag_index_loop, sop_index_loop
+from worker.stream_maintenance import stream_maintenance_loop
 from worker.es_client import ensure_index as ensure_es_index
 
 structlog.configure(
@@ -160,6 +161,7 @@ async def main():
         _supervise("consume", _consume),
         _supervise("reload", lambda: reload_loop(state)),
         _supervise("dlq_retry", lambda: dlq_retry_loop(state)),
+        _supervise("stream_maintenance", stream_maintenance_loop),
         _supervise("webhook_retry", webhook_retry_loop),
         _supervise("ai_analysis", ai_analysis_loop),
         _supervise("ai_backfill", ai_backfill_loop),
