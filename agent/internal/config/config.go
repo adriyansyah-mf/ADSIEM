@@ -19,6 +19,8 @@ type AgentConfig struct {
 	Token           string `yaml:"token"`
 	EnrollmentToken string `yaml:"enrollment_token"`
 	BufferSize      int    `yaml:"buffer_size"`
+	StateDir        string `yaml:"state_dir"`
+	ConfigPath      string `yaml:"config_path"`
 }
 
 type ServerConfig struct {
@@ -31,11 +33,39 @@ type FimConfig struct {
 	WatchPaths []string `yaml:"watch_paths"`
 }
 
+type FirewallConfig struct {
+	Enabled      bool     `yaml:"enabled"`
+	Backend      string   `yaml:"backend"`
+	DryRun       bool     `yaml:"dry_run"`
+	ProtectedIPs []string `yaml:"protected_ips"`
+	StatePath    string   `yaml:"state_path"`
+}
+
+type NetwatchConfig struct {
+	Enabled          bool `yaml:"enabled"`
+	SnapshotFallback bool `yaml:"snapshot_fallback"`
+}
+
+type DetectConfig struct {
+	Enabled         bool     `yaml:"enabled"`
+	Rules           []string `yaml:"rules"`
+	MaxBlocked      int      `yaml:"max_blocked"`
+	MaxBlocksPerMin int      `yaml:"max_blocks_per_minute"`
+}
+
+type BufferConfig struct {
+	SpillPath string `yaml:"spill_path"`
+}
+
 type Config struct {
-	Agent  AgentConfig  `yaml:"agent"`
-	Server ServerConfig `yaml:"server"`
-	Logs   []LogSource  `yaml:"logs"`
-	FIM    FimConfig    `yaml:"fim"`
+	Agent    AgentConfig    `yaml:"agent"`
+	Server   ServerConfig   `yaml:"server"`
+	Logs     []LogSource    `yaml:"logs"`
+	FIM      FimConfig      `yaml:"fim"`
+	Firewall FirewallConfig `yaml:"firewall"`
+	Netwatch NetwatchConfig `yaml:"netwatch"`
+	Detect   DetectConfig   `yaml:"detect"`
+	Buffer   BufferConfig   `yaml:"buffer"`
 }
 
 func Load(path string) (*Config, error) {
@@ -52,6 +82,21 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Server.HeartbeatInterval == 0 {
 		cfg.Server.HeartbeatInterval = 30
+	}
+	if cfg.Firewall.Backend == "" {
+		cfg.Firewall.Backend = "auto"
+	}
+	if cfg.Firewall.StatePath == "" {
+		cfg.Firewall.StatePath = "/var/lib/siem-agent/firewall.json"
+	}
+	if cfg.Buffer.SpillPath == "" {
+		cfg.Buffer.SpillPath = "/var/lib/siem-agent/spill.log"
+	}
+	if cfg.Agent.StateDir == "" {
+		cfg.Agent.StateDir = "/var/lib/siem-agent"
+	}
+	if cfg.Agent.ConfigPath == "" {
+		cfg.Agent.ConfigPath = path
 	}
 	return &cfg, nil
 }

@@ -1,0 +1,22 @@
+name: linux_network_connect
+log_type: linux_network_connect
+type: kv
+priority: 10
+enabled: true
+fields:
+  source.address: src
+  destination.address: dst
+  destination.port: dport
+  source.port: lport
+  network.transport: proto
+  network.direction: direction
+  process.pid: pid
+  process.thread.id: tgid
+  process.name: comm
+  user.id: uid
+  group.id: gid
+  event.start: ts
+  destination.private: private_dst
+static_fields:
+  event.category: network
+  event.action: network_connect

@@ -1,0 +1,8 @@
+name: linux_network_snapshot
+log_type: linux_network_snapshot
+type: kv
+priority: 5
+enabled: true
+static_fields:
+  event.category: network
+  event.action: network_snapshot

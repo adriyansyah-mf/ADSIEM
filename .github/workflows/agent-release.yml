@@ -59,6 +59,10 @@ jobs:
             -I internal/procexec/bpf/include \
             -c internal/procexec/bpf/execve.bpf.c \
             -o internal/procexec/bpf/execve.bpf.o
+          clang -O2 -g -target bpf -D__TARGET_ARCH_${BPF_ARCH} \
+            -I internal \
+            -c internal/netwatch/bpf/netwatch.bpf.c \
+            -o internal/netwatch/bpf/netwatch.bpf.o
 
       - name: Build .deb
         env:

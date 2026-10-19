@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// ─── Process List ────────────────────────────────────────────────
+// ---- Process ----
 
 type ProcessInfo struct {
 	PID     int    `json:"pid"`
@@ -69,7 +69,7 @@ func collectProcesses() ([]ProcessInfo, error) {
 	return procs, nil
 }
 
-// ─── Netstat ─────────────────────────────────────────────────────
+// ---- Netstat ----
 
 type NetConn struct {
 	Proto      string `json:"proto"`
@@ -176,7 +176,7 @@ func hexToAddr(hexAddr string) string {
 	return fmt.Sprintf("[%s]:%d", ipHex, port)
 }
 
-// ─── File List ───────────────────────────────────────────────────
+// ---- File List ----
 
 type FileEntry struct {
 	Name    string `json:"name"`
@@ -221,7 +221,7 @@ func walkDir(root, current string, depth, maxDepth int, out *[]FileEntry) {
 	}
 }
 
-// ─── File Get ────────────────────────────────────────────────────
+// ---- File Get ----
 
 type FileContent struct {
 	Path     string `json:"path"`
@@ -259,7 +259,7 @@ func collectFileGet(path string) (FileContent, error) {
 	}, nil
 }
 
-// ─── Persistence Check ───────────────────────────────────────────
+// ---- Persistence Check ----
 
 type PersistenceItem struct {
 	Category string `json:"category"`
@@ -313,7 +313,7 @@ func collectPersistenceCheck() ([]PersistenceItem, error) {
 	return items, nil
 }
 
-// ─── Users List ──────────────────────────────────────────────────
+// ---- Users List ----
 
 type UserEntry struct {
 	Username string `json:"username"`
@@ -351,7 +351,7 @@ func collectUsersList() ([]UserEntry, error) {
 	return users, nil
 }
 
-// ─── Dmesg Tail ──────────────────────────────────────────────────
+// ---- Dmesg Tail ----
 
 func collectDmesgTail(lines int) (map[string]any, error) {
 	out, err := exec.Command("dmesg", "-T", "--level=err,warn,crit,alert,emerg").Output()
@@ -370,7 +370,7 @@ func collectDmesgTail(lines int) (map[string]any, error) {
 	return map[string]any{"lines": logLines, "count": len(logLines)}, nil
 }
 
-// ─── Open Files ──────────────────────────────────────────────────
+// ---- Open Files ----
 
 type OpenFile struct {
 	PID     int    `json:"pid"`

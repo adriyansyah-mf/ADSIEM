@@ -52,6 +52,20 @@ export interface LogSource {
   is_enabled: boolean
 }
 
+export interface FirewallRule {
+  id: string
+  agent_id: string
+  action: string
+  cidr: string
+  proto: string
+  port: number
+  direction: string
+  ttl_seconds: number
+  reason: string
+  is_enabled: boolean
+  created_at?: string | null
+}
+
 export interface RawLog {
   id: string
   agent_id: string | null

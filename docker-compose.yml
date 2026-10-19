@@ -236,6 +236,15 @@ services:
     hostname: agent-demo
     environment:
       AGENT_ENROLLMENT_TOKEN: ${AGENT_ENROLLMENT_TOKEN:-bootstrap-token}
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - BPF
+      - SYS_RESOURCE
+      # SYS_ADMIN is required to mount tracefs (eBPF tracepoints) and to load
+      # tracing programs on kernels where CAP_BPF alone is not enough. Lab-only:
+      # it is effectively root. Drop it and eBPF degrades to `ss` snapshots.
+      - SYS_ADMIN
     depends_on:
       server-api:
         condition: service_healthy

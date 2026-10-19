@@ -1,0 +1,17 @@
+name: linux_dns_query
+log_type: linux_dns_query
+type: kv
+priority: 10
+enabled: true
+fields:
+  dns.question.name: host
+  destination.address: dst
+  destination.port: dport
+  network.transport: proto
+  process.pid: pid
+  process.name: comm
+  user.id: uid
+  event.start: ts
+static_fields:
+  event.category: network
+  event.action: dns_query

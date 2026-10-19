@@ -1,2 +1,3 @@
 dist/packages/
 internal/procexec/bpf/*.bpf.o
+internal/netwatch/bpf/*.bpf.o

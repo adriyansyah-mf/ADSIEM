@@ -13,13 +13,16 @@ import (
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
+	"github.com/siem-platform/agent/internal/detect"
 	"github.com/siem-platform/agent/internal/enrollment"
 	"github.com/siem-platform/agent/internal/fim"
+	"github.com/siem-platform/agent/internal/firewall"
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
+	"github.com/siem-platform/agent/internal/netwatch"
 	"github.com/siem-platform/agent/internal/procexec"
-	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/tailer"
+	"github.com/siem-platform/agent/internal/task"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=x.y.z"
@@ -99,6 +102,14 @@ func run(configPath string, stop <-chan struct{}) {
 	c := client.New(cfg.Server.URL, cfg.Agent.Token)
 	mgr := tailer.NewManager(buf)
 
+	spill, err := buffer.OpenSpill(cfg.Buffer.SpillPath)
+	if err != nil {
+		slog.Warn("disk spill unavailable; undelivered events will be lost on restart", "err", err)
+		spill = nil
+	} else {
+		defer spill.Close()
+	}
+
 	// seed initial sources from config
 	initialSources := make([]heartbeat.LogSource, len(cfg.Logs))
 	for i, l := range cfg.Logs {
@@ -122,8 +133,34 @@ func run(configPath string, stop <-chan struct{}) {
 	// File Integrity Monitoring
 	fimWatcher := fim.Start(cfg, c)
 
-	// Legacy task runner (isolate/block-IP and pre-flow collections, via heartbeat)
-	taskRunner := task.NewRunner(cfg, c)
+	// Task runner for live response / Velociraptor-style artifacts
+	fwEngine := firewall.New(firewall.Options{
+		Enabled:      cfg.Firewall.Enabled,
+		Backend:      cfg.Firewall.Backend,
+		DryRun:       cfg.Firewall.DryRun,
+		ProtectedIPs: cfg.Firewall.ProtectedIPs,
+		StatePath:    cfg.Firewall.StatePath,
+		ServerURL:    cfg.Server.URL,
+		Buffer:       buf,
+	})
+	taskRunner := task.NewRunner(cfg, c, fwEngine)
+
+	var detector *detect.Engine
+	if cfg.Detect.Enabled {
+		rules, err := detect.ApplyEnabled(detect.DefaultRules(), cfg.Detect.Rules)
+		if err != nil {
+			slog.Warn("local detection disabled: bad rule configuration", "err", err)
+		} else {
+			detector = detect.New(detect.Options{
+				Rules:           rules,
+				Buffer:          buf,
+				Blocker:         detect.NewFirewallBlocker(fwEngine),
+				MaxBlocked:      cfg.Detect.MaxBlocked,
+				MaxBlocksPerMin: cfg.Detect.MaxBlocksPerMin,
+			})
+			slog.Info("local detection enabled", "rules", detector.EnabledRules())
+		}
+	}
 
 	// Live-response flows: long-polls the server and runs artifact plugins
 	flowCtx, stopFlows := context.WithCancel(context.Background())
@@ -138,11 +175,47 @@ func run(configPath string, stop <-chan struct{}) {
 		defer procMon.Stop()
 	}
 
+	// Network syscall telemetry (connect/accept/bind/DNS) with an `ss` snapshot
+	// fallback when eBPF is unavailable.
+	if cfg.Netwatch.Enabled {
+		if netMon, err := netwatch.Start(buf); err != nil {
+			slog.Warn("netwatch eBPF unavailable, continuing", "err", err)
+			if cfg.Netwatch.SnapshotFallback {
+				snap := netwatch.StartSnapshotter(buf)
+				defer snap.Stop()
+				slog.Info("netwatch running in snapshot mode", "interval", "10s")
+			}
+		} else {
+			defer netMon.Stop()
+		}
+	}
+
 	// heartbeat loop — drives log source + FIM path updates + task dispatch
 	go heartbeat.Loop(cfg, buf, c,
 		func(resp heartbeat.HeartbeatResponse) {
 			mgr.Update(resp.LogSources)
 			fimWatcher.UpdatePaths(resp.FimPaths)
+			fwEngine.RefreshGuard(cfg.Server.URL)
+
+			if len(resp.Firewall) > 0 || fwEngine.BlockedEntries() > 0 {
+				rules := make([]firewall.ServerRule, 0, len(resp.Firewall))
+				for _, r := range resp.Firewall {
+					rules = append(rules, firewall.ServerRule{
+						ID:         r.ID,
+						Action:     r.Action,
+						CIDR:       r.CIDR,
+						Proto:      r.Proto,
+						Port:       r.Port,
+						Direction:  r.Direction,
+						TTLSeconds: r.TTLSeconds,
+						Reason:     r.Reason,
+					})
+				}
+				added, removed, rejected := fwEngine.Sync(rules)
+				if len(rejected) > 0 {
+					slog.Warn("firewall rules rejected by guard", "rejected", rejected, "added", added, "removed", removed)
+				}
+			}
 		},
 		func(tasks []heartbeat.AgentTask) {
 			for _, t := range tasks {
@@ -156,7 +229,7 @@ func run(configPath string, stop <-chan struct{}) {
 	)
 
 	// sender loop
-	go senderLoop(buf, c, cfg)
+	go senderLoop(buf, c, cfg, spill, detector)
 
 	// periodic buffer diagnostics
 	go func() {
@@ -174,8 +247,11 @@ func run(configPath string, stop <-chan struct{}) {
 	flushBuffer(buf, c, cfg)
 }
 
-func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
+func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill *buffer.Spill, detector *detect.Engine) {
 	backoff := time.Second
+	wasOffline := false
+	replaySpill(buf, spill)
+
 	for {
 		entry, ok := buf.Pop()
 		if !ok {
@@ -184,6 +260,13 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 			continue
 		}
 		logType, location, rawMessage := tailer.Decode(entry)
+
+		// Local detection observes every event exactly once, before delivery:
+		// it must keep working while the server is unreachable.
+		if detector != nil {
+			detector.Emit(detector.Observe(logType, rawMessage))
+		}
+
 		payload := map[string]interface{}{
 			"agent_id":    cfg.Agent.ID,
 			"agent_token": cfg.Agent.Token,
@@ -199,6 +282,8 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 				resp.Body.Close()
 			}
 			buf.Push(entry) // re-queue
+			spill.Append(entry)
+			wasOffline = true
 			slog.Warn("send failed, backing off", "backoff", backoff, "err", err)
 			time.Sleep(backoff)
 			if backoff < 60*time.Second {
@@ -211,7 +296,28 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 			slog.Error("log rejected by server, dropping entry", "status", resp.StatusCode, "body", string(body), "log_type", logType)
 		}
 		resp.Body.Close()
+
+		// A successful delivery after a failure means connectivity is back:
+		// drain the disk spill so offline events are not stranded until the
+		// next restart.
+		if wasOffline {
+			wasOffline = false
+			replaySpill(buf, spill)
+		}
 		backoff = time.Second
+	}
+}
+
+func replaySpill(buf *buffer.Buffer, spill *buffer.Spill) {
+	if spill == nil {
+		return
+	}
+	undelivered := spill.Drain()
+	for _, entry := range undelivered {
+		buf.Push(entry)
+	}
+	if n := len(undelivered); n > 0 {
+		slog.Info("replayed undelivered entries", "count", n)
 	}
 }
 

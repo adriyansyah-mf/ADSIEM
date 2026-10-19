@@ -217,6 +217,13 @@ func encode(logType, location, rawMessage string) string {
 	return logType + "\x00" + location + "\x00" + rawMessage
 }
 
+// Encode packs a log type and raw message into one buffer entry for producers
+// outside the tailer (procexec, firewall, netwatch, detect) — the same codec,
+// with no source file.
+func Encode(logType, rawMessage string) string {
+	return encode(logType, "", rawMessage)
+}
+
 // Decode also accepts the older two-field "logType\x00line" form.
 func Decode(entry string) (logType, location, rawMessage string) {
 	parts := strings.SplitN(entry, "\x00", 3)

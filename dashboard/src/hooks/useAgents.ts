@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { Agent, LogSource, PaginatedResponse } from '@/types'
+import type { Agent, FirewallRule, LogSource, PaginatedResponse } from '@/types'
 
 export function useAgents(page = 1, pageSize = 25, search = '', status = '') {
   return useQuery<PaginatedResponse<Agent>>({
@@ -50,5 +50,30 @@ export function useDeleteLogSource(agentId: string) {
     mutationFn: (sourceId: string) =>
       api.delete(`/api/agents/${agentId}/log-sources/${sourceId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['log-sources', agentId] }),
+  })
+}
+
+export function useFirewallRules(agentId: string) {
+  return useQuery<FirewallRule[]>({
+    queryKey: ['firewall', agentId],
+    queryFn: () => api.get(`/api/agents/${agentId}/firewall`).then(r => r.data),
+    enabled: !!agentId,
+  })
+}
+
+export function useAddFirewallRule(agentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: Omit<FirewallRule, 'id' | 'agent_id' | 'created_at'>) =>
+      api.post(`/api/agents/${agentId}/firewall`, data).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['firewall', agentId] }),
+  })
+}
+
+export function useDeleteFirewallRule(agentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (ruleId: string) => api.delete(`/api/agents/${agentId}/firewall/${ruleId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['firewall', agentId] }),
   })
 }

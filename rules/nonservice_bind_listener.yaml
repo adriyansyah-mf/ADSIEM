@@ -1,0 +1,26 @@
+title: Non-Service Process Binding a Listening Port
+id: rule-net-nonservice-bind
+description: A process that is not a known daemon bound a listening socket, which is how backdoors and reverse-shell listeners appear
+logsource:
+  product: linux_network
+detection:
+  selection:
+    event.action: network_bind
+  not_service:
+    process.name:
+      - apache2
+      - nginx
+      - sshd
+      - mysqld
+      - php-fpm
+      - php-fpm8.3
+      - postfix
+      - rsyslogd
+      - systemd
+      - dockerd
+      - containerd
+  condition: selection and not not_service
+level: high
+tags:
+  - attack.persistence
+  - attack.t1205

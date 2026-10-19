@@ -69,6 +69,7 @@ class Agent(Base):
     created_at   = Column(DateTime(timezone=True), default=now_utc)
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     log_sources  = relationship("AgentLogSource", back_populates="agent", cascade="all, delete-orphan")
+    firewall_rules = relationship("AgentFirewallRule", back_populates="agent", cascade="all, delete-orphan")
 
 class AgentLogSource(Base):
     __tablename__ = "agent_log_sources"
@@ -80,6 +81,23 @@ class AgentLogSource(Base):
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     agent      = relationship("Agent", back_populates="log_sources")
+
+class AgentFirewallRule(Base):
+    __tablename__ = "agent_firewall_rules"
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id   = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    action     = Column(String(16), nullable=False, default="block")
+    cidr       = Column(String(64), nullable=False)
+    proto      = Column(String(16), nullable=False, default="any")
+    port       = Column(Integer, nullable=False, default=0)
+    direction  = Column(String(16), nullable=False, default="both")
+    ttl_seconds = Column(Integer, nullable=False, default=0)
+    reason     = Column(Text, nullable=False, default="")
+    is_enabled = Column(Boolean, nullable=False, default=True)
+    created_by = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    agent      = relationship("Agent", back_populates="firewall_rules")
 
 class Rule(Base):
     __tablename__ = "rules"

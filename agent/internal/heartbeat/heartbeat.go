@@ -30,15 +30,27 @@ type HeartbeatRequest struct {
 	BufferDropped int64  `json:"buffer_dropped"`
 }
 
+type FirewallRule struct {
+	ID         string `json:"id"`
+	Action     string `json:"action"`
+	CIDR       string `json:"cidr"`
+	Proto      string `json:"proto"`
+	Port       int    `json:"port"`
+	Direction  string `json:"direction"`
+	TTLSeconds int    `json:"ttl_seconds"`
+	Reason     string `json:"reason"`
+}
+
 // AgentVersion is sent on every heartbeat; main sets it from its -ldflags
 // version. The server uses it to tell which agents support live-response flows.
 var AgentVersion = "dev"
 
 type HeartbeatResponse struct {
-	ConfigHash string      `json:"config_hash"`
-	LogSources []LogSource `json:"log_sources"`
-	FimPaths   []string    `json:"fim_paths"`
-	Tasks      []AgentTask `json:"tasks"`
+	ConfigHash string         `json:"config_hash"`
+	LogSources []LogSource    `json:"log_sources"`
+	FimPaths   []string       `json:"fim_paths"`
+	Tasks      []AgentTask    `json:"tasks"`
+	Firewall   []FirewallRule `json:"firewall"`
 }
 
 // Loop sends heartbeats every interval.

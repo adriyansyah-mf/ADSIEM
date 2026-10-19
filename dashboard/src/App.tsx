@@ -9,6 +9,7 @@ import LoginPage from '@/pages/LoginPage'
 import DashboardPage from '@/pages/DashboardPage'
 import AgentsPage from '@/pages/AgentsPage'
 import LogSourcesPage from '@/pages/LogSourcesPage'
+import FirewallPage from '@/pages/FirewallPage'
 import LogsPage from '@/pages/LogsPage'
 import EventsPage from '@/pages/EventsPage'
 import LiveEventsPage from '@/pages/LiveEventsPage'
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/agents/:id/sources" element={<ProtectedRoute minRole="admin"><LogSourcesPage /></ProtectedRoute>} />
+        <Route path="/agents/:id/firewall" element={<ProtectedRoute minRole="admin"><FirewallPage /></ProtectedRoute>} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/live-events" element={<LiveEventsPage />} />

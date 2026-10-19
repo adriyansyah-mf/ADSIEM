@@ -1,4 +1,3 @@
-// agent/internal/task/runner.go
 package task
 
 import (
@@ -11,6 +10,7 @@ import (
 
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
+	"github.com/siem-platform/agent/internal/firewall"
 )
 
 type TaskDef struct {
@@ -26,13 +26,22 @@ type TaskResult struct {
 }
 
 type Runner struct {
-	cfg     *config.Config
-	client  *client.Client
+	cfg      *config.Config
+	client   *client.Client
+	fw       *firewall.Engine
 	inflight sync.Map
 }
 
-func NewRunner(cfg *config.Config, c *client.Client) *Runner {
-	return &Runner{cfg: cfg, client: c}
+func NewRunner(cfg *config.Config, c *client.Client, fw *firewall.Engine) *Runner {
+	initQuarantineState(stateDirFor(cfg))
+	return &Runner{cfg: cfg, client: c, fw: fw}
+}
+
+func stateDirFor(cfg *config.Config) string {
+	if cfg != nil && cfg.Agent.StateDir != "" {
+		return cfg.Agent.StateDir
+	}
+	return "/var/lib/siem-agent"
 }
 
 // Dispatch runs a task in a goroutine, skipping if already in-flight.
@@ -101,17 +110,29 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 		recursive, _ := task.Params["recursive"].(bool)
 		rulesRaw, _ := task.Params["rules"].([]any)
 		return runYaraScan(path, recursive, rulesRaw)
+
 	case "isolate_host":
-		return nil, isolateHost(r.cfg.Server.URL)
+		return r.handleIsolateHost()
 	case "unisolate_host":
-		return nil, unisolateHost()
+		return r.handleUnisolateHost()
 	case "block_ip":
-		ip, _ := task.Params["ip"].(string)
-		duration, _ := task.Params["duration_seconds"].(float64)
-		if duration == 0 {
-			duration = 3600
-		}
-		return nil, blockIP(ip, int(duration))
+		return r.handleBlockIP(task.Params)
+	case "unblock_ip":
+		return r.handleUnblockIP(task.Params)
+	case "firewall_list":
+		return r.handleFirewallList()
+	case "firewall_flush":
+		return r.handleFirewallFlush()
+
+	case "kill_process":
+		return r.handleKillProcess(task.Params)
+	case "quarantine_file":
+		return r.handleQuarantineFile(task.Params)
+	case "restore_file":
+		return r.handleRestoreFile(task.Params)
+	case "agent_integrity":
+		return r.handleAgentIntegrity()
+
 	default:
 		return nil, fmt.Errorf("unknown task type: %s", task.TaskType)
 	}

@@ -1,0 +1,22 @@
+title: Outbound Connection to Raw Public IP from Shell
+id: rule-net-shell-raw-ip
+description: A shell interpreter opened an outbound connection directly to a public IP address (staging / callback pattern)
+logsource:
+  product: linux_network
+detection:
+  selection:
+    event.action: network_connect
+    destination.private: "false"
+  shell:
+    process.name:
+      - bash
+      - sh
+      - dash
+      - zsh
+      - perl
+      - python3
+  condition: selection and shell
+level: medium
+tags:
+  - attack.execution
+  - attack.t1059
