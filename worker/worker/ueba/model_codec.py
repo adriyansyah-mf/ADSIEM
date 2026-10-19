@@ -3,18 +3,38 @@
 
 `pickle.loads` on a Redis-stored blob executes arbitrary code if Redis is ever
 tampered with. sklearn models are ultimately plain numeric arrays, so we persist
-those arrays as JSON and rebuild an equivalent estimator whose ``decision_function``
-is sklearn's own implementation — loading is pure data, never code execution.
+those arrays as JSON and rebuild an equivalent estimator whose
+``decision_function`` is sklearn's own implementation — loading is pure data,
+never code execution.
+
+sklearn >= 1.5 made every ``Tree`` attribute read-only, so the tree is rebuilt
+through ``Tree.__getstate__``/``__setstate__`` (the same dict pickle would carry)
+and the two derived caches sklearn computes during ``fit``
+(``_decision_path_lengths`` and ``_average_path_length_per_tree``) are
+recomputed from the restored trees. Both formulas are verified against a fitted
+model in ``worker/tests/test_ueba_model_codec.py``.
 """
 import base64
 import json
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
+from sklearn.ensemble._iforest import _average_path_length
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.tree._tree import Tree
 
-_FORMAT = "isoforest-v1"
+_FORMAT = "isoforest-v2"
+
+_FIELD_MAP = {
+    "left_child": "children_left",
+    "right_child": "children_right",
+    "feature": "feature",
+    "threshold": "threshold",
+    "impurity": "impurity",
+    "n_node_samples": "n_node_samples",
+    "weighted_n_node_samples": "weighted_n_node_samples",
+    "missing_go_to_left": "missing_go_to_left",
+}
 
 
 def dumps_model(model) -> str:
@@ -22,7 +42,11 @@ def dumps_model(model) -> str:
         "format": _FORMAT,
         "n_estimators": len(model.estimators_),
         "max_samples": int(model.max_samples_),
+        "max_samples_value": int(model._max_samples),
+        "max_features": int(model._max_features),
         "offset": float(model.offset_),
+        "n_features_in": int(model.n_features_in_),
+        "estimators_features": [list(map(int, f)) for f in model.estimators_features_],
         "estimators": [],
     }
     for est in model.estimators_:
@@ -37,10 +61,45 @@ def dumps_model(model) -> str:
             "impurity": t.impurity.tolist(),
             "n_node_samples": t.n_node_samples.tolist(),
             "weighted_n_node_samples": t.weighted_n_node_samples.tolist(),
-            "value": t.value.reshape(-1).tolist(),
+            "missing_go_to_left": t.missing_go_to_left.tolist(),
+            "value": np.asarray(t.value).reshape(-1).tolist(),
             "value_shape": list(t.value.shape),
         })
     return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
+def _build_tree(ed: dict) -> Tree:
+    n_features = ed["n_features"]
+    n_classes = ed["n_classes"]
+    n_nodes = len(ed["children_left"])
+
+    tree = Tree(n_features, np.array([n_classes], dtype=np.intp), 1)
+    state = tree.__getstate__()
+
+    nodes = np.zeros(n_nodes, dtype=state["nodes"].dtype)
+    for node_field, tree_attr in _FIELD_MAP.items():
+        nodes[node_field] = np.asarray(ed[tree_attr])
+
+    state["node_count"] = n_nodes
+    state["nodes"] = nodes
+    state["values"] = np.asarray(ed["value"], dtype=np.float64).reshape(n_nodes, 1, 1)
+    tree.__setstate__(state)
+    return tree
+
+
+def _decision_path_lengths(tree: Tree) -> np.ndarray:
+    depths = np.zeros(tree.node_count, dtype=np.int64)
+    stack = [(0, 1)]
+    while stack:
+        node, depth = stack.pop()
+        depths[node] = depth
+        left = tree.children_left[node]
+        right = tree.children_right[node]
+        if left != -1:
+            stack.append((left, depth + 1))
+        if right != -1:
+            stack.append((right, depth + 1))
+    return depths
 
 
 def loads_model(blob_b64: str):
@@ -50,29 +109,29 @@ def loads_model(blob_b64: str):
         return None
 
     estimators = []
+    path_lengths = []
+    avg_lengths = []
+
     for ed in payload["estimators"]:
-        n_features = ed["n_features"]
-        n_classes = ed["n_classes"]
-        tree = Tree(n_features, np.array([n_classes], dtype=np.intp), 1)
-        tree.children_left = np.asarray(ed["children_left"], dtype=np.int64)
-        tree.children_right = np.asarray(ed["children_right"], dtype=np.int64)
-        tree.feature = np.asarray(ed["feature"], dtype=np.int64)
-        tree.threshold = np.asarray(ed["threshold"], dtype=np.float64)
-        tree.impurity = np.asarray(ed["impurity"], dtype=np.float64)
-        tree.n_node_samples = np.asarray(ed["n_node_samples"], dtype=np.int64)
-        tree.weighted_n_node_samples = np.asarray(
-            ed["weighted_n_node_samples"], dtype=np.float64
-        )
-        tree.value = np.asarray(ed["value"], dtype=np.float64).reshape(ed["value_shape"])
+        tree = _build_tree(ed)
 
         reg = DecisionTreeRegressor()
         reg.tree_ = tree
-        reg.n_features_in_ = n_features
+        reg.n_features_in_ = ed["n_features"]
         estimators.append(reg)
+
+        path_lengths.append(_decision_path_lengths(tree))
+        avg_lengths.append(_average_path_length(tree.n_node_samples))
 
     model = IsolationForest()
     model.estimators_ = estimators
     model.max_samples_ = payload["max_samples"]
     model.offset_ = payload["offset"]
-    model.n_features_in_ = estimators[0].n_features_in_
+    model.n_features_in_ = payload["n_features_in"]
+    model._max_samples = payload["max_samples_value"]
+    model._max_features = payload["max_features"]
+    model.estimators_features_ = [np.asarray(f, dtype=np.intp)
+                                  for f in payload["estimators_features"]]
+    model._decision_path_lengths = tuple(path_lengths)
+    model._average_path_length_per_tree = tuple(avg_lengths)
     return model

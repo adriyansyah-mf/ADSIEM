@@ -106,7 +106,7 @@ async def process_message(
     for match in rule_matches:
         sigma_matches.labels(rule_id=match["id"]).inc()
         alerts_total.labels(severity=match["level"], rule_id=match["id"]).inc()
-        await create_alert(
+        alert_id = await create_alert(
             rule_match=match,
             event_id=event_id,
             agent_id=agent_id,
@@ -114,7 +114,9 @@ async def process_message(
             source_ip=decoded.get("source.ip"),
             hostname=hostname,
         )
-        log.info("alert_generated", title=match["title"], severity=match["level"], source_ip=decoded.get("source.ip"))
+        if alert_id is not None:
+            log.info("alert_handled", title=match["title"], severity=match["level"],
+                     source_ip=decoded.get("source.ip"), alert_id=str(alert_id))
 
     # UEBA scoring — best-effort, never block main pipeline
     try:
