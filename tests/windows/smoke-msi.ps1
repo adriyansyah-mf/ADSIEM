@@ -143,7 +143,11 @@ try {
         Fail ("flow ended '{0}' {1}; errors: {2}" -f $final.state, $final.error, (($errors | ForEach-Object { $_.message }) -join " | "))
     }
     $rowsBy = @{}
-    foreach ($u in $updates) { if ($u.source -and $u.rows) { $rowsBy[$u.source] = @($rowsBy[$u.source]) + @($u.rows) } }
+    foreach ($u in $updates) {
+        if (-not $u.source -or -not $u.rows) { continue }
+        if (-not $rowsBy.ContainsKey($u.source)) { $rowsBy[$u.source] = New-Object System.Collections.Generic.List[object] }
+        foreach ($r in $u.rows) { $rowsBy[$u.source].Add($r) }
+    }
     foreach ($src in "Info", "Pslist", "Users", "Persistence", "Services", "Programs", "Netstat", "Events") {
         if (@($rowsBy[$src]).Count -lt 1) { Fail "live-response source $src returned no rows" }
     }
