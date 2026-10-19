@@ -24,6 +24,12 @@ respond from — without needing Splunk/QRadar-scale infrastructure or licensing
   risk score over time.
 - **Case management** — alerts roll up into investigations with AI-assisted triage
   notes, an attack graph view, and MITRE ATT&CK tagging throughout.
+  - An alert joins an open case only when both the IP/host and the **attack family** match.
+    The family is the furthest kill-chain tactic in the rule's ATT&CK tags.
+  - A new family on the same target gets its own case, linked to the earlier one. If it is
+    post-compromise after brute force, it is raised to critical.
+  - Failed-only brute force from public IPs goes into one digest case per day
+    (`bruteforce_digest_enabled`), so it no longer produces a case per bot.
 - **AI investigation** — the **Investigate with AI** button on a case lets an LLM agent
   work the case like a DFIR analyst:
   - It reads the case's alerts, IOCs and hosts, and searches the logs.
@@ -478,6 +484,12 @@ logsource (from `linux_process_exec` / the eBPF monitor), which intentionally us
 Sigma's own standard field names (`Image`, `CommandLine`, `ParentImage`, `User`,
 `ProcessId`, `ParentProcessId`) instead of ECS — that's what lets you drop in public
 SigmaHQ `process_creation` rules unmodified.
+
+Besides Sigma's own `threshold`-like correlations, rules can use an `after:` block: the rule
+fires only when at least `count` events matching `after.detection` were seen for the same
+`group_by` values within `timewindow`. For example, `rules/login_after_brute_force.yaml` fires
+on a successful login preceded by five or more failures from the same `source.ip`. Each
+sequence fires once.
 
 A rule only sees events from its `logsource` (`worker/worker/sigma_logsource.py` maps
 each decoder `log_type` — plus, for Windows, the event's channel and EventID — to

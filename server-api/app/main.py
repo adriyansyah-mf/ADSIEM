@@ -59,6 +59,7 @@ _DEFAULT_SETTINGS = [
     ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
     ("ai_confidence_threshold","0.0",                    False, "Minimum AI confidence (0.0-1.0) to create/escalate a case — notes always written regardless"),
     ("ai_min_severity",    "high",                      False, "Minimum alert severity investigated by the AI analyst (info/low/medium/high/critical)"),
+    ("bruteforce_digest_enabled", "true",               False, "Collect failed-only brute force from public IPs into one AI case per day instead of a case per attacker IP (true/false)"),
     ("searxng_url",        "http://searxng:8080",        False, "Internal URL of SearXNG instance used for threat intel search"),
     ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),

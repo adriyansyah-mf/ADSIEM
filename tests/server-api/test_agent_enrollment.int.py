@@ -47,8 +47,11 @@ def env():
 
     async def setup():
         async with engine.begin() as conn:
+            # a fresh schema: the worker's tests share this database and leave tables
+            # (e.g. case_embeddings → cases) these models don't know
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
     _run(setup())
     yield async_sessionmaker(engine, expire_on_commit=False)
