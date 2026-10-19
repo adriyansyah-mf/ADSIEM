@@ -6,4 +6,5 @@
 !worker/worker/sigma_engine.py
 !worker/worker/sigma_logsource.py
 !worker/worker/decoder_engine.py
+!worker/worker/agent_health.py
 **/__pycache__
