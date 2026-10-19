@@ -1,6 +1,8 @@
 package heartbeat
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +26,22 @@ func TestIntegrityHashesBinaryAndConfig(t *testing.T) {
 	second := currentIntegrity()
 	if second.ConfigSHA256 == first.ConfigSHA256 || second.BinarySHA256 != first.BinarySHA256 {
 		t.Fatalf("an edited config must change only the config hash: %+v → %+v", first, second)
+	}
+
+	// the uninstall token hash from the server: stored once, then enforced
+	if err := VerifyUninstallToken(cfg, ""); err != nil {
+		t.Fatalf("nothing provisioned yet must allow removal: %v", err)
+	}
+	sum := sha256.Sum256([]byte("tok-123"))
+	storeUninstallHash(hex.EncodeToString(sum[:]))
+	if err := VerifyUninstallToken(cfg, "wrong"); err != ErrUninstallRefused {
+		t.Fatalf("wrong token: %v", err)
+	}
+	if err := VerifyUninstallToken(cfg, ""); err != ErrUninstallRefused {
+		t.Fatalf("missing token: %v", err)
+	}
+	if err := VerifyUninstallToken(cfg, " tok-123\n"); err != nil {
+		t.Fatalf("right token: %v", err)
 	}
 
 	ConfigPath = filepath.Join(t.TempDir(), "missing.yaml")

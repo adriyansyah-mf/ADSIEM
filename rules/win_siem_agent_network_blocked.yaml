@@ -1,0 +1,26 @@
+title: SIEM Agent Network Blocked by WFP
+id: rule-win-siem-agent-network-blocked
+description: >-
+  A Windows Filtering Platform filter naming the SIEM agent was added (5447,
+  "Filtering Platform Policy Change" auditing — enabled by the agent's
+  installer), or a connection of the agent was blocked (5152/5157). This is
+  how EDRSilencer-style tools mute an agent while leaving it running
+  (T1562.001). The event reaches the SIEM once the block is lifted.
+logsource:
+  product: windows
+  service: security
+detection:
+  wfp_change:
+    EventID: 5447
+  agent_named:
+    - 'siem-agent.exe'
+  blocked:
+    EventID:
+      - 5152
+      - 5157
+    Application|contains: 'siem-agent.exe'
+  condition: (wfp_change and agent_named) or blocked
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

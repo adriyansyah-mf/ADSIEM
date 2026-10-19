@@ -1,0 +1,19 @@
+title: SIEM Agent Logs Stopped
+id: rule-siem-agent-logs-silent
+description: >-
+  The agent still heartbeats but has sent no logs for longer than Settings →
+  agent_log_silence_minutes: its log sources were removed or emptied, or the
+  path its events take was blocked while the agent itself kept running
+  (T1562.001, T1562.006).
+logsource:
+  product: siem
+  service: agent
+detection:
+  silent:
+    event.action: agent_logs_silent
+  condition: silent
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+  - attack.t1562.006

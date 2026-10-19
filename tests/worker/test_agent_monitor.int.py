@@ -28,9 +28,22 @@ def _run(coro):
 class FakeRedis:
     def __init__(self):
         self.events = []
+        self.kv = {}
 
     async def xadd(self, _stream, data):
         self.events.append(data)
+
+    async def get(self, key):
+        return self.kv.get(key)
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.kv:
+            return None
+        self.kv[key] = str(value)
+        return True
+
+    async def delete(self, key):
+        self.kv.pop(key, None)
 
 
 @pytest.fixture()
@@ -52,7 +65,11 @@ def env(monkeypatch):
 
     async def fake_get_redis():
         return redis
+
+    async def fake_setting(key, default=""):
+        return "60" if key == "agent_log_silence_minutes" else default
     monkeypatch.setattr(agent_monitor, "get_redis", fake_get_redis)
+    monkeypatch.setattr(agent_monitor, "get_setting", fake_setting)
     yield redis
     _run(engine.dispose())  # its connections are bound to this module's loop
 
@@ -77,6 +94,7 @@ def _sweep():
         async with AsyncSessionLocal() as s:
             await agent_monitor._mark_offline(s)
             await agent_monitor._report_stops(s)
+            await agent_monitor._check_quiet_agents(s)
     _run(go())
 
 
@@ -120,3 +138,62 @@ def test_half_the_fleet_offline_is_one_event(env):
     _sweep()
     assert _events(env) == [("siem", "event=agent_offline_mass")]
     assert "count=6" in env.events[0]["raw_message"]
+
+
+def _ids_by_host():
+    from sqlalchemy import select
+
+    from worker.database import AsyncSessionLocal
+    from worker.models import Agent
+
+    async def go():
+        async with AsyncSessionLocal() as s:
+            return {h: i for i, h in (await s.execute(select(Agent.id, Agent.hostname))).all()}
+    return _run(go())
+
+
+def test_heartbeating_agents_whose_logs_or_polls_stopped(env):
+    from worker.agent_monitor import LAST_LOG_KEY
+
+    now = datetime.now(timezone.utc)
+    _agents(
+        dict(hostname="muted", status="online", last_seen_at=_ago(10), flow_poll_at=_ago(5)),
+        dict(hostname="chatty", status="online", last_seen_at=_ago(10), flow_poll_at=_ago(5)),
+        dict(hostname="fake-beats", status="online", last_seen_at=_ago(10), flow_poll_at=_ago(1800)),
+        dict(hostname="no-runner", status="online", last_seen_at=_ago(10), flow_poll_at=None),
+        dict(hostname="new", status="online", last_seen_at=_ago(10)),  # no log yet: no opinion
+    )
+    ids = _ids_by_host()
+    env.kv[LAST_LOG_KEY.format(ids["muted"])] = str(now.timestamp() - 2 * 3600)
+    env.kv[LAST_LOG_KEY.format(ids["chatty"])] = str(now.timestamp() - 60)
+    env.kv[LAST_LOG_KEY.format(ids["fake-beats"])] = str(now.timestamp() - 60)
+    env.kv[LAST_LOG_KEY.format(ids["no-runner"])] = str(now.timestamp() - 60)
+
+    _sweep()
+    assert sorted(_events(env)) == [("fake-beats", "event=agent_heartbeat_anomaly"),
+                                    ("muted", "event=agent_logs_silent")], env.events
+    muted = next(e for e in env.events if e["hostname"] == "muted")["raw_message"]
+    assert "silent_minutes=120" in muted
+    assert "kind=no_flow_poll" in next(e for e in env.events if e["hostname"] == "fake-beats")["raw_message"]
+
+    env.events.clear()
+    _sweep()
+    assert env.events == []  # once per episode
+
+    # logs resume → the flag clears → a later silence reports again
+    env.kv[LAST_LOG_KEY.format(ids["muted"])] = str(now.timestamp())
+    _sweep()
+    env.kv[LAST_LOG_KEY.format(ids["muted"])] = str(now.timestamp() - 2 * 3600)
+    _sweep()
+    assert _events(env) == [("muted", "event=agent_logs_silent")]
+
+
+def test_everyone_quiet_at_once_is_not_tampering(env):
+    from worker.agent_monitor import LAST_LOG_KEY
+
+    now = datetime.now(timezone.utc)
+    _agents(*[dict(hostname=f"web{i}", status="online", last_seen_at=_ago(10), flow_poll_at=_ago(5)) for i in range(6)])
+    for agent_id in _ids_by_host().values():
+        env.kv[LAST_LOG_KEY.format(agent_id)] = str(now.timestamp() - 3 * 3600)  # e.g. the pipeline was down
+    _sweep()
+    assert env.events == []

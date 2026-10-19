@@ -16,5 +16,11 @@ fields:
   hash.current: current
   agent.count: count
   agent.hosts: hosts
+  agent.anomaly: kind
+  agent.session: session
+  agent.seq: seq
+  agent.last_log: last_log
+  agent.last_poll: last_poll
+  agent.silent_minutes: silent_minutes
 static_fields:
   event.category: agent_health

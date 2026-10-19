@@ -6,6 +6,7 @@ log per line). Stdlib only.
 
     python mock_siem.py <port> <out dir> [<cert.pem> <key.pem>]   (TLS with the cert when given)
 """
+import hashlib
 import json
 import os
 import ssl
@@ -17,6 +18,8 @@ from pathlib import Path
 
 PORT, OUT = int(sys.argv[1]), Path(sys.argv[2])
 OUT.mkdir(parents=True, exist_ok=True)
+# the agent gets only its hash; the smoke test passes the token to msiexec /x
+UNINSTALL_TOKEN = "SMOKE-UNINS-TALLT-OKEN1"
 # MOCK_FLOW=1: hand the agent one live-response flow running every Windows plugin
 # (as server-api would after compile_request); its updates go to <out>/flows.jsonl.
 FLOW = {
@@ -65,7 +68,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ingest/heartbeat":
             with open(OUT / "heartbeats.jsonl", "a") as fh:
                 fh.write(json.dumps(payload) + "\n")
-            return self._reply(200, {"config_hash": "mock", "log_sources": SOURCES, "fim_paths": [], "tasks": []})
+            return self._reply(200, {"config_hash": "mock", "log_sources": SOURCES, "fim_paths": [], "tasks": [],
+                                     "uninstall_token_sha256": hashlib.sha256(UNINSTALL_TOKEN.encode()).hexdigest()})
         if path == "/api/ingest/log":
             with open(OUT / "logs.jsonl", "a") as fh:
                 fh.write(json.dumps(payload) + "\n")

@@ -150,6 +150,8 @@ class HeartbeatRequest(BaseModel):
     buffer_dropped: int = 0
     reason: str | None = None          # with status "stopping": service_stop | system_shutdown
     integrity: dict[str, str] | None = None  # binary_sha256 / config_sha256, agents >= 1.7.0
+    session: str | None = None  # one per agent process, with a rising seq (agents >= 1.8.0)
+    seq: int | None = None
 
 class AgentTaskDef(BaseModel):
     id: UUID
@@ -162,6 +164,7 @@ class HeartbeatResponse(BaseModel):
     fim_paths: list[str] = []
     tasks: list[AgentTaskDef] = []
     firewall: list[dict] = []
+    uninstall_token_sha256: str = ""  # agents >= 1.8.0 refuse removal without the token
 
 # ─── Ingest ──────────────────────────────────────────────────────
 

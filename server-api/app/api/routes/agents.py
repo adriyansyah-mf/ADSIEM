@@ -258,6 +258,30 @@ async def approve_agent(
                         {"hostname": agent.hostname})
     return AgentOut.model_validate(agent)
 
+@router.get("/api/agents/{agent_id}/uninstall-token")
+async def get_uninstall_token(
+    agent_id: UUID,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    """The token that removing this agent's package needs (agents >= 1.8.0)."""
+    from app.services.agent_tamper import uninstall_token
+
+    agent = await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    token = uninstall_token(agent.id)
+    background.add_task(audit_log, db, current_user.id, "agent_uninstall_token_viewed", "agent", str(agent_id),
+                        {"hostname": agent.hostname})
+    return {
+        "token": token,
+        "commands": {
+            "windows": f"msiexec /x siem-agent-<version>-x64.msi /qn UNINSTALL_TOKEN={token}",
+            "debian": f"sudo SIEM_UNINSTALL_TOKEN={token} apt remove siem-agent",
+            "rhel": f"sudo SIEM_UNINSTALL_TOKEN={token} dnf remove siem-agent",
+        },
+    }
+
 @router.get("/api/agents/{agent_id}", response_model=AgentOut)
 async def get_agent(
     agent_id: UUID,

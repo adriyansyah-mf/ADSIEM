@@ -2,13 +2,18 @@ package heartbeat
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/siem-platform/agent/internal/buffer"
@@ -35,6 +40,44 @@ type HeartbeatRequest struct {
 	BufferDropped int64      `json:"buffer_dropped"`
 	Reason        string     `json:"reason,omitempty"` // with status "stopping": service_stop | system_shutdown
 	Integrity     *Integrity `json:"integrity,omitempty"`
+	// One random id per agent process and a counter per heartbeat: the server
+	// spots a second sender using this agent's token (sessions interleaving) or
+	// a replayed heartbeat (a sequence number going back).
+	Session string `json:"session,omitempty"`
+	Seq     int64  `json:"seq,omitempty"`
+}
+
+// Session identifies this agent process in its heartbeats.
+var Session = newSession()
+
+var seq atomic.Int64
+
+func newSession() string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
+}
+
+// UninstallHashPath is where the server's uninstall-token hash is kept
+// (next to the config); `siem-agent -verify-uninstall-token` checks against it.
+func UninstallHashPath(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), "uninstall.sha256")
+}
+
+// storeUninstallHash writes the hash the server sent, when it changed.
+func storeUninstallHash(hash string) {
+	if ConfigPath == "" || len(hash) != 64 {
+		return
+	}
+	path := UninstallHashPath(ConfigPath)
+	if old, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(old)) == hash {
+		return
+	}
+	if err := os.WriteFile(path, []byte(hash+"\n"), 0o600); err != nil {
+		slog.Warn("could not store the uninstall token hash", "err", err)
+	}
 }
 
 // Integrity is what the server compares against the agent's baseline: a
@@ -105,6 +148,7 @@ func SendStopping(cfg *config.Config, c *client.Client, reason string) {
 	defer cancel()
 	resp, err := c.PostContext(ctx, "/api/ingest/heartbeat", HeartbeatRequest{
 		AgentID: cfg.Agent.ID, Status: "stopping", Version: AgentVersion, Reason: reason,
+		Session: Session, Seq: seq.Add(1),
 	})
 	if err != nil {
 		slog.Warn("could not report stopping", "err", err)
@@ -119,6 +163,9 @@ type HeartbeatResponse struct {
 	FimPaths   []string       `json:"fim_paths"`
 	Tasks      []AgentTask    `json:"tasks"`
 	Firewall   []FirewallRule `json:"firewall"`
+	// SHA-256 of this agent's uninstall token (server-side secret); kept
+	// locally so package removal can be refused without it.
+	UninstallTokenSHA256 string `json:"uninstall_token_sha256"`
 }
 
 // Loop sends heartbeats every interval.
@@ -146,6 +193,8 @@ func Loop(
 			Version:       AgentVersion,
 			BufferDropped: dropped,
 			Integrity:     integrity,
+			Session:       Session,
+			Seq:           seq.Add(1),
 		}
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
 		if err != nil {
@@ -159,6 +208,7 @@ func Loop(
 		if resp.StatusCode == 200 {
 			var hbResp HeartbeatResponse
 			if err := json.Unmarshal(body, &hbResp); err == nil {
+				storeUninstallHash(hbResp.UninstallTokenSHA256)
 				if hbResp.ConfigHash != lastHash {
 					slog.Info("config updated", "hash", hbResp.ConfigHash)
 					lastHash = hbResp.ConfigHash
@@ -174,4 +224,26 @@ func Loop(
 		}
 		time.Sleep(interval)
 	}
+}
+
+// ErrUninstallRefused: a token is required (the server provisioned one) and
+// the given one is missing or wrong.
+var ErrUninstallRefused = errors.New("uninstall refused: wrong or missing uninstall token " +
+	"(Agents page → agent → Uninstall token)")
+
+// VerifyUninstallToken is what the package removal hooks call. With no hash
+// provisioned yet (never reached the server) removal is allowed.
+func VerifyUninstallToken(configPath, token string) error {
+	want, err := os.ReadFile(UninstallHashPath(configPath))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	got := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	if subtle.ConstantTimeCompare([]byte(hex.EncodeToString(got[:])), []byte(strings.TrimSpace(string(want)))) != 1 {
+		return ErrUninstallRefused
+	}
+	return nil
 }

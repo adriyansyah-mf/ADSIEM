@@ -22,6 +22,7 @@ class Agent(Base):
     last_seen_at = Column(DateTime(timezone=True))
     stop_reason  = Column(String(30))
     version      = Column(String(50))
+    flow_poll_at = Column(DateTime(timezone=True))
 
 class FleetHunt(Base):
     __tablename__ = "fleet_hunts"

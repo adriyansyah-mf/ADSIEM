@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -39,7 +40,22 @@ func main() {
 	flag.StringVar(&opts.key, "key", "", "with -configure: enrollment key (clears any previous enrollment)")
 	flag.StringVar(&opts.name, "name", "", "with -configure: agent name (default: hostname)")
 	flag.StringVar(&opts.auditing, "enable-auditing", "", "with -configure on Windows: 1 to turn on logon/process/account auditing and PowerShell script block logging")
+	verifyUninstall := flag.Bool("verify-uninstall", false,
+		"exit 0 only if -token (or $SIEM_UNINSTALL_TOKEN) is this agent's uninstall token; used by the MSI and .deb/.rpm removal")
+	uninstallToken := flag.String("token", "", "with -verify-uninstall: the uninstall token")
 	flag.Parse()
+
+	if *verifyUninstall {
+		token := *uninstallToken
+		if token == "" {
+			token = os.Getenv("SIEM_UNINSTALL_TOKEN")
+		}
+		if err := heartbeat.VerifyUninstallToken(*configPath, token); err != nil {
+			fmt.Fprintln(os.Stderr, "siem-agent:", err)
+			os.Exit(3)
+		}
+		return
+	}
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	if *doConfigure {

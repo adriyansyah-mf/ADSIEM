@@ -46,6 +46,7 @@ func enableAuditing() error {
 		{"/set", "/subcategory:{0CCE9235-69AE-11D9-BED3-505054503030}", "/success:enable", "/failure:enable"}, // User Account Management
 		{"/set", "/subcategory:{0CCE9237-69AE-11D9-BED3-505054503030}", "/success:enable"},                    // Security Group Management
 		{"/set", "/subcategory:{0CCE9227-69AE-11D9-BED3-505054503030}", "/success:enable"},                    // Other Object Access (tasks)
+		{"/set", "/subcategory:{0CCE9233-69AE-11D9-BED3-505054503030}", "/success:enable"},                    // Filtering Platform Policy Change (5447: WFP filters, e.g. EDRSilencer)
 	} {
 		if out, err := exec.Command("auditpol", args...).CombinedOutput(); err != nil {
 			return fmt.Errorf("auditpol %s: %v: %s", args[1], err, strings.TrimSpace(string(out)))
