@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -66,14 +67,29 @@ func main() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 		<-sigCh
+		setStopReason(signalStopReason())
 		close(stop)
 	}()
 	run(*configPath, stop)
 }
 
+// stopReason says why run's stop channel was closed: "service_stop" (someone
+// stopped the agent — alerted on) or "system_shutdown" (the host is going down).
+var stopReason atomic.Value
+
+func setStopReason(reason string) { stopReason.Store(reason) }
+
+func getStopReason() string {
+	if r, ok := stopReason.Load().(string); ok {
+		return r
+	}
+	return "service_stop"
+}
+
 // run starts every agent subsystem and blocks until stop is closed.
 func run(configPath string, stop <-chan struct{}) {
 	heartbeat.AgentVersion = Version
+	heartbeat.ConfigPath = configPath
 	enrollment.AgentVersion = Version
 	slog.Info("siem-agent starting", "version", Version)
 
@@ -96,6 +112,11 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Error("enrollment failed", "err", err)
 			os.Exit(1)
 		}
+	}
+
+	// Windows: only SYSTEM may stop / reconfigure / delete the service (no-op elsewhere)
+	if err := protectService(cfg.AntiTamper.UnlockService); err != nil {
+		slog.Warn("could not set the service's tamper protection", "err", err)
 	}
 
 	buf := buffer.New(cfg.Agent.BufferSize)
@@ -246,7 +267,8 @@ func run(configPath string, stop <-chan struct{}) {
 	}()
 
 	<-stop
-	slog.Info("shutting down")
+	slog.Info("shutting down", "reason", getStopReason())
+	heartbeat.SendStopping(cfg, c, getStopReason())
 	stopFlows()
 	mgr.StopAll()
 	flushBuffer(buf, c, cfg)

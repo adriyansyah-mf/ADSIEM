@@ -1,0 +1,18 @@
+title: SIEM Agent Config Modified
+id: rule-siem-agent-config-modified
+description: >-
+  The agent's config file changed on the host (e.g. log sources removed,
+  commands or tamper protection unlocked, server URL changed). Expected after
+  an admin edits it; otherwise someone is reconfiguring the agent (T1562.001).
+logsource:
+  product: siem
+  service: agent
+detection:
+  changed:
+    event.action: agent_integrity_changed
+    file.type: config
+  condition: changed
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

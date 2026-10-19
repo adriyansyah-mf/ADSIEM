@@ -148,6 +148,8 @@ class HeartbeatRequest(BaseModel):
     status: str = "online"
     version: str | None = None
     buffer_dropped: int = 0
+    reason: str | None = None          # with status "stopping": service_stop | system_shutdown
+    integrity: dict[str, str] | None = None  # binary_sha256 / config_sha256, agents >= 1.7.0
 
 class AgentTaskDef(BaseModel):
     id: UUID

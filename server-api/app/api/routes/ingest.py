@@ -16,6 +16,7 @@ from app.core.security import hash_token
 from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
                             FimWatchPath)
 from app.schemas.schemas import AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
+from app.services.agent_tamper import check_integrity
 from app.services.ingest import enqueue_log
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
@@ -45,13 +46,32 @@ async def heartbeat(
     body: HeartbeatRequest,
     agent: Annotated[Agent, Depends(get_agent)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     from sqlalchemy import update
+    from worker.agent_health import health_event
+
+    def health(event: str, **fields) -> dict:
+        return health_event(event, agent_id=agent.id, group_id=agent.group_id, hostname=agent.hostname, **fields)
+
+    now = datetime.now(timezone.utc)
+    if body.status == "stopping":
+        # Offline now; the worker reports the stop only if the agent stays down
+        # (a restart or an upgrade comes back within seconds and clears it).
+        await db.execute(update(Agent).where(Agent.id == agent.id).values(
+            status="offline", last_seen_at=now, stop_reason=(body.reason or "service_stop")[:30]))
+        await db.commit()
+        return HeartbeatResponse(config_hash="", log_sources=[])
+
+    integrity_updates, changes = check_integrity(agent, body.version, body.integrity)
     await db.execute(
         update(Agent).where(Agent.id == agent.id)
-        .values(status="online", last_seen_at=datetime.now(timezone.utc), version=body.version)
+        .values(status="online", last_seen_at=now, version=body.version, stop_reason=None, **integrity_updates)
     )
     await db.commit()
+    if agent.approved:
+        for change in changes:
+            await enqueue_log(redis, health("agent_integrity_changed", **change))
 
     result = await db.execute(
         select(AgentLogSource).where(AgentLogSource.agent_id == agent.id)

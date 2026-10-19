@@ -6,23 +6,16 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=siem-agent
-Group=siem-agent
+# Root, like other EDR agents: eBPF process/network telemetry, host isolation,
+# firewall blocks, quarantine and approved AI commands all need it.
+User=root
 EnvironmentFile=-/etc/siem-agent/env
 ExecStart=/usr/bin/siem-agent -config /etc/siem-agent/config.yaml
-Restart=on-failure
+# Anti-tamper: killed or crashed → back in 5s. `systemctl stop` still stops it,
+# and the agent reports that to the server first (alerted as "SIEM Agent Stopped").
+Restart=always
 RestartSec=5s
 TimeoutStopSec=30s
-
-# Hardening
-NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/var/lib/siem-agent /etc/siem-agent
-ReadOnlyPaths=/var/log
-ProtectHome=read-only
-PrivateTmp=yes
-# Allow reading protected log files (e.g. /var/log/auth.log owned by adm group)
-SupplementaryGroups=adm
 
 [Install]
 WantedBy=multi-user.target

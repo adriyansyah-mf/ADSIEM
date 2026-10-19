@@ -165,12 +165,29 @@ try {
     Write-Host ("ok: live response: " + (($rowsBy.Keys | Sort-Object | ForEach-Object { "$_=$(@($rowsBy[$_]).Count)" }) -join ", ") +
         "; info: $($info.OSRelease) $($info.Kernel)")
 
+    # 4d. Tamper protection: the service DACL refuses an Administrator's stop
+    # (msiexec runs as SYSTEM, so the uninstall below must still work).
+    $refused = $false
+    try { Stop-Service SIEMAgent -ErrorAction Stop } catch { $refused = $true }
+    if (-not $refused) { Fail "an Administrator could stop the tamper-protected service" }
+    if ((Get-Service SIEMAgent).Status -ne "Running") { Fail "service not running after the refused stop" }
+    $sddl = (& sc.exe sdshow SIEMAgent | Out-String).Trim()
+    Write-Host "ok: Stop-Service refused for Administrators ($sddl)"
+    $beats = @(Get-Content (Join-Path $mockOut "heartbeats.jsonl") | ConvertFrom-Json)
+    $hashed = $beats | Where-Object { $_.integrity -and $_.integrity.binary_sha256.Length -eq 64 -and $_.integrity.config_sha256.Length -eq 64 }
+    if (-not $hashed) { Fail "no heartbeat carried the binary/config hashes" }
+    Write-Host "ok: heartbeats carry integrity hashes"
+
     # 5. Uninstall removes the service but keeps the config (and its token).
     $code = Invoke-Msiexec @("/x", "`"$Msi`"") "uninstall.log"
     if ($code -ne 0) { Fail "msiexec /x exited $code" }
     if (Get-Service SIEMAgent -ErrorAction SilentlyContinue) { Fail "service still present after uninstall" }
     if (-not (Test-Path (Join-Path $dataDir "config.yaml"))) { Fail "config removed on uninstall" }
     Write-Host "ok: uninstalled; config kept in $dataDir"
+    $stopping = Get-Content (Join-Path $mockOut "heartbeats.jsonl") | ConvertFrom-Json |
+        Where-Object { $_.status -eq "stopping" } | Select-Object -Last 1
+    if (-not $stopping -or $stopping.reason -ne "service_stop") { Fail "no stop notice (status=stopping reason=service_stop) on uninstall" }
+    Write-Host "ok: the agent reported its stop before the uninstall removed it"
     Write-Host "SMOKE TEST PASSED"
 }
 finally {

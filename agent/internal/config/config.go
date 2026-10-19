@@ -63,6 +63,13 @@ type LiveResponseConfig struct {
 	DisableCommands bool `yaml:"disable_commands"`
 }
 
+type AntiTamperConfig struct {
+	// Windows: the agent service is locked so only SYSTEM (the MSI, an
+	// upgrade) can stop, reconfigure or delete it. true restores the default
+	// permissions on the next start, e.g. to manage the service by hand.
+	UnlockService bool `yaml:"unlock_service"`
+}
+
 type Config struct {
 	Agent        AgentConfig        `yaml:"agent"`
 	Server       ServerConfig       `yaml:"server"`
@@ -73,6 +80,7 @@ type Config struct {
 	Detect       DetectConfig       `yaml:"detect"`
 	Buffer       BufferConfig       `yaml:"buffer"`
 	LiveResponse LiveResponseConfig `yaml:"live_response"`
+	AntiTamper   AntiTamperConfig   `yaml:"anti_tamper"`
 }
 
 func Load(path string) (*Config, error) {

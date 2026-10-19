@@ -354,6 +354,13 @@ async def _migrate_agent_flow_poll() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS flow_poll_at TIMESTAMPTZ"))
 
+async def _migrate_agent_integrity() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        for col in ("binary_sha256 VARCHAR(64)", "config_sha256 VARCHAR(64)", "integrity_version VARCHAR(50)",
+                    "stop_reason VARCHAR(30)"):
+            await conn.execute(text(f"ALTER TABLE agents ADD COLUMN IF NOT EXISTS {col}"))
+
 async def _migrate_audit_log_group() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -452,6 +459,7 @@ async def lifespan(app: FastAPI):
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
         await _migrate_agent_flow_poll()
+        await _migrate_agent_integrity()
         await _migrate_audit_log_group()
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()

@@ -3,12 +3,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -48,6 +50,11 @@ func (s *agentService) Execute(_ []string, req <-chan svc.ChangeRequest, status 
 			case svc.Interrogate:
 				status <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
+				if c.Cmd == svc.Shutdown {
+					setStopReason("system_shutdown")
+				} else {
+					setStopReason("service_stop")
+				}
 				status <- svc.Status{State: svc.StopPending}
 				close(stop)
 				select {
@@ -84,6 +91,55 @@ func runAsService(run func(stop <-chan struct{})) bool {
 	return true
 }
 
+// Service permissions. Locked: Administrators keep query/start/read but lose
+// stop (WP), change config (DC), delete (SD) and the DACL/owner (WD/WO), so
+// stopping or removing the agent takes SYSTEM — the MSI (msiexec runs as
+// SYSTEM) or a deliberate escalation, which the tamper rules alert on.
+// Default is the SCM's usual DACL for a new service.
+const (
+	lockedServiceSDDL  = "D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCLCSWRPLOCRRC;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"
+	defaultServiceSDDL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"
+)
+
+// protectService applies the locked (or, with anti_tamper.unlock_service,
+// the default) DACL to the agent's service. Only when running as the service.
+func protectService(unlock bool) error {
+	if isService, err := svc.IsWindowsService(); err != nil || !isService {
+		return nil
+	}
+	sddl := lockedServiceSDDL
+	if unlock {
+		sddl = defaultServiceSDDL
+	}
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return err
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	m, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer m.Disconnect()
+	s, err := m.OpenService(serviceName)
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	if err := windows.SetSecurityInfo(s.Handle, windows.SE_SERVICE, windows.DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil); err != nil {
+		return err
+	}
+	slog.Info("service permissions set", "locked", !unlock)
+	return nil
+}
+
+// signalStopReason: Ctrl+C on an agent run from a console.
+func signalStopReason() string { return "service_stop" }
+
 // manageService installs (auto-start, restart on failure) or removes the service.
 func manageService(install bool, configPath string) error {
 	m, err := mgr.Connect()
@@ -100,6 +156,10 @@ func manageService(install bool, configPath string) error {
 		defer s.Close()
 		_, _ = s.Control(svc.Stop)
 		if err := s.Delete(); err != nil {
+			if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+				return fmt.Errorf("%w: the service is tamper-protected; uninstall with msiexec /x, or set "+
+					"anti_tamper.unlock_service: true in the config and reboot first", err)
+			}
 			return err
 		}
 		fmt.Println("service removed")

@@ -1,0 +1,66 @@
+title: SIEM Agent Tampering Command
+id: rule-siem-agent-tamper-commands
+description: >-
+  A command that stops, reconfigures, removes or deletes the SIEM agent:
+  sc/net/taskkill/PowerShell/reg against the SIEMAgent service on Windows,
+  package removal or deleting the agent's files on Linux. (systemctl stop and
+  kill of siem-agent are covered by "Security Tool Disabled".) T1562.001.
+logsource:
+  category: process_creation
+detection:
+  win_sc:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains:
+      - 'SIEMAgent'
+      - 'SIEM Agent'
+    CommandLine|re: '(?i)\s(stop|delete|config|sdset|failure)\s'
+  win_net:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains|all:
+      - ' stop '
+      - 'SIEM'
+  win_taskkill:
+    Image|endswith: '\taskkill.exe'
+    CommandLine|contains: 'siem-agent'
+  win_powershell:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'SIEMAgent'
+      - 'siem-agent'
+    CommandLine|re: '(?i)(Stop|Set|Remove)-Service|Stop-Process|sc(\.exe)?\s+(stop|delete|config|sdset)'
+  win_reg:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains: '\Services\SIEMAgent'
+    CommandLine|re: '(?i)\s(add|delete|import)\s'
+  linux_package_removal:
+    Image|endswith:
+      - '/apt'
+      - '/apt-get'
+      - '/dpkg'
+      - '/rpm'
+      - '/dnf'
+      - '/yum'
+      - '/zypper'
+    CommandLine|contains: 'siem-agent'
+    CommandLine|re: '\s(remove|purge|erase|autoremove|-e|--erase|-r|--remove|-P|--purge)(\s|$)'
+  linux_files:
+    Image|endswith:
+      - '/rm'
+      - '/mv'
+      - '/cp'
+      - '/chattr'
+      - '/truncate'
+      - '/shred'
+    CommandLine|contains:
+      - '/usr/bin/siem-agent'
+      - '/etc/siem-agent/'
+      - '/lib/systemd/system/siem-agent.service'
+  condition: 1 of them
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

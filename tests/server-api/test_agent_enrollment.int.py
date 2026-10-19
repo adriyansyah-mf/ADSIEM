@@ -198,7 +198,7 @@ def test_approval_gates_logs_and_tasks(env):
 
     async def hb(a):
         async with env() as db:
-            return await heartbeat(HeartbeatRequest(agent_id=a.id, version="1.5.0"), a, db)
+            return await heartbeat(HeartbeatRequest(agent_id=a.id, version="1.5.0"), a, db, redis)
     assert _run(hb(agent)).tasks == []
 
     async def do_approve():
@@ -209,3 +209,41 @@ def test_approval_gates_logs_and_tasks(env):
     _run(ingest_log(log, agent, redis))
     assert len(redis.items) == 1
     assert [t.task_type for t in _run(hb(agent)).tasks] == ["process_list"]
+
+
+def test_heartbeat_integrity_and_stop_notice(env):
+    """Integrity changes become siem_agent events; a stop notice is held for the worker."""
+    from app.api.routes.ingest import heartbeat
+    from app.schemas.schemas import HeartbeatRequest
+
+    res = _enroll(env, _key(env, max_uses=None), "tamper-01")
+    redis = _Redis()
+    a, b, c = "a" * 64, "b" * 64, "c" * 64
+
+    def hb(**kw):
+        from app.models.models import Agent
+
+        async def go():
+            async with env() as db:
+                agent = await db.get(Agent, res.agent_id)
+                return await heartbeat(HeartbeatRequest(agent_id=agent.id, **kw), agent, db, redis)
+        return _run(go())
+
+    hb(version="1.7.0", integrity={"binary_sha256": a, "config_sha256": b})  # baseline
+    hb(version="1.7.0", integrity={"binary_sha256": a, "config_sha256": b})
+    assert redis.items == []
+    hb(version="1.7.0", integrity={"binary_sha256": c, "config_sha256": b})
+    assert len(redis.items) == 1
+    event = redis.items[0][1]
+    assert event["log_type"] == "siem_agent" and event["hostname"] == "tamper-01"
+    assert event["raw_message"].startswith("event=agent_integrity_changed file=binary previous=" + a)
+    hb(version="1.8.0", integrity={"binary_sha256": a, "config_sha256": b})  # upgrade: new baseline
+    assert len(redis.items) == 1
+
+    hb(version="1.8.0", status="stopping", reason="service_stop")
+    agent = _agent(env, res.agent_id)
+    assert (agent.status, agent.stop_reason) == ("offline", "service_stop")
+    assert len(redis.items) == 1  # the worker reports it if the agent stays down
+    hb(version="1.8.0")  # restarted
+    agent = _agent(env, res.agent_id)
+    assert (agent.status, agent.stop_reason) == ("online", None)
