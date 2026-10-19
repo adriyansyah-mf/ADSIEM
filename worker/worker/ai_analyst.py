@@ -647,11 +647,11 @@ async def _create_case_from_verdict(
             label = r["family"].replace("_", " ")
             new_label = (family or "other").replace("_", " ")
             db.add(CaseNote(case_id=case.id, author_id=None, is_ai_generated=True, content=(
-                f"🔗 **Related open case** on the same IP/host: [{r['title']}](/cases/{r['case_id']}) ({label})"
-                + (f"\n\n⚠ This case is **{new_label}** after **{label}** on the same target — the earlier "
+                f"**Related open case** on the same IP/host: [{r['title']}](/cases/{r['case_id']}) ({label})"
+                + (f"\n\n**Escalated:** this case is **{new_label}** after **{label}** on the same target — the earlier "
                    "activity may have succeeded; severity raised to critical." if escalated else ""))))
             db.add(CaseNote(case_id=uuid.UUID(r["case_id"]), author_id=None, is_ai_generated=True, content=(
-                f"🔗 **New related case** on the same IP/host: [{prefix} {title}](/cases/{case.id}) "
+                f"**New related case** on the same IP/host: [{prefix} {title}](/cases/{case.id}) "
                 f"({new_label})")))
         await db.commit()
         log.info("case_created_by_ai_l1",
