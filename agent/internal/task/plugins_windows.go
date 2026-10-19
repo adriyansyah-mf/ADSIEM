@@ -30,11 +30,6 @@ func init() {
 	Plugins["open_files"] = unsupported("open_files is not available on Windows")
 }
 
-func unsupported(msg string) Plugin {
-	return func(context.Context, map[string]any, func(map[string]any) error) error {
-		return fmt.Errorf("%s", msg)
-	}
-}
 
 // emitPowerShell runs a script whose output is a JSON array of objects (from
 // ConvertTo-Json -InputObject @(...)) and emits each object as a row.

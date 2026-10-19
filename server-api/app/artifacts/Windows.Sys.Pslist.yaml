@@ -1,0 +1,14 @@
+name: Windows.Sys.Pslist
+description: Running processes with executable path, command line, owner and start time.
+parameters:
+  - name: ProcessRegex
+    description: Only return processes whose name matches this regex
+    default: "."
+sources:
+  - name: Processes
+    plugin: pslist
+    detection:
+      selection:
+        Name|re: "{{ProcessRegex}}"
+      condition: selection
+    fields: [Pid, Ppid, Name, Username, Exe, CommandLine, StartTime, RssKb, Threads]

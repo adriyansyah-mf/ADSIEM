@@ -17,6 +17,24 @@ from pathlib import Path
 
 PORT, OUT = int(sys.argv[1]), Path(sys.argv[2])
 OUT.mkdir(parents=True, exist_ok=True)
+# MOCK_FLOW=1: hand the agent one live-response flow running every Windows plugin
+# (as server-api would after compile_request); its updates go to <out>/flows.jsonl.
+FLOW = {
+    "id": str(uuid.uuid4()), "artifact": "Smoke.Windows.Plugins", "timeout": 300, "max_rows": 20000,
+    "sources": [
+        {"name": "Info", "plugin": "info", "args": {}},
+        {"name": "Pslist", "plugin": "pslist", "args": {}},
+        {"name": "Users", "plugin": "users", "args": {}},
+        {"name": "Persistence", "plugin": "persistence", "args": {}},
+        {"name": "Services", "plugin": "services", "args": {}},
+        {"name": "Programs", "plugin": "programs", "args": {}},
+        {"name": "Netstat", "plugin": "netstat", "args": {}},
+        {"name": "Events", "plugin": "eventlog",
+         "args": {"channel": "Application", "event_ids": "999", "hours": "1", "limit": "50"}},
+    ],
+} if os.environ.get("MOCK_FLOW") else None
+_flow_sent = False
+
 SOURCES = json.loads(os.environ.get("MOCK_SOURCES") or "null") or [
     {"path": "eventlog:Application", "log_type": "windows_application", "is_enabled": True},
     {"path": "eventlog:System", "log_type": "windows_system", "is_enabled": True},
@@ -51,8 +69,16 @@ class Handler(BaseHTTPRequestHandler):
                 fh.write(json.dumps(payload) + "\n")
             return self._reply(202, {"status": "queued"})
         if path == "/api/agent/flows/poll":
+            global _flow_sent
+            if FLOW and not _flow_sent and (OUT / "send_flow").exists():  # the test says when
+                _flow_sent = True
+                return self._reply(200, {"flows": [FLOW], "cancel": []})
             time.sleep(2)
             return self._reply(200, {"flows": [], "cancel": []})
+        if path.startswith("/api/agent/flows/") and path.endswith("/update"):
+            with open(OUT / "flows.jsonl", "a") as fh:
+                fh.write(json.dumps(payload) + "\n")
+            return self._reply(200, {"cancel": False})
         if path == "/api/hygiene":
             (OUT / "hygiene.json").write_text(json.dumps(payload))
             return self._reply(204)

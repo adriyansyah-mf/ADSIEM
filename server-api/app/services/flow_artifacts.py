@@ -37,6 +37,7 @@ ARTIFACT_DIR = Path(__file__).resolve().parent.parent / "artifacts"
 PLUGINS = {
     "info", "pslist", "netstat", "users", "glob", "hash", "read_file",
     "persistence", "dmesg", "open_files", "yara",
+    "eventlog", "services", "programs",  # Windows agents only
 }
 
 # Display order for each plugin's columns. Rows are stored as JSONB, which does
@@ -53,6 +54,10 @@ PLUGIN_COLUMNS = {
     "dmesg": ["Line"],
     "open_files": ["Pid", "Process", "Fd", "Path"],
     "yara": ["Rule", "File", "Size", "Strings"],
+    # eventlog rows also carry each event's EventData fields (after these)
+    "eventlog": ["TimeCreated", "EventID", "Channel", "Provider", "Computer", "RecordID", "Level"],
+    "services": ["Name", "DisplayName", "State", "StartMode", "Account", "Pid", "PathName", "Description"],
+    "programs": ["Name", "Version", "Publisher", "InstallDate", "InstallLocation", "Scope", "UninstallString"],
 }
 
 DEFAULT_TIMEOUT = 600

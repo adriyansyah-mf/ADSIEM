@@ -1,0 +1,14 @@
+name: Windows.Detection.Yara
+description: Scan a folder with every enabled YARA rule (managed on the YARA page).
+parameters:
+  - name: Path
+    default: C:/Users
+  - name: Recursive
+    type: bool
+    default: true
+sources:
+  - name: Matches
+    plugin: yara
+    args:
+      path: "{{Path}}"
+      recursive: "{{Recursive}}"

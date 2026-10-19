@@ -1,0 +1,19 @@
+name: Windows.EventLogs.DefenderDetections
+description: Microsoft Defender detections and actions taken (1116 detected, 1117 action, 1118/1119 action failed), plus real-time protection being turned off (5001).
+parameters:
+  - name: Hours
+    type: int
+    description: How far back to look (0 = everything still in the log)
+    default: 720
+  - name: Limit
+    type: int
+    default: 2000
+sources:
+  - name: Events
+    plugin: eventlog
+    args:
+      channel: "Microsoft-Windows-Windows Defender/Operational"
+      event_ids: "1116,1117,1118,1119,5001"
+      hours: "{{Hours}}"
+      limit: "{{Limit}}"
+    fields: [TimeCreated, EventID, ThreatName, SeverityName, Path, ProcessName, DetectionUser, ActionName]

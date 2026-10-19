@@ -1,0 +1,14 @@
+name: Windows.Network.Netstat
+description: TCP connections and UDP endpoints with the owning process.
+parameters:
+  - name: StateRegex
+    description: "Only connections whose state matches, e.g. ESTABLISHED or LISTEN"
+    default: "."
+sources:
+  - name: Connections
+    plugin: netstat
+    detection:
+      selection:
+        State|re: "{{StateRegex}}"
+      condition: selection
+    fields: [Proto, LocalAddr, LocalPort, RemoteAddr, RemotePort, State, Pid, Process]

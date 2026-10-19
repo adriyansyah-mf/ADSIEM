@@ -1,0 +1,29 @@
+name: Windows.Detection.SuspiciousProcesses
+description: |
+  Processes running from user-writable folders, encoded or download-cradle
+  PowerShell, LOLBins fetching or executing remote content, and common
+  credential-dumping / tunnelling tools.
+sources:
+  - name: Suspicious
+    plugin: pslist
+    detection:
+      writable_path:
+        Exe|contains:
+          - '\AppData\Local\Temp\'
+          - '\Users\Public\'
+          - '\Windows\Temp\'
+          - '\ProgramData\'
+          - '\$Recycle.Bin\'
+      office_writable:
+        Exe|contains: '\Downloads\'
+        Exe|endswith: ['.scr', '.pif', '.com']
+      powershell:
+        Name|re: '(?i)^(powershell|pwsh)\.exe$'
+        CommandLine|re: '(?i)(\s-e(nc(odedcommand)?)?\s|downloadstring|downloadfile|iex\s*\(|invoke-expression|frombase64string|-w(indowstyle)?\s+hidden)'
+      lolbin:
+        Name|re: '(?i)^(mshta|rundll32|regsvr32|certutil|bitsadmin|wmic|msbuild|installutil)\.exe$'
+        CommandLine|re: '(?i)(https?://|javascript:|vbscript:|-urlcache|/transfer|scrobj\.dll|\.sct)'
+      tools:
+        Name|re: '(?i)^(mimikatz|procdump64?|psexec(64)?|psexesvc|nc64|ncat|chisel|plink|ngrok|rclone|xmrig)\.exe$'
+      condition: 1 of them
+    fields: [Pid, Ppid, Name, Username, Exe, CommandLine, StartTime]

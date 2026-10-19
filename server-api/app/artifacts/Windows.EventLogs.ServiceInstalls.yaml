@@ -1,0 +1,19 @@
+name: Windows.EventLogs.ServiceInstalls
+description: Services installed (System 7045) — PsExec, remote admin tools and persistence show up here.
+parameters:
+  - name: Hours
+    type: int
+    description: How far back to look (0 = everything still in the log)
+    default: 720
+  - name: Limit
+    type: int
+    default: 1000
+sources:
+  - name: Events
+    plugin: eventlog
+    args:
+      channel: "System"
+      event_ids: "7045"
+      hours: "{{Hours}}"
+      limit: "{{Limit}}"
+    fields: [TimeCreated, ServiceName, ImagePath, ServiceType, StartType, AccountName]

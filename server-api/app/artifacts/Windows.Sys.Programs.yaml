@@ -1,0 +1,12 @@
+name: Windows.Sys.Programs
+description: Installed programs (Add/Remove Programs), machine-wide and per user.
+parameters:
+  - name: NameRegex
+    default: "."
+sources:
+  - name: Programs
+    plugin: programs
+    detection:
+      selection:
+        Name|re: "{{NameRegex}}"
+      condition: selection

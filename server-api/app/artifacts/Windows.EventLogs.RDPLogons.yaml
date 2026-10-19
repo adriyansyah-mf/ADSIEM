@@ -1,0 +1,23 @@
+name: Windows.EventLogs.RDPLogons
+description: Successful Remote Desktop logons (Security 4624, logon type 10 RemoteInteractive) and their source address.
+parameters:
+  - name: Hours
+    type: int
+    description: How far back to look (0 = everything still in the log)
+    default: 168
+  - name: Limit
+    type: int
+    default: 2000
+sources:
+  - name: Events
+    plugin: eventlog
+    args:
+      channel: "Security"
+      event_ids: "4624"
+      hours: "{{Hours}}"
+      limit: "{{Limit}}"
+    detection:
+      rdp:
+        LogonType: '10'
+      condition: rdp
+    fields: [TimeCreated, TargetUserName, TargetDomainName, IpAddress, WorkstationName, LogonType]

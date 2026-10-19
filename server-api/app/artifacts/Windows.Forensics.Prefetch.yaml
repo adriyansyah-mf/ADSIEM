@@ -1,0 +1,11 @@
+name: Windows.Forensics.Prefetch
+description: |
+  Prefetch files — one per program that has run (name-HASH.pf), with the time
+  of its last run as the file's modification time. Evidence of execution even
+  after the binary is gone.
+sources:
+  - name: Prefetch
+    plugin: glob
+    args:
+      globs: ["C:/Windows/Prefetch/*.pf"]
+    fields: [Name, ModTime, Size, Path]

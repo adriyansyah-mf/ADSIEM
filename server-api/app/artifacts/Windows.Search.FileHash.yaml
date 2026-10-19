@@ -1,0 +1,10 @@
+name: Windows.Search.FileHash
+description: MD5 / SHA1 / SHA256 of every regular file matching a glob.
+parameters:
+  - name: Glob
+    default: C:/Windows/System32/drivers/*.sys
+sources:
+  - name: Hashes
+    plugin: hash
+    args:
+      globs: ["{{Glob}}"]

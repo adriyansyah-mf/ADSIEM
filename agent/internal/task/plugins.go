@@ -42,6 +42,16 @@ var Plugins = map[string]Plugin{
 	"dmesg":       pluginDmesg,
 	"open_files":  pluginOpenFiles,
 	"yara":        pluginYara,
+	// Windows-only (plugins_windows*.go); elsewhere they say so
+	"eventlog": unsupported("eventlog queries the Windows Event Log; on Linux search the logs in the SIEM"),
+	"services": unsupported("services lists Windows services; on Linux use the persistence plugin (systemd units)"),
+	"programs": unsupported("programs lists Windows installed programs; on Linux see Hygiene → packages"),
+}
+
+func unsupported(msg string) Plugin {
+	return func(context.Context, map[string]any, func(map[string]any) error) error {
+		return fmt.Errorf("%s", msg)
+	}
 }
 
 // ─── Arg helpers ─────────────────────────────────────────────────
@@ -297,7 +307,10 @@ func globRegexp(pattern string) (*regexp.Regexp, error) {
 	for i := 0; i < len(pattern); i++ {
 		switch c := pattern[i]; c {
 		case '*':
-			if i+1 < len(pattern) && pattern[i+1] == '*' {
+			if i+2 < len(pattern) && pattern[i+1] == '*' && pattern[i+2] == '/' {
+				b.WriteString("(?:.*/)?") // "**/": zero or more directories
+				i += 2
+			} else if i+1 < len(pattern) && pattern[i+1] == '*' {
 				b.WriteString(".*")
 				i++
 			} else {
@@ -305,6 +318,19 @@ func globRegexp(pattern string) (*regexp.Regexp, error) {
 			}
 		case '?':
 			b.WriteString("[^/]")
+		case '{':
+			// {exe,dll,ps1}: one of the comma-separated literals (no nesting)
+			end := strings.IndexByte(pattern[i:], '}')
+			if end < 0 {
+				b.WriteString(regexp.QuoteMeta("{"))
+				continue
+			}
+			alts := strings.Split(pattern[i+1:i+end], ",")
+			for j, a := range alts {
+				alts[j] = regexp.QuoteMeta(a)
+			}
+			b.WriteString("(?:" + strings.Join(alts, "|") + ")")
+			i += end
 		default:
 			b.WriteString(regexp.QuoteMeta(string(c)))
 		}
@@ -315,7 +341,7 @@ func globRegexp(pattern string) (*regexp.Regexp, error) {
 
 // globRoot is the longest leading directory of the pattern without wildcards.
 func globRoot(pattern string) string {
-	idx := strings.IndexAny(pattern, "*?")
+	idx := strings.IndexAny(pattern, "*?{")
 	if idx < 0 {
 		return pattern
 	}

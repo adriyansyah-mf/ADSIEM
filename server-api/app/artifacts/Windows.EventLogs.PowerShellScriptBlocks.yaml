@@ -1,0 +1,19 @@
+name: Windows.EventLogs.PowerShellScriptBlocks
+description: PowerShell script block logging (4104) — the deobfuscated code PowerShell actually ran. Needs script block logging (the MSI's ENABLE_AUDITING=1).
+parameters:
+  - name: Hours
+    type: int
+    description: How far back to look (0 = everything still in the log)
+    default: 24
+  - name: Limit
+    type: int
+    default: 2000
+sources:
+  - name: Events
+    plugin: eventlog
+    args:
+      channel: "Microsoft-Windows-PowerShell/Operational"
+      event_ids: "4104"
+      hours: "{{Hours}}"
+      limit: "{{Limit}}"
+    fields: [TimeCreated, ScriptBlockText, Path, ScriptBlockId]

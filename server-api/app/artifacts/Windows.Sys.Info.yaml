@@ -1,0 +1,5 @@
+name: Windows.Sys.Info
+description: Hostname, Windows edition and version, build, architecture, domain and uptime.
+sources:
+  - name: Info
+    plugin: info

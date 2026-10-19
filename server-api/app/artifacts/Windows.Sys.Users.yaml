@@ -1,0 +1,6 @@
+name: Windows.Sys.Users
+description: Local accounts — enabled, member of Administrators, last logon, password last set.
+sources:
+  - name: Users
+    plugin: users
+    fields: [Username, Uid, Enabled, Admin, LastLogon, PasswordLastSet, Description]

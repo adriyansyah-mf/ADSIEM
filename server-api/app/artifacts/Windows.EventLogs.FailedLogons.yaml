@@ -1,0 +1,19 @@
+name: Windows.EventLogs.FailedLogons
+description: Failed logons (Security 4625) — who, from where, with which logon type and failure reason.
+parameters:
+  - name: Hours
+    type: int
+    description: How far back to look (0 = everything still in the log)
+    default: 24
+  - name: Limit
+    type: int
+    default: 5000
+sources:
+  - name: Events
+    plugin: eventlog
+    args:
+      channel: "Security"
+      event_ids: "4625"
+      hours: "{{Hours}}"
+      limit: "{{Limit}}"
+    fields: [TimeCreated, TargetUserName, TargetDomainName, IpAddress, WorkstationName, LogonType, Status, SubStatus, ProcessName]
