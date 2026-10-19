@@ -50,3 +50,33 @@ async def update_setting(
         {"is_secret": bool(setting.is_secret)},
     )
     return _mask(setting)
+
+
+@router.get("/api/settings/ai-models")
+async def list_ai_models(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(Perm)],
+):
+    """Models and combos the configured 9router offers (its /v1/models), for the
+    model pickers — every AI call still goes through 9router."""
+    import httpx
+
+    from app.core.config import settings
+
+    key = (await db.execute(
+        select(PlatformSetting.value).where(PlatformSetting.key == "ninerouter_api_key")
+    )).scalar_one_or_none()
+    if not key:
+        raise HTTPException(status_code=422, detail="Set the 9router API key first")
+    url = f"{settings.NINEROUTER_BASE_URL.rstrip('/')}/models"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {key}"})
+            resp.raise_for_status()
+            body = resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"9router /models failed: {exc}")
+    items = body.get("data", body) if isinstance(body, dict) else body
+    if not isinstance(items, list):
+        return {"models": []}
+    return {"models": sorted({str(m["id"]) for m in items if isinstance(m, dict) and m.get("id")})}

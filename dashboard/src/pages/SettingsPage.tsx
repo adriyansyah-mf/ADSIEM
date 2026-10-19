@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useSettings, useUpdateSetting } from '@/hooks/useSettings'
 import type { Setting } from '@/types'
 import { api } from '@/api/client'
@@ -8,6 +9,8 @@ const SETTING_LABELS: Record<string, string> = {
   org_name: 'Organization Name',
   ninerouter_api_key: '9router API Key',
   ninerouter_model: '9router Combo',
+  investigation_model: 'AI Investigation Model',
+  bruteforce_digest_enabled: 'Brute-Force Daily Digest',
   searxng_url: 'SearXNG URL',
   ai_analyst_enabled: 'AI Analyst',
   ai_min_severity: 'Minimum Alert Severity for AI',
@@ -35,6 +38,8 @@ const SETTING_HINTS: Record<string, string> = {
   org_name: 'Shown as the title on generated PDF reports (Reports page)',
   ninerouter_api_key: 'Generated once via the 9router dashboard API (POST /api/keys) — see docs/PROJECT_OVERVIEW.md',
   ninerouter_model: 'Combo name created in the 9router dashboard, e.g. "combo"',
+  investigation_model: 'Model for "Investigate with AI" on cases, through 9router — pick a frontier model with native tool calling and a long context. Empty = the combo above',
+  bruteforce_digest_enabled: 'Collect failed-only brute force from public IPs into one AI case per day (true / false)',
   searxng_url: 'Internal URL of your SearXNG instance',
   ai_analyst_enabled: 'Enable or disable automated AI triage (true / false)',
   ai_min_severity: 'Only run AI triage for alerts at this severity or above (low / medium / high / critical)',
@@ -60,11 +65,22 @@ const SETTING_HINTS: Record<string, string> = {
 
 const MASKED = '••••••••'
 
+// settings whose value is a 9router model or combo: offer what 9router lists
+const MODEL_KEYS = new Set(['ninerouter_model', 'investigation_model'])
+
 function SettingRow({ setting }: { setting: Setting }) {
   const [value, setValue] = useState(setting.is_secret ? '' : setting.value)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const update = useUpdateSetting()
+  const isModel = MODEL_KEYS.has(setting.key)
+  const models = useQuery<{ models: string[] }>({
+    queryKey: ['ai-models'],
+    queryFn: () => api.get('/api/settings/ai-models').then(r => r.data),
+    enabled: isModel,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
 
   useEffect(() => {
     if (!setting.is_secret) setValue(setting.value)
@@ -112,10 +128,16 @@ function SettingRow({ setting }: { setting: Setting }) {
       </div>
 
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        {isModel && (
+          <datalist id={`models-${setting.key}`}>
+            {(models.data?.models ?? []).map(m => <option key={m} value={m} />)}
+          </datalist>
+        )}
         <input
           type={setting.is_secret ? 'password' : 'text'}
           value={value}
-          placeholder={setting.is_secret ? placeholder : ''}
+          list={isModel ? `models-${setting.key}` : undefined}
+          placeholder={setting.is_secret ? placeholder : isModel ? 'Pick or type a 9router model / combo' : ''}
           onChange={e => { setValue(e.target.value); setSaved(false) }}
           style={{
             flex: 1,
@@ -136,7 +158,7 @@ function SettingRow({ setting }: { setting: Setting }) {
         )}
         <button
           onClick={handleSave}
-          disabled={update.isPending || !value}
+          disabled={update.isPending || (!value && !isModel)}
           style={{
             padding: '7px 16px',
             borderRadius: '4px',
@@ -147,8 +169,8 @@ function SettingRow({ setting }: { setting: Setting }) {
             fontWeight: 700,
             fontSize: '12px',
             letterSpacing: '1px',
-            cursor: update.isPending || !value ? 'not-allowed' : 'pointer',
-            opacity: !value ? 0.5 : 1,
+            cursor: update.isPending || (!value && !isModel) ? 'not-allowed' : 'pointer',
+            opacity: !value && !isModel ? 0.5 : 1,
             transition: 'all 0.15s',
             whiteSpace: 'nowrap',
           }}
@@ -160,6 +182,13 @@ function SettingRow({ setting }: { setting: Setting }) {
       {error && (
         <div style={{ gridColumn: '2', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--accent-red)', marginTop: '-6px' }}>
           {error}
+        </div>
+      )}
+      {isModel && (
+        <div style={{ gridColumn: '2', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px' }}>
+          {models.isLoading ? 'Loading models from 9router…'
+            : models.isError ? 'Could not list 9router models — type the model id'
+            : `${models.data?.models.length ?? 0} models available in 9router`}
         </div>
       )}
     </div>

@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { format } from 'date-fns'
+import { format, formatDistanceStrict } from 'date-fns'
+import {
+  AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileCode2, FileText,
+  Play, Search, Server, Terminal, XCircle,
+} from 'lucide-react'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 import MarkdownNote from '@/components/MarkdownNote'
@@ -25,10 +29,30 @@ interface Investigation {
 }
 
 const ACTIVE = new Set(['queued', 'running'])
-const VERDICT_COLOR: Record<string, string> = {
-  true_positive: 'var(--accent-red, #f87171)',
-  false_positive: 'var(--accent-green, #4ade80)',
-  inconclusive: 'var(--accent-yellow, #fbbf24)',
+
+const STATUS_COLOR: Record<string, string> = {
+  queued: 'var(--text-muted)', running: 'var(--accent-cyan)', finished: 'var(--accent-green)',
+  error: 'var(--accent-red)', cancelled: 'var(--text-muted)', interrupted: 'var(--accent-orange)',
+}
+const VERDICT: Record<string, { label: string; color: string }> = {
+  true_positive: { label: 'True positive', color: 'var(--accent-red)' },
+  false_positive: { label: 'False positive', color: 'var(--accent-green)' },
+  inconclusive: { label: 'Inconclusive', color: 'var(--accent-yellow)' },
+}
+// read-only SIEM tools, as plain verbs
+const TOOL_LABEL: Record<string, string> = {
+  list_hosts: 'Listed hosts', list_artifacts: 'Listed artifacts', get_flow_rows: 'Read flow rows',
+  search_events: 'Searched events', aggregate_events: 'Aggregated events', event_timeline: 'Built event timeline',
+  get_alert: 'Read alert', search_alerts: 'Searched alerts', get_case: 'Read case',
+  correlate_entity: 'Correlated entity', reconstruct_timeline: 'Reconstructed timeline', pivot_ioc: 'Pivoted on IOC',
+  recent_fim_changes: 'Checked file integrity changes', agent_hygiene: 'Checked host hygiene',
+  ueba_top_risky_entities: 'Checked UEBA risk', search_sop: 'Searched SOPs',
+}
+
+const mono: React.CSSProperties = { fontFamily: 'Share Tech Mono, monospace' }
+const label: React.CSSProperties = {
+  fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', letterSpacing: '1.5px',
+  textTransform: 'uppercase', color: 'var(--text-muted)',
 }
 
 function detail(err: unknown, fallback: string): string {
@@ -36,51 +60,95 @@ function detail(err: unknown, fallback: string): string {
   return typeof d === 'string' ? d : fallback
 }
 
-function StepLine({ step }: { step: Step }) {
-  const [open, setOpen] = useState(false)
-  const time = format(new Date(step.ts), 'HH:mm:ss')
-  let icon = '•'
-  let text: React.ReactNode = step.kind
+function Pill({ text, color }: { text: string; color: string }) {
+  return (
+    <span style={{
+      ...label, color, border: `1px solid ${color}`, background: 'transparent',
+      padding: '1px 6px', borderRadius: '3px', fontSize: '10px', letterSpacing: '1px',
+    }}>{text}</span>
+  )
+}
+
+function argsText(args: unknown): string {
+  if (!args || typeof args !== 'object') return ''
+  return Object.entries(args as Record<string, unknown>)
+    .filter(([, v]) => v !== '' && v != null)
+    .map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`)
+    .join('  ')
+}
+
+type Row = { icon: React.ReactNode; title: React.ReactNode; detail?: React.ReactNode; tone?: string; extra?: React.ReactNode }
+
+function describe(step: Step, open: boolean, toggle: () => void): Row | null {
+  const s = step as Record<string, any>
   switch (step.kind) {
     case 'started':
-      icon = '▶'; text = `Started by ${step.by} (${step.model})`; break
+      return { icon: <Play size={13} />, title: 'Started', detail: `by ${s.by} · ${s.model}` }
     case 'context':
-      icon = '📋'; text = `Read the case — hosts: ${(step.hosts as string[]).join(', ') || 'none linked'}`; break
-    case 'thought':
-      icon = '💭'; text = <span className="italic">{String(step.text)}</span>; break
+      return { icon: <FileText size={13} />, title: 'Read the case',
+        detail: s.hosts?.length ? `hosts: ${s.hosts.join(', ')}` : 'no linked hosts' }
     case 'tool':
-      icon = '🔎'; text = <><span className="font-mono">{String(step.tool)}</span>{' '}
-        <span className="text-muted-foreground font-mono">{JSON.stringify(step.args)}</span></>; break
+      return { icon: <Search size={13} />, title: TOOL_LABEL[s.tool] ?? s.tool, detail: argsText(s.args) }
     case 'flow':
-      icon = '🖥'; text = <>Live response <b>{String(step.artifact)}</b> on <b>{String(step.host)}</b>
-        {step.reason ? <span className="text-muted-foreground"> — {String(step.reason)}</span> : null}{' '}
-        <a className="underline" href={`/live-response?flow=${step.flow_id}`}>open flow</a></>; break
+      return {
+        icon: <Server size={13} />, tone: 'var(--accent-cyan)',
+        title: <>Ran <b>{s.artifact}</b> on <b>{s.host}</b></>,
+        detail: <>{s.reason}{s.reason ? ' · ' : ''}<a href={`/live-response?flow=${s.flow_id}`} style={{ color: 'var(--accent-cyan)' }}>view flow</a></>,
+      }
     case 'flow_result':
-      icon = '📥'; text = <>Flow {String(step.status)}: {Object.entries((step.rows as Record<string, number>) || {})
-        .map(([s, n]) => `${s} ${n} rows`).join(', ')}</>; break
+      return { icon: <CheckCircle2 size={13} />, title: `Flow ${s.status}`,
+        detail: Object.entries(s.rows ?? {}).map(([src, n]) => `${src}: ${n} rows`).join(' · ') }
     case 'artifact':
-      icon = '🧩'; text = <>Created artifact <b>{String(step.name)}</b>
-        {step.reason ? <span className="text-muted-foreground"> — {String(step.reason)}</span> : null}{' '}
-        <button className="underline" onClick={() => setOpen(o => !o)}>{open ? 'hide' : 'YAML'}</button></>; break
-    case 'warning':
-      icon = '⚠'; text = <span className="text-amber-400">{String(step.text)}</span>; break
+      return {
+        icon: <FileCode2 size={13} />, tone: 'var(--accent-purple, #a78bfa)',
+        title: <>Created artifact <b>{s.name}</b></>,
+        detail: <>{s.reason}{s.reason ? ' · ' : ''}<button onClick={toggle} style={{ color: 'var(--accent-cyan)' }}>{open ? 'hide YAML' : 'YAML'}</button></>,
+        extra: open ? <pre style={{ ...mono, fontSize: '11px', whiteSpace: 'pre-wrap', margin: '6px 0 0', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px', background: 'var(--bg-base)' }}>{s.yaml}</pre> : null,
+      }
     case 'refused':
-      icon = '⛔'; text = <span className="text-destructive">Refused: {String(step.reason)}</span>; break
+      return { icon: <Ban size={13} />, tone: 'var(--accent-red)', title: 'Refused', detail: s.reason }
+    case 'warning':
+      return { icon: <AlertTriangle size={13} />, tone: 'var(--accent-yellow)', title: 'Warning', detail: s.text }
     case 'finished':
-      icon = '✅'; text = `Finished — ${String(step.verdict).replace('_', ' ')}, ${step.flows} live-response runs, ${step.artifacts} new artifacts`; break
+      return { icon: <CheckCircle2 size={13} />, tone: 'var(--accent-green)', title: 'Finished',
+        detail: `${s.flows} live-response runs · ${s.artifacts} new artifacts` }
     case 'cancelled':
-      icon = '⏹'; text = `Cancelled: ${String(step.reason)}`; break
+      return { icon: <CircleStop size={13} />, title: 'Cancelled', detail: s.reason }
     case 'error':
-      icon = '⚠'; text = <span className="text-destructive">Error: {String(step.error)}</span>; break
+      return { icon: <XCircle size={13} />, tone: 'var(--accent-red)', title: 'Error', detail: s.error }
+    default:
+      return null
   }
+}
+
+function Timeline({ steps, showReasoning }: { steps: Step[]; showReasoning: boolean }) {
+  const [openIdx, setOpenIdx] = useState<number | null>(null)
   return (
-    <div className="text-xs py-0.5">
-      <span className="text-muted-foreground font-mono mr-2">{time}</span>
-      <span className="mr-1">{icon}</span>
-      {text}
-      {open && step.kind === 'artifact' && (
-        <pre className="mt-1 ml-16 p-2 rounded border border-border bg-muted/30 font-mono whitespace-pre-wrap">{String(step.yaml)}</pre>
-      )}
+    <div style={{ border: '1px solid var(--border)', borderRadius: '4px', maxHeight: '320px', overflow: 'auto' }}>
+      {steps.length === 0 && <div style={{ ...mono, fontSize: '12px', color: 'var(--text-muted)', padding: '10px' }}>Queued</div>}
+      {steps.map((step, i) => {
+        if (step.kind === 'thought') {
+          if (!showReasoning) return null
+          return (
+            <div key={i} style={{ padding: '6px 10px 6px 92px', fontSize: '12px', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+              {String(step.text)}
+            </div>
+          )
+        }
+        const row = describe(step, openIdx === i, () => setOpenIdx(openIdx === i ? null : i))
+        if (!row) return null
+        return (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '64px 18px 1fr', gap: '6px', padding: '6px 10px', borderBottom: '1px solid var(--border)', alignItems: 'start' }}>
+            <span style={{ ...mono, fontSize: '11px', color: 'var(--text-muted)', paddingTop: '1px' }}>{format(new Date(step.ts), 'HH:mm:ss')}</span>
+            <span style={{ color: row.tone ?? 'var(--text-muted)', paddingTop: '2px' }}>{row.icon}</span>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ fontSize: '13px', color: row.tone ?? 'var(--text-primary)' }}>{row.title}</span>
+              {row.detail && <span style={{ ...mono, fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px', wordBreak: 'break-word' }}>{row.detail}</span>}
+              {row.extra}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -93,10 +161,11 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
     refetchInterval: (q) => ((q.state.data as Investigation[] | undefined)?.some(r => ACTIVE.has(r.status)) ? 3000 : false),
   })
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [showReasoning, setShowReasoning] = useState(false)
   const current = runs.find(r => r.id === selectedId) ?? runs[0]
   const active = current ? ACTIVE.has(current.status) : false
 
-  // the report is added to the case as an AI note: refresh the case when a run ends
+  // the report is added to the case as a note: refresh the case when a run ends
   const [wasActive, setWasActive] = useState(false)
   useEffect(() => {
     if (wasActive && !active) qc.invalidateQueries({ queryKey: ['case', caseId] })
@@ -116,55 +185,79 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['investigations', caseId] }),
   })
 
+  const btn: React.CSSProperties = {
+    display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '4px',
+    fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px', cursor: 'pointer',
+  }
+  const thoughts = current?.steps.filter(s => s.kind === 'thought').length ?? 0
+  const verdict = current?.verdict ? VERDICT[current.verdict] : null
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 flex-wrap">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <button onClick={() => start.mutate()} disabled={active || start.isPending}
-          className="px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm disabled:opacity-50">
-          {active ? 'Investigating…' : '🤖 Investigate with AI'}
+          style={{ ...btn, border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.08)', color: 'var(--accent-cyan)', opacity: active ? 0.5 : 1, cursor: active ? 'not-allowed' : 'pointer' }}>
+          <Terminal size={13} /> {active ? 'INVESTIGATING' : 'INVESTIGATE'}
         </button>
         {active && current && (
           <button onClick={() => cancel.mutate(current.id)} disabled={cancel.isPending}
-            className="px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">Cancel</button>
+            style={{ ...btn, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+            <CircleStop size={13} /> CANCEL
+          </button>
+        )}
+        {current && (
+          <>
+            <Pill text={current.status} color={STATUS_COLOR[current.status] ?? 'var(--text-muted)'} />
+            {verdict && <Pill text={verdict.label} color={verdict.color} />}
+            <span style={{ ...mono, fontSize: '11px', color: 'var(--text-muted)' }}>
+              {current.model}
+              {current.finished_at && ` · ${formatDistanceStrict(new Date(current.finished_at), new Date(current.created_at))}`}
+            </span>
+          </>
         )}
         {runs.length > 1 && (
           <select value={current?.id} onChange={e => setSelectedId(e.target.value)}
-            className="ml-auto px-2 py-1 rounded border border-border bg-background text-xs">
+            style={{ ...mono, marginLeft: 'auto', fontSize: '11px', padding: '3px 6px', background: 'var(--bg-base)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px' }}>
             {runs.map(r => (
               <option key={r.id} value={r.id}>
-                {format(new Date(r.created_at), 'dd MMM HH:mm')} — {r.status}{r.verdict ? ` (${r.verdict.replace('_', ' ')})` : ''}
+                {format(new Date(r.created_at), 'dd MMM HH:mm')} · {r.status}{r.verdict ? ` · ${VERDICT[r.verdict]?.label ?? r.verdict}` : ''}
               </option>
             ))}
           </select>
         )}
       </div>
+
       {!current && (
-        <p className="text-xs text-muted-foreground">
-          The AI reads this case, searches the logs and runs live-response artifacts on the affected hosts
-          (writing new ones when needed), then adds its findings to the case. It only collects — isolation,
-          killing processes and other response actions stay with you.
-        </p>
+        <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          Reads the case and its alerts, searches the logs, and collects evidence from the case&apos;s hosts with
+          live-response artifacts (writing new ones if needed). The findings are added to the case as a note.
+          Response actions — isolate, kill, quarantine, block — are left to you.
+        </div>
       )}
+
       {current && (
         <>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="font-semibold uppercase">{current.status}</span>
-            {current.verdict && (
-              <span style={{ color: VERDICT_COLOR[current.verdict], border: `1px solid ${VERDICT_COLOR[current.verdict]}` }}
-                className="px-1.5 rounded font-semibold uppercase">{current.verdict.replace('_', ' ')}</span>
+          {current.error && current.status !== 'finished' && (
+            <div style={{ ...mono, fontSize: '12px', color: 'var(--accent-red)' }}>{current.error}</div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={label}>Activity</span>
+            {thoughts > 0 && (
+              <button onClick={() => setShowReasoning(v => !v)}
+                style={{ ...mono, fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                {showReasoning ? <ChevronDown size={12} /> : <ChevronRight size={12} />} reasoning ({thoughts})
+              </button>
             )}
-            {current.model && <span className="text-muted-foreground">{current.model}</span>}
-            {current.error && <span className="text-destructive">{current.error}</span>}
           </div>
-          <div className="max-h-72 overflow-auto rounded border border-border p-2">
-            {current.steps.length === 0 ? <div className="text-xs text-muted-foreground">Queued…</div>
-              : current.steps.map((s, i) => <StepLine key={i} step={s} />)}
-          </div>
+          <Timeline steps={current.steps} showReasoning={showReasoning} />
           {current.report && (
-            <div className="rounded border border-border p-3">
-              <MarkdownNote content={current.report}
-                style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)' }} />
-            </div>
+            <>
+              <span style={label}>Report</span>
+              <div style={{ border: '1px solid var(--border)', borderRadius: '4px', padding: '12px 14px' }}>
+                <MarkdownNote content={current.report}
+                  style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)' }} />
+              </div>
+            </>
           )}
         </>
       )}
