@@ -23,6 +23,10 @@ function Show-Diagnostics {
     Write-Host "---- config.yaml"; Get-Content (Join-Path $dataDir "config.yaml") -ErrorAction SilentlyContinue |
         Where-Object { $_ -notmatch "token" }
     Write-Host "---- received logs"; Get-Content (Join-Path $mockOut "logs.jsonl") -Tail 20 -ErrorAction SilentlyContinue
+    Write-Host "---- flow updates (without rows)"
+    Get-Content (Join-Path $mockOut "flows.jsonl") -ErrorAction SilentlyContinue | ConvertFrom-Json |
+        ForEach-Object { "{0} state={1} rows={2} error={3} logs={4}" -f $_.source, $_.state, @($_.rows).Count, $_.error,
+            (($_.logs | ForEach-Object { "$($_.level): $($_.message)" }) -join " | ") }
     Write-Host "---- msiexec log (errors)"; Select-String -Path (Join-Path $work "*.log") -Pattern "error|failed|return value 3" -ErrorAction SilentlyContinue |
         Select-Object -Last 30 | ForEach-Object { $_.Line }
 }
@@ -39,6 +43,7 @@ function Invoke-Msiexec([string[]]$msiArgs, [string]$logName) {
 $tls = Join-Path $work "tls"
 python tests\windows\make_cert.py $tls
 if ($LASTEXITCODE -ne 0) { throw "make_cert.py failed" }
+$env:MOCK_FLOW = "1"
 $mock = Start-Process python -PassThru -NoNewWindow -ArgumentList @("tests\windows\mock_siem.py", $port, "`"$mockOut`"",
                                                                     "`"$tls\cert.pem`"", "`"$tls\key.pem`"")
 $caCert = $null
@@ -124,6 +129,41 @@ try {
     Write-Host ("ok: hygiene: {0} {1} (kernel {2}), {3} MB RAM, {4} ports, {5} users, {6} programs, score {7}, issues: {8}" -f
         $h.os_name, $h.os_version, $h.kernel, $h.mem_total_mb, @($h.open_ports).Count, @($h.users).Count,
         @($h.packages).Count, $h.hygiene_score, ((@($h.issues) | ForEach-Object { $_.message }) -join "; "))
+
+    # 4c. Live response: a flow running every Windows plugin (Windows.* artifacts) returns rows.
+    New-Item -ItemType File -Force -Path (Join-Path $mockOut "send_flow") | Out-Null
+    $flowsPath = Join-Path $mockOut "flows.jsonl"
+    $deadline = (Get-Date).AddSeconds(240)
+    $updates = @()
+    while ($true) {
+        if (Test-Path $flowsPath) { $updates = @(Get-Content $flowsPath | ConvertFrom-Json) }
+        if ($updates | Where-Object { $_.state -in @("finished", "error", "cancelled") }) { break }
+        if ((Get-Date) -gt $deadline) { Fail "live-response flow didn't finish" }
+        Start-Sleep 3
+    }
+    $final = $updates | Where-Object { $_.state -in @("finished", "error", "cancelled") } | Select-Object -First 1
+    $errors = @($updates | ForEach-Object { $_.logs } | Where-Object { $_ -and $_.level -eq "error" })
+    if ($final.state -ne "finished" -or $errors) {
+        Fail ("flow ended '{0}' {1}; errors: {2}" -f $final.state, $final.error, (($errors | ForEach-Object { $_.message }) -join " | "))
+    }
+    $rowsBy = @{}
+    foreach ($u in $updates) {
+        if (-not $u.source -or -not $u.rows) { continue }
+        $key = [string]$u.source
+        if (-not $rowsBy.ContainsKey($key)) { $rowsBy[$key] = @() }
+        $rowsBy[$key] = $rowsBy[$key] + @($u.rows)
+    }
+    foreach ($src in "Info", "Pslist", "Users", "Persistence", "Services", "Programs", "Netstat", "Events") {
+        if (-not $rowsBy.ContainsKey($src) -or $rowsBy[$src].Count -lt 1) { Fail "live-response source $src returned no rows" }
+    }
+    $info = $rowsBy["Info"][0]
+    if ($info.OSRelease -notlike "Windows*") { Fail "info OSRelease '$($info.OSRelease)'" }
+    if (-not ($rowsBy["Pslist"] | Where-Object { $_.Name -eq "siem-agent.exe" })) { Fail "pslist lacks the agent itself" }
+    if (-not ($rowsBy["Services"] | Where-Object { $_.Name -eq "SIEMAgent" })) { Fail "services lacks SIEMAgent" }
+    $ev = $rowsBy["Events"] | Where-Object { $_.Data1 -like "siem-smoke-*" } | Select-Object -First 1
+    if (-not $ev -or $ev.EventID -ne "999" -or $ev.Provider -ne "SIEMSmoke") { Fail "eventlog didn't return the smoke event" }
+    Write-Host ("ok: live response: " + (($rowsBy.Keys | Sort-Object | ForEach-Object { "$_=$(@($rowsBy[$_]).Count)" }) -join ", ") +
+        "; info: $($info.OSRelease) $($info.Kernel)")
 
     # 5. Uninstall removes the service but keeps the config (and its token).
     $code = Invoke-Msiexec @("/x", "`"$Msi`"") "uninstall.log"

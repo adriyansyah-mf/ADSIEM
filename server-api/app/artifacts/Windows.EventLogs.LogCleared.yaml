@@ -1,0 +1,21 @@
+name: Windows.EventLogs.LogCleared
+description: Event logs being cleared (Security 1102, System 104) — a classic anti-forensics step.
+parameters:
+  - name: Hours
+    type: int
+    default: 720
+sources:
+  - name: SecurityLog
+    plugin: eventlog
+    args:
+      channel: Security
+      event_ids: "1102"
+      hours: "{{Hours}}"
+    fields: [TimeCreated, SubjectUserName, SubjectDomainName, Computer]
+  - name: OtherLogs
+    plugin: eventlog
+    args:
+      channel: System
+      event_ids: "104"
+      hours: "{{Hours}}"
+    fields: [TimeCreated, Channel, SubjectUserName, SubjectDomainName, Computer]

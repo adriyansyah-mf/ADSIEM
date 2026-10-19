@@ -60,23 +60,51 @@ type eventXML struct {
 // System fields come first in a fixed order, then EventData/UserData fields
 // sorted by name. EventData entries without a Name become Data1, Data2, ...
 func FormatXML(raw []byte) (string, error) {
+	pairs, err := fieldPairs(raw)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString("EventID=" + pairs[0].value)
+	for _, p := range pairs[1:] {
+		b.WriteString(" " + p.key + "=" + quote(p.value))
+	}
+	return b.String(), nil
+}
+
+// Fields returns the same fields FormatXML writes, as a map (live-response
+// event log queries emit them as rows).
+func Fields(raw []byte) (map[string]string, error) {
+	pairs, err := fieldPairs(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(pairs))
+	for _, p := range pairs {
+		out[p.key] = p.value
+	}
+	return out, nil
+}
+
+type pair struct{ key, value string }
+
+// fieldPairs: EventID first, then System fields in a fixed order, then
+// EventData/UserData sorted by name; empty values are left out.
+func fieldPairs(raw []byte) ([]pair, error) {
 	var ev eventXML
 	if err := xml.Unmarshal(raw, &ev); err != nil {
-		return "", fmt.Errorf("parse event xml: %w", err)
+		return nil, fmt.Errorf("parse event xml: %w", err)
 	}
 	s := ev.System
 	if strings.TrimSpace(s.EventID) == "" {
-		return "", fmt.Errorf("event has no EventID")
+		return nil, fmt.Errorf("event has no EventID")
 	}
 
-	var b strings.Builder
-	b.WriteString("EventID=" + strings.TrimSpace(s.EventID))
+	pairs := []pair{{"EventID", strings.TrimSpace(s.EventID)}}
 	add := func(k, v string) {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			return
+		if v = strings.TrimSpace(v); v != "" {
+			pairs = append(pairs, pair{k, v})
 		}
-		b.WriteString(" " + k + "=" + quote(v))
 	}
 	add("Channel", s.Channel)
 	add("Provider", s.Provider.Name)
@@ -115,7 +143,7 @@ func FormatXML(raw []byte) (string, error) {
 			add(k, data[k])
 		}
 	}
-	return b.String(), nil
+	return pairs, nil
 }
 
 var systemKeys = map[string]bool{

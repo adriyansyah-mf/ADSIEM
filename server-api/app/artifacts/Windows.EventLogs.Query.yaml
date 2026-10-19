@@ -1,0 +1,25 @@
+name: Windows.EventLogs.Query
+description: |
+  Events from any channel by event ID and age, newest first — e.g. Security
+  4624,4625 or Microsoft-Windows-Sysmon/Operational 1,3. Rows carry the event's
+  EventData fields.
+parameters:
+  - name: Channel
+    default: Security
+  - name: EventIDs
+    description: Comma-separated event IDs; empty = all
+    default: ""
+  - name: Hours
+    type: int
+    default: 24
+  - name: Limit
+    type: int
+    default: 1000
+sources:
+  - name: Events
+    plugin: eventlog
+    args:
+      channel: "{{Channel}}"
+      event_ids: "{{EventIDs}}"
+      hours: "{{Hours}}"
+      limit: "{{Limit}}"

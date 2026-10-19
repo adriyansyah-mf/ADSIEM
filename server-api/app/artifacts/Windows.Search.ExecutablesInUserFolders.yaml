@@ -1,0 +1,19 @@
+name: Windows.Search.ExecutablesInUserFolders
+description: |
+  Executables and scripts dropped in per-user writable folders (Temp, AppData,
+  Downloads, Public) with their hashes — the usual staging places for payloads.
+parameters:
+  - name: MaxResults
+    type: int
+    default: 2000
+sources:
+  - name: Files
+    plugin: hash
+    args:
+      globs:
+        - "C:/Users/*/AppData/Local/Temp/**/*.{exe,dll,ps1,bat,vbs,js,hta,scr}"
+        - "C:/Users/*/AppData/Roaming/**/*.{exe,dll,ps1,bat,vbs,js,hta,scr}"
+        - "C:/Users/*/Downloads/**/*.{exe,dll,ps1,bat,vbs,js,hta,scr,iso,lnk}"
+        - "C:/Users/Public/**/*.{exe,dll,ps1,bat,vbs,js,hta,scr}"
+        - "C:/Windows/Temp/**/*.{exe,dll,ps1,bat,vbs,js,hta,scr}"
+      max_results: "{{MaxResults}}"

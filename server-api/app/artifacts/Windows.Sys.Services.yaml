@@ -1,0 +1,13 @@
+name: Windows.Sys.Services
+description: All services with state, start mode, account and binary path.
+parameters:
+  - name: StartModeRegex
+    description: "Only services whose start mode matches (Auto, Manual, Disabled)"
+    default: "."
+sources:
+  - name: Services
+    plugin: services
+    detection:
+      selection:
+        StartMode|re: "{{StartModeRegex}}"
+      condition: selection

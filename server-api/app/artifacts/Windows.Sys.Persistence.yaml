@@ -1,0 +1,8 @@
+name: Windows.Sys.Persistence
+description: |
+  Autostart locations — Run/RunOnce keys (machine and every user), Startup
+  folders, non-Microsoft scheduled tasks, auto-start services outside svchost,
+  and WMI event consumers.
+sources:
+  - name: Entries
+    plugin: persistence

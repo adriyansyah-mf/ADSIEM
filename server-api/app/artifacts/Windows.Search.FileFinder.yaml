@@ -1,0 +1,17 @@
+name: Windows.Search.FileFinder
+description: |
+  Find files by glob (case-insensitive). `*` matches within one folder, `**`
+  across any depth, e.g. C:/Users/*/AppData/Roaming/**/*.exe.
+parameters:
+  - name: SearchGlob
+    default: C:/Users/*/Downloads/**
+  - name: MaxResults
+    type: int
+    default: 5000
+sources:
+  - name: Files
+    plugin: glob
+    args:
+      globs: ["{{SearchGlob}}"]
+      max_results: "{{MaxResults}}"
+    fields: [Path, Size, ModTime, IsDir]

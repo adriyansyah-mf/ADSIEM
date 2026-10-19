@@ -274,8 +274,18 @@ The agent reads the Security, System, Application, Sysmon and PowerShell/Operati
 logs (log source paths `eventlog:<channel>`), decoded by `decoders/win_*.yaml`. `-EnableAuditing`
 turns on logon / process-creation (with command line) / account-management auditing and
 PowerShell script block logging; install [Sysmon](https://learn.microsoft.com/sysinternals/downloads/sysmon)
-for process, network, file, registry and DNS events. Live response (process/network/user/persistence
-listing, file collection, YARA) works; host isolation and block-IP use Windows Defender Firewall.
+for process, network, file, registry and DNS events. Live response has its own `Windows.*`
+artifacts:
+
+- **System:** info, processes, connections, users, persistence (Run keys, Startup folder, tasks,
+  services, WMI), services, installed programs.
+- **Detection and search:** suspicious processes (encoded PowerShell, LOLBins, tools, user-writable
+  paths), file finder/hash, executables in user folders, YARA, Prefetch.
+- **Event log queries over the history already on the host:** a generic channel + event-ID query,
+  failed logons, RDP logons, service installs, PowerShell script blocks, cleared logs, Defender
+  detections.
+
+Host isolation and block-IP use Windows Defender Firewall.
 Hygiene works too: OS and build, memory, disks, listening ports, local accounts, installed programs (Add/Remove Programs), plus Windows checks: firewall profiles, Defender real-time protection, UAC, SMBv1, Guest account, RDP without NLA. Installed programs aren't CVE-scanned, since OSV has no Windows ecosystem. There is no eBPF process monitor on Windows.
 
 ### Option B — Build from source

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // Windows implementations of the plugins that read /proc and /etc on Linux.
@@ -30,11 +31,6 @@ func init() {
 	Plugins["open_files"] = unsupported("open_files is not available on Windows")
 }
 
-func unsupported(msg string) Plugin {
-	return func(context.Context, map[string]any, func(map[string]any) error) error {
-		return fmt.Errorf("%s", msg)
-	}
-}
 
 // emitPowerShell runs a script whose output is a JSON array of objects (from
 // ConvertTo-Json -InputObject @(...)) and emits each object as a row.
@@ -42,13 +38,23 @@ func emitPowerShell(ctx context.Context, script string, emit func(map[string]any
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass", "-Command",
 		"$ErrorActionPreference='SilentlyContinue'; $ProgressPreference='SilentlyContinue'; "+
-			"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "+script)
+			"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "+script+
+			// -Command exits 1 after any non-terminating error (a Run key that
+			// doesn't exist, an inaccessible task); terminating ones still stop
+			// the script before this, with their message on stderr.
+			"\nexit 0")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("powershell: %w", err)
+		msg := strings.TrimSpace(stderr.String())
+		if len(msg) > 600 {
+			msg = msg[:600] + "…"
+		}
+		return fmt.Errorf("powershell: %w: %s", err, msg)
 	}
 	out = bytes.TrimSpace(bytes.TrimPrefix(out, []byte("\xef\xbb\xbf")))
 	if len(out) == 0 {
@@ -144,4 +150,5 @@ Get-CimInstance Win32_Service | Where-Object {
 Get-CimInstance -Namespace root\subscription -ClassName __EventConsumer | ForEach-Object {
   $c = if ($_.CommandLineTemplate) { $_.CommandLineTemplate } elseif ($_.ScriptText) { $_.ScriptText } else { '' }
   Add-Row 'wmi_subscription' $_.Name $c '' }
-ConvertTo-Json -InputObject @($rows) -Compress -Depth 3`
+# @() on a List throws "Argument types do not match" (hidden by SilentlyContinue)
+ConvertTo-Json -InputObject ([object[]]$rows.ToArray()) -Compress -Depth 3`
