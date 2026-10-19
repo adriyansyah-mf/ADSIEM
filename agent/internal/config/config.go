@@ -59,14 +59,13 @@ type BufferConfig struct {
 
 type LiveResponseConfig struct {
 	// Refuse commands an operator approved on the server (the exec plugin);
-	// artifacts still run. Unset means true: a host runs commands only after
-	// its admin sets disable_commands: false.
-	DisableCommands *bool `yaml:"disable_commands"`
+	// artifacts still run. Default false: the server gates commands (the
+	// ai_command_execution setting plus a person approving each one).
+	DisableCommands bool `yaml:"disable_commands"`
 }
 
-// CommandsDisabled is DisableCommands with its default (true) applied.
 func (l LiveResponseConfig) CommandsDisabled() bool {
-	return l.DisableCommands == nil || *l.DisableCommands
+	return l.DisableCommands
 }
 
 type Config struct {

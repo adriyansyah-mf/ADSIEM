@@ -21,7 +21,7 @@ logs:
     type: syslog
 
 # AI investigations can ask to run commands on a host once an analyst
-# approves them on the server (Settings → ai_command_execution). This host
-# refuses them unless disable_commands is false. Commands run as root.
+# approves them on the server (Settings → ai_command_execution); they run as
+# root. Set disable_commands: true to refuse them on this host regardless.
 live_response:
-  disable_commands: true
+  disable_commands: false

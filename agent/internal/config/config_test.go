@@ -6,10 +6,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestCommandsAreDisabledUnlessExplicitlyAllowed(t *testing.T) {
+func TestCommandsAreAllowedUnlessTheHostRefusesThem(t *testing.T) {
 	for doc, want := range map[string]bool{
-		"server: {url: x}":                         true, // key absent: old configs stay safe
-		"live_response: {}":                        true,
+		"server: {url: x}":                         false, // key absent: the server's approval gates them
+		"live_response: {}":                        false,
 		"live_response: {disable_commands: true}":  true,
 		"live_response: {disable_commands: false}": false,
 	} {

@@ -168,9 +168,7 @@ func run(configPath string, stop <-chan struct{}) {
 	flows := task.NewFlowRunner(c)
 	if cfg.LiveResponse.CommandsDisabled() {
 		flows.Plugins = task.WithoutCommands(flows.Plugins)
-		slog.Info("live response: operator-approved commands disabled (set live_response.disable_commands: false to allow)")
-	} else {
-		slog.Warn("live response: operator-approved commands ENABLED on this host")
+		slog.Info("live response: operator-approved commands disabled by config")
 	}
 	go flows.Run(flowCtx)
 
