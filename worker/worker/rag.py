@@ -1,6 +1,7 @@
 """RAG — embed resolved cases and retrieve similar ones at triage time."""
 from __future__ import annotations
 import os
+import time
 import uuid
 from typing import Optional
 
@@ -12,16 +13,24 @@ from worker.database import AsyncSessionLocal
 log = structlog.get_logger()
 
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # 384 dims, matches the vector(384) columns
+EMBED_RETRY_SECONDS = 600  # after a failed load, don't retry (a slow download) on every alert
 _embedder = None
+_failed_at = 0.0
 
 
 def _get_embedder():
-    global _embedder
+    global _embedder, _failed_at
     if _embedder is None:
+        if _failed_at and time.monotonic() - _failed_at < EMBED_RETRY_SECONDS:
+            raise RuntimeError("embedding model unavailable; retrying later")
         from fastembed import TextEmbedding
         # the image bakes the model into FASTEMBED_CACHE_PATH (worker/Dockerfile),
         # so RAG works without reaching HuggingFace at runtime
-        _embedder = TextEmbedding(model_name=EMBED_MODEL, cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
+        try:
+            _embedder = TextEmbedding(model_name=EMBED_MODEL, cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
+        except Exception:
+            _failed_at = time.monotonic()
+            raise
     return _embedder
 
 
