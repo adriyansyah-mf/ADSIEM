@@ -38,7 +38,11 @@ func emitPowerShell(ctx context.Context, script string, emit func(map[string]any
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass", "-Command",
 		"$ErrorActionPreference='SilentlyContinue'; $ProgressPreference='SilentlyContinue'; "+
-			"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "+script)
+			"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "+script+
+			// -Command exits 1 after any non-terminating error (a Run key that
+			// doesn't exist, an inaccessible task); terminating ones still stop
+			// the script before this, with their message on stderr.
+			"\nexit 0")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
