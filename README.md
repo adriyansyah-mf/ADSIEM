@@ -24,10 +24,18 @@ respond from — without needing Splunk/QRadar-scale infrastructure or licensing
   risk score over time.
 - **Case management** — alerts roll up into investigations with AI-assisted triage
   notes, an attack graph view, and MITRE ATT&CK tagging throughout.
-  - An alert joins an open case only when both the IP/host and the **attack family** match.
-    The family is the furthest kill-chain tactic in the rule's ATT&CK tags.
-  - A new family on the same target gets its own case, linked to the earlier one. If it is
-    post-compromise after brute force, it is raised to critical.
+  - A case is one attacker's **campaign**, keyed by the IOCs it uses: public source IPs, file
+    hashes, and for outbound behaviour (C2, exfiltration, download-and-run) the IP, domain or
+    URL contacted. Alerts sharing an IOC join the same case on whichever host they fire, and
+    the case lists the affected hosts. Hosts and usernames are never keys, so two attackers on
+    one server are two linked cases.
+  - An alert without IOCs (local privilege escalation, persistence, …) joins the campaign
+    already on its host. Cases that turn out to share an IOC are merged; one an analyst is
+    working on is linked instead.
+  - The case keeps its furthest kill-chain stage. Post-compromise activity after brute force
+    or initial access raises it to critical. Own public IPs, proxies and shared SaaS go in
+    `case_ioc_exclusions`; public DNS resolvers and big update/CDN domains are excluded
+    already.
   - Failed-only brute force from public IPs goes into one digest case per day
     (`bruteforce_digest_enabled`), so it no longer produces a case per bot.
 - **AI investigation** — the **Investigate with AI** button on a case lets an LLM agent

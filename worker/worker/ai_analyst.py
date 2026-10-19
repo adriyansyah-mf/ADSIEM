@@ -377,47 +377,162 @@ def _case_family(case: Case) -> str:
     return ioc.get("attack_family") or attack_family([], ioc.get("threat_type"), case.title)
 
 
-def _same_entity(case: Case, source_ip: Optional[str], hostname: Optional[str]) -> bool:
+# ─── Campaign cases (worker/case_grouping.py) ────────────────────
+# A case is one attacker's campaign, keyed by the IOCs it uses; hosts are the
+# assets it touched. Cases stay joinable while active (not resolved/closed)
+# and touched within case_ioc_window_days.
+
+_CLOSED_STATUSES = ("resolved", "closed", "false_positive")
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _case_keys(case: Case) -> set[str]:
+    """A case's campaign keys; cases from before keys existed use their public source IP."""
+    from worker.case_grouping import is_public_ip
     ioc = case.ioc_data or {}
-    return bool((source_ip and ioc.get("source_ip") == source_ip)
-                or (hostname and ioc.get("hostname") == hostname))
+    keys = set(ioc.get("ioc_keys") or [])
+    if not keys and is_public_ip(ioc.get("source_ip")):
+        keys.add(f"ip:{ioc['source_ip']}")
+    return keys
 
 
-async def _open_entity_cases(source_ip: Optional[str], hostname: Optional[str], group_id: str) -> list[Case]:
-    """Open AI cases (last 24 h, digests excluded) about this IP or host."""
-    if not source_ip and not hostname:
-        return []
-    window = datetime.now(timezone.utc) - timedelta(hours=24)
+def _case_hosts(case: Case) -> list[str]:
+    ioc = case.ioc_data or {}
+    hosts = list(ioc.get("affected_hosts") or [])
+    if ioc.get("hostname") and ioc["hostname"] not in hosts:
+        hosts.insert(0, ioc["hostname"])
+    return hosts
+
+
+async def _active_campaign_cases(group_id: str) -> list[Case]:
+    try:
+        days = max(1, int(await get_setting("case_ioc_window_days", "7") or 7))
+    except ValueError:
+        days = 7
+    since = datetime.now(timezone.utc) - timedelta(days=days)
     async with AsyncSessionLocal() as db:
-        q = select(Case).where(
-            Case.group_id == group_id,
-            Case.status == "open",
-            Case.created_at >= window,
-            Case.created_by_ai == True,
-        )
-        return [c for c in (await db.execute(q)).scalars().all()
-                if not (c.ioc_data or {}).get("digest") and _same_entity(c, source_ip, hostname)]
+        rows = (await db.execute(select(Case).where(
+            Case.group_id == group_id, Case.created_by_ai == True,  # noqa: E712
+            Case.status.notin_(_CLOSED_STATUSES), Case.updated_at >= since,
+        ))).scalars().all()
+    return [c for c in rows if not (c.ioc_data or {}).get("digest") and not (c.ioc_data or {}).get("merged_into")]
 
 
-async def _find_existing_open_case(
-    source_ip: Optional[str],
-    hostname: Optional[str],
-    group_id: str,
-    family: Optional[str] = None,
-) -> Optional[str]:
-    """An open case for the same IP/host and the same attack family (24 h).
+async def _find_campaign_case(keys: list[str], hostname: Optional[str], group_id: str) -> tuple[Optional[str], list[str]]:
+    """(case to join, other cases to merge into it).
 
-    Matching on the entity alone let a host's brute-force case swallow every
-    later alert on it — including a real compromise — as just another note."""
-    for case in await _open_entity_cases(source_ip, hostname, group_id):
-        if family is None or _case_family(case) == family:
-            return str(case.id)
-    return None
+    With campaign keys: the oldest active case sharing any key — on any host —
+    and every other one sharing a key gets merged into it. Without keys (a
+    local alert: privilege escalation, persistence, …) the alert belongs to the
+    campaign already on that host: the most recently active one."""
+    cases = await _active_campaign_cases(group_id)
+    if keys:
+        hits = sorted((c for c in cases if _case_keys(c) & set(keys)), key=lambda c: c.created_at)
+        return (str(hits[0].id), [str(c.id) for c in hits[1:]]) if hits else (None, [])
+    if hostname:
+        hits = sorted((c for c in cases if hostname in _case_hosts(c)), key=lambda c: c.updated_at, reverse=True)
+        if hits:
+            return str(hits[0].id), []
+    return None, []
 
 
 async def _related_open_cases(source_ip: Optional[str], hostname: Optional[str], group_id: str) -> list[dict]:
+    """Other campaigns on the same host: a different attacker on the same victim
+    gets its own case, linked to these."""
+    if not hostname:
+        return []
     return [{"case_id": str(c.id), "family": _case_family(c), "title": c.title}
-            for c in await _open_entity_cases(source_ip, hostname, group_id)]
+            for c in await _active_campaign_cases(group_id) if hostname in _case_hosts(c)]
+
+
+async def _join_campaign_case(
+    case_id: str, alert_id: str, title: str, triage_notes: str, severity: str,
+    family: Optional[str], keys: list[str], hostname: Optional[str], merge: Optional[list[str]] = None,
+) -> dict:
+    """Add an alert to a campaign case: new host and IOCs, kill-chain stage,
+    severity, merging other cases that share its IOCs. Returns
+    {"escalated": bool, "new_host": bool}."""
+    from worker.case_grouping import further_stage, raises_to_critical
+
+    async with AsyncSessionLocal() as db:
+        case = await db.get(Case, uuid.UUID(case_id))
+        if case is None:
+            return {"escalated": False, "new_host": False}
+        ioc = dict(case.ioc_data or {})
+        all_keys, hosts = _case_keys(case), _case_hosts(case)
+        families = set(ioc.get("families_seen") or [_case_family(case)])
+        related = list(ioc.get("related_cases") or [])
+        stage_before = ioc.get("attack_family") or _case_family(case)
+        lines: list[str] = []
+
+        for other_id in merge or []:
+            other = await db.get(Case, uuid.UUID(other_id))
+            if other is None or str(other.id) == case_id:
+                continue
+            shared = sorted(_case_keys(other) & set(keys))
+            other_ioc = dict(other.ioc_data or {})
+            if other.assignee_id or other.status != "open":
+                # an analyst is on it: link both ways instead of closing their case
+                related.append(str(other.id))
+                other_ioc["related_cases"] = sorted({*(other_ioc.get("related_cases") or []), case_id})
+                other.ioc_data = other_ioc
+                lines.append(f"Linked case **{other.title}**: it shares {', '.join(shared)} but is being worked on.")
+                continue
+            all_keys |= _case_keys(other)
+            hosts += [h for h in _case_hosts(other) if h not in hosts]
+            families |= set(other_ioc.get("families_seen") or [_case_family(other)])
+            stage_before = further_stage(stage_before, other_ioc.get("attack_family") or _case_family(other))
+            other.status = "resolved"
+            other.ioc_data = {**other_ioc, "merged_into": case_id}
+            db.add(CaseNote(case_id=other.id, author_id=None, is_ai_generated=True,
+                            content=f"**Merged** into case **{case.title}** ({case_id}): same campaign, "
+                                    f"shared {', '.join(shared)}."))
+            lines.append(f"Merged case **{other.title}** ({other.id}): it shared {', '.join(shared)}.")
+
+        new_host = bool(hostname) and hostname not in hosts
+        if new_host:
+            hosts.append(hostname)
+            lines.append(f"New affected host: **{hostname}** ({len(hosts)} hosts in this campaign).")
+        new_keys = sorted(set(keys) - all_keys)
+        if new_keys:
+            lines.append(f"New indicators: {', '.join(new_keys)}.")
+        stage = further_stage(stage_before, family)
+        if stage != stage_before:
+            lines.append(f"Kill-chain stage advanced: {stage_before} → **{stage}**"
+                         + (f" on {hostname}." if hostname else "."))
+
+        escalated = bool(family) and raises_to_critical(family, families) and case.severity != "critical"
+        new_severity = "critical" if escalated else max(
+            (case.severity, severity), key=lambda s: _SEVERITY_RANK.get(s, 0))
+        if escalated:
+            case.escalated_at = datetime.now(timezone.utc)
+            if not case.title.startswith("🚨"):
+                case.title = "🚨 [ESCALATED] " + case.title.removeprefix("[AI] ")
+            lines.append("**Escalated to critical:** the attacker moved past credential/initial access.")
+
+        ioc.update({
+            "ioc_keys": sorted(all_keys | set(keys)),
+            "affected_hosts": hosts,
+            "families_seen": sorted(families | ({family} if family else set())),
+            "attack_family": stage,
+        })
+        if related:
+            ioc["related_cases"] = sorted(set(related))
+        case.ioc_data = ioc
+        case.severity = new_severity
+        case.updated_at = datetime.now(timezone.utc)
+        details = "\n".join(f"- {line}" for line in lines)
+        db.add(CaseNote(
+            case_id=case.id, author_id=None, is_ai_generated=True,
+            content=(f"**[AI L1] New alert linked to this case**\n\n"
+                     f"Alert: {title} | Severity: {severity}" + (f" | Host: {hostname}" if hostname else "")
+                     + (f"\n\n{details}" if details else "")
+                     + f"\n\n**Triage notes:**\n{triage_notes}"),
+        ))
+        await db.commit()
+    log.info("alert_joined_campaign_case", case_id=case_id, alert_id=alert_id, new_host=new_host,
+             escalated=escalated, merged=len(merge or []))
+    return {"escalated": escalated, "new_host": new_host}
 
 
 async def _alert_tags(alert_id: str) -> list[str]:
@@ -508,30 +623,6 @@ async def _check_and_note_fleet_spread(
         log.warning("fleet_spread_check_failed", case_id=case_id, error=str(exc))
 
 
-async def _add_note_to_existing_case(
-    case_id: str,
-    alert_id: str,
-    title: str,
-    triage_notes: str,
-    severity: str,
-) -> None:
-    """Tambah catatan ke case yang sudah ada (alert baru terkait kasus yang sama)."""
-    async with AsyncSessionLocal() as db:
-        note = CaseNote(
-            case_id=uuid.UUID(case_id),
-            author_id=None,
-            content=(
-                f"**[AI L1] New alert linked to this case**\n\n"
-                f"Alert: {title} | Severity: {severity}\n\n"
-                f"**Triage notes:**\n{triage_notes}"
-            ),
-            is_ai_generated=True,
-        )
-        db.add(note)
-        await db.commit()
-    log.info("alert_linked_to_existing_case", case_id=case_id, alert_id=alert_id)
-
-
 async def _create_case_from_verdict(
     alert_id: str,
     title: str,
@@ -543,8 +634,9 @@ async def _create_case_from_verdict(
     family: Optional[str] = None,
     hostname: Optional[str] = None,
     related: Optional[list[dict]] = None,
+    keys: Optional[list[str]] = None,
 ) -> Optional[str]:
-    """Buat case baru dari hasil triage."""
+    """Buat case baru dari hasil triage: a new campaign, keyed by `keys`."""
     from worker.case_grouping import raises_to_critical
     related = related or []
     triage_notes = analysis.get("triage_notes", "")
@@ -567,8 +659,11 @@ async def _create_case_from_verdict(
         ioc_data["overall_risk"] = enrichment.overall_risk
     if hostname:
         ioc_data["hostname"] = hostname
+        ioc_data["affected_hosts"] = [hostname]
+    ioc_data["ioc_keys"] = sorted(set(keys or []))
     if family:
         ioc_data["attack_family"] = family
+        ioc_data["families_seen"] = [family]
     if related:
         ioc_data["related_cases"] = [r["case_id"] for r in related]
     # e.g. persistence on a host whose open case is password guessing: the guessing worked
@@ -741,11 +836,11 @@ async def analyze_and_maybe_create_case(
             "run_soar_playbooks": run_soar_playbooks,
             "update_alert_status": _update_alert_status,
             "run_searches": _run_ai_searches,
-            "find_existing_open_case": _find_existing_open_case,
+            "find_campaign_case": _find_campaign_case,
             "related_open_cases": _related_open_cases,
             "alert_tags": _alert_tags,
             "add_to_bruteforce_digest": _add_to_bruteforce_digest,
-            "add_note_to_existing_case": _add_note_to_existing_case,
+            "join_campaign_case": _join_campaign_case,
             "create_case_from_verdict": _create_case_from_verdict,
             "analyze_campaign": analyze_campaign,
             "check_fleet_spread": _check_and_note_fleet_spread,

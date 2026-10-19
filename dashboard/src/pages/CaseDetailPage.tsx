@@ -242,7 +242,19 @@ export default function CaseDetailPage() {
     )
   }
 
+  // campaign fields (worker/case_grouping.py) get their own box
+  const ioc = (caseData.ioc_data ?? {}) as Record<string, unknown>
+  const campaign = {
+    hosts: (ioc.affected_hosts as string[] | undefined) ?? (ioc.hostname ? [String(ioc.hostname)] : []),
+    keys: (ioc.ioc_keys as string[] | undefined) ?? [],
+    stage: ioc.attack_family as string | undefined,
+    families: (ioc.families_seen as string[] | undefined) ?? [],
+    related: (ioc.related_cases as string[] | undefined) ?? [],
+    mergedInto: ioc.merged_into as string | undefined,
+  }
+  const CAMPAIGN_FIELDS = new Set(['affected_hosts', 'ioc_keys', 'attack_family', 'families_seen', 'related_cases', 'merged_into', 'hostname'])
   const iocEntries = Object.entries(caseData.ioc_data ?? {}).filter(([k, v]) => {
+    if (CAMPAIGN_FIELDS.has(k)) return false
     if (v == null || v === '') return false
     if (Array.isArray(v) && (v as unknown[]).length === 0) return false
     // hide overall_risk=0 — means no TI data available, not an actual zero-risk score
@@ -377,6 +389,61 @@ export default function CaseDetailPage() {
               </div>
             )}
           </Box>
+
+          {/* Campaign: the attacker's IOCs and the hosts they touched */}
+          {(campaign.hosts.length > 0 || campaign.keys.length > 0 || campaign.mergedInto) && (
+            <Box title="Campaign">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
+                {campaign.mergedInto && (
+                  <div style={{ color: 'var(--accent-yellow)' }}>
+                    Merged into{' '}
+                    <button onClick={() => navigate(`/cases/${campaign.mergedInto}`)} style={{ color: 'var(--accent-cyan)', textDecoration: 'underline' }}>
+                      case {campaign.mergedInto.slice(0, 8)}
+                    </button>{' '}— the same attacker. Work continues there.
+                  </div>
+                )}
+                {campaign.hosts.length > 0 && (
+                  <div>
+                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '4px' }}>
+                      AFFECTED HOSTS ({campaign.hosts.length})
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {campaign.hosts.map(h => (
+                        <span key={h} style={{ fontFamily: 'Share Tech Mono, monospace', padding: '2px 8px', border: '1px solid var(--border)', borderRadius: '3px' }}>{h}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {campaign.keys.length > 0 && (
+                  <div>
+                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '4px' }}>
+                      INDICATORS THAT TIE THIS CASE TOGETHER
+                    </div>
+                    {campaign.keys.map(k => (
+                      <div key={k} style={{ fontFamily: 'Share Tech Mono, monospace', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>{k}</div>
+                    ))}
+                  </div>
+                )}
+                {campaign.stage && (
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    Furthest stage: <b style={{ color: 'var(--text-primary)' }}>{campaign.stage.replace(/_/g, ' ')}</b>
+                    {campaign.families.length > 1 && <> · seen: {campaign.families.map(f => f.replace(/_/g, ' ')).join(', ')}</>}
+                  </div>
+                )}
+                {campaign.related.length > 0 && (
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    Related cases:{' '}
+                    {campaign.related.map((id, i) => (
+                      <span key={id}>
+                        {i > 0 && ', '}
+                        <button onClick={() => navigate(`/cases/${id}`)} style={{ color: 'var(--accent-cyan)', textDecoration: 'underline' }}>{id.slice(0, 8)}</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Box>
+          )}
 
           {/* IOC Data */}
           {iocEntries.length > 0 && (

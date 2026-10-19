@@ -136,7 +136,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
       enrich, retrieve_similar_cases, retrieve_sop_context,
       retrieve_feedback_context, suggest_mitre, escalate_severity,
       write_alert_note, tag_alert_with_mitre, set_alert_verdict,
-      update_alert_status, find_existing_open_case, add_note_to_existing_case,
+      update_alert_status, find_campaign_case, join_campaign_case,
       create_case_from_verdict, dispatch_case_webhooks, run_soar_playbooks,
       enqueue_hunt, analyze_campaign, check_fleet_spread, run_searches,
       get_setting,
@@ -322,10 +322,13 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
 
         await deps["update_alert_status"](alert_id, "acknowledged")
 
-        # Which case: same entity AND same attack family (worker/case_grouping.py)
-        from worker.case_grouping import attack_family, is_failed_bruteforce, is_public_ip
+        # Which case: the attacker's campaign, keyed by IOCs across hosts (worker/case_grouping.py)
+        from worker.case_grouping import attack_family, ioc_keys, is_failed_bruteforce, is_public_ip, parse_exclusions
         tags = await deps["alert_tags"](alert_id) if "alert_tags" in deps else []
         family = attack_family(tags, (state.get("analysis") or {}).get("threat_type"), state["title"])
+        keys = ioc_keys(family, source_ip, state.get("decoded_fields"),
+                        getattr(state.get("enrichment"), "iocs", None),
+                        parse_exclusions(await deps["get_setting"]("case_ioc_exclusions", "")))
 
         # Failed-only password guessing from the internet: one digest case a day, not one per IP
         if (verdict != "escalate" and "add_to_bruteforce_digest" in deps and is_public_ip(source_ip)
@@ -338,12 +341,23 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             if digest_id:
                 return {"case_id": digest_id}
 
-        existing = await deps["find_existing_open_case"](source_ip, hostname, group_id, family=family)
+        existing, merge = await deps["find_campaign_case"](keys, hostname, group_id)
         if existing:
-            await deps["add_note_to_existing_case"](
-                existing, alert_id, state["title"], state.get("triage_notes", ""),
-                state.get("effective_severity", state["severity"]),
-            )
+            joined = await deps["join_campaign_case"](
+                case_id=existing, alert_id=alert_id, title=state["title"],
+                triage_notes=state.get("triage_notes", ""),
+                severity=state.get("effective_severity", state["severity"]),
+                family=family, keys=keys, hostname=hostname, merge=merge,
+            ) or {}
+            if joined.get("escalated"):
+                try:
+                    await deps["dispatch_case_webhooks"](
+                        case_id=existing, title=f"🚨 ESCALATED {state['title']}", severity="critical",
+                        description=(state.get("triage_notes") or "")[:500], group_id=group_id,
+                        alert_id=uuid.UUID(alert_id) if alert_id else None,
+                    )
+                except Exception as exc:
+                    log.warning("case_webhook_dispatch_failed", error=str(exc))
             asyncio.ensure_future(deps["analyze_campaign"](
                 trigger_alert_id=alert_id, source_ip=source_ip, hostname=hostname,
                 group_id=group_id, case_id=existing,
@@ -353,7 +367,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                 asyncio.ensure_future(deps["run_searches"](alert_id, existing, queries, **search_kwargs))
             return {"case_id": existing}
 
-        # open cases of other families on the same IP/host get linked to the new one
+        # a new campaign: other campaigns on the same host get linked to it
         related = (await deps["related_open_cases"](source_ip, hostname, group_id)
                    if "related_open_cases" in deps else [])
         case_id = await deps["create_case_from_verdict"](
@@ -367,6 +381,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             family=family,
             hostname=hostname,
             related=related,
+            keys=keys,
         )
         if not case_id:
             return {}
