@@ -1,0 +1,31 @@
+title: Successful Login After Brute Force
+id: rule-login-after-brute-force
+description: |
+  A login succeeded from a source that failed to log in at least five times in
+  the hour before — the password guessing probably worked. Covers SSH (Linux),
+  Windows logons and anything else decoded as login_failed / login_success.
+  Uses the platform's `after:` extension: the rule fires on the success only
+  when enough earlier failures from the same source.ip were seen.
+detection:
+  success:
+    event.action: login_success
+  local:
+    source.ip: ['-', '127.0.0.1', '::1']
+  condition: success and not local
+after:
+  detection:
+    failed:
+      event.action:
+        - login_failed
+        - invalid_user
+        - preauth_disconnect
+        - max_auth_exceeded
+    condition: failed
+  count: 5
+  timewindow: 1h
+  group_by: source.ip
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1078
+  - attack.t1110

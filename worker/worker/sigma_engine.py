@@ -590,6 +590,12 @@ class RuleDef:
     name: str | None = None
     matcher: Matcher = field(default=lambda ev: False, repr=False)
     db_id: str | None = None  # rules.id of the row this came from, so alerts link to their rule
+    # `after:` extension — fire only once `count` earlier events matching
+    # after_matcher were seen for the same group_by values within `window` s
+    after_matcher: Matcher | None = field(default=None, repr=False)
+    after_count: int = 0
+    after_window: int = 0
+    after_group_by: list[str] = field(default_factory=list)
 
     @property
     def refs(self) -> set[str]:
@@ -642,7 +648,7 @@ def _compile_rule(d: dict) -> RuleDef:
     if d.get("suppression") is not None and not isinstance(d["suppression"], dict):
         raise RuleError("'suppression' must be a mapping")
     tags, mitre = _tags(d)
-    return RuleDef(
+    rule = RuleDef(
         id=str(d.get("id", d.get("title", "unknown"))),
         title=d.get("title", "Untitled"),
         level=d.get("level", "medium"),
@@ -655,6 +661,24 @@ def _compile_rule(d: dict) -> RuleDef:
         name=d.get("name"),
         matcher=_compile_detection(d["detection"]),
     )
+    after = d.get("after")
+    if after is not None:
+        # e.g. a successful login after N failures from the same source: the
+        # sequence Sigma's temporal correlation can't count
+        if not isinstance(after, dict) or "detection" not in after:
+            raise RuleError("'after' needs a detection block")
+        try:
+            count = int(after.get("count", 1))
+        except (TypeError, ValueError) as exc:
+            raise RuleError("'after.count' must be a number") from exc
+        if count < 1:
+            raise RuleError("'after.count' must be at least 1")
+        group_by = after.get("group_by") or []
+        rule.after_matcher = _compile_detection(after["detection"])
+        rule.after_count = count
+        rule.after_window = _parse_timespan(after.get("timewindow", "1h"))
+        rule.after_group_by = [group_by] if isinstance(group_by, str) else [str(g) for g in group_by]
+    return rule
 
 
 def _compile_correlation(d: dict) -> CorrelationDef:
@@ -860,6 +884,9 @@ class SigmaEngine:
         fired: list[RuleDef] = []
         for rule in rules:
             try:
+                if rule.after_matcher is not None and rule.after_matcher(event):
+                    await self._window_add(self._after_key(rule, event), [str(_uuid.uuid4())], now,
+                                           rule.after_window)
                 if rule.matcher(event):
                     fired.append(rule)
             except Exception as exc:  # one bad rule must not drop the event for the rest
@@ -869,6 +896,14 @@ class SigmaEngine:
         for rule in fired:
             if rule.refs & self._silenced:
                 continue  # only feeds a correlation with generate: false
+
+            prior = None
+            if rule.after_matcher is not None:
+                key = self._after_key(rule, event)
+                prior = await self._window_count(key, now, rule.after_window)
+                if prior < rule.after_count:
+                    continue
+                await self._window_reset(key)  # one alert per sequence
 
             corr_result = None
             if rule.threshold:
@@ -900,6 +935,14 @@ class SigmaEngine:
                 match["title"] = f"{title} [{hit_count}x in {tw}s{suffix}]"
                 match["correlation_hit_count"] = hit_count
                 match["correlation_group"] = group_val
+            if prior is not None:
+                group_val = self._after_group(rule, event)
+                suffix = f" from {group_val}" if group_val != "_all" else ""
+                match["title"] = f"{title} [after {prior} earlier events in {rule.after_window}s{suffix}]"
+                match["correlation_hit_count"] = prior
+                match["correlation_group"] = group_val
+                match["correlation_window"] = rule.after_window
+                match["correlation_group_by"] = ", ".join(rule.after_group_by) or None
             matches.append(match)
 
         if self._correlations and fired:
@@ -968,6 +1011,26 @@ class SigmaEngine:
         window = self._local_windows.setdefault(key, {})
         for m in members:
             window[m] = now
+        for m in [m for m, ts in window.items() if now - ts > span]:
+            del window[m]
+        return len(window)
+
+    @staticmethod
+    def _after_group(rule: RuleDef, event: dict) -> str:
+        return "|".join(
+            _to_str(v) if (v := _lookup(event, g)) not in (_MISSING, None) else "_"
+            for g in rule.after_group_by
+        ) or "_all"
+
+    def _after_key(self, rule: RuleDef, event: dict) -> str:
+        return f"sigma:after:{rule.id}:{self._after_group(rule, event)}"
+
+    async def _window_count(self, key: str, now: float, span: int) -> int:
+        """Size of a sliding window without adding to it."""
+        if self._redis:
+            await self._redis.zremrangebyscore(key, 0, now - span)
+            return await self._redis.zcard(key)
+        window = self._local_windows.get(key, {})
         for m in [m for m, ts in window.items() if now - ts > span]:
             del window[m]
         return len(window)

@@ -81,7 +81,7 @@ def _recording_deps(calls, verdict_override=None):
     async def run_searches(aid, cid, queries):
         calls.append("run_searches")
 
-    async def find_case(ip, host, gid):
+    async def find_case(ip, host, gid, family=None):
         return None
 
     async def add_note(cid, aid, title, notes, sev):

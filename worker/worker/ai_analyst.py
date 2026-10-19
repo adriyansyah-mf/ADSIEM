@@ -370,14 +370,23 @@ async def _update_alert_status(alert_id: str, status: str) -> None:
         log.warning("alert_status_update_failed", alert_id=alert_id, error=str(exc))
 
 
-async def _find_existing_open_case(
-    source_ip: Optional[str],
-    hostname: Optional[str],
-    group_id: str,
-) -> Optional[str]:
-    """Cari open case yang sudah ada untuk entity yang sama (24 jam terakhir)."""
+def _case_family(case: Case) -> str:
+    """A case's attack family; cases made before families existed are classified by title."""
+    from worker.case_grouping import attack_family
+    ioc = case.ioc_data or {}
+    return ioc.get("attack_family") or attack_family([], ioc.get("threat_type"), case.title)
+
+
+def _same_entity(case: Case, source_ip: Optional[str], hostname: Optional[str]) -> bool:
+    ioc = case.ioc_data or {}
+    return bool((source_ip and ioc.get("source_ip") == source_ip)
+                or (hostname and ioc.get("hostname") == hostname))
+
+
+async def _open_entity_cases(source_ip: Optional[str], hostname: Optional[str], group_id: str) -> list[Case]:
+    """Open AI cases (last 24 h, digests excluded) about this IP or host."""
     if not source_ip and not hostname:
-        return None
+        return []
     window = datetime.now(timezone.utc) - timedelta(hours=24)
     async with AsyncSessionLocal() as db:
         q = select(Case).where(
@@ -386,14 +395,83 @@ async def _find_existing_open_case(
             Case.created_at >= window,
             Case.created_by_ai == True,
         )
-        cases = (await db.execute(q)).scalars().all()
-        for case in cases:
-            ioc = case.ioc_data or {}
-            if source_ip and ioc.get("source_ip") == source_ip:
-                return str(case.id)
-            if hostname and ioc.get("hostname") == hostname:
-                return str(case.id)
+        return [c for c in (await db.execute(q)).scalars().all()
+                if not (c.ioc_data or {}).get("digest") and _same_entity(c, source_ip, hostname)]
+
+
+async def _find_existing_open_case(
+    source_ip: Optional[str],
+    hostname: Optional[str],
+    group_id: str,
+    family: Optional[str] = None,
+) -> Optional[str]:
+    """An open case for the same IP/host and the same attack family (24 h).
+
+    Matching on the entity alone let a host's brute-force case swallow every
+    later alert on it — including a real compromise — as just another note."""
+    for case in await _open_entity_cases(source_ip, hostname, group_id):
+        if family is None or _case_family(case) == family:
+            return str(case.id)
     return None
+
+
+async def _related_open_cases(source_ip: Optional[str], hostname: Optional[str], group_id: str) -> list[dict]:
+    return [{"case_id": str(c.id), "family": _case_family(c), "title": c.title}
+            for c in await _open_entity_cases(source_ip, hostname, group_id)]
+
+
+async def _alert_tags(alert_id: str) -> list[str]:
+    """The firing rule's tags (attack.* tactics/techniques), kept on the alert's context."""
+    try:
+        async with AsyncSessionLocal() as db:
+            alert = await db.get(Alert, uuid.UUID(alert_id))
+            return list(((alert.context or {}) if alert else {}).get("tags") or [])
+    except (ValueError, TypeError):
+        return []
+
+
+BRUTEFORCE_DIGEST_MAX_SOURCES = 500
+
+
+async def _add_to_bruteforce_digest(
+    alert_id: str, title: str, source_ip: Optional[str], hostname: Optional[str],
+    group_id: str, severity: str,
+) -> Optional[str]:
+    """One open case per group per day collects failed-only brute force from the internet."""
+    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    key = f"bruteforce:{day}"
+    async with AsyncSessionLocal() as db:
+        q = select(Case).where(Case.group_id == group_id, Case.created_by_ai == True,
+                               Case.ioc_data["digest"].astext == key).with_for_update()
+        case = (await db.execute(q)).scalars().first()
+        if case is None:
+            case = Case(
+                title=f"[AI] Internet brute force — {day}",
+                description=("Failed password guessing from public addresses, collected into one case for the day. "
+                             "Nothing here has succeeded; a successful login after brute force raises its own case."),
+                severity="medium", status="open", created_by_ai=True, group_id=group_id,
+                ioc_data={"digest": key, "attack_family": "credential_access", "threat_type": "brute_force",
+                          "sources": {}, "hosts": []},
+            )
+            db.add(case)
+            await db.flush()
+        ioc = dict(case.ioc_data or {})
+        sources = dict(ioc.get("sources") or {})
+        first_time = source_ip not in sources
+        if source_ip and (not first_time or len(sources) < BRUTEFORCE_DIGEST_MAX_SOURCES):
+            sources[source_ip] = sources.get(source_ip, 0) + 1
+        hosts = list(ioc.get("hosts") or [])
+        if hostname and hostname not in hosts:
+            hosts.append(hostname)
+        ioc.update(sources=sources, hosts=hosts)
+        case.ioc_data = ioc
+        case.title = f"[AI] Internet brute force — {day} ({len(sources)} sources, {len(hosts)} hosts)"
+        if first_time:  # a note per new source; repeats only count
+            db.add(CaseNote(case_id=case.id, author_id=None, is_ai_generated=True,
+                            content=f"**{source_ip}** → {hostname or 'unknown host'}: {title} ({severity})"))
+        await db.commit()
+        log.info("bruteforce_digest_updated", case_id=str(case.id), source_ip=source_ip, alert_id=alert_id)
+        return str(case.id)
 
 
 async def _check_and_note_fleet_spread(
@@ -462,8 +540,13 @@ async def _create_case_from_verdict(
     analysis: dict,
     enrichment,
     group_id: str,
+    family: Optional[str] = None,
+    hostname: Optional[str] = None,
+    related: Optional[list[dict]] = None,
 ) -> Optional[str]:
     """Buat case baru dari hasil triage."""
+    from worker.case_grouping import raises_to_critical
+    related = related or []
     triage_notes = analysis.get("triage_notes", "")
     mitre = analysis.get("mitre_techniques", [])
     actions = analysis.get("immediate_actions", [])
@@ -482,6 +565,16 @@ async def _create_case_from_verdict(
             for i in enrichment.iocs[:20]
         ]
         ioc_data["overall_risk"] = enrichment.overall_risk
+    if hostname:
+        ioc_data["hostname"] = hostname
+    if family:
+        ioc_data["attack_family"] = family
+    if related:
+        ioc_data["related_cases"] = [r["case_id"] for r in related]
+    # e.g. persistence on a host whose open case is password guessing: the guessing worked
+    escalated = bool(family) and raises_to_critical(family, {r["family"] for r in related})
+    if escalated:
+        severity = "critical"
 
     search_intel: dict = {}
     if enrichment and enrichment.provider_bullets:
@@ -491,7 +584,7 @@ async def _create_case_from_verdict(
             search_intel["ti_risk"] = enrichment.overall_risk
 
     # Different prefix for escalate vs create_case
-    prefix = "🚨 [ESCALATED]" if verdict == "escalate" else "[AI]"
+    prefix = "🚨 [ESCALATED]" if verdict == "escalate" or escalated else "[AI]"
     case_status = "open"
 
     async with AsyncSessionLocal() as db:
@@ -550,6 +643,16 @@ async def _create_case_from_verdict(
             is_ai_generated=True,
         )
         db.add(note)
+        for r in related:
+            label = r["family"].replace("_", " ")
+            new_label = (family or "other").replace("_", " ")
+            db.add(CaseNote(case_id=case.id, author_id=None, is_ai_generated=True, content=(
+                f"🔗 **Related open case** on the same IP/host: [{r['title']}](/cases/{r['case_id']}) ({label})"
+                + (f"\n\n⚠ This case is **{new_label}** after **{label}** on the same target — the earlier "
+                   "activity may have succeeded; severity raised to critical." if escalated else ""))))
+            db.add(CaseNote(case_id=uuid.UUID(r["case_id"]), author_id=None, is_ai_generated=True, content=(
+                f"🔗 **New related case** on the same IP/host: [{prefix} {title}](/cases/{case.id}) "
+                f"({new_label})")))
         await db.commit()
         log.info("case_created_by_ai_l1",
                  case_id=str(case.id),
@@ -639,6 +742,9 @@ async def analyze_and_maybe_create_case(
             "update_alert_status": _update_alert_status,
             "run_searches": _run_ai_searches,
             "find_existing_open_case": _find_existing_open_case,
+            "related_open_cases": _related_open_cases,
+            "alert_tags": _alert_tags,
+            "add_to_bruteforce_digest": _add_to_bruteforce_digest,
             "add_note_to_existing_case": _add_note_to_existing_case,
             "create_case_from_verdict": _create_case_from_verdict,
             "analyze_campaign": analyze_campaign,
