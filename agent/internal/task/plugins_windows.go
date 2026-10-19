@@ -150,4 +150,5 @@ Get-CimInstance Win32_Service | Where-Object {
 Get-CimInstance -Namespace root\subscription -ClassName __EventConsumer | ForEach-Object {
   $c = if ($_.CommandLineTemplate) { $_.CommandLineTemplate } elseif ($_.ScriptText) { $_.ScriptText } else { '' }
   Add-Row 'wmi_subscription' $_.Name $c '' }
-ConvertTo-Json -InputObject @($rows) -Compress -Depth 3`
+# @() on a List throws "Argument types do not match" (hidden by SilentlyContinue)
+ConvertTo-Json -InputObject ([object[]]$rows.ToArray()) -Compress -Depth 3`
