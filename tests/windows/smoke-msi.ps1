@@ -145,8 +145,9 @@ try {
     $rowsBy = @{}
     foreach ($u in $updates) {
         if (-not $u.source -or -not $u.rows) { continue }
-        if (-not $rowsBy.ContainsKey($u.source)) { $rowsBy[$u.source] = New-Object System.Collections.Generic.List[object] }
-        foreach ($r in $u.rows) { $rowsBy[$u.source].Add($r) }
+        $key = [string]$u.source
+        if (-not $rowsBy.ContainsKey($key)) { $rowsBy[$key] = @() }
+        $rowsBy[$key] = $rowsBy[$key] + @($u.rows)
     }
     foreach ($src in "Info", "Pslist", "Users", "Persistence", "Services", "Programs", "Netstat", "Events") {
         if (@($rowsBy[$src]).Count -lt 1) { Fail "live-response source $src returned no rows" }
