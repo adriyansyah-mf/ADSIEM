@@ -55,6 +55,7 @@ async def start_investigation(
         raise HTTPException(409, "An investigation of this case is already running")
     from app.services.assistant import _graph_config
     api_key, model, _ = await _graph_config(db, case.group_id)
+    model = await investigator.investigation_model(db, model)
     if not api_key:
         raise HTTPException(422, "No AI provider configured (Settings → AI: 9router API key)")
 

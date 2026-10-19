@@ -62,6 +62,8 @@ function StepLine({ step }: { step: Step }) {
       icon = '🧩'; text = <>Created artifact <b>{String(step.name)}</b>
         {step.reason ? <span className="text-muted-foreground"> — {String(step.reason)}</span> : null}{' '}
         <button className="underline" onClick={() => setOpen(o => !o)}>{open ? 'hide' : 'YAML'}</button></>; break
+    case 'warning':
+      icon = '⚠'; text = <span className="text-amber-400">{String(step.text)}</span>; break
     case 'refused':
       icon = '⛔'; text = <span className="text-destructive">Refused: {String(step.reason)}</span>; break
     case 'finished':

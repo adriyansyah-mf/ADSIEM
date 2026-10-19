@@ -34,7 +34,7 @@ from typing import Any
 
 import structlog
 from fastapi import HTTPException
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from sqlalchemy import desc, select, text, update
 
@@ -56,7 +56,9 @@ MAX_FLOWS = 12
 MAX_NEW_ARTIFACTS = 4
 MAX_SECONDS = 30 * 60
 FLOW_WAIT_CAP = 600          # longest a single flow is waited for
-TOOL_RESULT_CHARS = 12_000   # what one tool result may put in the model's context
+TOOL_RESULT_CHARS = 8_000    # what one tool result may put in the model's context
+CONTEXT_CHARS = 60_000       # older tool results are shortened to keep the prompt under this
+KEEP_FULL_RESULTS = 3        # ...except the most recent ones
 STALE_AFTER = timedelta(minutes=5)  # a running investigation not updated this long is dead
 
 # Investigation-relevant subset of the assistant's read-only tools.
@@ -491,6 +493,14 @@ def build_tools(ctx: Ctx) -> list[StructuredTool]:
 
 # ─── The loop ────────────────────────────────────────────────────
 
+async def investigation_model(db, default: str) -> str:
+    """Settings → investigation_model, else the assistant's model. Investigations
+    need native tool calling and a long context — a stronger model than chat."""
+    from app.models.models import PlatformSetting
+    row = await db.get(PlatformSetting, "investigation_model")
+    return (row.value or "").strip() if row and (row.value or "").strip() else default
+
+
 def make_chat_model(api_key: str, model: str, effort: str | None):
     """The LLM client; tests replace this with a scripted model."""
     from app.core.config import settings
@@ -501,6 +511,103 @@ def make_chat_model(api_key: str, model: str, effort: str | None):
 
 
 _VERDICT_RE = re.compile(r"VERDICT:\s*(true_positive|false_positive|inconclusive)", re.I)
+
+
+# ─── Model output hygiene ────────────────────────────────────────
+# Models routed through a 9router combo vary: some answer with native tool
+# calls, some write them as text (Qwen's <function=...> XML, Hermes' JSON in
+# <tool_call>), and small ones degenerate into <unk> runs when the prompt gets
+# long. All three are handled here rather than surfacing as garbage.
+
+_TOOL_CALL_BLOCK = re.compile(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", re.S)
+_XML_FUNCTION = re.compile(r"<function=([\w.-]+)>(.*?)(?:</function>|$)", re.S)
+_XML_PARAM = re.compile(r"<parameter=([\w.-]+)>\s*(.*?)\s*</parameter>", re.S)
+
+
+def _param_value(raw: str) -> Any:
+    raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return raw
+
+
+def parse_text_tool_calls(content: str, known: set[str]) -> tuple[list[dict], str]:
+    """Tool calls written as text → (calls, the content without them). Only names of real tools count."""
+    calls: list[dict] = []
+    for m in _XML_FUNCTION.finditer(content):
+        name = m.group(1)
+        if name in known:
+            calls.append({"name": name, "args": {k: _param_value(v) for k, v in _XML_PARAM.findall(m.group(2))}})
+    if not calls:
+        for m in _TOOL_CALL_BLOCK.finditer(content):
+            try:
+                obj = json.loads(m.group(1))
+            except (json.JSONDecodeError, ValueError):
+                continue
+            name = obj.get("name") if isinstance(obj, dict) else None
+            args = obj.get("arguments", obj.get("parameters", {})) if isinstance(obj, dict) else {}
+            if isinstance(args, str):
+                args = _param_value(args)
+            if name in known and isinstance(args, dict):
+                calls.append({"name": name, "args": args})
+    if not calls:
+        return [], content
+    for i, c in enumerate(calls):
+        c["id"] = f"text_call_{uuid.uuid4().hex[:8]}_{i}"
+    cut = min((i for i in (content.find("<tool_call>"), content.find("<function=")) if i >= 0), default=len(content))
+    return calls, content[:cut].strip()
+
+
+def is_degenerate(text: str) -> bool:
+    """<unk> runs or one short chunk repeated over and over: the model lost the thread."""
+    if not text:
+        return False
+    if text.count("<unk>") >= 3:
+        return True
+    tail = text.rstrip()[-2000:]
+    for n in range(1, 41):  # the end is one unit repeated back to back
+        unit = tail[-n:]
+        reps = max(12, 240 // n)
+        if unit.strip() and len(tail) >= n * reps and tail.endswith(unit * reps):
+            return True
+    return False
+
+
+def _compact(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Shorten older tool results once the conversation outgrows CONTEXT_CHARS."""
+    total = sum(len(str(m.content)) for m in messages)
+    if total <= CONTEXT_CHARS:
+        return messages
+    tool_idx = [i for i, m in enumerate(messages) if isinstance(m, ToolMessage)]
+    out = list(messages)
+    for i in tool_idx[:-KEEP_FULL_RESULTS]:
+        body = str(out[i].content)
+        if len(body) > 1200:
+            out[i] = ToolMessage(content=body[:1200] + " …(older result shortened; re-read it with get_flow_rows "
+                                 "or repeat the search if you need it)", tool_call_id=out[i].tool_call_id,
+                                 name=out[i].name)
+            total -= len(body) - len(str(out[i].content))
+        if total <= CONTEXT_CHARS:
+            break
+    return out
+
+
+async def _ask(ctx: Ctx, model, messages: list[BaseMessage], known: set[str]):
+    """One model turn, with text tool calls recovered and one retry on degenerate output."""
+    for attempt in range(2):
+        reply = await model.ainvoke(_compact(messages))
+        content = str(reply.content or "")
+        calls = list(getattr(reply, "tool_calls", None) or [])
+        if not calls:
+            calls, content = parse_text_tool_calls(content, known)
+        if not is_degenerate(content):
+            return content, calls
+        await _step(ctx.inv_id, "warning", text="the model produced corrupted output; retrying with a shorter context")
+        messages = messages + [HumanMessage(content=(
+            "Your previous reply was corrupted (repeated or unknown tokens) and was discarded. "
+            "Continue concisely: call one tool, or write the final report."))]
+    return "", []
 
 
 async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None) -> tuple[str, str]:
@@ -522,15 +629,20 @@ async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None) -
         final = round_no == MAX_ROUNDS or ctx.seconds_left() < 120
         if final:
             messages.append(HumanMessage(content="Budget exhausted: write the final report now, no more tools."))
-            reply = await chat.ainvoke(messages)
-        else:
-            reply = await llm.ainvoke(messages)
-        messages.append(reply)
-        calls = getattr(reply, "tool_calls", None) or []
-        if reply.content and calls:
-            await _step(ctx.inv_id, "thought", text=_clip(str(reply.content), 1500))
+        content, calls = await _ask(ctx, chat if final else llm, messages, set(by_name))
+        if not content and not calls:
+            if final:
+                return "", "inconclusive"
+            # degenerate twice: stop collecting and go straight to the report
+            messages.append(HumanMessage(content="Stop investigating and write the final report now."))
+            content, _ = await _ask(ctx, chat, messages, set())
+            m = _VERDICT_RE.search(content)
+            return content.strip(), (m.group(1).lower() if m else "inconclusive")
+        messages.append(AIMessage(content=content, tool_calls=calls))
+        if content and calls:
+            await _step(ctx.inv_id, "thought", text=_clip(content, 1500))
         if not calls or final:
-            report = str(reply.content or "").strip()
+            report = content.strip()
             m = _VERDICT_RE.search(report)
             return report, (m.group(1).lower() if m else "inconclusive")
 
@@ -554,6 +666,7 @@ async def run_investigation(inv_id: uuid.UUID) -> None:
         ctx = Ctx(inv_id=inv.id, case_id=inv.case_id, group_id=inv.group_id,
                   user_id=inv.started_by, username=user.username if user else "unknown")
         api_key, model, effort = await _graph_config(db, inv.group_id)
+        model = await investigation_model(db, model)
     await _set(inv_id, status="running", model=model)
     await _step(inv_id, "started", by=ctx.username, model=model)
     try:
