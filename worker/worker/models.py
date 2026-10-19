@@ -20,6 +20,34 @@ class Agent(Base):
     status       = Column(String(30), nullable=False, default="online")
     last_seen_at = Column(DateTime(timezone=True))
 
+class FleetHunt(Base):
+    __tablename__ = "fleet_hunts"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    status           = Column(String(20), nullable=False, default="running")
+    total_agents     = Column(Integer, nullable=False, default=0)
+    completed_agents = Column(Integer, nullable=False, default=0)
+
+class Flow(Base):
+    __tablename__ = "flows"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id     = Column(UUID(as_uuid=True))
+    status       = Column(String(20), nullable=False, default="scheduled")
+    timeout      = Column(Integer, nullable=False)
+    error        = Column(Text)
+    created_at   = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at   = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+
+class AgentTask(Base):
+    __tablename__ = "agent_tasks"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id      = Column(UUID(as_uuid=True))
+    fleet_hunt_id = Column(UUID(as_uuid=True))
+    status        = Column(String(20), nullable=False, default="pending")
+    error         = Column(Text)
+    created_at    = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    completed_at  = Column(DateTime(timezone=True))
+
 class Rule(Base):
     __tablename__ = "rules"
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -59,6 +87,8 @@ class Alert(Base):
     resolved_at      = Column(DateTime(timezone=True))
     mitre_techniques = Column(JSONB, nullable=False, default=list)
     kill_chain_stage = Column(String(50))
+    ai_verdict       = Column(String(50))  # set by ai_analyst._set_alert_verdict; column created by server-api
+    context          = Column(JSONB, nullable=False, default=dict)  # alert_manager.alert_context
     created_at       = Column(DateTime(timezone=True), default=now_utc)
     updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -163,6 +193,7 @@ class UebaAnomaly(Base):
     features      = Column(JSONB,       nullable=False, default=dict)
     alert_id         = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
     mitre_techniques = Column(JSONB,               nullable=False, default=list)
+    reasons          = Column(JSONB,               nullable=False, default=list)  # ueba.explain output
     ai_narrative     = Column(Text)
     ai_action        = Column(String(20))
     case_id          = Column(UUID(as_uuid=True))  # FK omitted — worker models omit FK constraints by convention

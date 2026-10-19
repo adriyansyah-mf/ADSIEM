@@ -41,6 +41,10 @@ type FirewallRule struct {
 	Reason     string `json:"reason"`
 }
 
+// AgentVersion is sent on every heartbeat; main sets it from its -ldflags
+// version. The server uses it to tell which agents support live-response flows.
+var AgentVersion = "dev"
+
 type HeartbeatResponse struct {
 	ConfigHash string         `json:"config_hash"`
 	LogSources []LogSource    `json:"log_sources"`
@@ -66,7 +70,7 @@ func Loop(
 		payload := HeartbeatRequest{
 			AgentID:       cfg.Agent.ID,
 			Status:        "online",
-			Version:       "1.0.0",
+			Version:       AgentVersion,
 			BufferDropped: dropped,
 		}
 		resp, err := c.Post("/api/ingest/heartbeat", payload)

@@ -1,0 +1,15 @@
+title: Windows Scheduled Task Created
+id: rule-win-scheduled-task
+description: A scheduled task was created (4698), a common persistence and execution mechanism.
+logsource:
+  product: windows
+  service: security
+detection:
+  created:
+    event.action: scheduled_task_created
+  condition: created
+level: medium
+tags:
+  - attack.persistence
+  - attack.execution
+  - attack.t1053.005

@@ -1,9 +1,10 @@
 # server-api/app/api/routes/alerts.py
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -12,10 +13,12 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission, fetch_scoped
 from app.core.es_client import get_log as es_get_log
 from app.core.geoip import lookup_country
-from app.models.models import AiFeedback, Alert, AlertNote, User
+from app.core.mitre_names import technique_info
+from app.models.models import Agent, AiFeedback, Alert, AlertNote, Rule, UebaAnomaly, User
 from app.schemas.schemas import (
-    AiFeedbackCreate, AiFeedbackOut, AlertNoteCreate, AlertNoteOut, AlertOut,
-    AlertSourceLogOut, AlertUpdate, EventOut, PaginatedResponse, RawLogOut,
+    AiFeedbackCreate, AiFeedbackOut, AlertAgentInfo, AlertDetailOut, AlertNoteCreate, AlertNoteOut,
+    AlertOut, AlertRelatedOut, AlertRuleInfo, AlertSourceLogOut, AlertUebaInfo, AlertUpdate, EventOut,
+    PaginatedResponse, RawLogOut,
 )
 from app.services.audit import audit_log
 
@@ -77,7 +80,21 @@ async def list_alerts(
     return PaginatedResponse(total=total, page=page, page_size=page_size, items=items)
 
 
-@router.get("/{alert_id}", response_model=AlertOut)
+RELATED_WINDOW = timedelta(hours=24)
+_TITLE_SUFFIX = re.compile(r"\s+\[[^\]]*\]$")  # "[5x in 60s from 1.2.3.4]" added by thresholds
+
+
+async def _alert_rule(db: AsyncSession, alert: Alert) -> Rule | None:
+    if alert.rule_id:
+        rule = await db.get(Rule, alert.rule_id)
+        if rule:
+            return rule
+    # alerts created before rule_id was recorded: match the rule by its title
+    base_title = _TITLE_SUFFIX.sub("", alert.title)
+    return (await db.execute(select(Rule).where(Rule.title == base_title).limit(1))).scalar_one_or_none()
+
+
+@router.get("/{alert_id}", response_model=AlertDetailOut)
 async def get_alert(
     alert_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -90,8 +107,70 @@ async def get_alert(
     alert = result.scalar_one_or_none()
     if not alert or (group_filter and alert.group_id != group_filter):
         raise HTTPException(status_code=404, detail="Alert not found")
-    out = AlertOut.model_validate(alert)
+    out = AlertDetailOut.model_validate(alert)
     out.source_ip_country = lookup_country(alert.source_ip)
+
+    rule = await _alert_rule(db, alert)
+    if rule:
+        out.rule = AlertRuleInfo(id=rule.id, title=rule.title, description=rule.description,
+                                 level=rule.level, tags=list(rule.tags or []), content=rule.content)
+    if alert.agent_id:
+        agent = await db.get(Agent, alert.agent_id)
+        if agent:
+            out.agent = AlertAgentInfo.model_validate(agent, from_attributes=True)
+    # UEBA alerts have no source log; the anomaly that raised them is the evidence
+    anomaly = (await db.execute(
+        select(UebaAnomaly).where(UebaAnomaly.alert_id == alert.id).order_by(UebaAnomaly.detected_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if anomaly:
+        out.ueba = AlertUebaInfo.model_validate(anomaly)
+
+    techniques = list(alert.mitre_techniques or [])
+    if anomaly:
+        techniques += [m.get("id") for m in (anomaly.mitre_techniques or []) if m.get("id")]
+    seen: set[str] = set()
+    for info in map(technique_info, techniques):
+        if info["id"] not in seen:
+            seen.add(info["id"])
+            out.mitre.append(info)
+
+    if rule or alert.rule_id:
+        same_rule = Alert.rule_id == rule.id if rule else Alert.rule_id == alert.rule_id
+        if rule:  # older alerts only match by title
+            same_rule = or_(same_rule, Alert.title == rule.title, Alert.title.like(f"{rule.title} [%"))
+        out.rule_fired_24h = int((await db.execute(
+            select(func.coalesce(func.sum(Alert.duplicate_count + 1), 0))
+            .where(same_rule, Alert.group_id == alert.group_id,
+                   Alert.created_at >= datetime.now(timezone.utc) - RELATED_WINDOW)
+        )).scalar() or 0)
+
+    if alert.event_id:
+        doc = await es_get_log(str(alert.event_id))
+        if doc:
+            out.event = {
+                "id": doc.get("id"),
+                "timestamp": doc.get("created_at"),
+                "log_type": doc.get("log_type"),
+                "location": doc.get("location"),
+                "decoder": doc.get("decoder"),
+                "full_log": doc.get("raw_message"),
+                "data": doc.get("decoded_fields") or {},
+            }
+
+    entity_filters = []
+    if alert.source_ip:
+        entity_filters.append(Alert.source_ip == alert.source_ip)
+    if alert.hostname:
+        entity_filters.append(Alert.hostname == alert.hostname)
+    if entity_filters and alert.created_at:
+        related = (await db.execute(
+            select(Alert)
+            .where(Alert.id != alert.id, Alert.group_id == alert.group_id, or_(*entity_filters),
+                   Alert.created_at.between(alert.created_at - RELATED_WINDOW, alert.created_at + RELATED_WINDOW))
+            .order_by(Alert.created_at.desc())
+            .limit(15)
+        )).scalars().all()
+        out.related = [AlertRelatedOut.model_validate(r) for r in related]
     return out
 
 

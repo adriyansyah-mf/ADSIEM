@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import DataTable from '@/components/DataTable'
 import SeverityBadge from '@/components/SeverityBadge'
 import StatusBadge from '@/components/StatusBadge'
-import AlertDetailModal from '@/components/AlertDetailModal'
 import { useAlerts } from '@/hooks/useAlerts'
 import { useStartHunt } from '@/hooks/useHunts'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -122,7 +121,7 @@ export default function AlertsPage() {
   const [searchParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
-  const [selected, setSelected] = useState<Alert | null>(null)
+  const navigateTo = useNavigate()
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState(() => searchParams.get('severity') ?? '')
   const [hostnameFilter, setHostnameFilter] = useState('')
@@ -154,15 +153,11 @@ export default function AlertsPage() {
   // Deep link from the global search dropdown (?open=<alert_id>) — fetched
   // directly rather than found in the current page's rows, since the
   // matching alert may not be on whatever page/filter is currently shown.
+  // old ?open=<id> links now land on the full detail page
   const openId = searchParams.get('open')
-  const { data: deepLinkedAlert } = useQuery<Alert>({
-    queryKey: ['alert', openId],
-    queryFn: () => api.get(`/api/alerts/${openId}`).then(r => r.data),
-    enabled: !!openId,
-  })
   useEffect(() => {
-    if (deepLinkedAlert) setSelected(deepLinkedAlert)
-  }, [deepLinkedAlert])
+    if (openId) navigateTo(`/alerts/${openId}`, { replace: true })
+  }, [openId, navigateTo])
 
   const columns = [
     { key: 'severity', header: 'Severity', render: (r: Alert) => <SeverityBadge severity={r.severity} /> },
@@ -223,9 +218,8 @@ export default function AlertsPage() {
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
           page={page} pageSize={pageSize} onPageChange={setPage}
           onPageSizeChange={(s) => { setPageSize(s); setPage(1) }}
-          onRowClick={setSelected} />
+          onRowClick={(a: Alert) => navigateTo(`/alerts/${a.id}`)} />
       )}
-      {selected && <AlertDetailModal alert={selected} onClose={() => setSelected(null)} />}
     </div>
   )
 }

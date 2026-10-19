@@ -1,12 +1,14 @@
 # worker/worker/ueba/trainer.py
 import asyncio
 import structlog
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from worker.database import AsyncSessionLocal
-from worker.models import UebaFeatureSnapshot
+from worker.models import UebaEntityScore, UebaFeatureSnapshot
+from worker.ueba.explain import MIN_ENTITY_SNAPSHOTS, build_baseline
 from worker.ueba.features import (
     USER_FEATURE_KEYS, IP_FEATURE_KEYS,
     build_user_vector_dict, build_ip_vector_dict,
@@ -65,6 +67,41 @@ async def take_snapshots(redis) -> None:
     log.info("ueba_snapshots_saved", users=len(users), ips=len(ips))
 
 
+_ACTIVITY_KEY = {"user": "login_count", "ip": "total_events"}
+
+
+def active_snapshots(entity_type: str, rows):
+    """Drop hourly snapshots of entities that did nothing that hour. Their
+    counters had already expired, and keeping them drags every baseline to
+    zero — after which any active IP looks wildly abnormal."""
+    key = _ACTIVITY_KEY[entity_type]
+    return [r for r in rows if float((r.features or {}).get(key, 0) or 0) > 0]
+
+
+async def _store_entity_profiles(entity_type: str, rows, keys: list[str]) -> None:
+    """Per-entity baselines (from that entity's own hourly snapshots) so an
+    anomaly can be explained against the entity's normal, not just everyone's."""
+    by_entity: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_entity[r.entity_value].append(r.features)
+    profiles = {
+        value: build_baseline(feats, keys)
+        for value, feats in by_entity.items()
+        if len(feats) >= MIN_ENTITY_SNAPSHOTS
+    }
+    if not profiles:
+        return
+    async with AsyncSessionLocal() as db:
+        for value, profile in profiles.items():
+            await db.execute(
+                update(UebaEntityScore)
+                .where(UebaEntityScore.entity_type == entity_type, UebaEntityScore.entity_value == value)
+                .values(feature_profile=profile)
+            )
+        await db.commit()
+    log.info("ueba_entity_profiles_saved", entity_type=entity_type, n=len(profiles))
+
+
 async def train_models(redis) -> None:
     """Load DB snapshots, train IsolationForest, persist model state to Redis."""
     import numpy as np
@@ -86,11 +123,13 @@ async def train_models(redis) -> None:
         )).scalars().all()
 
     trained_any = False
+    trained_at = datetime.now(timezone.utc).isoformat()
 
     for entity_type, rows, keys, model_key in [
         ("user", user_rows, USER_FEATURE_KEYS, "ueba:model:user"),
         ("ip",   ip_rows,   IP_FEATURE_KEYS,   "ueba:model:ip"),
     ]:
+        rows = active_snapshots(entity_type, rows)
         if len(rows) < MIN_SNAPSHOTS:
             log.info("ueba_cold_start", entity_type=entity_type, n=len(rows), needed=MIN_SNAPSHOTS)
             continue
@@ -101,8 +140,10 @@ async def train_models(redis) -> None:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, model.fit, X)
 
-        model_b64 = dumps_model(model)
+        population = build_baseline((r.features for r in rows), keys)
+        model_b64 = dumps_model(model, keys, population, len(rows), trained_at)
         await redis.set(model_key, model_b64, ex=MODEL_TTL)
+        await _store_entity_profiles(entity_type, rows, keys)
         trained_any = True
         log.info("ueba_model_trained", entity_type=entity_type, n_samples=len(rows))
 

@@ -59,6 +59,10 @@ jobs:
             -I internal/procexec/bpf/include \
             -c internal/procexec/bpf/execve.bpf.c \
             -o internal/procexec/bpf/execve.bpf.o
+          clang -O2 -g -target bpf -D__TARGET_ARCH_${BPF_ARCH} \
+            -I internal \
+            -c internal/netwatch/bpf/netwatch.bpf.c \
+            -o internal/netwatch/bpf/netwatch.bpf.o
 
       - name: Build .deb
         env:
@@ -91,8 +95,85 @@ jobs:
           name: packages-${{ matrix.arch }}
           path: agent/dist/packages/*
 
+  build-windows:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#agent-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Windows zip (exe + install scripts)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: amd64
+        run: bash packaging/build-windows.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows-amd64
+          path: agent/dist/packages/*
+
+  build-msi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install smoke-test dependencies
+        run: pip install cryptography
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#agent-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build MSI
+        working-directory: agent
+        shell: pwsh
+        run: ./packaging/build-msi.ps1 -Version ${{ steps.version.outputs.version }}
+
+      # the release MSI must install, enroll and ship events before it's published
+      - name: Smoke test
+        shell: pwsh
+        run: ./tests/windows/smoke-msi.ps1 -Msi agent/dist/packages/siem-agent-${{ steps.version.outputs.version }}-x64.msi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-windows-msi
+          path: agent/dist/packages/*.msi
+
   release:
-    needs: build
+    needs: [build, build-windows, build-msi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

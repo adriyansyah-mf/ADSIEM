@@ -69,7 +69,7 @@ Agents page).
 - Ports 80/443 free (nginx), or adjust `docker-compose.prod.yml`
 
 **Endpoint agent host:**
-- Linux (the agent is Linux-only — no Windows/macOS build)
+- Linux, or Windows 10 / Server 2016 and later (see [Windows](#windows) — no macOS build)
 - To run as a systemd service: any systemd-based distro (Debian/Ubuntu → `.deb`, RHEL/Fedora/Rocky/Alma → `.rpm`)
 - For the eBPF process-exec monitor specifically (optional, degrades gracefully without it):
   - Kernel with BTF: `ls /sys/kernel/btf/vmlinux` must exist (`CONFIG_DEBUG_INFO_BTF=y`) — true on any mainstream distro kernel from the last ~5 years
@@ -173,28 +173,61 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 ## Agent Installation
 
-The agent is a single static Go binary. Three ways to get it onto a host, in order of
-convenience:
+The agent is a single static Go binary for Linux and Windows. The quickest way onto a
+host is the dashboard's deploy command; the options below cover doing it by hand.
+
+### Deploy from the dashboard (recommended)
+
+**Agents → Deploy agent** works like Wazuh's *Deploy new agent*. You pick the OS
+(DEB, RPM or Windows), check the server address the host will use, and create an
+**enrollment key**. You then get one command to run on the host, which downloads the
+package from this server, installs it, enrolls the agent and starts it:
+
+```bash
+curl -fsSLo /tmp/siem-agent_1.5.0_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.5.0_amd64.deb' \
+  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.5.0_amd64.deb
+```
+
+The RPM command is the same with `rpm -Uvh`. On Windows, an elevated PowerShell
+downloads the zip and runs `install.ps1 -ServerUrl … -EnrollmentToken …`.
+
+**Enrollment keys** (Agents → Deploy agent, or `POST /api/enrollment-tokens`):
+
+- A key decides the agent's **group**. A group-scoped admin can only create keys for
+  their own group.
+- *Max agents*: `1` gives a single-use key. A number allows that many hosts. Blank means
+  unlimited, which suits a deployment key you paste into Ansible, GPO or a golden image.
+  Uses are counted atomically, so parallel installs can't go over the limit.
+- *Expires in* and **revoke** limit how long a key can be used. Revoking a key doesn't
+  touch agents already enrolled with it.
+- *New agents wait for approval*: agents enrolled with such a key show as **PENDING**.
+  Their heartbeats are accepted, but their logs are dropped and they get no
+  live-response tasks until someone clicks **Approve**. Wazuh's open enrollment has no
+  equivalent; it trusts anyone holding the password.
+
+Re-enrolling a hostname reuses that agent's record, so a rebuilt host doesn't leave a
+duplicate behind. This is only allowed once the old agent has been silent for 2 minutes.
+While it is still connected the server answers 409 and the new install keeps retrying.
+This stops anyone holding a key from taking over a live agent by reporting its hostname.
 
 ### Option A — Prebuilt package (`.deb` / `.rpm`)
 
-The platform builds these itself on every stack start (`package-builder` service) and
-serves them from the dashboard: **Agents → Download Agent**. Or fetch a tagged GitHub
-release (`.github/workflows/agent-release.yml`, triggered by pushing a tag like `agent-v1.1.0`).
+The platform builds the packages on every stack start: the `package-builder` service
+runs the same scripts as the release, at the version in `agent/VERSION`. The dashboard
+serves them, and so does each tagged GitHub release
+(`.github/workflows/agent-release.yml`, triggered by a tag like `agent-v1.5.0`).
 
-**Debian/Ubuntu/Kali:**
 ```bash
-sudo dpkg -i siem-agent_<version>_amd64.deb
-sudo vi /etc/siem-agent/config.yaml   # set server.url and enrollment token — see below
-sudo systemctl enable --now siem-agent
+sudo dpkg -i siem-agent_<version>_amd64.deb          # or: sudo rpm -Uvh siem-agent-<version>-1.x86_64.rpm
+sudo siem-agent-configure --server https://siem.example.com --key <enrollment key>
 ```
 
-**RHEL/Fedora/Rocky/Alma:**
-```bash
-sudo rpm -i siem-agent-<version>-1.x86_64.rpm
-sudo vi /etc/siem-agent/config.yaml
-sudo systemctl enable --now siem-agent
-```
+`siem-agent-configure` writes the server and key into `/etc/siem-agent/config.yaml`,
+clears any earlier enrollment, and on RHEL-family hosts switches the log paths to
+`/var/log/secure` and `/var/log/messages`. It then enables and starts the service. Run
+it again whenever an installed agent should point at another server. Setting
+`SIEM_SERVER_URL`/`SIEM_ENROLLMENT_KEY` (and optionally `SIEM_AGENT_NAME`) while
+installing the package does the same thing, which is what the one-line command relies on.
 
 Both packages install to `/usr/bin/siem-agent`, `/etc/siem-agent/config.yaml`, and a
 `siem-agent.service` unit. The packaged `postinst` creates an unprivileged `siem-agent`
@@ -203,6 +236,47 @@ i.e. **as root**, which is what live-response (`iptables` isolate/block-IP) and 
 monitor need. If you harden the unit to run as `siem-agent`, isolate/block-IP and
 process-exec monitoring will fail closed (logged as warnings, not fatal) — everything
 else (log tailing, FIM, hygiene) still works unprivileged.
+
+### Windows
+
+Each tagged release ships **`siem-agent-<version>-x64.msi`**. It is built with WiX on a
+Windows runner, and before publishing the release workflow installs it there and
+checks enrollment and event shipping (`tests/windows/smoke-msi.ps1`). Install it like
+Wazuh's, from an elevated prompt or any deployment tool (Intune, SCCM, PDQ…):
+
+```powershell
+msiexec /i siem-agent-<version>-x64.msi /qn SERVER_URL=https://siem.example.com ENROLLMENT_KEY=<key> ENABLE_AUDITING=1
+```
+
+| Property | |
+|---|---|
+| `SERVER_URL` | SIEM server, as the host reaches it (required on first install) |
+| `ENROLLMENT_KEY` | enrollment key (required on first install; a new one re-enrolls the agent) |
+| `AGENT_NAME` | optional, default: hostname |
+| `ENABLE_AUDITING` | `1` turns on logon / process-creation (with command line) / account auditing and PowerShell script block logging |
+
+The MSI installs `C:\Program Files\SIEMAgent\siem-agent.exe` as the auto-start
+`SIEMAgent` service. The service runs as LocalSystem and restarts itself if it crashes.
+Its config and `agent.log` live in `C:\ProgramData\SIEMAgent`, which only SYSTEM and
+Administrators can read.
+
+- **Upgrade:** a newer MSI, with or without properties, keeps the config and the agent token.
+- **Uninstall:** `msiexec /x` or *Apps & features* removes the service and binary and
+  leaves `C:\ProgramData\SIEMAgent`.
+- **Re-point an agent** at another server without reinstalling:
+  `siem-agent.exe -configure -server … -key …`.
+
+The release also has the older `siem-agent-windows-amd64-<version>.zip`, holding the exe,
+`install.ps1` and `uninstall.ps1`, for hosts where an MSI can't be used:
+`powershell -ExecutionPolicy Bypass -File install.ps1 -ServerUrl … -EnrollmentToken … -EnableAuditing`.
+
+The agent reads the Security, System, Application, Sysmon and PowerShell/Operational event
+logs (log source paths `eventlog:<channel>`), decoded by `decoders/win_*.yaml`. `-EnableAuditing`
+turns on logon / process-creation (with command line) / account-management auditing and
+PowerShell script block logging; install [Sysmon](https://learn.microsoft.com/sysinternals/downloads/sysmon)
+for process, network, file, registry and DNS events. Live response (process/network/user/persistence
+listing, file collection, YARA) works; host isolation and block-IP use Windows Defender Firewall.
+There is no eBPF process monitor or package inventory on Windows.
 
 ### Option B — Build from source
 
@@ -281,7 +355,23 @@ both sides in sync.
 
 If the platform's TLS cert isn't from a public CA (see step 2 of
 [Server Installation](#server-installation)), every agent host needs that cert added to
-its own trust store, or all agent→server traffic will fail TLS verification:
+its own trust store, or all agent→server traffic will fail TLS verification. On Windows
+the download in the install command fails first, with *Could not establish trust
+relationship for the SSL/TLS secure channel*.
+
+**Agents → Deploy agent handles this.** nginx serves the certificate (not the key) at
+`/api/agents/platform-ca.pem`, and the wizard puts it into the command it generates, so
+the host trusts it before downloading anything:
+
+- Windows: imports into `LocalMachine\Root`.
+- Debian: `update-ca-certificates`.
+- RHEL: `update-ca-trust`.
+
+For an `https://<IP>` server this is on by default. The wizard shows the certificate's
+SHA-256 fingerprint; check it against
+`openssl x509 -noout -fingerprint -sha256 -in nginx/certs/cert.pem` on the server.
+
+By hand:
 
 ```bash
 # fetch the cert from the server, e.g.:
@@ -300,7 +390,12 @@ sudo cp adsiem-ca.pem /etc/pki/ca-trust/source/anchors/adsiem-platform.pem
 sudo update-ca-trust extract
 ```
 
-Then restart the agent: `sudo systemctl restart siem-agent`.
+**Windows** (elevated PowerShell):
+```powershell
+Import-Certificate -FilePath .\adsiem-ca.pem -CertStoreLocation Cert:\LocalMachine\Root
+```
+
+Then restart the agent: `sudo systemctl restart siem-agent` (Windows: `Restart-Service SIEMAgent`).
 
 ### Verifying an agent is fully working
 
@@ -361,6 +456,31 @@ logsource (from `linux_process_exec` / the eBPF monitor), which intentionally us
 Sigma's own standard field names (`Image`, `CommandLine`, `ParentImage`, `User`,
 `ProcessId`, `ParentProcessId`) instead of ECS — that's what lets you drop in public
 SigmaHQ `process_creation` rules unmodified.
+
+A rule only sees events from its `logsource` (`worker/worker/sigma_logsource.py` maps
+each decoder `log_type` — plus, for Windows, the event's channel and EventID — to
+Sigma's product/service/category; any other `log_type` like `fortigate_traffic` is
+read as product `fortigate`, service `traffic`). Rules without a logsource see every event.
+
+### SigmaHQ ruleset
+
+**Dashboard → Rules → Import SigmaHQ** downloads an official
+[SigmaHQ release](https://github.com/SigmaHQ/sigma/releases) (Core, Core+, Core++,
+Emerging Threats or All) and imports it; servers without internet access can upload
+the release zip instead. Run it again to update: rules are matched by their Sigma id,
+upstream changes are applied, and rules you edited in the dashboard are left alone.
+New rules are enabled when their level and status pass the policy you pick (default:
+high/critical, stable/test) and a log source here can feed them — cloud, macOS and
+other sources the agents don't collect are imported disabled and marked
+*not collected*.
+
+Windows events keep their native field names (Sysmon/Security `EventData`, e.g.
+`Image`, `TargetObject`, `NewValue`), so SigmaHQ's Windows rules run unmodified.
+Compatibility is checked by replaying SigmaHQ's own regression samples — real `.evtx`
+events paired with the rule that must match — through agent formatting → decoders →
+engine (`tests/sigmahq/run.sh`, `.github/workflows/sigmahq-compat.yml`): all 3,768
+rules load and 469/471 samples give the exact expected match count (the other two
+samples hold two matching events where the reference counts one).
 
 Also addable via API or **Dashboard → Rules → New Rule** (write YAML → Test → Save):
 ```bash
@@ -509,8 +629,10 @@ step 2) before bringing up `nginx` in the prod compose.
 - [x] Real-time dashboard via WebSocket
 - [x] Email notification integration
 - [ ] Prometheus + Grafana dashboard
+- [x] One-command agent deployment with reusable enrollment keys and approval
 - [ ] Agent auto-update mechanism
 - [ ] Multi-tenancy group management UI
-- [ ] Sigma rule import from community repos
-- [ ] Windows/macOS endpoint agent
+- [x] Sigma rule import from community repos (SigmaHQ)
+- [x] Windows endpoint agent
+- [ ] macOS endpoint agent
 - [ ] Let's Encrypt automation for the platform's own TLS cert

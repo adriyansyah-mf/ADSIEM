@@ -1,0 +1,35 @@
+# Sysmon 1: process creation
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_sysmon_1_process_created
+log_type: windows_sysmon
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=1 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  Image: Image
+  CommandLine: CommandLine
+  ParentImage: ParentImage
+  ParentCommandLine: ParentCommandLine
+  User: User
+  Hashes: Hashes
+  OriginalFileName: OriginalFileName
+  CurrentDirectory: CurrentDirectory
+  IntegrityLevel: IntegrityLevel
+  ProcessId: ProcessId
+  ParentProcessId: ParentProcessId
+  process.name: Image
+  process.executable: Image
+  process.command_line: CommandLine
+  process.parent.name: ParentImage
+  process.hash: Hashes
+  user.name: User
+static_fields:
+  event.category: process
+  event.action: process_created

@@ -1,0 +1,21 @@
+title: User Added to Windows Administrators Group
+id: rule-win-admin-group-add
+description: A member was added to an administrators group (local 4732, domain/global 4728, universal 4756).
+logsource:
+  product: windows
+  service: security
+detection:
+  added:
+    event.action: user_added_to_group
+  admin_group:
+    group.name|contains:
+      - Administrators
+      - Domain Admins
+      - Enterprise Admins
+      - Schema Admins
+  condition: added and admin_group
+level: high
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1098

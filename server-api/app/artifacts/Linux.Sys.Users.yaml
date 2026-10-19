@@ -1,0 +1,5 @@
+name: Linux.Sys.Users
+description: Local accounts from /etc/passwd.
+sources:
+  - name: Users
+    plugin: users

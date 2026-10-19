@@ -1,0 +1,15 @@
+# sshd: client gave up before authenticating — on key-only servers the only trace of password guessing
+name: ssh_preauth_disconnect
+log_type: linux_auth
+type: regex
+priority: 12
+enabled: true
+match: '[preauth]'
+pattern: 'sshd\[\d+\]: (?:Connection closed|Disconnected) by (?:invalid user |authenticating user )(?P<user>\S*) ?(?P<src_ip>[0-9a-fA-F.:]+) port (?P<port>\d+) \[preauth\]'
+fields:
+  event.category: authentication
+  event.outcome: failure
+  event.action: preauth_disconnect
+  user.name: user
+  source.ip: src_ip
+  source.port: port

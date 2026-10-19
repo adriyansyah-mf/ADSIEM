@@ -1,0 +1,21 @@
+# Security 4698: a scheduled task was created
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_security_4698_scheduled_task_created
+log_type: windows_security
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=4698 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  user.name: SubjectUserName
+  task.name: TaskName
+  task.content: TaskContent
+static_fields:
+  event.category: process
+  event.action: scheduled_task_created

@@ -1,0 +1,15 @@
+# kernel: a process crashed with a segmentation fault (exploitation attempts often crash services)
+name: linux_kernel_segfault
+log_type: syslog
+type: regex
+priority: 50
+enabled: true
+match: segfault at
+pattern: 'kernel: (?:\[\s*[\d.]+\]\s+)?(?P<proc>[^\[\s]+)\[(?P<pid>\d+)\]: segfault at (?P<addr>\S+) ip (?P<ip>\S+).*? in (?P<module>\S+)'
+fields:
+  event.category: host
+  event.action: segfault
+  process.pid: pid
+  process.name: proc
+  error.address: addr
+  error.module: module

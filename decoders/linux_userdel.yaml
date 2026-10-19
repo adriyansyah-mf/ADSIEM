@@ -1,0 +1,12 @@
+# userdel: an account was deleted
+name: linux_userdel
+log_type: linux_auth
+type: regex
+priority: 15
+enabled: true
+match: userdel[
+pattern: 'userdel\[\d+\]: (?:delete user|removed group|removed shadow group) ''(?P<user>[^'']+)'''
+fields:
+  event.category: iam
+  event.action: user_deleted
+  user.target: user

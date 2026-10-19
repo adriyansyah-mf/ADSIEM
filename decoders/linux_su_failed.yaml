@@ -1,0 +1,14 @@
+name: linux_su_failed
+log_type: linux_auth
+type: regex
+# util-linux su failure: "su[1234]: FAILED SU (to root) alice on pts/0"
+priority: 15
+enabled: true
+pattern: 'su(?:\[\d+\])?:\s+FAILED SU \(to (?P<target>[^)]+)\) (?P<user>\S+) on (?P<tty>\S+)'
+fields:
+  event.category: authentication
+  event.action: su_failed
+  event.outcome: failure
+  user.name: user
+  user.target: target
+  process.tty: tty

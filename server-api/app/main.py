@@ -20,6 +20,7 @@ from app.api.routes.fim import router as fim_router
 from app.api.routes.hunts import router as hunts_router
 from app.api.routes.tasks import router as tasks_router, fleet_router
 from app.api.routes.artifacts import router as artifacts_router
+from app.api.routes.flows import router as flows_router, artifact_router as flow_artifacts_router, agent_router as agent_flows_router
 from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
@@ -101,6 +102,10 @@ async def _migrate_ueba_columns() -> None:
             ADD COLUMN IF NOT EXISTS feature_profile JSONB NOT NULL DEFAULT '{}'::jsonb
         """))
         await conn.execute(text("""
+            ALTER TABLE ueba_anomalies
+            ADD COLUMN IF NOT EXISTS reasons JSONB NOT NULL DEFAULT '[]'::jsonb
+        """))
+        await conn.execute(text("""
             ALTER TABLE ueba_feature_snapshots
             ADD COLUMN IF NOT EXISTS risk_score FLOAT NOT NULL DEFAULT 0.0
         """))
@@ -117,6 +122,12 @@ async def _migrate_ueba_columns() -> None:
             CREATE INDEX IF NOT EXISTS ix_ueba_anomalies_case_id
             ON ueba_anomalies(case_id)
             WHERE case_id IS NOT NULL
+        """))
+        # alert detail looks up the anomaly that raised a UEBA alert
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_ueba_anomalies_alert_id
+            ON ueba_anomalies(alert_id)
+            WHERE alert_id IS NOT NULL
         """))
         # Performance indexes for multi-tenant queries and sorted lists
         await conn.execute(text("""
@@ -144,7 +155,8 @@ async def _migrate_alerts_columns() -> None:
             ADD COLUMN IF NOT EXISTS duplicate_count INTEGER NOT NULL DEFAULT 0,
             ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ,
-            ADD COLUMN IF NOT EXISTS ai_verdict VARCHAR(50)
+            ADD COLUMN IF NOT EXISTS ai_verdict VARCHAR(50),
+            ADD COLUMN IF NOT EXISTS context JSONB NOT NULL DEFAULT '{}'::jsonb
         """))
         await conn.execute(text("""
             ALTER TABLE cases
@@ -332,11 +344,47 @@ async def _migrate_mfa_columns() -> None:
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_secret TEXT"))
         await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE"))
 
+async def _migrate_agent_flow_poll() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS flow_poll_at TIMESTAMPTZ"))
+
 async def _migrate_audit_log_group() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS group_id VARCHAR(100) NOT NULL DEFAULT 'default'"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_group_created ON audit_logs(group_id, created_at DESC)"))
+
+async def _migrate_agent_enrollment_columns() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            ALTER TABLE enrollment_tokens
+            ADD COLUMN IF NOT EXISTS max_uses INTEGER DEFAULT 1,
+            ADD COLUMN IF NOT EXISTS use_count INTEGER NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS require_approval BOOLEAN NOT NULL DEFAULT false
+        """))
+        # tokens used before use_count existed were single-use and are spent
+        await conn.execute(text(
+            "UPDATE enrollment_tokens SET use_count = 1 WHERE used_at IS NOT NULL AND use_count = 0"
+        ))
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS approved BOOLEAN NOT NULL DEFAULT true"))
+
+async def _migrate_rule_source_columns() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            ALTER TABLE rules
+            ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'custom',
+            ADD COLUMN IF NOT EXISTS external_id VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS sigma_status VARCHAR(20),
+            ADD COLUMN IF NOT EXISTS upstream_hash VARCHAR(64)
+        """))
+        # SigmaHQ import upserts by rule id
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_rules_source_external_id
+            ON rules(source, external_id) WHERE external_id IS NOT NULL
+        """))
 
 async def _migrate_drop_alerts_event_fk() -> None:
     """Drop the legacy alerts.event_id -> events(id) foreign key.
@@ -398,7 +446,10 @@ async def lifespan(app: FastAPI):
         await _migrate_soar_tables()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
+        await _migrate_agent_flow_poll()
         await _migrate_audit_log_group()
+        await _migrate_agent_enrollment_columns()
+        await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
@@ -427,6 +478,7 @@ for router in [
     logs.router, events.router, alerts.router, rules.router,
     decoders.router, webhooks.router, system.router, cases_router, settings_router, hygiene_router, ueba_router, fim_router, hunts_router,
     tasks_router, fleet_router, artifacts_router, yara_router,
+    flows_router, flow_artifacts_router, agent_flows_router,
     enrollment_tokens_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,

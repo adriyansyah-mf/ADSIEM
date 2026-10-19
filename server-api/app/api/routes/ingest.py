@@ -26,6 +26,9 @@ async def ingest_log(
     agent: Annotated[Agent, Depends(get_agent)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
+    if not agent.approved:
+        # accepted, not processed: the agent keeps running quietly until approved
+        return {"status": "pending_approval"}
     await enqueue_log(redis, {
         "agent_id": str(agent.id),
         "group_id": agent.group_id,
@@ -33,6 +36,7 @@ async def ingest_log(
         "log_type": body.log_type,
         "raw_message": body.raw_message,
         "received_at": body.received_at.isoformat(),
+        "location": body.location or "",
     })
     return {"status": "queued"}
 
@@ -59,11 +63,13 @@ async def heartbeat(
     )
     fim_paths = [p.path for p in fim_result.scalars().all()]
 
-    # fetch pending tasks for this agent and mark them dispatched
-    task_result = await db.execute(
-        select(AgentTask).where(AgentTask.agent_id == agent.id, AgentTask.status == "pending")
-    )
-    pending_tasks = task_result.scalars().all()
+    # fetch pending tasks for this agent and mark them dispatched (none before approval)
+    pending_tasks = []
+    if agent.approved:
+        task_result = await db.execute(
+            select(AgentTask).where(AgentTask.agent_id == agent.id, AgentTask.status == "pending")
+        )
+        pending_tasks = task_result.scalars().all()
     task_ids = [t.id for t in pending_tasks]
     if task_ids:
         from sqlalchemy import update as _update

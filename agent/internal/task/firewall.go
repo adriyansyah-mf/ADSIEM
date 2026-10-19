@@ -14,6 +14,16 @@ func (r *Runner) firewallEngine() (*firewall.Engine, error) {
 }
 
 func (r *Runner) handleBlockIP(params map[string]any) (any, error) {
+	if nativeFirewall {
+		rule, err := firewall.ParseRule(params)
+		if err != nil {
+			return nil, err
+		}
+		if err := nativeBlock(rule); err != nil {
+			return nil, err
+		}
+		return map[string]any{"cidr": rule.CIDR, "action": "block", "ttl": rule.TTLSeconds(), "backend": "netsh"}, nil
+	}
 	eng, err := r.firewallEngine()
 	if err != nil {
 		return nil, err
@@ -41,6 +51,16 @@ func (r *Runner) handleBlockIP(params map[string]any) (any, error) {
 }
 
 func (r *Runner) handleUnblockIP(params map[string]any) (any, error) {
+	if nativeFirewall {
+		rule, err := firewall.ParseRule(params)
+		if err != nil {
+			return nil, fmt.Errorf("a valid ip is required: %w", err)
+		}
+		if err := nativeUnblock(rule); err != nil {
+			return nil, err
+		}
+		return map[string]any{"removed": rule.CIDR}, nil
+	}
 	eng, err := r.firewallEngine()
 	if err != nil {
 		return nil, err
@@ -62,6 +82,12 @@ func (r *Runner) handleUnblockIP(params map[string]any) (any, error) {
 }
 
 func (r *Runner) handleIsolateHost() (any, error) {
+	if nativeFirewall {
+		if err := nativeIsolate(r.cfg.Server.URL); err != nil {
+			return nil, err
+		}
+		return map[string]any{"isolated": true, "backend": "netsh"}, nil
+	}
 	eng, err := r.firewallEngine()
 	if err != nil {
 		return nil, err
@@ -70,6 +96,12 @@ func (r *Runner) handleIsolateHost() (any, error) {
 }
 
 func (r *Runner) handleUnisolateHost() (any, error) {
+	if nativeFirewall {
+		if err := nativeUnisolate(); err != nil {
+			return nil, err
+		}
+		return map[string]any{"isolated": false}, nil
+	}
 	eng, err := r.firewallEngine()
 	if err != nil {
 		return nil, err

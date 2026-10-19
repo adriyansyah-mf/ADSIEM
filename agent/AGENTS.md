@@ -42,6 +42,10 @@ agent/
 | Anti-lockout rules | `internal/firewall/guard.go` | refuses blocks covering SIEM IP / gateway / loopback |
 | Firewall task handlers | `internal/task/firewall.go` | block_ip, unblock_ip, isolate_host, firewall_list, firewall_flush |
 | Live-response collectors | `internal/task/collectors.go` | process_list, netstat, persistence_check, users_list, dmesg_tail, open_files, file_list, file_get |
+| Live-response flows (Velociraptor-style) | `internal/task/flow.go` | long-polls `/api/agent/flows/poll`, runs sources sequentially, 500-row batches to `/update`, enforces timeout/max_rows, honours server cancel; a plugin ignoring ctx is abandoned after 5s |
+| Flow plugins | `internal/task/plugins.go` | registry must match `PLUGINS` in `server-api/app/services/flow_artifacts.py`; plugins emit rows and must check ctx; glob/hash/yara never enter `/proc` `/sys` `/dev` unless the root is inside them (`/proc/kmsg` reads block forever) |
+| Legacy task collectors | `internal/task/collectors.go`, `runner.go` | fixed task types via heartbeat (isolate/block-IP still use this path) |
+| Windows isolate/block-IP | `internal/task/isolation_windows.go` | `netsh advfirewall` (`SIEM-*` rules); the nft engine has no Windows backend |
 | YARA scans | `internal/task/yara.go` | |
 
 ## CONVENTIONS
@@ -71,3 +75,10 @@ agent/
 - **Do not commit new large binaries/bootstrap headers**; `bin/agent` and `include/bpf/vmlinux.h` are already committed artifacts and inflate the repo.
 - **`make build` now compiles the eBPF object first** (target `bpf`, requires `clang`; fails with a clear message if absent). `make package-deb`/`package-rpm` depend on it too. The `.bpf.o` is gitignored — never commit it.
 - **Windows/macOS hosts can still `go build ./...`** for editing; `hygiene/collector*.go` and `procexec/*.go` use `//go:build linux` with a no-op stub elsewhere.
+
+## WINDOWS
+
+- Same binary, `GOOS=windows` (`packaging/build-windows.sh` → zip with `install.ps1`/`uninstall.ps1`/`config.yaml`). Runs as the `SIEMAgent` service (`cmd/agent/service_windows.go`; `-install`/`-uninstall`), config and `agent.log` in `%ProgramData%\SIEMAgent`.
+- Event logs: a log source path `eventlog:<channel>` (e.g. `eventlog:Security`) is read via `EvtSubscribe` (`internal/winevent`), future events only. Each event becomes one `EventID=<id> Channel="..." Key="value" ...` line — the contract for the `decoders/win_*.yaml` kv decoders; change `winevent.FormatXML` and those decoders together (`tests/agent/winevent_format_test.go`, `tests/worker/test_windows_decoding.py`).
+- Live response: `plugins_windows.go` replaces pslist/netstat/users/persistence with PowerShell (`Get-CimInstance`, `Get-NetTCPConnection`, ...); dmesg/open_files are unsupported. Isolation/block-IP use `netsh advfirewall` rules named `SIEM-*`.
+- No eBPF/process-exec stream and no package hygiene on Windows — use Sysmon (`eventlog:Microsoft-Windows-Sysmon/Operational`) or 4688 for process creation.

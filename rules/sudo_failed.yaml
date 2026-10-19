@@ -1,0 +1,20 @@
+title: Failed sudo Authentication
+id: rule-sudo-failed
+description: Wrong password entered for sudo. Occasional typos are normal; bursts suggest password guessing on a compromised account.
+logsource:
+  product: linux
+detection:
+  selection:
+    event.action: sudo_failed
+  condition: selection
+threshold:
+  count: 3
+  timewindow: 600
+  group_by: user.name
+suppression:
+  timewindow: 1800
+level: medium
+tags:
+  - attack.privilege_escalation
+  - attack.credential_access
+  - attack.t1110.001

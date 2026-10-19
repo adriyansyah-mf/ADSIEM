@@ -122,8 +122,9 @@ async def submit_result(
             completed_at=now,
         )
     )
-    # update fleet hunt progress
-    if t.fleet_hunt_id and body.status in ("done", "failed"):
+    # update fleet hunt progress — only on the first terminal result, so a late
+    # result for a task agent_monitor already timed out isn't counted twice
+    if t.fleet_hunt_id and body.status in ("done", "failed") and t.status not in ("done", "failed"):
         fh = (await db.execute(select(FleetHunt).where(FleetHunt.id == t.fleet_hunt_id))).scalar_one_or_none()
         if fh:
             new_completed = fh.completed_agents + 1

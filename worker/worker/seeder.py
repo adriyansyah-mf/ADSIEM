@@ -48,7 +48,8 @@ async def _upsert_rules(db) -> None:
         try:
             with open(path) as f:
                 content = f.read()
-            d = yaml.safe_load(content)
+            # a file may hold a base rule plus its correlation; the first names the row
+            d = next((doc for doc in yaml.safe_load_all(content) if isinstance(doc, dict)), {})
             title = d.get("title", "Untitled")
             # See _upsert_decoders: SAVEPOINT so one title colliding with a
             # concurrent worker replica doesn't poison the rest of the batch.

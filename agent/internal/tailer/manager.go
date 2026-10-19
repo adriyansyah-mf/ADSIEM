@@ -2,6 +2,7 @@ package tailer
 
 import (
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/siem-platform/agent/internal/buffer"
@@ -52,7 +53,11 @@ func (m *Manager) Update(sources []heartbeat.LogSource) {
 			slog.Info("starting tailer", "path", path, "type", s.LogType)
 			stopCh := make(chan struct{})
 			m.sources[path] = &source{path: path, logType: s.LogType, stopCh: stopCh}
-			go Tail(path, s.LogType, m.buf, stopCh)
+			if strings.HasPrefix(path, EventLogPrefix) {
+				go TailEventLog(path, s.LogType, m.buf, stopCh)
+			} else {
+				go Tail(path, s.LogType, m.buf, stopCh)
+			}
 		}
 	}
 }

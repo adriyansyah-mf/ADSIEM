@@ -1,0 +1,51 @@
+name: SigmaHQ compatibility
+
+# Replays SigmaHQ's regression samples through agent formatting → decoders →
+# SigmaEngine (tests/sigmahq/run.sh). PRs run against a pinned SigmaHQ
+# commit so they only fail for our own changes; the weekly run tracks master
+# to catch new Sigma syntax early.
+on:
+  pull_request:
+    paths:
+      - "worker/worker/sigma_*.py"
+      - "worker/worker/decoder_engine.py"
+      - "decoders/**"
+      - "agent/internal/winevent/**"
+      - "tests/sigmahq/**"
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "SigmaHQ ref (branch or release tag)"
+        default: master
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      - name: Install dependencies
+        # the engine and decoders only need these (not the full worker stack)
+        run: pip install pyyaml==6.0.2 structlog==24.4.0 python-evtx==0.8.1
+
+      - name: Run SigmaHQ regression samples
+        run: |
+          # pinned SigmaHQ master commit (release tags carry since-corrected match counts)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then REF=b7920ed31356fb7f6a9275b34737d8604c65bac3
+          else REF="${{ inputs.ref || 'master' }}"; fi
+          bash tests/sigmahq/run.sh "$REF"

@@ -1,0 +1,24 @@
+# System 7045: a service was installed
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_system_7045_service_installed
+log_type: windows_system
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=7045 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  service.name: ServiceName
+  service.path: ImagePath
+  service.type: ServiceType
+  service.start_type: StartType
+  user.name: AccountName
+  ImagePath: ImagePath
+static_fields:
+  event.category: process
+  event.action: service_installed

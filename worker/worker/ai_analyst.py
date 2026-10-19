@@ -249,8 +249,12 @@ async def _tag_alert_with_mitre(alert_id: str, mitre_techniques: list[str]) -> N
         async with AsyncSessionLocal() as db:
             alert = await db.get(Alert, uuid.UUID(alert_id))
             if alert:
-                alert.mitre_techniques = mitre_techniques
-                alert.kill_chain_stage = stage_for_techniques(mitre_techniques)
+                # keep the detecting rule's techniques; the AI's entry wins per technique id
+                ai_ids = {str(t).split(":")[0].strip().upper() for t in mitre_techniques}
+                kept = [t for t in (alert.mitre_techniques or [])
+                        if str(t).split(":")[0].strip().upper() not in ai_ids]
+                alert.mitre_techniques = list(mitre_techniques) + kept
+                alert.kill_chain_stage = stage_for_techniques(alert.mitre_techniques)
                 await db.commit()
     except Exception as exc:
         log.warning("alert_mitre_tag_failed", alert_id=alert_id, error=str(exc))
@@ -270,6 +274,82 @@ async def _set_alert_verdict(alert_id: str, verdict: str) -> None:
                 await db.commit()
     except Exception as exc:
         log.warning("set_alert_verdict_failed", alert_id=alert_id, error=str(exc))
+
+
+UEBA_CONTEXT_ANOMALIES = 5
+UEBA_CONTEXT_RELATED_HOURS = 24
+
+
+async def _ueba_context(fields: dict, group_id: str) -> str:
+    """Summarise a UEBA entity's behaviour history for the L1 triage prompt:
+    risk trend, recent anomalies with their reasons, what is normal for it,
+    and other alerts on the same entity in the last 24h."""
+    from worker.models import UebaAnomaly, UebaEntityScore
+
+    entity_type = fields.get("ueba_entity_type")
+    entity_value = fields.get("ueba_entity_value")
+    if not entity_type or not entity_value:
+        return ""
+    since = datetime.now(timezone.utc) - timedelta(hours=UEBA_CONTEXT_RELATED_HOURS)
+    lines = [f"Entity: {entity_type} {entity_value}"]
+
+    async with AsyncSessionLocal() as db:
+        score = await db.get(UebaEntityScore, (entity_type, entity_value))
+        anomalies = (await db.execute(
+            select(UebaAnomaly)
+            .where(UebaAnomaly.entity_type == entity_type, UebaAnomaly.entity_value == entity_value)
+            .order_by(UebaAnomaly.detected_at.desc())
+            .limit(UEBA_CONTEXT_ANOMALIES)
+        )).scalars().all()
+        related_q = select(Alert.title, Alert.severity, Alert.created_at).where(
+            Alert.created_at >= since, Alert.group_id == group_id, ~Alert.title.like("[UEBA]%"),
+        )
+        if entity_type == "ip":
+            related_q = related_q.where(Alert.source_ip == entity_value)
+        else:
+            related_q = related_q.where(Alert.title.ilike(f"%{entity_value}%"))
+        related = (await db.execute(related_q.order_by(Alert.created_at.desc()).limit(8))).all()
+
+    if score:
+        lines.append(f"Risk score {score.risk_score:.0f}/100, {score.anomaly_count} anomalies recorded, "
+                     f"last seen {score.last_seen_at:%Y-%m-%d %H:%M} UTC" if score.last_seen_at else
+                     f"Risk score {score.risk_score:.0f}/100, {score.anomaly_count} anomalies recorded")
+        profile = score.feature_profile or {}
+        if profile.get("_n"):
+            normal = ", ".join(
+                f"{k} ~{v['median']}" for k, v in profile.items()
+                if isinstance(v, dict) and "median" in v
+            )
+            lines.append(f"Its own normal over {profile['_n']} hourly snapshots: {normal}")
+        else:
+            lines.append("No per-entity baseline yet (compared against all entities)")
+    if anomalies:
+        lines.append("Recent anomalies (newest first):")
+        for a in anomalies:
+            why = "; ".join(r.get("text", "") for r in (a.reasons or [])[:2]) or "no explanation stored"
+            lines.append(f"  - {a.detected_at:%m-%d %H:%M} risk {a.risk_score:.0f}: {why}")
+    if related:
+        lines.append(f"Other alerts on this entity in the last {UEBA_CONTEXT_RELATED_HOURS}h:")
+        lines.extend(f"  - [{sev}] {title} ({ts:%m-%d %H:%M})" for title, sev, ts in related)
+    else:
+        lines.append(f"No other alerts on this entity in the last {UEBA_CONTEXT_RELATED_HOURS}h")
+    return "\n".join(lines)[:2500]
+
+
+async def _record_ueba_outcome(alert_id: str, verdict: str, notes: str, case_id: str | None) -> None:
+    """Write the AI verdict back onto the UEBA anomaly that raised this alert;
+    a no-op for alerts that didn't come from UEBA."""
+    from worker.models import UebaAnomaly
+    if not alert_id:
+        return
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(UebaAnomaly)
+            .where(UebaAnomaly.alert_id == uuid.UUID(alert_id))
+            .values(ai_narrative=notes or None, ai_action=verdict,
+                    case_id=uuid.UUID(str(case_id)) if case_id else None)
+        )
+        await db.commit()
 
 
 async def _update_alert_status(alert_id: str, status: str) -> None:
@@ -564,6 +644,8 @@ async def analyze_and_maybe_create_case(
             "analyze_campaign": analyze_campaign,
             "check_fleet_spread": _check_and_note_fleet_spread,
             "dispatch_case_webhooks": dispatch_case_webhooks,
+            "ueba_context": _ueba_context,
+            "record_outcome": _record_ueba_outcome,
         },
     )
 

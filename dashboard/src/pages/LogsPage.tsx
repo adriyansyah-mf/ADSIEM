@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { SlidersHorizontal } from 'lucide-react'
 import DataTable from '@/components/DataTable'
 import QueryBuilder, { EMPTY_GROUP, isEmptyTree, type Group } from '@/components/QueryBuilder'
@@ -10,7 +11,9 @@ import type { RawLog } from '@/types'
 const FIELDS = ['log_type', 'raw_message', 'agent_id', 'created_at', 'decoded_fields.source.ip', 'decoded_fields.user.name']
 
 export default function LogsPage() {
-  const [search, setSearch] = useState('')
+  const [params] = useSearchParams()
+  // ?q= lets other pages (alert detail "search logs for this value") open a query directly
+  const [search, setSearch] = useState(params.get('q') ?? '')
   const [showBuilder, setShowBuilder] = useState(false)
   const [builderTree, setBuilderTree] = useState<Group>(EMPTY_GROUP)
   const [appliedTree, setAppliedTree] = useState<Group>(EMPTY_GROUP)
@@ -66,7 +69,7 @@ export default function LogsPage() {
         <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
           page={page} pageSize={pageSize} onPageChange={goToPage}
           onPageSizeChange={changePageSize}
-          onSearch={(q) => { setSearch(q); reset() }}
+          onSearch={(q) => { setSearch(q); reset() }} initialSearch={search}
           searchPlaceholder='Lucene syntax: log_type:linux_auth AND raw_message:"Failed password"' />
       )}
     </div>

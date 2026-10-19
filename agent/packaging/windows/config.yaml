@@ -1,0 +1,27 @@
+agent:
+  id: ""
+  name: ""               # set to hostname if blank at runtime
+  group: default
+  token: ""              # populated automatically after enrollment
+  enrollment_token: ""   # set this OR use AGENT_ENROLLMENT_TOKEN env var
+  buffer_size: 10000
+
+server:
+  url: http://your-siem-server:8000
+  heartbeat_interval: 30
+
+# Windows Event Log channels: path is "eventlog:<channel name>" as shown by
+#   wevtutil el
+# Sysmon and PowerShell/Operational only produce events once Sysmon is
+# installed and script block logging is enabled; a missing channel is retried.
+logs:
+  - path: eventlog:Security
+    type: windows_security
+  - path: eventlog:System
+    type: windows_system
+  - path: eventlog:Application
+    type: windows_application
+  - path: eventlog:Microsoft-Windows-Sysmon/Operational
+    type: windows_sysmon
+  - path: eventlog:Microsoft-Windows-PowerShell/Operational
+    type: windows_powershell

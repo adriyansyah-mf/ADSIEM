@@ -1,0 +1,29 @@
+# Any auditd record (USER_LOGIN, USER_CMD, PATH, ADD_USER, AVC, ...): its key=value fields; EXECVE and SYSCALL have dedicated decoders
+name: linux_audit_generic
+log_type: linux_audit
+type: kv
+priority: 50
+enabled: true
+match: type=
+fields:
+  event.action: type
+  audit.type: type
+  audit.key: key
+  audit.result: res
+  audit.success: success
+  audit.syscall: syscall
+  audit.operation: op
+  process.executable: exe
+  process.name: comm
+  process.pid: pid
+  process.ppid: ppid
+  user.id: uid
+  user.audit_id: auid
+  user.name: acct
+  source.ip: addr
+  source.hostname: hostname
+  file.path: name
+  process.tty: terminal
+  process.working_directory: cwd
+static_fields:
+  event.category: audit

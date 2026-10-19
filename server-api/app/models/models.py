@@ -59,8 +59,12 @@ class Agent(Base):
     token_hash   = Column(Text, nullable=False)
     version      = Column(String(50))
     status       = Column(String(20), nullable=False, default="offline")
+    # False while waiting for approval (enrolled with a key that requires it):
+    # heartbeats are accepted, logs are dropped and no tasks are sent
+    approved     = Column(Boolean, nullable=False, default=True, server_default="true")
     is_isolated  = Column(Boolean, nullable=False, default=False)
     last_seen_at = Column(DateTime(timezone=True))
+    flow_poll_at = Column(DateTime(timezone=True))  # last live-response long poll; NULL = no flow runner
     enrolled_at  = Column(DateTime(timezone=True), default=now_utc)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
@@ -107,6 +111,12 @@ class Rule(Base):
     version     = Column(Integer, nullable=False, default=1)
     is_enabled  = Column(Boolean, nullable=False, default=True)
     group_id    = Column(String(100))
+    # "custom" (written here / shipped in rules/) or "sigmahq" (imported ruleset)
+    source        = Column(String(20), nullable=False, default="custom", server_default="custom")
+    external_id   = Column(String(255))  # the Sigma rule id for imported rules
+    sigma_status  = Column(String(20))   # stable / test / experimental
+    # sha256 of the content as last imported; differs from content once edited locally
+    upstream_hash = Column(String(64))
     created_at  = Column(DateTime(timezone=True), default=now_utc)
     updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -140,6 +150,7 @@ class Alert(Base):
     mitre_techniques = Column(JSONB, nullable=False, default=list)
     kill_chain_stage = Column(String(50))
     ai_verdict       = Column(String(50))  # escalate/create_case/monitor/false_positive from AI L1 triage
+    context          = Column(JSONB, nullable=False, default=dict)  # why it fired: rule tags, threshold counts, UEBA reasons
     created_at       = Column(DateTime(timezone=True), default=now_utc)
     updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     notes            = relationship("AlertNote", back_populates="alert", cascade="all, delete-orphan")
@@ -282,6 +293,7 @@ class UebaAnomaly(Base):
     features      = Column(JSONB,       nullable=False, default=dict)
     alert_id         = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
     mitre_techniques = Column(JSONB,               nullable=False, default=list)
+    reasons          = Column(JSONB,               nullable=False, default=list)  # why it was anomalous (worker/ueba/explain.py)
     ai_narrative     = Column(Text)
     ai_action        = Column(String(20))
     case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="SET NULL"))
@@ -387,7 +399,13 @@ class EnrollmentToken(Base):
     group_id         = Column(String(100), nullable=False, default="default")
     expires_at       = Column(DateTime(timezone=True), nullable=True)
     is_active        = Column(Boolean, nullable=False, default=True)
-    used_at          = Column(DateTime(timezone=True), nullable=True)
+    # how many agents may enroll with it; NULL = unlimited (a deployment key).
+    # No ORM default: SQLAlchemy would apply it to an explicit None too.
+    max_uses         = Column(Integer, nullable=True)
+    use_count        = Column(Integer, nullable=False, default=0, server_default="0")
+    # agents enrolled with it stay pending until approved in the dashboard
+    require_approval = Column(Boolean, nullable=False, default=False, server_default="false")
+    used_at          = Column(DateTime(timezone=True), nullable=True)  # last use
     used_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime(timezone=True), default=now_utc)
@@ -489,3 +507,53 @@ class SoarAction(Base):
     order_index = Column(Integer, nullable=False, default=0)
     params      = Column(JSONB, nullable=False, default=dict)
     created_at  = Column(DateTime(timezone=True), default=now_utc)
+
+# ─── Live response flows (artifact collections) ──────────────────
+
+class FlowArtifact(Base):
+    """Custom artifact YAML; built-ins live in app/artifacts/ and are never stored."""
+    __tablename__ = "flow_artifacts"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(100), unique=True, nullable=False)
+    description = Column(Text)
+    content     = Column(Text, nullable=False)
+    group_id    = Column(String(100), nullable=False, default="default")
+    created_by  = Column(UUID(as_uuid=True))
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+
+class Flow(Base):
+    """One artifact collection on one agent: scheduled → running → finished|error|cancelled."""
+    __tablename__ = "flows"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id         = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    artifact         = Column(String(100), nullable=False)
+    artifact_content = Column(Text, nullable=False)  # snapshot: later edits don't change a past flow
+    params           = Column(JSONB, nullable=False, default=dict)
+    request          = Column(JSONB, nullable=False, default=dict)
+    status           = Column(String(20), nullable=False, default="scheduled", index=True)
+    cancel_pending   = Column(Boolean, nullable=False, default=False)
+    total_rows       = Column(Integer, nullable=False, default=0)
+    error            = Column(Text)
+    timeout          = Column(Integer, nullable=False)
+    max_rows         = Column(Integer, nullable=False)
+    created_by       = Column(UUID(as_uuid=True))
+    created_at       = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at       = Column(DateTime(timezone=True))
+    completed_at     = Column(DateTime(timezone=True))
+
+class FlowRowBatch(Base):
+    __tablename__ = "flow_row_batches"
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
+    flow_id    = Column(UUID(as_uuid=True), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False, index=True)
+    source     = Column(String(64), nullable=False)
+    rows       = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+class FlowLog(Base):
+    __tablename__ = "flow_logs"
+    id      = Column(BigInteger, primary_key=True, autoincrement=True)
+    flow_id = Column(UUID(as_uuid=True), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False, index=True)
+    ts      = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    level   = Column(String(10), nullable=False, default="info")
+    message = Column(Text, nullable=False)

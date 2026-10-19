@@ -1,5 +1,8 @@
-FROM golang:1.25-alpine AS builder
-RUN apk add --no-cache clang
+# Builds the agent packages the dashboard serves (Agents → Deploy agent):
+# the same scripts as the release workflow — .deb, .rpm and the Windows zip.
+FROM golang:1.25-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends clang llvm rpm zip \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -7,15 +10,22 @@ COPY . .
 RUN clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
     -I internal/procexec/bpf/include \
     -c internal/procexec/bpf/execve.bpf.c \
-    -o internal/procexec/bpf/execve.bpf.o
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /siem-agent ./cmd/agent/
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    dpkg-dev \
-    rpm \
-    && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /siem-agent /tmp/siem-agent
-COPY packaging/build.sh /tmp/build.sh
-RUN chmod +x /tmp/build.sh
-CMD ["/tmp/build.sh"]
+    -o internal/procexec/bpf/execve.bpf.o \
+ && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
+    -I internal \
+    -c internal/netwatch/bpf/netwatch.bpf.c \
+    -o internal/netwatch/bpf/netwatch.bpf.o
+RUN export VERSION="$(cat VERSION)" \
+    && bash packaging/build-deb.sh >/dev/null \
+    && ARCH=x86_64 bash packaging/build-rpm.sh >/dev/null \
+    && ARCH=amd64 bash packaging/build-windows.sh
+# The MSI needs WiX on Windows, so it's built (and smoke-tested) by the release
+# workflow; take the one for this version from the release when it exists.
+# Without it the dashboard offers the Windows zip instead.
+ARG AGENT_RELEASES=https://github.com/adriyansyah-mf/ADSIEM/releases/download
+RUN VERSION="$(cat VERSION)" \
+    && (curl -fsSL -o "dist/packages/siem-agent-${VERSION}-x64.msi" \
+          "${AGENT_RELEASES}/agent-v${VERSION}/siem-agent-${VERSION}-x64.msi" \
+        || { rm -f "dist/packages/siem-agent-${VERSION}-x64.msi"; echo "no MSI released for ${VERSION}; serving the zip"; })
+# /output is the agent_packages volume: replace the previous build's files
+CMD ["sh", "-c", "rm -f /output/siem-agent* && cp dist/packages/siem-agent* /output/ && ls -l /output"]

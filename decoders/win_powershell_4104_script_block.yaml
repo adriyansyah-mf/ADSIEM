@@ -1,0 +1,23 @@
+# PowerShell 4104: script block logging
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_powershell_4104_script_block
+log_type: windows_powershell
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=4104 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  ScriptBlockText: ScriptBlockText
+  powershell.script_block: ScriptBlockText
+  powershell.script_path: Path
+  powershell.script_block_id: ScriptBlockId
+  process.command_line: ScriptBlockText
+static_fields:
+  event.category: process
+  event.action: powershell_script_block

@@ -1,0 +1,15 @@
+# sshd: connection dropped after too many failed attempts
+name: ssh_max_auth_exceeded
+log_type: linux_auth
+type: regex
+priority: 12
+enabled: true
+match: maximum authentication attempts
+pattern: 'sshd\[\d+\]: (?:error: )?maximum authentication attempts exceeded for (?:invalid user )?(?P<user>\S+) from (?P<src_ip>\S+) port (?P<port>\d+)'
+fields:
+  event.category: authentication
+  event.outcome: failure
+  event.action: max_auth_exceeded
+  user.name: user
+  source.ip: src_ip
+  source.port: port

@@ -14,6 +14,7 @@ import LogsPage from '@/pages/LogsPage'
 import EventsPage from '@/pages/EventsPage'
 import LiveEventsPage from '@/pages/LiveEventsPage'
 import AlertsPage from '@/pages/AlertsPage'
+import AlertDetailPage from '@/pages/AlertDetailPage'
 import RulesPage from '@/pages/RulesPage'
 import DecodersPage from '@/pages/DecodersPage'
 import UsersPage from '@/pages/UsersPage'
@@ -57,6 +58,7 @@ export default function App() {
             <Route path="/events" element={<EventsPage />} />
             <Route path="/live-events" element={<LiveEventsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
+            <Route path="/alerts/:id" element={<AlertDetailPage />} />
             <Route path="/cases" element={<CasesPage />} />
             <Route path="/cases/:id" element={<CaseDetailPage />} />
             <Route path="/rules" element={<RulesPage />} />

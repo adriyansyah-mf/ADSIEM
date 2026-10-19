@@ -135,8 +135,10 @@ class AgentOut(BaseModel):
     group_id: str
     version: str | None
     status: str
+    approved: bool = True
     is_isolated: bool = False
     last_seen_at: datetime | None
+    flow_poll_at: datetime | None = None
     enrolled_at: datetime
     log_sources: list[LogSourceOut] = []
     model_config = {"from_attributes": True}
@@ -167,6 +169,7 @@ class LogIngestRequest(BaseModel):
     raw_message: str
     received_at: datetime
     hostname: str
+    location: str | None = Field(default=None, max_length=1024)  # source file (agent >= 1.4)
 
     @field_validator("log_type", "raw_message")
     @classmethod
@@ -230,9 +233,17 @@ class RuleOut(BaseModel):
     version: int
     is_enabled: bool
     group_id: str | None
+    source: str = "custom"
+    external_id: str | None = None
+    sigma_status: str | None = None
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
+
+class RuleListItem(RuleOut):
+    logsource: dict[str, Any] = {}
+    collected: bool = True             # some log source on this platform can feed the rule
+    modified_locally: bool = False     # imported rule edited since its last import
 
 class RuleTestRequest(BaseModel):
     content: str
@@ -242,6 +253,25 @@ class RuleTestResponse(BaseModel):
     matched: bool
     rule_title: str | None = None
     error: str | None = None
+    logsource_applies: bool | None = None  # only known when sample_event has a log_type
+
+class SigmaHQImportRequest(BaseModel):
+    ruleset: str = "core"                  # core, core+, core++, emerging_threats, all
+    release: str = "latest"                # a SigmaHQ release tag such as r2026-07-01
+    enable_levels: list[str] = ["high", "critical"]
+    enable_statuses: list[str] = ["stable", "test"]
+
+class SigmaHQImportResult(BaseModel):
+    release: str
+    total: int
+    created: int
+    updated: int
+    unchanged: int
+    kept_local_edits: int
+    rejected: int
+    enabled: int
+    not_collected: int
+    rejected_examples: list[str] = []
 
 # ─── Decoders ────────────────────────────────────────────────────
 
@@ -312,10 +342,61 @@ class AlertOut(BaseModel):
     acknowledged_at: datetime | None = None
     resolved_at: datetime | None = None
     ai_verdict: str | None = None
+    mitre_techniques: list = []
+    kill_chain_stage: str | None = None
+    context: dict = {}
     created_at: datetime
     updated_at: datetime
     notes: list[AlertNoteOut] = []
     model_config = {"from_attributes": True}
+
+class AlertRuleInfo(BaseModel):
+    id: UUID
+    title: str
+    description: str | None
+    level: str
+    tags: list[str] = []
+    content: str
+
+class AlertAgentInfo(BaseModel):
+    id: UUID
+    hostname: str
+    name: str
+    version: str | None
+    status: str
+    last_seen_at: datetime | None
+
+class AlertRelatedOut(BaseModel):
+    id: UUID
+    title: str
+    severity: str
+    status: str
+    source_ip: str | None
+    hostname: str | None
+    duplicate_count: int = 0
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+class AlertUebaInfo(BaseModel):
+    entity_type: str
+    entity_value: str
+    risk_score: float
+    anomaly_score: float
+    reasons: list[dict] = []
+    mitre_techniques: list[dict] = []
+    features: dict = {}
+    ai_action: str | None = None
+    ai_narrative: str | None = None
+    model_config = {"from_attributes": True}
+
+class AlertDetailOut(AlertOut):
+    rule: AlertRuleInfo | None = None
+    rule_fired_24h: int = 0  # occurrences of the same rule in the last 24h, duplicates included
+    agent: AlertAgentInfo | None = None
+    ueba: AlertUebaInfo | None = None
+    mitre: list[dict] = []   # [{id, name, tactic, url}]
+    event: dict | None = None  # the triggering log document (full_log, location, decoder, decoded fields)
+    related: list[AlertRelatedOut] = []
 
 # ─── AI feedback (analyst rating of an AI triage verdict) ────────
 
@@ -508,6 +589,7 @@ class UebaAnomalyOut(BaseModel):
     features: dict
     alert_id: UUID | None
     mitre_techniques: list[dict]
+    reasons: list[dict] = []
     ai_narrative: str | None
     ai_action: str | None
     case_id: UUID | None
@@ -751,3 +833,62 @@ class AssistantChatResponse(BaseModel):
     reply: str
     tools_used: list[str]
     actions: list[dict] = []
+
+# ─── Live response flows ─────────────────────────────────────────
+
+class FlowArtifactIn(BaseModel):
+    content: str = Field(max_length=100_000)
+
+class FlowCreate(BaseModel):
+    agent_id: UUID
+    artifact: str
+    params: dict[str, Any] = {}
+    timeout: int | None = None
+    max_rows: int | None = None
+
+class FlowOut(BaseModel):
+    id: UUID
+    agent_id: UUID
+    artifact: str
+    params: dict
+    status: str
+    total_rows: int
+    error: str | None
+    timeout: int
+    max_rows: int
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    model_config = {"from_attributes": True}
+
+class FlowSourceCount(BaseModel):
+    name: str
+    rows: int
+
+class FlowDetailOut(FlowOut):
+    request: dict
+    artifact_content: str
+    sources: list[FlowSourceCount] = []
+
+class FlowLogOut(BaseModel):
+    ts: datetime
+    level: str
+    message: str
+    model_config = {"from_attributes": True}
+
+class FlowResultsOut(BaseModel):
+    source: str
+    columns: list[str]
+    rows: list[dict]
+    total: int
+
+class AgentFlowLogIn(BaseModel):
+    level: Literal["debug", "info", "warn", "error"] = "info"
+    message: str = Field(max_length=4000)
+
+class AgentFlowUpdate(BaseModel):
+    state: Literal["running", "finished", "error", "cancelled"] | None = None
+    source: str | None = None
+    rows: list[dict[str, Any]] = Field(default=[], max_length=1000)
+    logs: list[AgentFlowLogIn] = Field(default=[], max_length=200)
+    error: str | None = Field(default=None, max_length=4000)

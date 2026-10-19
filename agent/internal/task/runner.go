@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/siem-platform/agent/internal/client"
@@ -72,7 +73,7 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 	case "file_list":
 		path, _ := task.Params["path"].(string)
 		if path == "" {
-			path = "/tmp"
+			path = os.TempDir()
 		}
 		maxDepth := 2
 		if d, ok := task.Params["max_depth"].(float64); ok {
@@ -104,7 +105,7 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 	case "yara_scan":
 		path, _ := task.Params["path"].(string)
 		if path == "" {
-			path = "/tmp"
+			path = os.TempDir()
 		}
 		recursive, _ := task.Params["recursive"].(bool)
 		rulesRaw, _ := task.Params["rules"].([]any)

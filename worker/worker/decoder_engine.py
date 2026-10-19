@@ -5,13 +5,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _KV_RE = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
+_KV_UNESCAPE_RE = re.compile(r'\\(["\\])')
 
 def _parse_kv(raw: str) -> dict[str, str]:
-    """Extract key=value and key="value" pairs from a FortiGate-style log line."""
+    """Extract key=value and key="value" pairs from a FortiGate-style log line.
+
+    Inside quotes \\" is a quote and \\\\ a backslash (the Windows agent's
+    escaping); any other backslash is literal, so C:\\Windows stays as is."""
     result = {}
     for key, val in _KV_RE.findall(raw):
-        if val.startswith('"') and val.endswith('"'):
-            val = val[1:-1]
+        if len(val) >= 2 and val.startswith('"') and val.endswith('"'):
+            val = _KV_UNESCAPE_RE.sub(r"\1", val[1:-1])
+        elif val.endswith("'") and val.count("'") == 1:
+            val = val[:-1]  # last field inside auditd's msg='...' wrapper: res=failed'
         result[key] = val
     return result
 
@@ -83,6 +89,10 @@ class DecoderEngine:
         self._decoders = sorted(decoders, key=lambda x: x.priority)
 
     def decode(self, log_type: str, raw_message: str) -> dict[str, Any]:
+        return self.decode_named(log_type, raw_message)[0]
+
+    def decode_named(self, log_type: str, raw_message: str) -> tuple[dict[str, Any], str | None]:
+        """decode() plus the name of the decoder that matched (None if none did)."""
         for decoder in self._decoders:
             if decoder.log_type != log_type:
                 continue
@@ -98,7 +108,7 @@ class DecoderEngine:
                 for output_field, group_name in decoder.fields_map.items():
                     result[output_field] = groups.get(group_name)
                 result.update(decoder.static_fields)
-                return result
+                return result, decoder.name
 
             elif decoder.decoder_type == "kv":
                 kv = _parse_kv(raw_message)
@@ -109,6 +119,6 @@ class DecoderEngine:
                     if kv_key in kv:
                         result[output_field] = kv[kv_key]
                 result.update(decoder.static_fields)
-                return result
+                return result, decoder.name
 
-        return {}
+        return {}, None

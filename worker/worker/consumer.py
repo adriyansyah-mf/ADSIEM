@@ -43,10 +43,10 @@ async def load_engines(db: AsyncSession) -> tuple[DecoderEngine, SigmaEngine]:
     dec_engine.load_from_yaml_list(decoder_yamls)
 
     result = await db.execute(select(Rule).where(Rule.is_enabled == True))
-    rule_yamls = [r.content for r in result.scalars().all()]
+    rule_rows = result.scalars().all()
     redis = await get_redis()
     sig_engine = SigmaEngine(redis=redis)
-    sig_engine.load_from_yaml_list(rule_yamls)
+    sig_engine.load_from_yaml_list([r.content for r in rule_rows], [str(r.id) for r in rule_rows])
 
     return dec_engine, sig_engine
 
@@ -79,7 +79,7 @@ async def process_message(
             if not await db.get(AgentModel, agent_id):
                 agent_id = None
 
-    decoded = dec_engine.decode(log_type, raw_message)
+    decoded, decoder_name = dec_engine.decode_named(log_type, raw_message)
     if not decoded:
         decode_failures.inc()
     else:
@@ -90,6 +90,8 @@ async def process_message(
         "agent_id": str(agent_id) if agent_id else None,
         "group_id": group_id,
         "log_type": log_type,
+        "location": data.get("location") or None,  # source file, from agents >= 1.4
+        "decoder": decoder_name,
         "raw_message": raw_message,
         "decoded_fields": decoded,
         "event_category": decoded.get("event.category"),
@@ -101,7 +103,10 @@ async def process_message(
 
     logs_ingested.inc()
 
-    flat_event = {**decoded, "group_id": group_id, "hostname": hostname}
+    # raw_message gives Sigma `keywords` selections the original log line to search;
+    # log_type selects which rules apply (their logsource)
+    flat_event = {**decoded, "group_id": group_id, "hostname": hostname, "raw_message": raw_message,
+                  "log_type": log_type}
     rule_matches = await sig_engine.evaluate(flat_event)
     for match in rule_matches:
         sigma_matches.labels(rule_id=match["id"]).inc()

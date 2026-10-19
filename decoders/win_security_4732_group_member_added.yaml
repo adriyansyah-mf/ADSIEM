@@ -1,0 +1,24 @@
+# Security 4732: a member was added to a security-enabled local group
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_security_4732_group_member_added
+log_type: windows_security
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=4732 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  user.name: SubjectUserName
+  user.target: MemberName
+  user.target_sid: MemberSid
+  group.name: TargetUserName
+  group.domain: TargetDomainName
+static_fields:
+  event.category: iam
+  event.action: user_added_to_group
+  group.scope: local

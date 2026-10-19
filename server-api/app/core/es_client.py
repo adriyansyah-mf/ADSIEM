@@ -13,6 +13,8 @@ _MAPPING = {
             "agent_id":       {"type": "keyword"},
             "group_id":       {"type": "keyword"},
             "log_type":       {"type": "keyword"},
+            "location":       {"type": "keyword"},
+            "decoder":        {"type": "keyword"},
             "raw_message":    {"type": "text"},
             "decoded_fields": {"type": "object", "dynamic": True},
             "event_category": {"type": "keyword"},

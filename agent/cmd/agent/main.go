@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"io"
 	"log/slog"
@@ -28,12 +29,55 @@ import (
 var Version = "dev"
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "path to config file")
+	configPath := flag.String("config", defaultConfigPath(), "path to config file")
+	install := flag.Bool("install", false, "install the agent as a Windows service (Windows only)")
+	uninstall := flag.Bool("uninstall", false, "remove the Windows service (Windows only)")
+	doConfigure := flag.Bool("configure", false, "write -server/-key/-name into the config file and exit (used by the MSI)")
+	var opts configureOptions
+	flag.StringVar(&opts.server, "server", "", "with -configure: SIEM server URL")
+	flag.StringVar(&opts.key, "key", "", "with -configure: enrollment key (clears any previous enrollment)")
+	flag.StringVar(&opts.name, "name", "", "with -configure: agent name (default: hostname)")
+	flag.StringVar(&opts.auditing, "enable-auditing", "", "with -configure on Windows: 1 to turn on logon/process/account auditing and PowerShell script block logging")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	if *doConfigure {
+		if err := configure(*configPath, opts); err != nil {
+			slog.Error("configure failed", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("configured", "config", *configPath)
+		return
+	}
+	if *install || *uninstall {
+		if err := manageService(*install, *configPath); err != nil {
+			slog.Error("service command failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// Started by the Windows Service Control Manager: it decides when to stop.
+	if runAsService(func(stop <-chan struct{}) { run(*configPath, stop) }) {
+		return
+	}
 
-	cfg, err := config.Load(*configPath)
+	stop := make(chan struct{})
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+		<-sigCh
+		close(stop)
+	}()
+	run(*configPath, stop)
+}
+
+// run starts every agent subsystem and blocks until stop is closed.
+func run(configPath string, stop <-chan struct{}) {
+	heartbeat.AgentVersion = Version
+	enrollment.AgentVersion = Version
+	slog.Info("siem-agent starting", "version", Version)
+
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
@@ -48,7 +92,7 @@ func main() {
 	}
 
 	if cfg.Agent.Token == "" {
-		if err := enrollment.Enroll(cfg, *configPath, enrollToken); err != nil {
+		if err := enrollment.Enroll(cfg, configPath, enrollToken); err != nil {
 			slog.Error("enrollment failed", "err", err)
 			os.Exit(1)
 		}
@@ -74,7 +118,7 @@ func main() {
 	mgr.Update(initialSources)
 
 	// fsnotify for bootstrap fields only (agent.name, agent.group, server.url)
-	if err := config.Watch(*configPath, func(newCfg *config.Config) {
+	if err := config.Watch(configPath, func(newCfg *config.Config) {
 		cfg.Agent.Name = newCfg.Agent.Name
 		cfg.Agent.Group = newCfg.Agent.Group
 		cfg.Server.URL = newCfg.Server.URL
@@ -117,6 +161,11 @@ func main() {
 			slog.Info("local detection enabled", "rules", detector.EnabledRules())
 		}
 	}
+
+	// Live-response flows: long-polls the server and runs artifact plugins
+	flowCtx, stopFlows := context.WithCancel(context.Background())
+	defer stopFlows()
+	go task.NewFlowRunner(c).Run(flowCtx)
 
 	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
@@ -191,11 +240,9 @@ func main() {
 		}
 	}()
 
-	// signal handler
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	<-sigCh
+	<-stop
 	slog.Info("shutting down")
+	stopFlows()
 	mgr.StopAll()
 	flushBuffer(buf, c, cfg)
 }
@@ -212,7 +259,7 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill 
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		logType, rawMessage := tailer.Decode(entry)
+		logType, location, rawMessage := tailer.Decode(entry)
 
 		// Local detection observes every event exactly once, before delivery:
 		// it must keep working while the server is unreachable.
@@ -225,6 +272,7 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill 
 			"agent_token": cfg.Agent.Token,
 			"log_type":    logType,
 			"raw_message": rawMessage,
+			"location":    location,
 			"received_at": time.Now().UTC().Format(time.RFC3339Nano),
 			"hostname":    mustHostname(),
 		}
@@ -280,12 +328,13 @@ func flushBuffer(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 		if !ok {
 			break
 		}
-		logType, rawMessage := tailer.Decode(entry)
+		logType, location, rawMessage := tailer.Decode(entry)
 		payload := map[string]interface{}{
 			"agent_id":    cfg.Agent.ID,
 			"agent_token": cfg.Agent.Token,
 			"log_type":    logType,
 			"raw_message": rawMessage,
+			"location":    location,
 			"received_at": time.Now().UTC().Format(time.RFC3339Nano),
 			"hostname":    mustHostname(),
 		}

@@ -1,0 +1,14 @@
+# gpasswd -a: a user was added to a group
+name: linux_gpasswd_group_add
+log_type: linux_auth
+type: regex
+priority: 15
+enabled: true
+match: gpasswd[
+pattern: 'gpasswd\[\d+\]: user (?P<user>\S+) added by (?P<by>\S+) to group (?P<group>\S+)'
+fields:
+  event.category: iam
+  event.action: user_added_to_group
+  user.target: user
+  user.name: by
+  group.name: group

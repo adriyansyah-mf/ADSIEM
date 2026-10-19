@@ -1,0 +1,14 @@
+title: Windows Event Log Cleared
+id: rule-win-log-cleared
+description: The Security log (1102) or another event log (System 104) was cleared — a common step to hide activity.
+logsource:
+  product: windows
+detection:
+  cleared:
+    event.action: log_cleared
+    winlog.event_id: ['1102', '104']
+  condition: cleared
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1070.001

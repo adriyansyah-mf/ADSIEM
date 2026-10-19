@@ -1,0 +1,7 @@
+name: Linux.Sys.Persistence
+description: |
+  Common persistence locations — cron, init scripts, systemd units, shell
+  profiles, SSH authorized_keys, sudoers, at jobs.
+sources:
+  - name: Entries
+    plugin: persistence

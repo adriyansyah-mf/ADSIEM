@@ -1,0 +1,18 @@
+# Any other PowerShell event
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_powershell_generic
+log_type: windows_powershell
+type: kv
+priority: 85
+enabled: true
+match: EventID=
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+static_fields:
+  event.category: process
+  event.action: windows_event

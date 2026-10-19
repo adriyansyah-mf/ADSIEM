@@ -19,6 +19,7 @@ interface Props<T> {
   onPageChange: (page: number) => void
   onPageSizeChange?: (size: number) => void
   onSearch?: (q: string) => void
+  initialSearch?: string
   onSort?: (key: string, dir: 'asc' | 'desc') => void
   onDateRange?: (from: string, to: string) => void
   searchPlaceholder?: string
@@ -53,12 +54,12 @@ function toCsv<T>(columns: Column<T>[], rows: T[]): string {
 
 export default function DataTable<T extends { id: string }>({
   columns, data, total, page, pageSize,
-  onPageChange, onPageSizeChange, onSearch, onSort, onDateRange,
+  onPageChange, onPageSizeChange, onSearch, initialSearch = '', onSort, onDateRange,
   searchPlaceholder = 'Search...', onRowClick, rowKey,
   expandable = false, renderExpanded,
   exportFilename = 'export.csv', toolbarExtra,
 }: Props<T>) {
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(initialSearch)
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [dateFrom, setDateFrom] = useState('')

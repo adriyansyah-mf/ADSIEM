@@ -27,6 +27,9 @@ type EnrollRequest struct {
 	LogSources      []LogSourcePayload `json:"log_sources"`
 }
 
+// AgentVersion is reported at enrollment; main sets it from its -ldflags version.
+var AgentVersion = "dev"
+
 type EnrollResponse struct {
 	AgentID    string `json:"agent_id"`
 	AgentToken string `json:"agent_token"`
@@ -45,7 +48,7 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 	payload := EnrollRequest{
 		EnrollmentToken: enrollToken,
 		Hostname:        h,
-		Version:         "1.0.0",
+		Version:         AgentVersion,
 		Group:           cfg.Agent.Group,
 		Name:            cfg.Agent.Name,
 		LogSources:      sources,
@@ -64,6 +67,16 @@ func Enroll(cfg *config.Config, configPath, enrollToken string) error {
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if resp.StatusCode == 409 {
+			// another agent with this hostname is still connected (e.g. the old
+			// install on a rebuilt host); the server lets us in once it goes quiet
+			slog.Warn("enrollment deferred", "reason", string(body), "retry_in", backoff)
+			time.Sleep(backoff)
+			if backoff < 5*time.Minute {
+				backoff *= 2
+			}
+			continue
+		}
 		if resp.StatusCode != 201 {
 			return fmt.Errorf("enrollment rejected (status %d): %s", resp.StatusCode, body)
 		}

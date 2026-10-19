@@ -1,0 +1,17 @@
+name: Linux.Search.FileFinder
+description: |
+  Find files by glob. `*` matches within one directory level, `**` across any
+  number of levels (e.g. /home/**/.ssh/authorized_keys).
+parameters:
+  - name: SearchGlob
+    default: /tmp/**
+  - name: MaxResults
+    type: int
+    default: 5000
+sources:
+  - name: Files
+    plugin: glob
+    args:
+      globs: ["{{SearchGlob}}"]
+      max_results: "{{MaxResults}}"
+    fields: [Path, Size, Mode, Uid, ModTime, IsDir]

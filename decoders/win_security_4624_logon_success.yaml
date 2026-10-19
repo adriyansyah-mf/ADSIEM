@@ -1,0 +1,29 @@
+# Security 4624: an account was successfully logged on
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_security_4624_logon_success
+log_type: windows_security
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=4624 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  user.name: TargetUserName
+  user.domain: TargetDomainName
+  source.ip: IpAddress
+  source.port: IpPort
+  source.hostname: WorkstationName
+  winlog.logon.type: LogonType
+  process.name: ProcessName
+  TargetUserName: TargetUserName
+  IpAddress: IpAddress
+  LogonType: LogonType
+static_fields:
+  event.category: authentication
+  event.action: login_success
+  event.outcome: success

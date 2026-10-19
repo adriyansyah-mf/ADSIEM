@@ -72,6 +72,7 @@ class TriageState(TypedDict):
     similar_cases: NotRequired[list]
     sop_context: NotRequired[list[str]]
     feedback_context: NotRequired[list]
+    ueba_context: NotRequired[str]  # entity history for UEBA alerts (ai_analyst._ueba_context)
 
     analysis: NotRequired[dict]
     verdict: NotRequired[str]
@@ -174,6 +175,14 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         if state.get("source_ip") and enrichment and getattr(enrichment, "overall_risk", 0) > 0.5:
             asyncio.ensure_future(deps["enqueue_hunt"](state["source_ip"], gid))
 
+        # UEBA alerts are judged against the entity's behaviour history, which
+        # the alert title and fields alone don't carry.
+        if "ueba_context" in deps and (state.get("decoded_fields") or {}).get("ueba_entity_type"):
+            try:
+                out["ueba_context"] = await deps["ueba_context"](state["decoded_fields"], gid)
+            except Exception as exc:
+                log.warning("ueba_context_failed", error=str(exc))
+
         return out
 
     async def triage_node(state: TriageState):
@@ -191,6 +200,11 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             prompt_parts.append(f"\nTHREAT INTEL:\n{lines}")
         if state.get("heuristic_mitre"):
             prompt_parts.append(f"\nHeuristic MITRE: {', '.join(state['heuristic_mitre'])}")
+        if state.get("ueba_context"):
+            prompt_parts.append(
+                "\nUEBA BEHAVIOUR CONTEXT (statistical anomaly, not a signature hit — judge whether "
+                "the deviation is malicious or a benign change in behaviour):\n" + state["ueba_context"]
+            )
 
         try:
             reply = await llm.ainvoke([
@@ -352,18 +366,36 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
 
         return {"case_id": case_id}
 
+    async def record_node(state: TriageState):
+        """Hand the outcome back to the subsystem that raised the alert (UEBA
+        writes it onto its anomaly so the UEBA page shows the AI's view)."""
+        hook = deps.get("record_outcome")
+        if hook and state.get("alert_id"):
+            try:
+                await hook(
+                    alert_id=state["alert_id"],
+                    verdict=state.get("verdict", "monitor"),
+                    notes=state.get("triage_notes", ""),
+                    case_id=state.get("case_id"),
+                )
+            except Exception as exc:
+                log.warning("record_outcome_failed", alert_id=state["alert_id"], error=str(exc))
+        return {}
+
     graph = StateGraph(TriageState)
     graph.add_node("enrich", enrich_node)
     graph.add_node("triage", triage_node)
     graph.add_node("persist", persist_node)
     graph.add_node("soar", soar_node)
     graph.add_node("finalize", finalize_node)
+    graph.add_node("record", record_node)
 
     graph.add_edge(START, "enrich")
     graph.add_edge("enrich", "triage")
     graph.add_edge("triage", "persist")
     graph.add_edge("persist", "soar")
     graph.add_edge("soar", "finalize")
-    graph.add_edge("finalize", END)
+    graph.add_edge("finalize", "record")
+    graph.add_edge("record", END)
 
     return graph.compile()

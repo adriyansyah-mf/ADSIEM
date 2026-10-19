@@ -1,0 +1,32 @@
+# Security 4625: an account failed to log on
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_security_4625_logon_failed
+log_type: windows_security
+type: kv
+priority: 4
+enabled: true
+match: 'EventID=4625 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  user.name: TargetUserName
+  user.domain: TargetDomainName
+  source.ip: IpAddress
+  source.port: IpPort
+  source.hostname: WorkstationName
+  winlog.logon.type: LogonType
+  process.name: ProcessName
+  TargetUserName: TargetUserName
+  IpAddress: IpAddress
+  LogonType: LogonType
+  event.reason: SubStatus
+  Status: Status
+  SubStatus: SubStatus
+static_fields:
+  event.category: authentication
+  event.action: login_failed
+  event.outcome: failure

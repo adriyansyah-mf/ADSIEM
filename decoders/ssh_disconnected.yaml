@@ -1,0 +1,14 @@
+# sshd: an authenticated session ended
+name: ssh_disconnected
+log_type: linux_auth
+type: regex
+priority: 30
+enabled: true
+match: Disconnected from user
+pattern: 'sshd\[\d+\]: Disconnected from user (?P<user>\S+) (?P<src_ip>\S+) port (?P<port>\d+)'
+fields:
+  event.category: authentication
+  event.action: session_closed
+  user.name: user
+  source.ip: src_ip
+  source.port: port

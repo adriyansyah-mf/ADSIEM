@@ -1,0 +1,19 @@
+title: Repeated Failed su Attempts
+id: rule-su-failed-repeated
+description: Three or more failed su attempts by the same user within 5 minutes — password guessing for root.
+logsource:
+  product: linux
+detection:
+  su_failed:
+    event.action: su_failed
+  condition: su_failed
+threshold:
+  count: 3
+  timewindow: 300
+  group_by: user.name
+  cooldown: 900
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.credential_access
+  - attack.t1110.001

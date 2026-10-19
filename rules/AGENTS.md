@@ -57,6 +57,14 @@ static_fields:
 | Server-side YAML validation | `server-api/app/api/routes/decoders.py` `_validate_decoder_yaml` | rejects non-`regex|kv`, regex without `pattern` |
 | Decoder test endpoint | `POST /api/decoders/test` | imports `worker.decoder_engine` |
 
+## SIGMA SUPPORT (`worker/worker/sigma_engine.py`)
+
+- **Matching:** case-insensitive by default (`|cased` opts out), `*`/`?` wildcards (`\*` = literal star, `\\*` = backslash + wildcard), list-of-maps selections, `keywords` (searched against `raw_message`).
+- **Modifiers:** `contains` `startswith` `endswith` `all` `re` (+ `i` `m` `s`) `cidr` `lt` `lte` `gt` `gte` `exists` `cased` `fieldref` `base64` `base64offset` `wide`/`utf16le` `utf16be` `utf16` `windash`. `field: null` matches a missing field.
+- **Condition:** `and`/`or`/`not`, parentheses, `1 of sel_*`, `all of them`, `N of x` (selections starting with `_` are excluded from `them`). `| count()` aggregations are not supported — use a correlation rule or `threshold`.
+- **Correlation rules (Sigma v2):** `type: event_count | value_count | temporal`, referencing rules by `name`, `id` or `title`; `group-by`, `timespan`, `condition` (`gt`/`gte`/`eq`). `generate` defaults to `false`, which silences the referenced rules' own alerts. A file may hold several rules separated by `---`.
+- Anything the engine can't evaluate is **rejected at load** and logged as `sigma_rule_rejected` — check worker logs after adding a rule.
+
 ## CONVENTIONS
 
 - **Filename** = snake_case describing the behaviour (`ssh_brute_force.yaml`, `kernel_module_suspicious.yaml`).

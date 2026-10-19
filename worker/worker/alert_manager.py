@@ -13,8 +13,42 @@ from worker.ai_queue import mark_queued
 from worker.soar_engine import run_soar_playbooks
 from worker.email_sender import send_alert_email
 from worker.settings_cache import get_setting
+from worker.ti.mitre import stage_for_techniques
 
 log = structlog.get_logger()
+
+# rule_match keys worth keeping on the alert so an analyst can see *why* it
+# fired: the rule's own id/tags, threshold/correlation counts, UEBA reasons.
+_CONTEXT_KEYS = (
+    "tags", "correlation_hit_count", "correlation_group", "correlation_window",
+    "correlation_group_by", "correlation_type", "correlation_rules", "matched_fields",
+)
+
+
+def _as_uuid(value) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def mitre_from_tags(tags: list[str]) -> list[str]:
+    """'attack.t1110.003' → 'T1110.003' (Sigma tag → technique id)."""
+    out = []
+    for tag in tags:
+        tag = str(tag).lower()
+        if tag.startswith("attack.t") and tag[8:9].isdigit():
+            technique = tag[len("attack."):].upper()
+            if technique not in out:
+                out.append(technique)
+    return out
+
+
+def alert_context(rule_match: dict) -> dict:
+    ctx = {k: rule_match[k] for k in _CONTEXT_KEYS if rule_match.get(k) not in (None, [], {}, "")}
+    if rule_match.get("id"):
+        ctx["rule_ref"] = rule_match["id"]
+    return ctx
 
 _SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
 
@@ -118,17 +152,21 @@ async def create_alert(
                      existing_id=str(existing.id), count=existing.duplicate_count)
             return existing.id
 
+    techniques = mitre_from_tags(rule_match.get("mitre_tags") or [])
     async with AsyncSessionLocal() as db:
         alert = Alert(
             title=rule_match["title"],
             severity=rule_match["level"],
             status="new",
-            rule_id=None,
+            rule_id=_as_uuid(rule_match.get("rule_db_id")),
             event_id=event_id,
             agent_id=agent_id,
             group_id=group_id,
             source_ip=source_ip,
             hostname=hostname,
+            mitre_techniques=techniques,
+            kill_chain_stage=stage_for_techniques(techniques) if techniques else None,
+            context=alert_context(rule_match),
         )
         db.add(alert)
         await db.flush()
