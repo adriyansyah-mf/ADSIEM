@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // Windows implementations of the plugins that read /proc and /etc on Linux.
@@ -38,12 +39,18 @@ func emitPowerShell(ctx context.Context, script string, emit func(map[string]any
 		"-ExecutionPolicy", "Bypass", "-Command",
 		"$ErrorActionPreference='SilentlyContinue'; $ProgressPreference='SilentlyContinue'; "+
 			"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "+script)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("powershell: %w", err)
+		msg := strings.TrimSpace(stderr.String())
+		if len(msg) > 600 {
+			msg = msg[:600] + "…"
+		}
+		return fmt.Errorf("powershell: %w: %s", err, msg)
 	}
 	out = bytes.TrimSpace(bytes.TrimPrefix(out, []byte("\xef\xbb\xbf")))
 	if len(out) == 0 {
