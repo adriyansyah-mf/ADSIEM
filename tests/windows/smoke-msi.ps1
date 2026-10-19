@@ -106,6 +106,25 @@ try {
     }
     Write-Host "ok: event shipped: $($line.raw_message)"
 
+    # 4b. The hygiene report (first one ~30 s after start) describes this host.
+    $hygPath = Join-Path $mockOut "hygiene.json"
+    $deadline = (Get-Date).AddSeconds(120)
+    while (-not (Test-Path $hygPath)) {
+        if ((Get-Date) -gt $deadline) { Fail "no hygiene report received" }
+        Start-Sleep 5
+    }
+    $h = Get-Content $hygPath -Raw | ConvertFrom-Json
+    if ($h.os_name -notlike "Windows*") { Fail "hygiene os_name '$($h.os_name)'" }
+    if ($h.mem_total_mb -le 0 -or $h.cpu_count -le 0 -or $h.uptime_seconds -le 0) { Fail "hygiene memory/cpu/uptime missing" }
+    if (-not ($h.disk_partitions | Where-Object { $_.mount -eq "C:" -and $_.total_mb -gt 0 })) { Fail "hygiene has no C: disk" }
+    if (-not ($h.open_ports | Where-Object { $_.port -eq 135 })) { Fail "hygiene open_ports lacks 135 (RPC)" }
+    if (@($h.users).Count -lt 1) { Fail "hygiene has no local users" }
+    if (@($h.packages).Count -lt 1 -or ($h.packages | Where-Object { $_.source -ne "windows" })) { Fail "hygiene packages missing or wrong source" }
+    if ($h.hygiene_score -lt 0 -or $h.hygiene_score -gt 100) { Fail "hygiene score $($h.hygiene_score)" }
+    Write-Host ("ok: hygiene: {0} {1} (kernel {2}), {3} MB RAM, {4} ports, {5} users, {6} programs, score {7}, issues: {8}" -f
+        $h.os_name, $h.os_version, $h.kernel, $h.mem_total_mb, @($h.open_ports).Count, @($h.users).Count,
+        @($h.packages).Count, $h.hygiene_score, ((@($h.issues) | ForEach-Object { $_.message }) -join "; "))
+
     # 5. Uninstall removes the service but keeps the config (and its token).
     $code = Invoke-Msiexec @("/x", "`"$Msi`"") "uninstall.log"
     if ($code -ne 0) { Fail "msiexec /x exited $code" }

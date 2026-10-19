@@ -276,7 +276,7 @@ turns on logon / process-creation (with command line) / account-management audit
 PowerShell script block logging; install [Sysmon](https://learn.microsoft.com/sysinternals/downloads/sysmon)
 for process, network, file, registry and DNS events. Live response (process/network/user/persistence
 listing, file collection, YARA) works; host isolation and block-IP use Windows Defender Firewall.
-There is no eBPF process monitor or package inventory on Windows.
+Hygiene works too: OS and build, memory, disks, listening ports, local accounts, installed programs (Add/Remove Programs), plus Windows checks: firewall profiles, Defender real-time protection, UAC, SMBv1, Guest account, RDP without NLA. Installed programs aren't CVE-scanned, since OSV has no Windows ecosystem. There is no eBPF process monitor on Windows.
 
 ### Option B — Build from source
 
