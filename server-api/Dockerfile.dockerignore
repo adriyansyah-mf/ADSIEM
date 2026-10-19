@@ -2,6 +2,7 @@
 *
 !server-api/requirements.txt
 !server-api/app
+!worker/bake_embedding_model.py
 !worker/worker/__init__.py
 !worker/worker/sigma_engine.py
 !worker/worker/sigma_logsource.py
