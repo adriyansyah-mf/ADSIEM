@@ -71,6 +71,74 @@ def _parse_stream_line(line: str) -> dict | None:
         return None
 
 
+def parse_completion_body(raw: str) -> dict:
+    """A non-streaming /chat/completions response, in whichever shape 9router sends.
+
+    9router answers with text/event-stream even when stream is false. Usually
+    that's one JSON object followed by "data: [DONE]" (raw_decode reads the
+    object), but for some providers — tool-calling requests in particular — it
+    is a full SSE stream of deltas starting with "data:", which used to fail
+    with "Expecting value: line 1 column 1". Those deltas are assembled into
+    one chat.completion here.
+    """
+    body = (raw or "").strip()
+    if not body:
+        raise ValueError("empty response body")
+    if body.startswith("{"):
+        obj, _ = json.JSONDecoder().raw_decode(body)
+        return obj
+    if body.startswith(("data:", "event:", ":")):
+        return _assemble_sse(body)
+    raise ValueError(f"response is neither JSON nor an event stream: {body[:200]!r}")
+
+
+def _assemble_sse(body: str) -> dict:
+    content: list[str] = []
+    reasoning: list[str] = []
+    calls: dict[int, dict] = {}
+    usage: dict = {}
+    finish = None
+    seen = False
+    for line in body.splitlines():
+        obj = _parse_stream_line(line)
+        if not obj:
+            continue
+        if obj.get("error"):
+            raise ValueError(f"9router error in stream: {obj['error']}")
+        seen = True
+        usage = obj.get("usage") or usage
+        for choice in obj.get("choices") or []:
+            finish = choice.get("finish_reason") or finish
+            # a provider may also send whole messages instead of deltas
+            delta = choice.get("delta") or choice.get("message") or {}
+            if delta.get("content"):
+                content.append(delta["content"])
+            if delta.get("reasoning_content"):
+                reasoning.append(delta["reasoning_content"])
+            for pos, tc in enumerate(delta.get("tool_calls") or []):
+                slot = calls.setdefault(tc.get("index", pos), {"id": "", "name": "", "arguments": ""})
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["name"] = fn["name"]
+                if fn.get("arguments"):
+                    args = fn["arguments"]
+                    slot["arguments"] += args if isinstance(args, str) else json.dumps(args)
+    if not seen:
+        raise ValueError(f"event stream without data: {body[:200]!r}")
+    message: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
+    if reasoning:
+        message["reasoning_content"] = "".join(reasoning)
+    if calls:
+        message["tool_calls"] = [
+            {"id": s["id"] or f"call_{i}", "type": "function",
+             "function": {"name": s["name"], "arguments": s["arguments"] or "{}"}}
+            for i, s in sorted(calls.items()) if s["name"]
+        ]
+    return {"choices": [{"message": message, "finish_reason": finish}], "usage": usage}
+
+
 class NineRouterChatModel(BaseChatModel):
     """Chat model backed by a 9router instance."""
 
@@ -137,10 +205,7 @@ class NineRouterChatModel(BaseChatModel):
         return clone
 
     def _parse_body(self, raw: str) -> dict:
-        if not raw or not raw.strip():
-            raise ValueError("empty response body")
-        obj, _ = json.JSONDecoder().raw_decode(raw)
-        return obj
+        return parse_completion_body(raw)
 
     def _generate(
         self,

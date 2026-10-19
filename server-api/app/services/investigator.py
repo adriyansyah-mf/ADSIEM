@@ -495,8 +495,9 @@ def make_chat_model(api_key: str, model: str, effort: str | None):
     """The LLM client; tests replace this with a scripted model."""
     from app.core.config import settings
     from app.core.graph.chat_model import NineRouterChatModel
+    # long prompts (case context + tool results) take a while: wider timeout than chat
     return NineRouterChatModel(base_url=settings.NINEROUTER_BASE_URL, api_key=api_key, model=model,
-                               max_tokens=4000, reasoning_effort=effort)
+                               max_tokens=4000, reasoning_effort=effort, timeout=180.0)
 
 
 _VERDICT_RE = re.compile(r"VERDICT:\s*(true_positive|false_positive|inconclusive)", re.I)
