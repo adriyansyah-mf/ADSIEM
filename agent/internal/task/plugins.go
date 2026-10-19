@@ -42,6 +42,8 @@ var Plugins = map[string]Plugin{
 	"dmesg":       pluginDmesg,
 	"open_files":  pluginOpenFiles,
 	"yara":        pluginYara,
+	// operator-approved commands only, never in an artifact (plugins_exec.go)
+	"exec": pluginExec,
 	// Windows-only (plugins_windows*.go); elsewhere they say so
 	"eventlog": unsupported("eventlog queries the Windows Event Log; on Linux search the logs in the SIEM"),
 	"services": unsupported("services lists Windows services; on Linux use the persistence plugin (systemd units)"),

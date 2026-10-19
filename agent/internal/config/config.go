@@ -57,15 +57,22 @@ type BufferConfig struct {
 	SpillPath string `yaml:"spill_path"`
 }
 
+type LiveResponseConfig struct {
+	// Refuse commands an operator approved on the server (the exec plugin);
+	// artifacts still run.
+	DisableCommands bool `yaml:"disable_commands"`
+}
+
 type Config struct {
-	Agent    AgentConfig    `yaml:"agent"`
-	Server   ServerConfig   `yaml:"server"`
-	Logs     []LogSource    `yaml:"logs"`
-	FIM      FimConfig      `yaml:"fim"`
-	Firewall FirewallConfig `yaml:"firewall"`
-	Netwatch NetwatchConfig `yaml:"netwatch"`
-	Detect   DetectConfig   `yaml:"detect"`
-	Buffer   BufferConfig   `yaml:"buffer"`
+	Agent        AgentConfig        `yaml:"agent"`
+	Server       ServerConfig       `yaml:"server"`
+	Logs         []LogSource        `yaml:"logs"`
+	FIM          FimConfig          `yaml:"fim"`
+	Firewall     FirewallConfig     `yaml:"firewall"`
+	Netwatch     NetwatchConfig     `yaml:"netwatch"`
+	Detect       DetectConfig       `yaml:"detect"`
+	Buffer       BufferConfig       `yaml:"buffer"`
+	LiveResponse LiveResponseConfig `yaml:"live_response"`
 }
 
 func Load(path string) (*Config, error) {

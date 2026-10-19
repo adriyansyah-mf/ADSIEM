@@ -165,7 +165,12 @@ func run(configPath string, stop <-chan struct{}) {
 	// Live-response flows: long-polls the server and runs artifact plugins
 	flowCtx, stopFlows := context.WithCancel(context.Background())
 	defer stopFlows()
-	go task.NewFlowRunner(c).Run(flowCtx)
+	flows := task.NewFlowRunner(c)
+	if cfg.LiveResponse.DisableCommands {
+		flows.Plugins = task.WithoutCommands(flows.Plugins)
+		slog.Info("live response: operator-approved commands disabled by config")
+	}
+	go flows.Run(flowCtx)
 
 	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)

@@ -1,21 +1,42 @@
 # server-api/app/api/routes/investigations.py
 """AI case investigations (services/investigator.py): start one from a case, follow its steps, cancel it."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import desc, select
+from pydantic import BaseModel, Field
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import fetch_scoped, get_current_user, get_scoped_group, require_permission
-from app.models.models import Case, CaseInvestigation, User
+from app.models.models import Case, CaseInvestigation, InvestigationCommand, User
 from app.services import investigator
 from app.services.audit import audit_log
 
 router = APIRouter(tags=["investigations"])
+
+
+class CommandOut(BaseModel):
+    id: UUID
+    hostname: str | None = None
+    command: str
+    args: list[str] = []
+    timeout: int
+    reason: str | None = None
+    status: str
+    auto_approved: bool = False
+    decided_at: datetime | None = None
+    decision_note: str | None = None
+    flow_id: UUID | None = None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class CommandDecision(BaseModel):
+    approve: bool
+    note: str | None = Field(default=None, max_length=1000)
 
 
 class InvestigationOut(BaseModel):
@@ -27,6 +48,7 @@ class InvestigationOut(BaseModel):
     report: str | None = None
     error: str | None = None
     steps: list[dict[str, Any]] = []
+    commands: list[CommandOut] = []
     created_at: datetime
     finished_at: datetime | None = None
     model_config = {"from_attributes": True}
@@ -118,3 +140,37 @@ async def cancel_investigation(
         background.add_task(audit_log, db, user.id, "ai_investigation_cancelled", "case", str(inv.case_id),
                             {"investigation": str(inv.id)})
     return inv
+
+
+@router.post("/api/investigation-commands/{cmd_id}/decision", response_model=CommandOut)
+async def decide_command(
+    cmd_id: UUID,
+    body: CommandDecision,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("cases:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    """Approve or reject a command the AI asked to run. Approving runs it on the
+    host as root / SYSTEM, so it needs live-response rights like starting one."""
+    if not _can_run_live_response(user):
+        raise HTTPException(403, "Deciding on AI commands needs the agents:manage permission (live response)")
+    cmd = await db.get(InvestigationCommand, cmd_id)
+    if cmd is None or (group_filter is not None and cmd.group_id != group_filter):
+        raise HTTPException(404, "Command not found")
+    status = "approved" if body.approve else "rejected"
+    # only a pending command changes, so two analysts deciding at once can't both win
+    done = await db.execute(
+        update(InvestigationCommand)
+        .where(InvestigationCommand.id == cmd_id, InvestigationCommand.status == "pending")
+        .values(status=status, decided_by=user.id, decided_at=datetime.now(timezone.utc),
+                decision_note=(body.note or "").strip() or None)
+    )
+    await db.commit()
+    await db.refresh(cmd)
+    if done.rowcount == 0:
+        raise HTTPException(409, f"This command is already {cmd.status}")
+    background.add_task(audit_log, db, user.id, f"ai_command_{status}", "agent", str(cmd.agent_id),
+                        {"investigation": str(cmd.investigation_id), "command": cmd.command, "args": cmd.args,
+                         "host": cmd.hostname})
+    return cmd

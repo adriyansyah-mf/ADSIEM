@@ -20,6 +20,11 @@ Guardrails, enforced here rather than trusted to the prompt:
   round forces a report instead of another tool call.
 - Every step (tool call, flow, artifact) is recorded on the investigation and
   every flow names the investigation and the analyst who started it.
+- Commands (run_command) exist only when Settings → ai_command_execution is
+  "approval". Each one waits for a person with agents:manage to approve it,
+  unless its program is on the admin's auto-approve list (never a shell or an
+  interpreter, never touching a credential store). No shell on the agent side:
+  the approved argv is what runs.
 """
 from __future__ import annotations
 
@@ -42,7 +47,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.redis_client import get_redis
 from app.models.models import (
     Agent, Alert, Case, CaseInvestigation, CaseNote, Flow, FlowArtifact, FlowLog, FlowRowBatch,
-    HygieneSnapshot, UebaAnomaly, User,
+    HygieneSnapshot, InvestigationCommand, PlatformSetting, UebaAnomaly, User,
 )
 from app.services.audit import audit_log
 from app.services.flow_artifacts import (
@@ -60,6 +65,17 @@ TOOL_RESULT_CHARS = 8_000    # what one tool result may put in the model's conte
 CONTEXT_CHARS = 60_000       # older tool results are shortened to keep the prompt under this
 KEEP_FULL_RESULTS = 3        # ...except the most recent ones
 STALE_AFTER = timedelta(minutes=5)  # a running investigation not updated this long is dead
+MAX_COMMANDS = 8
+APPROVAL_WAIT = 15 * 60      # a command nobody decides on in this long expires
+COMMAND_MAX_TIMEOUT = 300    # the agent's exec cap
+COMMAND_OUTPUT_CHARS = 6_000  # per stream, in the tool result
+
+# Never auto-approved, whatever the allowlist says: these run arbitrary code.
+INTERPRETERS = {
+    "sh", "bash", "zsh", "dash", "ksh", "fish", "busybox", "env", "sudo", "su", "doas", "xargs", "find",
+    "python", "python3", "perl", "ruby", "php", "node", "lua", "awk", "gawk", "tclsh",
+    "cmd", "powershell", "pwsh", "wscript", "cscript", "mshta", "rundll32", "regsvr32", "wmic", "msiexec",
+}
 
 # Investigation-relevant subset of the assistant's read-only tools.
 READ_ONLY_TOOLS = {
@@ -110,7 +126,7 @@ SYSTEM_PROMPT = f"""You are a senior DFIR analyst investigating a security case 
 Method:
 1. Read the case context you are given (alerts, hosts, IOCs, prior notes). Form hypotheses about what happened.
 2. Gather evidence. Search the SIEM's logs and alerts (search_events, event_timeline, correlate_entity, pivot_ioc, reconstruct_timeline, ...) and collect live data from the affected endpoints with run_artifact: running processes, network connections, persistence, accounts, event logs, suspicious files. Prefer targeted artifacts and parameters over dumping everything.
-3. When no existing artifact (list_artifacts) collects what you need, write one with create_artifact, then run it. Artifacts are YAML; names must start with "AI." (e.g. AI.Linux.CronFromTmp). Only the plugins below exist — you cannot run commands or scripts.
+3. When no existing artifact (list_artifacts) collects what you need, write one with create_artifact, then run it. Artifacts are YAML; names must start with "AI." (e.g. AI.Linux.CronFromTmp). Only the plugins below exist.
 4. Pivot on what you find (a suspicious PID → its parent and connections; an IP → other hosts; a file → its hash and how it persists). Use get_flow_rows to search a large result instead of re-running the artifact.
 5. Stop when the evidence answers the question or the budget runs low, and write the report.
 
@@ -132,6 +148,16 @@ Final report (your last message, no tool calls), in the analyst's language if th
 ## Gaps — what you could not check and why.
 End with one line exactly: VERDICT: true_positive | false_positive | inconclusive"""
 
+NO_COMMANDS_PROMPT = "\n\nYou cannot run commands or scripts on hosts; collect with artifacts only."
+
+COMMANDS_PROMPT = f"""
+
+Commands: run_command asks to run one program on a host when no artifact can collect what you need. There is no shell — give the program and its arguments as a list (Linux: ss -tnp, lsof -p 4242, journalctl -u ssh --since -2h, last -F, auditctl -l, crontab -l -u www-data; Windows: netstat -ano, schtasks /query /fo csv /v, ipconfig /displaydns, or powershell -NoProfile -Command "<one pipeline>" for PowerShell).
+- An analyst sees every command with your reason and approves or rejects it before it runs; it then runs as root / SYSTEM. Give a short, specific reason.
+- Read-only diagnostics only: never modify, delete, kill, stop, install, download, upload or send anything, and never read credential stores. Containment stays a recommendation in the report.
+- A rejected or expired command must not be asked for again; adapt and use what you have.
+- Budget: {MAX_COMMANDS} commands; each waits for approval (up to {APPROVAL_WAIT // 60} minutes) and runs for at most {COMMAND_MAX_TIMEOUT} s."""
+
 
 class Cancelled(Exception):
     pass
@@ -148,6 +174,9 @@ class Ctx:
     flows: int = 0
     artifacts: int = 0
     flow_ids: set[str] = field(default_factory=set)
+    commands_enabled: bool = False
+    autoapprove: frozenset[str] = frozenset()
+    commands: int = 0
 
     def seconds_left(self) -> float:
         return MAX_SECONDS - (time.monotonic() - self.started)
@@ -329,6 +358,23 @@ async def _flow_summary(flow_id: uuid.UUID, rows_per_source: int = 20) -> dict:
                 "note": "Showing the first rows of each source; get_flow_rows pages or searches the rest."}
 
 
+async def _wait_flow(ctx: Ctx, flow_id: uuid.UUID, flow_timeout: int) -> str:
+    """Poll a flow until it ends or the wait cap runs out; returns its last status."""
+    from app.api.routes.flows import TERMINAL
+
+    deadline = time.monotonic() + min(flow_timeout + 60, FLOW_WAIT_CAP, max(ctx.seconds_left(), 30))
+    status = "scheduled"
+    while time.monotonic() < deadline:
+        await asyncio.sleep(3)
+        async with AsyncSessionLocal() as db:
+            status = (await db.execute(select(Flow.status).where(Flow.id == flow_id))).scalar_one()
+        if status in TERMINAL:
+            break
+        await _check_cancel(ctx)
+        await _set(ctx.inv_id, updated_at=datetime.now(timezone.utc))  # alive, for mark_stale_interrupted
+    return status
+
+
 async def run_artifact(ctx: Ctx, artifact: str, host: str, params: dict | None = None, reason: str = "") -> dict:
     from app.api.routes.flows import TERMINAL, _load_artifact, schedule_flow
 
@@ -361,16 +407,7 @@ async def run_artifact(ctx: Ctx, artifact: str, host: str, params: dict | None =
     await _step(ctx.inv_id, "flow", flow_id=str(flow_id), artifact=artifact, host=hostname,
                 params=params, reason=reason)
 
-    deadline = time.monotonic() + min(flow_timeout + 60, FLOW_WAIT_CAP, max(ctx.seconds_left(), 30))
-    status = "scheduled"
-    while time.monotonic() < deadline:
-        await asyncio.sleep(3)
-        async with AsyncSessionLocal() as db:
-            status = (await db.execute(select(Flow.status).where(Flow.id == flow_id))).scalar_one()
-        if status in TERMINAL:
-            break
-        await _check_cancel(ctx)
-        await _set(ctx.inv_id, updated_at=datetime.now(timezone.utc))  # alive, for mark_stale_interrupted
+    status = await _wait_flow(ctx, flow_id, flow_timeout)
     summary = await _flow_summary(flow_id)
     if status not in TERMINAL:
         summary["note"] = (f"still {status} after waiting; partial rows shown — the agent may be slow or "
@@ -433,6 +470,154 @@ async def create_artifact(ctx: Ctx, yaml_text: str, reason: str = "") -> dict:
             "params": {p.name: p.default for p in art.parameters}}
 
 
+def _program(command: str) -> str:
+    """Bare, lower-case program name: /usr/bin/Whoami.EXE → whoami."""
+    name = re.split(r"[/\\]", command.strip())[-1].lower()
+    return re.sub(r"\.(exe|com|bat|cmd|ps1)$", "", name)
+
+
+def command_line(command: str, args: list[str]) -> str:
+    return " ".join([command] + [a if a and not re.search(r"\s|\"", a) else json.dumps(a) for a in args])
+
+
+def auto_approvable(command: str, args: list[str], allowlist: frozenset[str]) -> bool:
+    """Runs without a human only when the admin listed the program, it can't run
+    arbitrary code, and no argument points at a credential store."""
+    prog = _program(command)
+    if not prog or prog not in allowlist or prog in INTERPRETERS:
+        return False
+    return not any(SENSITIVE_PATH.search(a) for a in [command, *args])
+
+
+async def _await_decision(ctx: Ctx, cmd_id: uuid.UUID) -> InvestigationCommand:
+    """Wait for an analyst to approve or reject; expire it after APPROVAL_WAIT.
+    Time spent waiting doesn't count against the investigation's clock."""
+    started = time.monotonic()
+    deadline = started + APPROVAL_WAIT
+    try:
+        while True:
+            async with AsyncSessionLocal() as db:
+                cmd = await db.get(InvestigationCommand, cmd_id)
+                if cmd.status != "pending":
+                    return cmd
+                if time.monotonic() >= deadline:
+                    await db.execute(update(InvestigationCommand).where(
+                        InvestigationCommand.id == cmd_id, InvestigationCommand.status == "pending",
+                    ).values(status="expired", decided_at=datetime.now(timezone.utc)))
+                    await db.commit()
+                    continue  # re-read: an approval may have landed just now
+            await _check_cancel(ctx)
+            await _set(ctx.inv_id, updated_at=datetime.now(timezone.utc))
+            await asyncio.sleep(2)
+    finally:
+        ctx.started += time.monotonic() - started
+
+
+async def run_command(ctx: Ctx, host: str, command: str, args: list | None = None, reason: str = "",
+                      timeout: int = 60) -> dict:
+    if not ctx.commands_enabled:
+        return {"error": "running commands is disabled on this platform; use artifacts"}
+    if ctx.commands >= MAX_COMMANDS:
+        return {"error": f"command budget used up ({MAX_COMMANDS}); write the report"}
+    command = (command or "").strip()
+    if not command:
+        return {"error": "command is required (the program, e.g. 'ss' or 'netstat')"}
+    if isinstance(args, str):
+        return {"error": "args must be a list of strings, one per argument (there is no shell)"}
+    args = [str(a) for a in (args or [])]
+    if len(command) + sum(len(a) for a in args) > 4000:
+        return {"error": "command too long"}
+    timeout = max(1, min(int(timeout or 60), COMMAND_MAX_TIMEOUT))
+    if not reason.strip():
+        return {"error": "give a reason: the analyst approving the command sees it"}
+
+    async with AsyncSessionLocal() as db:
+        agent = await _resolve_agent(db, ctx, host)
+        if agent.status != "online":
+            return {"error": f"{agent.hostname} is {agent.status}; the command would never run"}
+        auto = auto_approvable(command, args, ctx.autoapprove)
+        cmd = InvestigationCommand(
+            investigation_id=ctx.inv_id, group_id=ctx.group_id, agent_id=agent.id, hostname=agent.hostname,
+            command=command, args=args, timeout=timeout, reason=reason.strip()[:2000],
+            status="approved" if auto else "pending", auto_approved=auto,
+            decided_at=datetime.now(timezone.utc) if auto else None,
+        )
+        db.add(cmd)
+        await db.commit()
+        cmd_id, agent_id, hostname = cmd.id, agent.id, agent.hostname
+    ctx.commands += 1
+    line = command_line(command, args)
+    await _step(ctx.inv_id, "command", command_id=str(cmd_id), host=hostname, command=line,
+                reason=reason, auto_approved=auto)
+
+    if not auto:
+        cmd = await _await_decision(ctx, cmd_id)
+        if cmd.status != "approved":
+            await _step(ctx.inv_id, "command_decision", command_id=str(cmd_id), status=cmd.status,
+                        note=cmd.decision_note)
+            why = f" ({cmd.decision_note})" if cmd.decision_note else ""
+            return {"error": f"the analyst did not run this command: {cmd.status}{why}. "
+                             "Don't ask for it again; adapt or write the report."}
+        await _step(ctx.inv_id, "command_decision", command_id=str(cmd_id), status="approved")
+
+    from app.api.routes.flows import schedule_command_flow
+    redis = await get_redis()
+    async with AsyncSessionLocal() as db:
+        agent = await db.get(Agent, agent_id)
+        decided_by = (await db.get(InvestigationCommand, cmd_id)).decided_by
+        flow = await schedule_command_flow(
+            db, redis, agent=agent, command=command, args=args, timeout=timeout,
+            created_by=decided_by or ctx.user_id,
+            scheduled_by=f"AI investigation {ctx.inv_id} (started by {ctx.username}), command "
+                         f"{'auto-approved' if auto else 'approved by an analyst'}",
+        )
+        await db.execute(update(InvestigationCommand).where(InvestigationCommand.id == cmd_id)
+                         .values(flow_id=flow.id))
+        await db.commit()
+        flow_id, flow_timeout = flow.id, flow.timeout
+    ctx.flow_ids.add(str(flow_id))
+    await audit_log(None, decided_by or ctx.user_id, "ai_command_run", "agent", str(agent_id),
+                    {"investigation": str(ctx.inv_id), "command": line, "auto_approved": auto})
+
+    status = await _wait_flow(ctx, flow_id, flow_timeout)
+    async with AsyncSessionLocal() as db:
+        batches = (await db.execute(select(FlowRowBatch.rows).where(FlowRowBatch.flow_id == flow_id)
+                                    .order_by(FlowRowBatch.id))).scalars().all()
+        flow = await db.get(Flow, flow_id)
+    rows = [r for b in batches for r in b]
+    streams = {s: "\n".join(str(r.get("Text", "")) for r in rows if r.get("Stream") == s)
+               for s in ("stdout", "stderr")}
+    exit_row = next((r for r in rows if r.get("Stream") == "exit"), None)
+    result = {
+        "host": hostname, "command": line, "flow_id": str(flow_id), "status": status,
+        "exit": exit_row.get("Text") if exit_row else None,
+        "error": flow.error,
+        "stdout": _clip(streams["stdout"], COMMAND_OUTPUT_CHARS),
+        "stderr": _clip(streams["stderr"], COMMAND_OUTPUT_CHARS // 3),
+    }
+    if len(streams["stdout"]) > COMMAND_OUTPUT_CHARS:
+        result["note"] = "stdout was shortened; get_flow_rows with contains= searches all of it"
+    await _step(ctx.inv_id, "command_result", command_id=str(cmd_id), flow_id=str(flow_id), status=status,
+                exit=result["exit"], error=flow.error, lines=sum(1 for r in rows if r.get("Stream") != "exit"))
+    return result
+
+
+async def _expire_pending(inv_id: uuid.UUID) -> None:
+    async with AsyncSessionLocal() as db:
+        await db.execute(update(InvestigationCommand).where(
+            InvestigationCommand.investigation_id == inv_id, InvestigationCommand.status == "pending",
+        ).values(status="expired", decided_at=datetime.now(timezone.utc)))
+        await db.commit()
+
+
+async def command_settings(db) -> tuple[bool, frozenset[str]]:
+    mode = await db.get(PlatformSetting, "ai_command_execution")
+    allow = await db.get(PlatformSetting, "ai_command_autoapprove")
+    enabled = bool(mode and (mode.value or "").strip().lower() == "approval")
+    names = frozenset(_program(n) for n in ((allow.value if allow else "") or "").split(",") if n.strip())
+    return enabled, names
+
+
 def build_tools(ctx: Ctx) -> list[StructuredTool]:
     from app.services.assistant_tools import TOOLS as ASSISTANT_TOOLS, run_tool
 
@@ -471,6 +656,17 @@ def build_tools(ctx: Ctx) -> list[StructuredTool]:
              {"type": "object", "required": ["yaml_text"], "properties": {
                  "yaml_text": {"type": "string"}, "reason": {"type": "string"}}}),
     ]
+    if ctx.commands_enabled:
+        tools.append(tool(
+            run_command, "run_command",
+            "Ask to run one read-only program on a host (no shell). An analyst approves it first; "
+            "returns its stdout, stderr and exit code.",
+            {"type": "object", "required": ["host", "command", "args", "reason"], "properties": {
+                "host": {"type": "string", "description": "hostname or agent id"},
+                "command": {"type": "string", "description": "the program, e.g. ss, netstat, powershell"},
+                "args": {"type": "array", "items": {"type": "string"}, "description": "one entry per argument"},
+                "reason": {"type": "string", "description": "why — the approving analyst reads this"},
+                "timeout": {"type": "integer", "description": f"seconds, at most {COMMAND_MAX_TIMEOUT}"}}}))
 
     for spec in ASSISTANT_TOOLS:
         name = spec["name"]
@@ -620,7 +816,7 @@ async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None) -
     await _step(ctx.inv_id, "context", hosts=[h["hostname"] for h in context["hosts"]],
                 alerts=[a["title"] for a in context["alerts"]])
     messages: list[BaseMessage] = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(content=SYSTEM_PROMPT + (COMMANDS_PROMPT if ctx.commands_enabled else NO_COMMANDS_PROMPT)),
         HumanMessage(content="Investigate this case. Context:\n" + _json(context, 20_000)),
     ]
 
@@ -667,8 +863,9 @@ async def run_investigation(inv_id: uuid.UUID) -> None:
                   user_id=inv.started_by, username=user.username if user else "unknown")
         api_key, model, effort = await _graph_config(db, inv.group_id)
         model = await investigation_model(db, model)
+        ctx.commands_enabled, ctx.autoapprove = await command_settings(db)
     await _set(inv_id, status="running", model=model)
-    await _step(inv_id, "started", by=ctx.username, model=model)
+    await _step(inv_id, "started", by=ctx.username, model=model, commands=ctx.commands_enabled)
     try:
         report, verdict = await _investigate(ctx, api_key, model, effort)
         if not report:
@@ -676,11 +873,13 @@ async def run_investigation(inv_id: uuid.UUID) -> None:
         async with AsyncSessionLocal() as db:
             db.add(CaseNote(case_id=ctx.case_id, author_id=None, is_ai_generated=True,
                             content=f"**AI investigation** ({verdict.replace('_', ' ')}; "
-                                    f"{ctx.flows} live-response runs, started by {ctx.username})\n\n{report}"))
+                                    f"{ctx.flows} live-response runs, {ctx.commands} commands, "
+                                    f"started by {ctx.username})\n\n{report}"))
             await db.execute(update(CaseInvestigation).where(CaseInvestigation.id == inv_id).values(
                 status="finished", report=report, verdict=verdict, finished_at=datetime.now(timezone.utc)))
             await db.commit()
-        await _step(inv_id, "finished", verdict=verdict, flows=ctx.flows, artifacts=ctx.artifacts)
+        await _step(inv_id, "finished", verdict=verdict, flows=ctx.flows, artifacts=ctx.artifacts,
+                    commands=ctx.commands)
     except Cancelled as exc:
         await _set(inv_id, status="cancelled", error=str(exc) or "cancelled by an analyst",
                    finished_at=datetime.now(timezone.utc))
@@ -689,6 +888,8 @@ async def run_investigation(inv_id: uuid.UUID) -> None:
         log.exception("investigation_failed", investigation=str(inv_id))
         await _set(inv_id, status="error", error=str(exc)[:2000], finished_at=datetime.now(timezone.utc))
         await _step(inv_id, "error", error=str(exc)[:500])
+    finally:
+        await _expire_pending(inv_id)  # nothing may be approved after the run that asked for it ended
 
 
 _running: set[asyncio.Task] = set()
@@ -709,5 +910,12 @@ async def mark_stale_interrupted() -> None:
                    CaseInvestigation.updated_at < datetime.now(timezone.utc) - STALE_AFTER)
             .values(status="interrupted", error="the server restarted during the investigation",
                     finished_at=datetime.now(timezone.utc))
+        )
+        await db.execute(
+            update(InvestigationCommand)
+            .where(InvestigationCommand.status == "pending",
+                   InvestigationCommand.investigation_id.in_(
+                       select(CaseInvestigation.id).where(CaseInvestigation.status == "interrupted")))
+            .values(status="expired", decided_at=datetime.now(timezone.utc))
         )
         await db.commit()

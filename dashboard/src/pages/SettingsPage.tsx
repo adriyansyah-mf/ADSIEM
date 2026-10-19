@@ -11,6 +11,8 @@ const SETTING_LABELS: Record<string, string> = {
   ninerouter_model: '9router Combo',
   investigation_model: 'AI Investigation Model',
   bruteforce_digest_enabled: 'Brute-Force Daily Digest',
+  ai_command_execution: 'AI Investigation Commands',
+  ai_command_autoapprove: 'AI Commands Without Approval',
   searxng_url: 'SearXNG URL',
   ai_analyst_enabled: 'AI Analyst',
   ai_min_severity: 'Minimum Alert Severity for AI',
@@ -40,6 +42,8 @@ const SETTING_HINTS: Record<string, string> = {
   ninerouter_model: 'Combo name created in the 9router dashboard, e.g. "combo"',
   investigation_model: 'Model for "Investigate with AI" on cases, through 9router — pick a frontier model with native tool calling and a long context. Empty = the combo above',
   bruteforce_digest_enabled: 'Collect failed-only brute force from public IPs into one AI case per day (true / false)',
+  ai_command_execution: 'off, or approval: investigations may ask to run a program on a host; someone with agents:manage approves each one on the case before it runs (as root / SYSTEM). Needs agent v1.6.0+',
+  ai_command_autoapprove: 'Comma-separated programs that run without asking, e.g. whoami,hostname,ipconfig. Shells and interpreters (bash, powershell, cmd, python, …) and credential paths always need approval',
   searxng_url: 'Internal URL of your SearXNG instance',
   ai_analyst_enabled: 'Enable or disable automated AI triage (true / false)',
   ai_min_severity: 'Only run AI triage for alerts at this severity or above (low / medium / high / critical)',
@@ -67,6 +71,8 @@ const MASKED = '••••••••'
 
 // settings whose value is a 9router model or combo: offer what 9router lists
 const MODEL_KEYS = new Set(['ninerouter_model', 'investigation_model'])
+// settings where an empty value means something (none auto-approved)
+const EMPTY_OK_KEYS = new Set(['ai_command_autoapprove'])
 
 function SettingRow({ setting }: { setting: Setting }) {
   const [value, setValue] = useState(setting.is_secret ? '' : setting.value)
@@ -74,6 +80,7 @@ function SettingRow({ setting }: { setting: Setting }) {
   const [error, setError] = useState('')
   const update = useUpdateSetting()
   const isModel = MODEL_KEYS.has(setting.key)
+  const canBeEmpty = isModel || EMPTY_OK_KEYS.has(setting.key)
   const models = useQuery<{ models: string[] }>({
     queryKey: ['ai-models'],
     queryFn: () => api.get('/api/settings/ai-models').then(r => r.data),
@@ -158,7 +165,7 @@ function SettingRow({ setting }: { setting: Setting }) {
         )}
         <button
           onClick={handleSave}
-          disabled={update.isPending || (!value && !isModel)}
+          disabled={update.isPending || (!value && !canBeEmpty)}
           style={{
             padding: '7px 16px',
             borderRadius: '4px',
@@ -169,8 +176,8 @@ function SettingRow({ setting }: { setting: Setting }) {
             fontWeight: 700,
             fontSize: '12px',
             letterSpacing: '1px',
-            cursor: update.isPending || (!value && !isModel) ? 'not-allowed' : 'pointer',
-            opacity: !value && !isModel ? 0.5 : 1,
+            cursor: update.isPending || (!value && !canBeEmpty) ? 'not-allowed' : 'pointer',
+            opacity: !value && !canBeEmpty ? 0.5 : 1,
             transition: 'all 0.15s',
             whiteSpace: 'nowrap',
           }}

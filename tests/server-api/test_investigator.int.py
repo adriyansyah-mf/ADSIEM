@@ -129,6 +129,12 @@ async def _fake_agent(stop: asyncio.Event):
         async with AsyncSessionLocal() as db:
             for flow in (await db.execute(select(Flow).where(Flow.status == "scheduled"))).scalars().all():
                 for src in flow.request["sources"]:
+                    if src["plugin"] == "exec":
+                        line = " ".join([src["args"]["command"], *src["args"]["args"]])
+                        db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[
+                            {"Stream": "stdout", "Line": 1, "Text": f"ran: {line}"},
+                            {"Stream": "exit", "Line": 0, "Text": "exit code 0 after 3 ms", "ExitCode": 0},
+                        ]))
                     if src["plugin"] == "pslist":
                         db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[
                             {"Pid": 4242, "Name": "kworkerd", "Exe": "/tmp/.x/kworkerd", "CommandLine": "kworkerd -c 203.0.113.9:443"},
@@ -294,3 +300,106 @@ def test_text_tool_calls_run_and_garbled_output_never_reaches_the_case(env, monk
             notes = (await db.execute(select(CaseNote).where(CaseNote.case_id == case_id))).scalars().all()
             assert len(notes) == 1 and "<unk>" not in notes[0].content
     _run(check())
+
+
+def _set_setting(key, value):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import PlatformSetting
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            row = await db.get(PlatformSetting, key)
+            if row is None:
+                db.add(PlatformSetting(key=key, value=value))
+            else:
+                row.value = value
+            await db.commit()
+    _run(go())
+
+
+def test_commands_wait_for_an_analyst(env, monkeypatch):
+    """approve → runs as an exec flow; reject → never scheduled; allowlisted → runs without asking."""
+    from sqlalchemy import select, update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Flow, InvestigationCommand
+
+    _set_setting("ai_command_execution", "approval")
+    _set_setting("ai_command_autoapprove", "hostname, bash")
+    user_id, _, case_id = _seed()
+    seen_pending = []
+
+    async def analyst(stop):
+        # approves ss, rejects everything else that waits
+        while not stop.is_set():
+            async with AsyncSessionLocal() as db:
+                for cmd in (await db.execute(select(InvestigationCommand).where(
+                        InvestigationCommand.status == "pending"))).scalars().all():
+                    seen_pending.append(cmd.command)
+                    ok = cmd.command == "ss"
+                    await db.execute(update(InvestigationCommand).where(InvestigationCommand.id == cmd.id).values(
+                        status="approved" if ok else "rejected", decided_by=user_id,
+                        decision_note=None if ok else "too broad"))
+                await db.commit()
+            await asyncio.sleep(0.3)
+
+    def script(turn, results):
+        if turn == 1:
+            return ("run_command", {"host": "web01", "command": "ss", "args": ["-tnp"],
+                                    "reason": "who talks to 203.0.113.9"})
+        if turn == 2:
+            assert results[-1]["status"] == "finished", results[-1]
+            assert results[-1]["stdout"] == "ran: ss -tnp" and "exit code 0" in results[-1]["exit"]
+            return ("run_command", {"host": "web01", "command": "bash", "args": ["-c", "id"], "reason": "who am i"})
+        if turn == 3:
+            assert "rejected (too broad)" in results[-1]["error"]
+            return ("run_command", {"host": "web01", "command": "/usr/bin/hostname", "args": [], "reason": "name"})
+        if turn == 4:
+            assert results[-1]["stdout"] == "ran: /usr/bin/hostname"
+            return "## Summary\nChecked sockets.\nVERDICT: inconclusive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    stop = asyncio.Event()
+    approver = _LOOP.create_task(analyst(stop))
+    try:
+        inv, model = _investigate(script, monkeypatch, user_id, case_id)
+    finally:
+        stop.set()
+        _run(approver)
+        _set_setting("ai_command_execution", "off")
+    assert inv.status == "finished", inv.error
+    assert seen_pending == ["ss", "bash"]  # hostname was auto-approved; bash never is
+    assert "run_command" in model.tool_names
+    assert "Commands: run_command" in model.seen[0][0].content
+    assert [s["status"] for s in inv.steps if s["kind"] == "command_decision"] == ["approved", "rejected"]
+
+    async def check():
+        async with AsyncSessionLocal() as db:
+            cmds = (await db.execute(select(InvestigationCommand).where(
+                InvestigationCommand.investigation_id == inv.id).order_by(InvestigationCommand.created_at)
+            )).scalars().all()
+            assert [(c.command, c.status, c.auto_approved, c.flow_id is not None) for c in cmds] == [
+                ("ss", "approved", False, True), ("bash", "rejected", False, False),
+                ("/usr/bin/hostname", "approved", True, True)]
+            flows = (await db.execute(select(Flow).where(Flow.id.in_([c.flow_id for c in cmds if c.flow_id]))
+                                      )).scalars().all()
+            assert {f.artifact for f in flows} == {"AI.Command"}
+            assert all(f.request["sources"][0]["plugin"] == "exec" for f in flows)
+            assert flows and all(f.created_by == user_id for f in flows)
+    _run(check())
+
+
+def test_commands_are_off_by_default(env, monkeypatch):
+    _set_setting("ai_command_execution", "off")
+    user_id, _, case_id = _seed()
+
+    def script(turn, results):
+        if turn == 1:
+            return ("run_command", {"host": "web01", "command": "id", "args": [], "reason": "x"})
+        assert "unknown tool" in results[-1]["error"]
+        return "## Summary\nNothing.\nVERDICT: inconclusive"
+
+    inv, model = _investigate(script, monkeypatch, user_id, case_id)
+    assert inv.status == "finished"
+    assert "run_command" not in model.tool_names
+    assert "cannot run commands" in model.seen[0][0].content
