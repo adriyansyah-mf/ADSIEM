@@ -13,6 +13,7 @@ from app.core.es_client import ensure_index as ensure_es_index
 import app.models.models  # noqa: F401 — ensure all models are registered before create_all
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
 from app.api.routes.cases import router as cases_router
+from app.api.routes.investigations import router as investigations_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.hygiene import router as hygiene_router
 from app.api.routes.ueba import router as ueba_router
@@ -451,6 +452,8 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
+        from app.services.investigator import mark_stale_interrupted
+        await mark_stale_interrupted()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
@@ -483,5 +486,6 @@ for router in [
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
+    investigations_router,
 ]:
     app.include_router(router)

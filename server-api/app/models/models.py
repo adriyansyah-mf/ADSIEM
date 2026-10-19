@@ -249,6 +249,27 @@ class HygieneSnapshot(Base):
     packages        = Column(JSONB, nullable=False, default=list)
     collected_at    = Column(DateTime(timezone=True), default=now_utc)
 
+class CaseInvestigation(Base):
+    """One AI-driven investigation of a case (services/investigator.py): the
+    steps it took — tool calls, live-response flows, artifacts it wrote — and
+    its final report, which is also added to the case as an AI note."""
+    __tablename__ = "case_investigations"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id         = Column(String(100), nullable=False, default="default")
+    # queued → running → finished | error | cancelled | interrupted (server restarted mid-run)
+    status           = Column(String(20), nullable=False, default="queued")
+    started_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    model            = Column(String(100))
+    steps            = Column(JSONB, nullable=False, default=list)
+    report           = Column(Text)
+    verdict          = Column(String(30))  # true_positive / false_positive / inconclusive
+    error            = Column(Text)
+    cancel_requested = Column(Boolean, nullable=False, default=False)
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+    updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    finished_at      = Column(DateTime(timezone=True))
+
 class CaseNote(Base):
     __tablename__ = "case_notes"
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
