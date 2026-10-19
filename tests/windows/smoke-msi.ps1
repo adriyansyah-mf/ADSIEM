@@ -23,6 +23,10 @@ function Show-Diagnostics {
     Write-Host "---- config.yaml"; Get-Content (Join-Path $dataDir "config.yaml") -ErrorAction SilentlyContinue |
         Where-Object { $_ -notmatch "token" }
     Write-Host "---- received logs"; Get-Content (Join-Path $mockOut "logs.jsonl") -Tail 20 -ErrorAction SilentlyContinue
+    Write-Host "---- flow updates (without rows)"
+    Get-Content (Join-Path $mockOut "flows.jsonl") -ErrorAction SilentlyContinue | ConvertFrom-Json |
+        ForEach-Object { "{0} state={1} rows={2} error={3} logs={4}" -f $_.source, $_.state, @($_.rows).Count, $_.error,
+            (($_.logs | ForEach-Object { "$($_.level): $($_.message)" }) -join " | ") }
     Write-Host "---- msiexec log (errors)"; Select-String -Path (Join-Path $work "*.log") -Pattern "error|failed|return value 3" -ErrorAction SilentlyContinue |
         Select-Object -Last 30 | ForEach-Object { $_.Line }
 }
@@ -150,7 +154,7 @@ try {
         $rowsBy[$key] = $rowsBy[$key] + @($u.rows)
     }
     foreach ($src in "Info", "Pslist", "Users", "Persistence", "Services", "Programs", "Netstat", "Events") {
-        if (@($rowsBy[$src]).Count -lt 1) { Fail "live-response source $src returned no rows" }
+        if (-not $rowsBy.ContainsKey($src) -or $rowsBy[$src].Count -lt 1) { Fail "live-response source $src returned no rows" }
     }
     $info = $rowsBy["Info"][0]
     if ($info.OSRelease -notlike "Windows*") { Fail "info OSRelease '$($info.OSRelease)'" }
