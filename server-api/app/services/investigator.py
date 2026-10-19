@@ -81,7 +81,7 @@ INTERPRETERS = {
 READ_ONLY_TOOLS = {
     "get_alert", "search_alerts", "get_case", "correlate_entity", "reconstruct_timeline", "pivot_ioc",
     "search_events", "aggregate_events", "event_timeline", "recent_fim_changes", "agent_hygiene",
-    "ueba_top_risky_entities", "search_sop",
+    "ueba_top_risky_entities", "search_sop", "search_knowledge",
 }
 
 # read_file never returns these, whichever artifact asks: credentials don't go to an LLM.

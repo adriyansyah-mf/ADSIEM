@@ -36,6 +36,7 @@ from worker.ninerouter_search import search_via_9router
 from worker.web_fetch import fetch_page_text
 from worker.fleet_correlation import check_fleet_spread, LOOKBACK_HOURS as FLEET_LOOKBACK_HOURS
 from worker.rag import retrieve_similar_cases, retrieve_sop_context, retrieve_feedback_context
+from worker.knowledge import retrieve_for_alert
 from worker.soar_engine import run_soar_playbooks
 
 log = structlog.get_logger()
@@ -828,6 +829,7 @@ async def analyze_and_maybe_create_case(
             "retrieve_similar_cases": retrieve_similar_cases,
             "retrieve_sop_context": retrieve_sop_context,
             "retrieve_feedback_context": retrieve_feedback_context,
+            "retrieve_knowledge": retrieve_for_alert,
             "enqueue_hunt": _maybe_enqueue_hunt,
             "get_setting": get_setting,
             "set_alert_verdict": _set_alert_verdict,

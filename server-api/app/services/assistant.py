@@ -40,6 +40,7 @@ _TOOL_ROUTES: dict[str, tuple[str, str]] = {
     "mitre_coverage": ("/mitre-heatmap", "Open MITRE heatmap"),
     "list_soar_playbooks": ("/soar", "Open SOAR"),
     "search_sop": ("/sop", "Open SOP"),
+    "search_knowledge": ("/knowledge", "Open Knowledge"),
     "list_decoders": ("/decoders", "Open decoders"),
     "list_log_sources": ("/agents", "Open agents"),
     "list_tasks": ("/live-response", "Open live response"),

@@ -31,6 +31,7 @@ from app.api.routes.metrics import router as metrics_router
 from app.api.routes.handover import router as handover_router
 from app.api.routes.hunt_schedules import router as hunt_schedules_router
 from app.api.routes.sop import router as sop_router
+from app.api.routes.knowledge import router as knowledge_router
 from app.api.routes.soar import router as soar_router
 from app.api.routes.search import router as search_router
 from app.api.routes.reports import router as reports_router
@@ -60,6 +61,8 @@ _DEFAULT_SETTINGS = [
     ("agent_log_silence_minutes", "240",                False, "Alert when an agent still heartbeats but has sent no logs for this many minutes (0 = off)"),
     ("case_ioc_exclusions", "",                         False, "IPs, CIDRs and domains never used to group alerts into one campaign case — e.g. your own public IPs, proxies, shared SaaS (comma separated; public DNS resolvers and major update/CDN domains are excluded already)"),
     ("case_ioc_window_days", "7",                       False, "An AI case keeps collecting alerts that share its IOCs while active and touched within this many days"),
+    ("knowledge_pat_enabled", "true",                   False, "Keep PayloadsAllTheThings in the AI knowledge base, refreshed weekly (true/false)"),
+    ("knowledge_pat_url", "https://codeload.github.com/swisskyrepo/PayloadsAllTheThings/zip/refs/heads/master", False, "Where the PayloadsAllTheThings zip is downloaded from — point it at an internal mirror if the server has no GitHub access"),
     ("ninerouter_search_provider", "searxng",            False, "9router /v1/search provider/combo for AI research queries (searxng, tavily, or a dashboard search-combo for multi-provider auto-fallback)"),
     ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
     ("ai_confidence_threshold","0.0",                    False, "Minimum AI confidence (0.0-1.0) to create/escalate a case — notes always written regardless"),
@@ -467,6 +470,8 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
+        from app.services.knowledge_schema import migrate_knowledge
+        await migrate_knowledge()
         from app.services.investigator import mark_stale_interrupted
         await mark_stale_interrupted()
     finally:
@@ -501,6 +506,6 @@ for router in [
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
-    investigations_router,
+    investigations_router, knowledge_router,
 ]:
     app.include_router(router)

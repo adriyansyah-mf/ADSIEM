@@ -30,7 +30,7 @@ async def rag_index_loop() -> None:
                                    COALESCE(c.ioc_data->>'verdict', c.status) AS verdict,
                                    c.group_id
                             FROM cases c
-                            WHERE c.id = :case_id::uuid
+                            WHERE c.id = CAST(:case_id AS uuid)
                         """), {"case_id": case_id})).mappings().first()
                     if row:
                         await index_case(
@@ -55,7 +55,7 @@ async def rag_index_loop() -> None:
                         row = (await db.execute(text("""
                             SELECT id::text, context_text, rating, group_id
                             FROM ai_feedback
-                            WHERE id = :feedback_id::uuid
+                            WHERE id = CAST(:feedback_id AS uuid)
                         """), {"feedback_id": feedback_id})).mappings().first()
                     if row:
                         await index_feedback(
@@ -92,12 +92,33 @@ async def rag_index_loop() -> None:
                         verdict=row["verdict"],
                         group_id=row["group_id"],
                     )
+            await backfill_feedback()
         except asyncio.CancelledError:
             break
         except Exception as e:
             log.error("rag_indexer_error", error=str(e))
 
         await asyncio.sleep(INDEX_INTERVAL)
+
+
+async def backfill_feedback(limit: int = 200) -> int:
+    """Embed analyst feedback that never made it into the index (the immediate
+    queue failed, or the model wasn't available then). Returns how many."""
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(text("""
+            SELECT f.id::text, f.context_text, f.rating, f.group_id
+            FROM ai_feedback f
+            LEFT JOIN feedback_embeddings fe ON fe.feedback_id = f.id
+            WHERE fe.feedback_id IS NULL
+            ORDER BY f.created_at DESC
+            LIMIT :limit
+        """), {"limit": limit})).mappings().all()
+    for row in rows:
+        await index_feedback(feedback_id=row["id"], context_text=row["context_text"],
+                             rating=row["rating"], group_id=row["group_id"])
+    if rows:
+        log.info("rag_feedback_backfill", count=len(rows))
+    return len(rows)
 
 
 SOP_INDEX_INTERVAL = 60  # poll every 60s for pending documents

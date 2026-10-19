@@ -7,7 +7,7 @@ import AssistantWidget from '@/components/AssistantWidget'
 import {
   LayoutDashboard, FileText, Activity, Bell, FolderOpen,
   Brain, HeartPulse, Lock, ScanLine, Crosshair,
-  Terminal, Server, BookOpen, Wrench, Shield,
+  Terminal, Server, BookOpen, Wrench, Shield, Lightbulb,
   Users, Settings, PanelLeftClose, PanelLeftOpen,
   Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown, Radio,
   Menu, X, LogOut,
@@ -44,6 +44,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: '/mitre-heatmap', label: 'MITRE Heatmap', icon: Grid3x3 },
       { to: '/reports', label: 'Reports', icon: FileBarChart },
       { to: '/sop', label: 'SOP', icon: BookOpen },
+      { to: '/knowledge', label: 'Knowledge', icon: Lightbulb },
       { to: '/handover', label: 'Handover', icon: ClipboardList },
     ],
   },

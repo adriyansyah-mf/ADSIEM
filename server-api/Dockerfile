@@ -20,7 +20,7 @@ RUN mkdir -p /opt/fastembed; \
     done; \
     chmod -R a+rX /opt/fastembed
 
-COPY worker/worker/__init__.py worker/worker/sigma_engine.py worker/worker/sigma_logsource.py worker/worker/decoder_engine.py worker/worker/agent_health.py ./worker/
+COPY worker/worker/__init__.py worker/worker/sigma_engine.py worker/worker/sigma_logsource.py worker/worker/decoder_engine.py worker/worker/agent_health.py worker/worker/knowledge_query.py ./worker/
 COPY server-api/app/ ./app/
 
 EXPOSE 8000

@@ -515,6 +515,29 @@ class SopDocument(Base):
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
+class KnowledgeEntry(Base):
+    """What the AI should know about this environment and about attacks:
+    analyst notes ("10.0.0.5 is our Nessus scanner") and reference material
+    (PayloadsAllTheThings). Chunked and embedded by the worker
+    (worker/knowledge.py) into knowledge_chunks; notes with a scope also match
+    alerts exactly on IP, host, user or rule."""
+    __tablename__ = "knowledge_entries"
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id   = Column(String(100), nullable=False, default="default")  # "*" = every group
+    kind       = Column(String(20), nullable=False, default="note")     # note | reference
+    source     = Column(String(50), nullable=False, default="analyst")  # analyst | payloadsallthethings
+    source_ref = Column(Text)                                            # e.g. "SQL Injection/README.md#Union"
+    title      = Column(String(300), nullable=False)
+    content    = Column(Text, nullable=False)
+    scope      = Column(JSONB, nullable=False, default=dict)             # {"ips": [], "hosts": [], "users": [], "rules": []}
+    enabled    = Column(Boolean, nullable=False, default=True)
+    expires_at = Column(DateTime(timezone=True))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    indexed_at = Column(DateTime(timezone=True))                         # NULL or < updated_at: (re)embed
+
+
 class SopChunk(Base):
     __tablename__ = "sop_chunks"
     id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
