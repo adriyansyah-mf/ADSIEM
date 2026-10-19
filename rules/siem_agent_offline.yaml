@@ -1,0 +1,18 @@
+title: SIEM Agent Stopped Reporting
+id: rule-siem-agent-offline
+description: >-
+  No heartbeat from the agent for 5 minutes and no stop notice before it: the
+  process was killed, its network cut, or the host lost. Check the host, then
+  why the agent went silent (T1562.001). Many hosts at once raise one
+  agent_offline_mass event instead (a SIEM or network outage).
+logsource:
+  product: siem
+  service: agent
+detection:
+  silent:
+    event.action: agent_offline
+  condition: silent
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

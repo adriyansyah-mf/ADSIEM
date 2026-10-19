@@ -1,0 +1,20 @@
+# The platform's own agent health events (worker/worker/agent_health.py):
+# stops, silences and binary/config changes, written by the server and worker.
+name: siem_agent
+log_type: siem_agent
+type: kv
+priority: 10
+enabled: true
+fields:
+  event.action: event
+  event.reason: reason
+  agent.version: version
+  agent.last_seen: last_seen
+  agent.stopped_at: stopped_at
+  file.type: file
+  hash.previous: previous
+  hash.current: current
+  agent.count: count
+  agent.hosts: hosts
+static_fields:
+  event.category: agent_health

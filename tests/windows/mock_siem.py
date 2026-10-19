@@ -63,6 +63,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("X-Agent-Token") != "mock-agent-token":
             return self._reply(401, {"detail": "Invalid agent token"})
         if path == "/api/ingest/heartbeat":
+            with open(OUT / "heartbeats.jsonl", "a") as fh:
+                fh.write(json.dumps(payload) + "\n")
             return self._reply(200, {"config_hash": "mock", "log_sources": SOURCES, "fim_paths": [], "tasks": []})
         if path == "/api/ingest/log":
             with open(OUT / "logs.jsonl", "a") as fh:

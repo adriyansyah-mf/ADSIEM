@@ -1,0 +1,20 @@
+title: SIEM Agent Binary Modified
+id: rule-siem-agent-binary-modified
+description: >-
+  The agent's executable changed without a version change: replaced or
+  patched outside an upgrade. Treat the host's telemetry as untrusted until
+  the binary is reinstalled (T1554, T1562.001).
+logsource:
+  product: siem
+  service: agent
+detection:
+  changed:
+    event.action: agent_integrity_changed
+    file.type: binary
+  condition: changed
+level: critical
+tags:
+  - attack.persistence
+  - attack.t1554
+  - attack.defense_evasion
+  - attack.t1562.001

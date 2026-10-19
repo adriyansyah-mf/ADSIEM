@@ -31,3 +31,9 @@ logs:
 # them on this host regardless, uncomment:
 # live_response:
 #   disable_commands: true
+
+# Tamper protection: only SYSTEM (msiexec, upgrades) can stop, reconfigure or
+# remove the SIEMAgent service; Administrators get "access denied". To manage
+# the service by hand, uncomment and reboot (the agent applies it at start):
+# anti_tamper:
+#   unlock_service: true

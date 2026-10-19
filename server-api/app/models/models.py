@@ -65,6 +65,14 @@ class Agent(Base):
     is_isolated  = Column(Boolean, nullable=False, default=False)
     last_seen_at = Column(DateTime(timezone=True))
     flow_poll_at = Column(DateTime(timezone=True))  # last live-response long poll; NULL = no flow runner
+    # Tamper baseline (heartbeat integrity): hashes as of integrity_version.
+    # A change without a version change raises an agent_integrity_changed event.
+    binary_sha256     = Column(String(64))
+    config_sha256     = Column(String(64))
+    integrity_version = Column(String(50))
+    # Set by a "stopping" heartbeat (service_stop / system_shutdown), cleared by
+    # the next normal one. The worker reports a stop that lasts (agent_monitor).
+    stop_reason       = Column(String(30))
     enrolled_at  = Column(DateTime(timezone=True), default=now_utc)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

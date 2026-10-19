@@ -18,7 +18,10 @@ class Agent(Base):
     group_id     = Column(String(100), nullable=False, default="default")
     hostname     = Column(String(255), nullable=False)
     status       = Column(String(30), nullable=False, default="online")
+    approved     = Column(Boolean, nullable=False, default=True)
     last_seen_at = Column(DateTime(timezone=True))
+    stop_reason  = Column(String(30))
+    version      = Column(String(50))
 
 class FleetHunt(Base):
     __tablename__ = "fleet_hunts"

@@ -1,0 +1,28 @@
+title: SIEM Agent Service Tampering
+id: rule-win-siem-agent-service-tampering
+description: >-
+  The SIEMAgent service's start type was changed (System 7040, e.g. to
+  disabled so it won't come back after a reboot), or its service registry key
+  was written outside the Service Control Manager and Windows Installer
+  (Sysmon 13) — the way around the service's locked permissions (T1562.001).
+logsource:
+  product: windows
+detection:
+  start_type:
+    Channel: System
+    EventID: 7040
+    param4: SIEMAgent
+  registry:
+    Channel: Microsoft-Windows-Sysmon/Operational
+    EventID: 13
+    TargetObject|contains: '\Services\SIEMAgent\'
+  registry_expected:
+    Image|endswith:
+      - '\services.exe'
+      - '\msiexec.exe'
+      - '\siem-agent.exe'
+  condition: start_type or (registry and not registry_expected)
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
