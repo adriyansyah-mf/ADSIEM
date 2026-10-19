@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     ALLOW_PRIVATE_WEBHOOK_TARGETS: bool = False
     LOG_LEVEL: str = "info"
     REDIS_STREAM_KEY: str = "siem:logs"
+    # Hard cap on the log stream (approximate). The worker trims what it has
+    # processed (worker/stream_maintenance.py); this only bites if the workers
+    # are down for long, so Redis can't grow until it is killed.
+    REDIS_STREAM_MAXLEN: int = 2_000_000
     REDIS_CONSUMER_GROUP: str = "siem-workers"
     ELASTICSEARCH_URL: str = "http://elasticsearch:9200"
     NINEROUTER_BASE_URL: str = "http://9router:20128/v1"
