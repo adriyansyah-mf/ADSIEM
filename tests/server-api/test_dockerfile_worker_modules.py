@@ -9,15 +9,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _needed_files(module: str) -> set[str]:
+    """worker.soar.graph -> {soar/graph, soar/__init__}; worker.x -> {x}."""
+    parts = module.split(".")
+    files = {"/".join(parts)}
+    for i in range(1, len(parts)):
+        files.add("/".join(parts[:i]) + "/__init__")
+    return files
+
+
 def test_every_imported_worker_module_is_copied_into_the_image():
     imported = set()
     for path in (ROOT / "server-api" / "app").rglob("*.py"):
-        imported |= set(re.findall(r"^\s*(?:from|import) worker\.(\w+)", path.read_text(), re.M))
+        for mod in re.findall(r"^\s*(?:from|import) worker\.([\w.]+)", path.read_text(), re.M):
+            imported |= _needed_files(mod)
     dockerfile = (ROOT / "server-api" / "Dockerfile").read_text()
-    copied = set(re.findall(r"worker/worker/(\w+)\.py", dockerfile))
+    copied = set(re.findall(r"worker/worker/([\w/]+)\.py", dockerfile))
     assert imported, "expected server-api to import worker modules"
     assert imported <= copied, f"server-api/Dockerfile doesn't copy {sorted(imported - copied)}"
     # the build context is a whitelist: a copied file it doesn't let through fails the build
     ignore = (ROOT / "server-api" / "Dockerfile.dockerignore").read_text()
-    allowed = set(re.findall(r"^!worker/worker/(\w+)\.py$", ignore, re.M))
+    allowed = set(re.findall(r"^!worker/worker/([\w/]+)\.py$", ignore, re.M))
     assert copied <= allowed, f"Dockerfile.dockerignore doesn't let through {sorted(copied - allowed)}"
+
+
+def test_worker_subpackages_land_in_matching_directories():
+    # COPY flattens its sources into the destination, so each subpackage needs its own line
+    dockerfile = (ROOT / "server-api" / "Dockerfile").read_text()
+    for line in re.findall(r"^COPY (worker/worker/.+)$", dockerfile, re.M):
+        *sources, dest = line.split()
+        dirs = {str(Path(s).parent).removeprefix("worker/worker").strip("/") for s in sources}
+        assert len(dirs) == 1, f"one COPY mixes worker directories: {line}"
+        assert dest.rstrip("/") == ("./worker/" + dirs.pop()).rstrip("/"), f"wrong destination: {line}"

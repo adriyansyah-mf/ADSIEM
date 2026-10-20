@@ -297,10 +297,45 @@ class SoarPlaybook(Base):
     name               = Column(String(255), nullable=False)
     description        = Column(Text)
     trigger_conditions = Column(JSONB, nullable=False, default=dict)
+    graph              = Column(JSONB)          # workflow graph; NULL = legacy linear actions
+    trigger_event      = Column(String(30))     # from the graph's Trigger node
     is_enabled         = Column(Boolean, nullable=False, default=True)
     group_id           = Column(String(100), nullable=False, default="default")
     created_at         = Column(DateTime(timezone=True), default=now_utc)
     updated_at         = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class SoarRun(Base):
+    __tablename__ = "soar_runs"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    playbook_id   = Column(UUID(as_uuid=True), ForeignKey("soar_playbooks.id", ondelete="CASCADE"), nullable=False)
+    group_id      = Column(String(100), nullable=False, default="default")
+    status        = Column(String(20), nullable=False, default="queued")
+    trigger_event = Column(String(30), nullable=False)
+    alert_id      = Column(UUID(as_uuid=True))
+    graph         = Column(JSONB, nullable=False)
+    context       = Column(JSONB, nullable=False, default=dict)
+    waiting_node  = Column(String(40))
+    wait_until    = Column(DateTime(timezone=True))
+    error         = Column(Text)
+    created_by    = Column(UUID(as_uuid=True))
+    created_at    = Column(DateTime(timezone=True), default=now_utc)
+    updated_at    = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    finished_at   = Column(DateTime(timezone=True))
+
+class SoarRunStep(Base):
+    __tablename__ = "soar_run_steps"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id      = Column(UUID(as_uuid=True), ForeignKey("soar_runs.id", ondelete="CASCADE"), nullable=False)
+    node_id     = Column(String(40), nullable=False)
+    node_type   = Column(String(20), nullable=False)
+    status      = Column(String(20), nullable=False)
+    output_name = Column(String(20))
+    input       = Column(JSONB)
+    output      = Column(JSONB)
+    error       = Column(Text)
+    attempts    = Column(Integer, nullable=False, default=1)
+    started_at  = Column(DateTime(timezone=True), default=now_utc)
+    duration_ms = Column(Integer)
 
 class SoarAction(Base):
     __tablename__ = "soar_actions"

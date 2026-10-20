@@ -11,6 +11,12 @@ _cache: dict = {}
 _fetched_at: float = 0.0
 _TTL = 60.0  # seconds
 
+async def settings_with_prefix(prefix: str) -> dict[str, str]:
+    """All settings whose key starts with prefix, keyed by the rest of the key."""
+    await get_setting(prefix)  # refresh the cache when stale
+    return {k[len(prefix):]: v for k, v in _cache.items() if k.startswith(prefix) and v}
+
+
 async def get_setting(key: str, default: str = "") -> str:
     global _cache, _fetched_at
     if time.monotonic() - _fetched_at > _TTL:

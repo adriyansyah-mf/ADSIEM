@@ -14,9 +14,12 @@ respond from — without needing Splunk/QRadar-scale infrastructure or licensing
 - **Detection** — Sigma-format rules (bring your own from SigmaHQ, or write your own)
   evaluated against decoded events in real time, with threshold/correlation windows
   and suppression built in. Rules and decoders are just YAML files, seeded from disk.
-- **Response** — SOAR playbooks that trigger automatically on alert conditions:
-  enrich IOCs, open a case, suppress noise, isolate a host (`iptables`), block a
-  source IP, send a webhook — all configurable from the dashboard, no code required.
+- **Response** — SOAR workflows (n8n-style node graphs) that run when an alert is
+  created or triaged: If branches, TI enrichment, an AI yes/no decision, analyst
+  approval, isolate a host / block an IP / kill a process / quarantine a file, case
+  and alert actions, notifications, and a curl-style HTTP Request node whose
+  response later nodes can use (`{{ steps.<node>.body... }}`). Every run keeps
+  each node's input, output and errors.
   A live-response console can also run ad-hoc process lists, netstat, file pulls, YARA
   scans, and persistence checks against any online agent.
 - **Threat intel & UEBA** — IOC enrichment (Shodan exposure data and others) feeds

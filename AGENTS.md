@@ -40,7 +40,7 @@ Modular SIEM platform: Go endpoint agent → FastAPI ingest → Python/Redis-Str
 | Detection pipeline entry | `worker/worker/main.py` | `asyncio.gather()` launches 15 concurrent loops |
 | Stream consume → decode → sigma → alert | `worker/worker/consumer.py` | DLQ at `{REDIS_STREAM_KEY}:failed`, retried every 300s |
 | Rule seeding | `worker/worker/seeder.py` | seeds `rules/` + `decoders/` into DB, new titles only |
-| SOAR playbooks | `worker/worker/soar_engine.py` | triggered from alert creation |
+| SOAR workflows | `worker/worker/soar/` (engine, nodes, graph) | node graph per playbook; `soar_engine.run_soar_playbooks` queues runs on `alert.created` / `alert.triaged`, `soar_loop` executes them |
 | UEBA | `worker/worker/ueba/` | Isolation Forest scorer + trainer + cycles |
 | Threat intel providers | `worker/worker/ti/providers/` | abuseipdb, virustotal, shodan, otx, greynoise, urlhaus, geoip, whois, base |
 | Dashboard routes | `dashboard/src/App.tsx` | 25+ routes; role gating nested `<ProtectedRoute minRole=...>` |

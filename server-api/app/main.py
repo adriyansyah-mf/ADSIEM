@@ -59,6 +59,7 @@ _DEFAULT_SETTINGS = [
     ("ai_command_execution", "off",                     False, "Let AI investigations ask to run commands on endpoints: off, or approval (an analyst with agents:manage approves each command before it runs)"),
     ("ai_command_autoapprove", "",                      False, "Comma-separated programs AI commands may run without approval (e.g. whoami,hostname,ipconfig); shells and interpreters always need approval"),
     ("agent_log_silence_minutes", "240",                False, "Alert when an agent still heartbeats but has sent no logs for this many minutes (0 = off)"),
+    ("soar_http_allowlist", "",                         False, "Internal hosts or CIDRs SOAR HTTP Request nodes may call (comma or newline separated), e.g. 10.0.5.20, fw.corp.local, 10.10.0.0/24. Public addresses are always allowed; cloud metadata never is"),
     ("case_ioc_exclusions", "",                         False, "IPs, CIDRs and domains never used to group alerts into one campaign case — e.g. your own public IPs, proxies, shared SaaS (comma separated; public DNS resolvers and major update/CDN domains are excluded already)"),
     ("case_ioc_window_days", "7",                       False, "An AI case keeps collecting alerts that share its IOCs while active and touched within this many days"),
     ("knowledge_pat_enabled", "true",                   False, "Keep PayloadsAllTheThings in the AI knowledge base, refreshed weekly (true/false)"),
@@ -343,6 +344,49 @@ async def _migrate_soar_tables() -> None:
             CREATE INDEX IF NOT EXISTS idx_soar_playbooks_enabled_group
             ON soar_playbooks(is_enabled, group_id)
         """))
+        await conn.execute(text("""
+            ALTER TABLE soar_playbooks
+            ADD COLUMN IF NOT EXISTS graph JSONB,
+            ADD COLUMN IF NOT EXISTS trigger_event VARCHAR(30)
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_runs (
+                id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                playbook_id   UUID NOT NULL REFERENCES soar_playbooks(id) ON DELETE CASCADE,
+                group_id      VARCHAR(100) NOT NULL DEFAULT 'default',
+                status        VARCHAR(20) NOT NULL DEFAULT 'queued',
+                trigger_event VARCHAR(30) NOT NULL,
+                alert_id      UUID,
+                graph         JSONB NOT NULL,
+                context       JSONB NOT NULL DEFAULT '{}'::jsonb,
+                waiting_node  VARCHAR(40),
+                wait_until    TIMESTAMPTZ,
+                error         TEXT,
+                created_by    UUID,
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                finished_at   TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS soar_run_steps (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                run_id      UUID NOT NULL REFERENCES soar_runs(id) ON DELETE CASCADE,
+                node_id     VARCHAR(40) NOT NULL,
+                node_type   VARCHAR(20) NOT NULL,
+                status      VARCHAR(20) NOT NULL,
+                output_name VARCHAR(20),
+                input       JSONB,
+                output      JSONB,
+                error       TEXT,
+                attempts    INTEGER NOT NULL DEFAULT 1,
+                started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                duration_ms INTEGER
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_soar_runs_status ON soar_runs(status, updated_at)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_soar_runs_playbook ON soar_runs(playbook_id, created_at DESC)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_soar_run_steps_run ON soar_run_steps(run_id, started_at)"))
 
 async def _migrate_webhook_payload_format() -> None:
     from sqlalchemy import text

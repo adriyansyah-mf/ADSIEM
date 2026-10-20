@@ -247,6 +247,7 @@ async def create_alert(
             hostname=hostname,
             user_name=user,
             group_id=group_id,
+            event="alert.created",
         )
     except Exception as exc:
         log.error("soar_dispatch_failed", error=str(exc))
