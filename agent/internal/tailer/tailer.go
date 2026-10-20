@@ -139,6 +139,7 @@ func tailGlob(pattern, logType string, buf *buffer.Buffer, stopCh <-chan struct{
 					break inner
 				}
 			}
+			rewindIfTruncated(f, reader, currentPath)
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
@@ -205,10 +206,33 @@ func tailFixed(path, logType string, buf *buffer.Buffer, stopCh <-chan struct{})
 					break
 				}
 			}
+			rewindIfTruncated(f, reader, path)
 			time.Sleep(200 * time.Millisecond)
 		}
 		f.Close()
 	}
+}
+
+// rewindIfTruncated handles copytruncate rotation (logrotate copytruncate,
+// aaPanel/cloud WAF): the inode stays the same but the file is emptied, so
+// the read offset sits past the new end and nothing is read again until the
+// file outgrows its old size. Called at EOF, when the reader's buffer is
+// empty and the fd offset is the read position.
+func rewindIfTruncated(f *os.File, reader *bufio.Reader, path string) bool {
+	pos, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return false
+	}
+	fi, err := f.Stat()
+	if err != nil || fi.Size() >= pos {
+		return false
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	reader.Reset(f)
+	slog.Info("log file truncated, reading from the start", "path", path, "was", pos, "now", fi.Size())
+	return true
 }
 
 // Buffer entries are "logType\x00location\x00line"; location is the file the
