@@ -23,6 +23,7 @@ import structlog
 from prometheus_client import Counter, Histogram
 
 from worker.config import NINEROUTER_API_KEY, NINEROUTER_BASE_URL, NINEROUTER_MODEL
+from worker.llm_body import parse_completion_body
 from worker.settings_cache import get_setting
 
 log = structlog.get_logger()
@@ -80,16 +81,9 @@ class Completion:
 
 
 def _parse_body(raw: str) -> dict:
-    """Parse a 9router response body.
-
-    9router returns text/event-stream even for non-streaming requests: a JSON
-    object immediately followed by a trailing "data: [DONE]" marker with no
-    separator. raw_decode parses the leading object and ignores the rest.
-    """
-    if not raw or not raw.strip():
-        raise ValueError("empty response body")
-    obj, _ = json.JSONDecoder().raw_decode(raw)
-    return obj
+    """Parse a 9router response body: one JSON object, or an SSE stream of
+    deltas (see llm_body)."""
+    return parse_completion_body(raw)
 
 
 def _record_usage(model: str, usage: dict) -> None:
