@@ -34,6 +34,7 @@ import LiveResponsePage from '@/pages/LiveResponsePage'
 import YaraPage from '@/pages/YaraPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
 import SoarPage from '@/pages/SoarPage'
+import SoarEditorPage from '@/pages/SoarEditorPage'
 import MitreHeatmapPage from '@/pages/MitreHeatmapPage'
 
 export default function App() {
@@ -80,6 +81,7 @@ export default function App() {
             <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />
             <Route path="/yara" element={<YaraPage />} />
             <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />
+            <Route path="/soar/:id" element={<ProtectedRoute minRole="analyst"><SoarEditorPage /></ProtectedRoute>} />
             <Route path="/audit-logs" element={<ProtectedRoute minRole="admin"><AuditLogsPage /></ProtectedRoute>} />
           </Route>
         </Route>

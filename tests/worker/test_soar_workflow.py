@@ -189,6 +189,22 @@ def test_check_target(monkeypatch):
     assert "never allowed" in _check("http://localhost:6379", "localhost")
 
 
+def test_check_target_judges_ipv4_behind_ipv6_wrappers(monkeypatch):
+    # DNS64/NAT64 networks return public IPv4 hosts as 64:ff9b::a.b.c.d
+    monkeypatch.delenv("ALLOW_PRIVATE_WEBHOOK_TARGETS", raising=False)
+    def resolve6(ip):
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(socket.AF_INET6, 1, 6, "", (ip, 443, 0, 0))])
+    resolve6("64:ff9b::2cd2:4a55")              # 44.210.74.85, public
+    assert _check("https://httpbin.org/post") is None
+    resolve6("64:ff9b::a9fe:a9fe")              # 169.254.169.254, cloud metadata
+    assert "never allowed" in _check("http://metadata.example/")
+    resolve6("::ffff:10.0.5.20")                # IPv4-mapped private
+    assert "soar_http_allowlist" in _check("https://fw.corp.local/api")
+    assert _check("https://fw.corp.local/api", "10.0.5.0/24") is None
+    resolve6("2002:7f00:1::1")                  # 6to4 wrapping 127.0.0.1
+    assert "never allowed" in _check("http://x.example/")
+
+
 # ─── HTTP Request node ──────────────────────────────────────────────────────
 
 _REAL_CLIENT = httpx.AsyncClient
