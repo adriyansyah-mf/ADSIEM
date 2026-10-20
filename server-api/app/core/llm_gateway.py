@@ -86,16 +86,11 @@ async def get_setting(db: AsyncSession, key: str, default: str = "") -> str:
 
 
 def _parse_body(raw: str) -> dict:
-    """Parse a 9router response body.
+    """Parse a 9router response body: one JSON object, or an SSE stream of
+    deltas when a combo falls through to e.g. an ollama model."""
+    from app.core.graph.chat_model import parse_completion_body
 
-    9router returns text/event-stream even for non-streaming requests: a JSON
-    object immediately followed by a trailing "data: [DONE]" marker with no
-    separator. raw_decode parses the leading object and ignores the rest.
-    """
-    if not raw or not raw.strip():
-        raise ValueError("empty response body")
-    obj, _ = json.JSONDecoder().raw_decode(raw)
-    return obj
+    return parse_completion_body(raw)
 
 
 def _record_usage(model: str, usage: dict) -> None:

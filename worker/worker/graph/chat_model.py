@@ -25,6 +25,8 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
+from worker.llm_body import parse_completion_body
+
 _MESSAGE_ROLE = {
     "human": "user",
     "ai": "assistant",
@@ -103,10 +105,7 @@ class NineRouterChatModel(BaseChatModel):
         return payload
 
     def _parse_body(self, raw: str) -> dict:
-        if not raw or not raw.strip():
-            raise ValueError("empty response body")
-        obj, _ = json.JSONDecoder().raw_decode(raw)
-        return obj
+        return parse_completion_body(raw)
 
     def _generate(
         self,
