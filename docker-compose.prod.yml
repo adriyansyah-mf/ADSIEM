@@ -49,9 +49,11 @@ services:
     deploy:
       replicas: 2
       resources:
+        # a worker sat at ~450 MiB of 512m and was CPU-throttled at 0.5; it is
+        # one asyncio process, so more than one core per replica buys nothing
         limits:
-          memory: 512m
-          cpus: '0.5'
+          memory: 1g
+          cpus: '1.0'
     environment:
       LOG_LEVEL: info
 

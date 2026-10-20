@@ -9,6 +9,10 @@ DECODERS_DIR: str = os.environ.get("DECODERS_DIR", "/app/decoders")
 RULES_DIR: str = os.environ.get("RULES_DIR", "/app/rules")
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "info")
 RELOAD_INTERVAL: int = int(os.environ.get("RELOAD_INTERVAL", "60"))
+# Stream entries read per round, and how many source groups of them are processed
+# at once (entries from one source IP/host stay in order). Bounded by the DB pool (25).
+CONSUME_BATCH: int = int(os.environ.get("CONSUME_BATCH", "100"))
+CONSUME_CONCURRENCY: int = int(os.environ.get("CONSUME_CONCURRENCY", "8"))
 WEBHOOK_RETRY_INTERVAL: int = int(os.environ.get("WEBHOOK_RETRY_INTERVAL", "30"))
 MAX_WEBHOOK_ATTEMPTS: int = int(os.environ.get("MAX_WEBHOOK_ATTEMPTS", "5"))
 NINEROUTER_BASE_URL: str = os.environ.get("NINEROUTER_BASE_URL", "http://9router:20128/v1")

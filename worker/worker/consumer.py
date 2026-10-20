@@ -2,13 +2,14 @@
 import asyncio
 import json
 import socket
+import time
 import uuid
 from datetime import datetime, timezone
 import structlog
 from prometheus_client import Counter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from worker.config import REDIS_CONSUMER_GROUP, REDIS_STREAM_KEY
+from worker.config import CONSUME_BATCH, CONSUME_CONCURRENCY, REDIS_CONSUMER_GROUP, REDIS_STREAM_KEY
 from worker.database import AsyncSessionLocal
 from worker.decoder_engine import DecoderEngine
 from worker.redis_client import get_redis
@@ -50,10 +51,29 @@ async def load_engines(db: AsyncSession) -> tuple[DecoderEngine, SigmaEngine]:
 
     return dec_engine, sig_engine
 
+# agent ids known to exist -> expiry; one DB round trip per agent a minute
+# instead of one per log line
+_known_agents: dict[uuid.UUID, float] = {}
+AGENT_CACHE_TTL = 60.0
+
+
+async def _agent_exists(agent_id: uuid.UUID) -> bool:
+    now = time.monotonic()
+    if _known_agents.get(agent_id, 0.0) > now:
+        return True
+    async with AsyncSessionLocal() as db:
+        from worker.models import Agent as AgentModel
+        exists = await db.get(AgentModel, agent_id) is not None
+    if exists:
+        _known_agents[agent_id] = now + AGENT_CACHE_TTL
+    return exists
+
+
 async def process_message(
     data: dict,
     dec_engine: DecoderEngine,
     sig_engine: SigmaEngine,
+    predecoded: tuple[dict, str | None] | None = None,
 ) -> None:
     agent_id_str = data.get("agent_id")
     log_type = data.get("log_type", "").strip()
@@ -73,13 +93,10 @@ async def process_message(
 
     agent_id = uuid.UUID(agent_id_str) if agent_id_str else None
 
-    if agent_id is not None:
-        async with AsyncSessionLocal() as db:
-            from worker.models import Agent as AgentModel
-            if not await db.get(AgentModel, agent_id):
-                agent_id = None
+    if agent_id is not None and not await _agent_exists(agent_id):
+        agent_id = None
 
-    decoded, decoder_name = dec_engine.decode_named(log_type, raw_message)
+    decoded, decoder_name = predecoded or dec_engine.decode_named(log_type, raw_message)
     if not decoded:
         decode_failures.inc()
     else:
@@ -130,27 +147,54 @@ async def process_message(
     except Exception as _ueba_exc:
         log.warning("ueba_score_error", error=str(_ueba_exc))
 
+def group_by_source(entries: list, dec_engine: DecoderEngine) -> list[list]:
+    """Split a batch into per-source groups of (msg_id, data, predecoded), in
+    stream order. Groups run concurrently; a group runs in order, so threshold
+    and sequence rules, suppression and alert dedup for one attacker or host
+    see its events one at a time, as before."""
+    groups: dict[str, list] = {}
+    for msg_id, data in entries:
+        raw = data.get("raw_message", "").strip()
+        try:
+            predecoded = dec_engine.decode_named(data.get("log_type", "").strip(), raw) if raw else None
+        except Exception:
+            predecoded = None  # process_message decodes again and fails that entry alone
+        key = (predecoded and predecoded[0].get("source.ip")) or data.get("hostname") or ""
+        groups.setdefault(key, []).append((msg_id, data, predecoded))
+    return list(groups.values())
+
+
+async def _process_group(redis, group: list, dec_engine, sig_engine, limit: asyncio.Semaphore) -> None:
+    async with limit:
+        for msg_id, data, predecoded in group:
+            try:
+                await process_message(data, dec_engine, sig_engine, predecoded)
+                await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
+            except Exception as exc:
+                log.error("message_processing_failed", msg_id=msg_id, error=str(exc))
+                await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
+                await redis.xadd(f"{REDIS_STREAM_KEY}:failed", data)
+
+
 async def consume_loop(state: dict) -> None:
     redis = await get_redis()
     await ensure_stream_group(redis)
+    limit = asyncio.Semaphore(CONSUME_CONCURRENCY)
 
     while True:
         try:
             messages = await redis.xreadgroup(
                 REDIS_CONSUMER_GROUP, CONSUMER_NAME,
-                {REDIS_STREAM_KEY: ">"}, count=10, block=5000
+                {REDIS_STREAM_KEY: ">"}, count=CONSUME_BATCH, block=5000
             )
             if not messages:
                 continue
-            for _stream, entries in messages:
-                for msg_id, data in entries:
-                    try:
-                        await process_message(data, state["dec_engine"], state["sig_engine"])
-                        await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
-                    except Exception as exc:
-                        log.error("message_processing_failed", msg_id=msg_id, error=str(exc))
-                        await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
-                        await redis.xadd(f"{REDIS_STREAM_KEY}:failed", data)
+            dec_engine, sig_engine = state["dec_engine"], state["sig_engine"]
+            entries = [entry for _stream, stream_entries in messages for entry in stream_entries]
+            await asyncio.gather(*(
+                _process_group(redis, group, dec_engine, sig_engine, limit)
+                for group in group_by_source(entries, dec_engine)
+            ))
         except asyncio.CancelledError:
             break
         except Exception as exc:
