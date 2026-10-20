@@ -18,7 +18,7 @@ func (m *Monitor) Stop() {}
 
 type Snapshotter struct{}
 
-func StartSnapshotter(buf *buffer.Buffer) *Snapshotter {
+func StartSnapshotter(buf *buffer.Buffer, _ string) *Snapshotter {
 	return &Snapshotter{}
 }
 

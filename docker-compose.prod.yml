@@ -1,6 +1,11 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 services:
 
+  # The demo agent watches the SIEM server itself (its own containers' traffic
+  # included) — lab material, not production. Start it with --profile demo.
+  agent-demo:
+    profiles: ["demo"]
+
   postgres:
     deploy:
       resources:
