@@ -297,6 +297,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                 ai_verdict=state.get("verdict"),
                 ai_confidence=state.get("confidence"),
                 ti_risk_score=getattr(enrichment, "overall_risk", None) if enrichment else None,
+                event="alert.triaged",
             ))
         except Exception as exc:
             log.warning("ai_soar_dispatch_failed", alert_id=alert_id, error=str(exc))

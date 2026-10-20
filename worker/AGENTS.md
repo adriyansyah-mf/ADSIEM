@@ -15,7 +15,9 @@ worker/worker/
 │                     #   Windows agent channels (tests/sigmahq/run.sh replays SigmaHQ's regression samples)
 ├── alert_manager.py  # alert creation + webhook fire
 ├── seeder.py         # seed rules/ + decoders/ into DB (new titles only)
-├── soar_engine.py    # playbook execution
+├── soar_engine.py    # SOAR entry point: alert event → queued playbook runs
+├── soar/             # workflow engine: graph.py (catalog, validation, legacy conversion), engine.py (runs,
+│                     #   approval wait/resume), nodes.py (9 node types), template.py ({{ path }}, no eval), curl.py
 ├── rag.py / rag_indexer.py   # pgvector RAG over cases/SOPs (fastembed)
 ├── llm_client.py / ai_analyst.py / ai_consumer.py  # AI triage + analyst
 ├── hunter.py / hunt_scheduler.py / campaign_analyzer.py / fleet_correlation.py
