@@ -23,6 +23,7 @@ class Agent(Base):
     stop_reason  = Column(String(30))
     version      = Column(String(50))
     flow_poll_at = Column(DateTime(timezone=True))
+    is_isolated  = Column(Boolean, nullable=False, default=False)
 
 class FleetHunt(Base):
     __tablename__ = "fleet_hunts"
@@ -47,6 +48,8 @@ class AgentTask(Base):
     id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agent_id      = Column(UUID(as_uuid=True))
     fleet_hunt_id = Column(UUID(as_uuid=True))
+    task_type     = Column(String(50), nullable=False)
+    params        = Column(JSONB, nullable=False, default=dict)
     status        = Column(String(20), nullable=False, default="pending")
     error         = Column(Text)
     created_at    = Column(DateTime(timezone=True), nullable=False, default=now_utc)

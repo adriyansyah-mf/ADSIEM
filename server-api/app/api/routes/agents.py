@@ -522,19 +522,3 @@ async def unisolate_agent(
     await db.refresh(agent)
     return agent
 
-
-@router.delete("/api/agents/{agent_id}/isolate", response_model=AgentOut)
-async def unisolate_agent(
-    agent_id: UUID,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(Perm)],
-):
-    agent = (await db.execute(select(Agent).where(Agent.id == agent_id))).scalar_one_or_none()
-    if not agent:
-        raise HTTPException(404, "Agent not found")
-    agent.is_isolated = False
-    task = AgentTask(agent_id=agent_id, task_type="unisolate_host", params={}, created_by=current_user.id)
-    db.add(task)
-    await db.commit()
-    await db.refresh(agent)
-    return agent
