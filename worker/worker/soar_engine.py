@@ -1,15 +1,16 @@
 """SOAR engine: evaluate playbook triggers and execute action sequences."""
 from __future__ import annotations
+import ipaddress
 import uuid
 from datetime import datetime, timezone
 
 import httpx
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from worker.database import AsyncSessionLocal
 from worker.models import (
-    AlertNote, AlertSuppression, Case, SoarAction, SoarPlaybook,
+    Agent, AgentTask, AlertNote, AlertSuppression, Case, SoarAction, SoarPlaybook,
 )
 
 log = structlog.get_logger()
@@ -180,6 +181,25 @@ async def _action_add_note(alert_id: uuid.UUID, ctx: dict, params: dict) -> None
         await db.commit()
 
 
+def _valid_ip(value) -> str | None:
+    """Return the normalised IP, or None when value isn't a literal IPv4/IPv6 address."""
+    try:
+        return str(ipaddress.ip_address(str(value).strip()))
+    except ValueError:
+        return None
+
+
+async def _find_online_agent(db, hostname: str, group_id: str):
+    """Online agent for hostname, scoped to the alert's group so playbooks can't reach other tenants."""
+    q = (
+        select(Agent)
+        .where(Agent.hostname == hostname, Agent.status == "online", Agent.group_id == group_id)
+        .order_by(Agent.last_seen_at.desc().nullslast())
+        .limit(1)
+    )
+    return (await db.execute(q)).scalar_one_or_none()
+
+
 async def _action_isolate_agent(alert_id: uuid.UUID, ctx: dict, params: dict) -> None:
     """Queue an isolate_host task for the agent that reported this alert."""
     hostname = ctx.get("hostname")
@@ -188,10 +208,7 @@ async def _action_isolate_agent(alert_id: uuid.UUID, ctx: dict, params: dict) ->
         return
 
     async with AsyncSessionLocal() as db:
-        from worker.models import Agent, AgentTask
-        from sqlalchemy import select as _select, update as _update
-        agent_q = _select(Agent).where(Agent.hostname == hostname, Agent.status == "online")
-        agent = (await db.execute(agent_q)).scalar_one_or_none()
+        agent = await _find_online_agent(db, hostname, ctx.get("group_id", "default"))
         if not agent:
             db.add(AlertNote(
                 alert_id=alert_id,
@@ -199,14 +216,13 @@ async def _action_isolate_agent(alert_id: uuid.UUID, ctx: dict, params: dict) ->
             ))
             await db.commit()
             return
-        task = AgentTask(
+        db.add(AgentTask(
             agent_id=agent.id,
             task_type="isolate_host",
-            payload={},
+            params={},
             status="pending",
-        )
-        db.add(task)
-        await db.execute(_update(Agent).where(Agent.id == agent.id).values(is_isolated=True))
+        ))
+        await db.execute(update(Agent).where(Agent.id == agent.id).values(is_isolated=True))
         db.add(AlertNote(
             alert_id=alert_id,
             content=f"**SOAR Isolate** — isolation task queued for `{hostname}` (agent_id: {agent.id})"
@@ -217,10 +233,22 @@ async def _action_isolate_agent(alert_id: uuid.UUID, ctx: dict, params: dict) ->
 
 async def _action_block_ip(alert_id: uuid.UUID, ctx: dict, params: dict) -> None:
     """Queue a block_ip task on the agent that reported this alert."""
-    source_ip = ctx.get("source_ip") or params.get("ip")
+    raw_ip = ctx.get("source_ip") or params.get("ip")
     hostname = ctx.get("hostname")
-    if not source_ip:
+    if not raw_ip:
         log.warning("soar_block_ip_skipped", reason="no source_ip in context")
+        return
+
+    # source_ip comes from decoded log fields, which an attacker can influence.
+    source_ip = _valid_ip(raw_ip)
+    if not source_ip:
+        log.warning("soar_block_ip_skipped", reason="invalid ip", ip=str(raw_ip)[:64])
+        async with AsyncSessionLocal() as db:
+            db.add(AlertNote(
+                alert_id=alert_id,
+                content="**SOAR Block IP** — source IP is not a valid address; block skipped."
+            ))
+            await db.commit()
         return
 
     if not hostname:
@@ -232,11 +260,15 @@ async def _action_block_ip(alert_id: uuid.UUID, ctx: dict, params: dict) -> None
             await db.commit()
         return
 
+    try:
+        duration = int(params.get("duration_seconds", 3600))
+    except (TypeError, ValueError):
+        duration = 3600
+    if duration <= 0:
+        duration = 3600
+
     async with AsyncSessionLocal() as db:
-        from worker.models import Agent, AgentTask
-        from sqlalchemy import select as _select
-        agent_q = _select(Agent).where(Agent.hostname == hostname, Agent.status == "online")
-        agent = (await db.execute(agent_q)).scalar_one_or_none()
+        agent = await _find_online_agent(db, hostname, ctx.get("group_id", "default"))
         if not agent:
             db.add(AlertNote(
                 alert_id=alert_id,
@@ -244,14 +276,12 @@ async def _action_block_ip(alert_id: uuid.UUID, ctx: dict, params: dict) -> None
             ))
             await db.commit()
             return
-        duration = params.get("duration_seconds", 3600)
-        task = AgentTask(
+        db.add(AgentTask(
             agent_id=agent.id,
             task_type="block_ip",
-            payload={"ip": source_ip, "duration_seconds": duration},
+            params={"ip": source_ip, "duration_seconds": duration, "reason": f"SOAR alert {alert_id}"},
             status="pending",
-        )
-        db.add(task)
+        ))
         db.add(AlertNote(
             alert_id=alert_id,
             content=f"**SOAR Block IP** — task queued to block `{source_ip}` on `{hostname}` for {duration}s"
