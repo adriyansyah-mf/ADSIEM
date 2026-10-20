@@ -25,7 +25,7 @@ from worker.models import SoarAction, SoarPlaybook, SoarRun, SoarRunStep
 from worker.soar.conditions import matches
 from worker.soar.graph import NODE_TYPES, GraphError, from_legacy, trigger_event, trigger_node, validate
 from worker.soar.nodes import HANDLERS, WAIT, NodeError
-from worker.soar.template import render
+from worker.soar.template import TemplateError, parse_path, references, render
 
 log = structlog.get_logger()
 
@@ -87,6 +87,19 @@ async def dispatch(event: str, trigger: dict, *, group_id: str) -> list[str]:
     if queued:
         _wake.set()
     return queued
+
+
+def _missing_secrets(params: dict, secrets: dict) -> list[str]:
+    """Names used as {{ secrets.NAME }} that have no soar_secret_NAME setting."""
+    names = set()
+    for ref in references(params):
+        try:
+            parts = parse_path(ref)
+        except TemplateError:
+            continue
+        if parts[0] == "secrets" and len(parts) > 1 and parts[1] not in secrets:
+            names.add(str(parts[1]))
+    return sorted(names)
 
 
 def _children(graph: dict, node_id: str, output: str) -> list[str]:
@@ -197,7 +210,13 @@ async def execute_run(run_id: uuid.UUID) -> str:
         started = _now()
 
         result, err, attempts = None, None, 0
-        for attempt in range(int(node.get("retry", 0)) + 1):
+        missing = _missing_secrets(raw, secrets)
+        retries = -1 if missing else int(node.get("retry", 0))
+        if missing:
+            attempts = 1
+            err = NodeError("secret not set: " + ", ".join(missing) + " (add "
+                            + ", ".join(f"soar_secret_{m}" for m in missing) + " in Settings)")
+        for attempt in range(retries + 1):
             attempts += 1
             try:
                 result = await asyncio.wait_for(HANDLERS[node["type"]](node, rendered, ctx), NODE_TIMEOUT_S)
@@ -210,7 +229,7 @@ async def execute_run(run_id: uuid.UUID) -> str:
             except Exception as exc:  # a bug in a handler must not kill the loop
                 log.exception("soar_node_crashed", node=nid, type=node["type"])
                 err = NodeError(f"{exc.__class__.__name__}: {exc}")
-            if attempt < int(node.get("retry", 0)):
+            if attempt < retries:
                 await asyncio.sleep(min(2 ** attempt, 5))
 
         if err is None and result.output == WAIT:

@@ -129,6 +129,18 @@ def _get(model, **where):
     return _run(go())
 
 
+def _set_secret(name, value):
+    from sqlalchemy import text
+
+    from worker.database import AsyncSessionLocal
+
+    async def go():
+        async with AsyncSessionLocal() as s:
+            await s.execute(text("INSERT INTO platform_settings VALUES (:k, :v)"), {"k": f"soar_secret_{name}", "v": value})
+            await s.commit()
+    _run(go())
+
+
 def _steps(run_id):
     from worker.models import SoarRunStep
     return {s.node_id: s for s in _get(SoarRunStep, run_id=uuid.UUID(run_id))}
@@ -173,17 +185,10 @@ def test_dispatch_matches_event_and_conditions(db):
 
 
 def test_branch_true_blocks_ip_and_redacts_secrets(db, monkeypatch):
-    from sqlalchemy import text
-
-    from worker.database import AsyncSessionLocal
     from worker.models import AgentTask, AlertNote
     from worker.soar import nodes
 
-    async def secret():
-        async with AsyncSessionLocal() as s:
-            await s.execute(text("INSERT INTO platform_settings VALUES ('soar_secret_TI_KEY', 'k-123')"))
-            await s.commit()
-    _run(secret())
+    _set_secret("TI_KEY", "k-123")
     http = FakeHTTP({"data": {"score": 95}})
     monkeypatch.setattr(nodes, "_send", http)
     alert, agent = _alert_and_agent()
@@ -207,6 +212,7 @@ def test_branch_false_and_error_edge(db, monkeypatch):
     from worker.models import AgentTask, AlertNote
     from worker.soar import nodes
 
+    _set_secret("TI_KEY", "k-123")
     alert, _ = _alert_and_agent()
     _playbook(TI_GRAPH)
     monkeypatch.setattr(nodes, "_send", FakeHTTP({"data": {"score": 12}}))
@@ -246,6 +252,25 @@ def test_error_without_edge_fails_run_and_retry_recovers(db, monkeypatch):
     run = _run_row(run_id)
     assert run.status == "failed" and "still down" in run.error and run.finished_at
     assert _steps(run_id)["call"].attempts == 2
+
+
+def test_missing_secret_fails_node_without_calling_out(db, monkeypatch):
+    from worker.soar import nodes
+
+    graph = {"nodes": [{"id": "t", "type": "trigger", "params": {"event": "alert.created"}},
+                       {"id": "call", "type": "http", "retry": 2, "params": {
+                           "url": "https://x.example", "headers": {"Authorization": "Bearer {{ secrets.NOPE }}"}}},
+                       {"id": "note", "type": "case", "params": {"operation": "add_note", "content": "{{ steps.call.error }}"}}],
+             "edges": [{"from": "t", "output": "main", "to": "call"}, {"from": "call", "output": "error", "to": "note"}]}
+    http = FakeHTTP({"ok": 1})
+    monkeypatch.setattr(nodes, "_send", http)
+    alert, _ = _alert_and_agent()
+    _playbook(graph)
+    [run_id] = _dispatch("alert.created", alert)
+    assert _execute(run_id) == "success"
+    step = _steps(run_id)["call"]
+    assert step.status == "error" and "soar_secret_NOPE" in step.error and step.attempts == 1
+    assert http.calls == []
 
 
 APPROVAL_GRAPH = {

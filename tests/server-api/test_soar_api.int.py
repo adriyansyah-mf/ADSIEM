@@ -91,6 +91,8 @@ def test_legacy_playbook_converts_when_graph_saved(env):
           current_user=USER, group_filter="blue")
     got = _call(s.get_playbook, pid, current_user=USER, group_filter="blue")
     assert got["legacy"] is True and [n["type"] for n in got["graph"]["nodes"]] == ["trigger", "case"]
+    # normalised like a saved graph, so the editor doesn't see a difference after saving it as-is
+    assert all({"retry", "continue_on_error", "label", "position"} <= set(n) for n in got["graph"]["nodes"])
 
     saved = _call(s.save_graph, pid, s.GraphIn(graph=got["graph"]), current_user=USER, group_filter="blue")
     assert saved["legacy"] is False and saved["actions"] == []

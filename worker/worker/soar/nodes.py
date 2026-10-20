@@ -250,6 +250,25 @@ def _allowlist(raw: str) -> tuple[set[str], list]:
     return hosts, nets
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _effective_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address):
+    """The IPv4 address an IPv6 one stands for (IPv4-mapped, NAT64 well-known prefix, 6to4), else itself.
+
+    On DNS64/NAT64 networks every public IPv4 host resolves to 64:ff9b::a.b.c.d,
+    which Python counts as non-global; judge the embedded IPv4 instead.
+    """
+    if ip.version == 6:
+        if ip.ipv4_mapped:
+            return ip.ipv4_mapped
+        if ip in _NAT64:
+            return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if ip.sixtofour:
+            return ip.sixtofour
+    return ip
+
+
 async def check_target(url: str, allowlist_raw: str = "") -> str | None:
     """None if url may be called, else the reason it may not.
 
@@ -270,7 +289,7 @@ async def check_target(url: str, allowlist_raw: str = "") -> str | None:
     hosts, nets = _allowlist(allowlist_raw)
     allow_private = os.environ.get("ALLOW_PRIVATE_WEBHOOK_TARGETS", "false").lower() in ("1", "true", "yes")
     for *_, sockaddr in infos:
-        ip = ipaddress.ip_address(sockaddr[0])
+        ip = _effective_ip(ipaddress.ip_address(sockaddr[0].split("%", 1)[0]))
         if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
             return f"{host} resolves to {ip}, which is never allowed"
         if ip.is_private or ip.is_reserved:
@@ -296,7 +315,7 @@ async def _send(method: str, url: str, *, headers: dict, query: dict, body_type:
     reason = await check_target(url, await get_setting("soar_http_allowlist"))
     if reason:
         raise NodeError(f"blocked: {reason}")
-    kwargs: dict[str, Any] = {"headers": {str(k): str(v) for k, v in headers.items()},
+    kwargs: dict[str, Any] = {"headers": {str(k).strip(): str(v).strip() for k, v in headers.items() if str(k).strip()},
                               "params": {str(k): str(v) for k, v in query.items()}}
     if body_type == "json":
         if isinstance(body, str):

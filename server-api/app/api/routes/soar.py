@@ -72,9 +72,13 @@ class ActionUpdate(BaseModel):
 def _graph_of(pb: SoarPlaybook, actions: list[SoarAction]) -> dict:
     if pb.graph:
         return pb.graph
-    return from_legacy(pb.trigger_conditions, [
+    graph = from_legacy(pb.trigger_conditions, [
         {"action_type": a.action_type, "order_index": a.order_index, "params": a.params} for a in actions
     ])
+    try:
+        return validate(graph)  # same shape the editor gets back after saving
+    except GraphError:
+        return graph
 
 
 def _pb_out(pb: SoarPlaybook, actions: list[SoarAction]) -> dict:

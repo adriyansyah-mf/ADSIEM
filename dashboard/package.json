@@ -27,6 +27,7 @@
     "@visx/scale": "^4.0.0",
     "@visx/shape": "^4.0.0",
     "@visx/tooltip": "^4.0.0",
+    "@xyflow/react": "^12.12.0",
     "axios": "^1.7.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
