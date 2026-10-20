@@ -223,9 +223,9 @@ func run(configPath string, stop <-chan struct{}) {
 		if netMon, err := netwatch.Start(buf); err != nil {
 			slog.Warn("netwatch eBPF unavailable, continuing", "err", err)
 			if cfg.Netwatch.SnapshotFallback {
-				snap := netwatch.StartSnapshotter(buf)
+				snap := netwatch.StartSnapshotter(buf, cfg.Server.URL)
 				defer snap.Stop()
-				slog.Info("netwatch running in snapshot mode", "interval", "10s")
+				slog.Info("netwatch running in snapshot mode (new connections only)", "interval", "10s")
 			}
 		} else {
 			defer netMon.Stop()
