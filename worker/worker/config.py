@@ -10,9 +10,16 @@ RULES_DIR: str = os.environ.get("RULES_DIR", "/app/rules")
 LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "info")
 RELOAD_INTERVAL: int = int(os.environ.get("RELOAD_INTERVAL", "60"))
 # Stream entries read per round, and how many source groups of them are processed
-# at once (entries from one source IP/host stay in order). Bounded by the DB pool (25).
+# at once (entries from one source IP/host stay in order). CONSUME_CONCURRENCY is
+# the starting point; adaptive.py moves it between MIN and MAX with the stream lag
+# and this container's CPU/memory. MAX is bounded by the DB pool (25).
 CONSUME_BATCH: int = int(os.environ.get("CONSUME_BATCH", "100"))
 CONSUME_CONCURRENCY: int = int(os.environ.get("CONSUME_CONCURRENCY", "8"))
+CONSUME_CONCURRENCY_MIN: int = int(os.environ.get("CONSUME_CONCURRENCY_MIN", "4"))
+CONSUME_CONCURRENCY_MAX: int = int(os.environ.get("CONSUME_CONCURRENCY_MAX", "16"))
+ADAPT_INTERVAL: int = int(os.environ.get("ADAPT_INTERVAL", "10"))
+LAG_HIGH: int = int(os.environ.get("LAG_HIGH", "2000"))  # entries waiting: climb
+LAG_LOW: int = int(os.environ.get("LAG_LOW", "200"))     # caught up: ease back
 WEBHOOK_RETRY_INTERVAL: int = int(os.environ.get("WEBHOOK_RETRY_INTERVAL", "30"))
 MAX_WEBHOOK_ATTEMPTS: int = int(os.environ.get("MAX_WEBHOOK_ATTEMPTS", "5"))
 NINEROUTER_BASE_URL: str = os.environ.get("NINEROUTER_BASE_URL", "http://9router:20128/v1")
