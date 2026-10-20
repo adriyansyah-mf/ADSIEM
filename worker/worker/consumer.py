@@ -179,13 +179,16 @@ async def _process_group(redis, group: list, dec_engine, sig_engine, limit: asyn
 async def consume_loop(state: dict) -> None:
     redis = await get_redis()
     await ensure_stream_group(redis)
-    limit = asyncio.Semaphore(CONSUME_CONCURRENCY)
 
     while True:
         try:
+            # adaptive_loop moves state["concurrency"]; read it per batch, and read
+            # enough entries that there are groups to fill it
+            concurrency = state.get("concurrency", CONSUME_CONCURRENCY)
+            limit = asyncio.Semaphore(concurrency)
             messages = await redis.xreadgroup(
                 REDIS_CONSUMER_GROUP, CONSUMER_NAME,
-                {REDIS_STREAM_KEY: ">"}, count=CONSUME_BATCH, block=5000
+                {REDIS_STREAM_KEY: ">"}, count=max(CONSUME_BATCH, concurrency * 12), block=5000
             )
             if not messages:
                 continue
