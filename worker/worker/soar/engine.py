@@ -1,8 +1,8 @@
 """Run engine: match playbooks to an event, queue runs, and execute them node by node.
 
-Runs are rows in soar_runs. Matching an alert only queues a run; soar_loop
+Runs are rows in soar_playbook_runs. Matching an alert only queues a run; soar_loop
 claims queued runs (FOR UPDATE SKIP LOCKED, so worker replicas never share one)
-and executes them off the log pipeline. Every node writes a soar_run_steps row.
+and executes them off the log pipeline. Every node writes a soar_playbook_run_steps row.
 
 Per node: retry up to node.retry times; on failure follow the node's "error"
 edge, else its first output when continue_on_error, else fail the run. An
@@ -283,9 +283,9 @@ async def execute_run(run_id: uuid.UUID) -> str:
 async def _claim(limit: int) -> list[uuid.UUID]:
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(text("""
-            UPDATE soar_runs SET status = 'running', updated_at = now()
+            UPDATE soar_playbook_runs SET status = 'running', updated_at = now()
             WHERE id IN (
-                SELECT id FROM soar_runs WHERE status IN ('queued', 'resume')
+                SELECT id FROM soar_playbook_runs WHERE status IN ('queued', 'resume')
                 ORDER BY created_at LIMIT :limit FOR UPDATE SKIP LOCKED
             )
             RETURNING id

@@ -580,7 +580,7 @@ class SoarPlaybook(Base):
     updated_at         = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 class SoarRun(Base):
-    __tablename__ = "soar_runs"
+    __tablename__ = "soar_playbook_runs"
     id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     playbook_id   = Column(UUID(as_uuid=True), ForeignKey("soar_playbooks.id", ondelete="CASCADE"), nullable=False)
     group_id      = Column(String(100), nullable=False, default="default")
@@ -598,9 +598,9 @@ class SoarRun(Base):
     finished_at   = Column(DateTime(timezone=True))
 
 class SoarRunStep(Base):
-    __tablename__ = "soar_run_steps"
+    __tablename__ = "soar_playbook_run_steps"
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    run_id      = Column(UUID(as_uuid=True), ForeignKey("soar_runs.id", ondelete="CASCADE"), nullable=False)
+    run_id      = Column(UUID(as_uuid=True), ForeignKey("soar_playbook_runs.id", ondelete="CASCADE"), nullable=False)
     node_id     = Column(String(40), nullable=False)
     node_type   = Column(String(20), nullable=False)
     status      = Column(String(20), nullable=False)   # success|error|waiting
