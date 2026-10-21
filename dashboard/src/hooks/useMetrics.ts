@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import type { Event, PaginatedResponse } from '@/types'
 
 export interface SocrMetrics {
   period_days: number
@@ -31,6 +32,36 @@ export interface MttrPoint {
   day: string
   avg_ack_minutes: number | null
   avg_mttr_minutes: number | null
+}
+
+export interface WorkloadItem {
+  readonly user_id: string
+  readonly username: string
+  readonly open_alerts: number
+  readonly open_cases: number
+  readonly total: number
+}
+
+export function useAnalystWorkload() {
+  return useQuery<WorkloadItem[]>({
+    queryKey: ['metrics', 'workload'],
+    queryFn: () => api.get('/api/metrics/workload').then(response => response.data),
+    refetchInterval: 60_000,
+  })
+}
+
+export function useRecentEvents() {
+  return useQuery<PaginatedResponse<Event>>({
+    queryKey: ['events', 'dashboard-recent'],
+    queryFn: () => api.get('/api/events', { params: { page_size: 5 } }).then(response => response.data),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useQuickThreatLookup() {
+  return useMutation<Record<string, unknown>, Error, { readonly ioc: string; readonly ioc_type: string }>({
+    mutationFn: body => api.get('/api/metrics/ti/quick', { params: body }).then(response => response.data),
+  })
 }
 
 export function useSocMetrics(days = 7) {

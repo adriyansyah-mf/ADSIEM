@@ -16,14 +16,14 @@ import {
 import type { TimeseriesPoint, MttrPoint, TopSource } from '@/hooks/useMetrics'
 
 const C = {
-  cyan: '#00d4ff',
-  green: '#00ff88',
-  orange: '#ff6b00',
-  red: '#ff2244',
-  yellow: '#ffd700',
-  border: '#1a2d45',
-  text: '#6b8aad',
-  muted: '#3a5070',
+  cyan: 'var(--accent-cyan)',
+  green: 'var(--accent-green)',
+  orange: 'var(--accent-orange)',
+  red: 'var(--accent-red)',
+  yellow: 'var(--accent-yellow)',
+  border: 'var(--border-default)',
+  text: 'var(--text-secondary)',
+  muted: 'var(--text-muted)',
 }
 
 const SEV = [
@@ -36,16 +36,16 @@ const SEV = [
 
 const AXIS_PROPS = {
   stroke: C.border,
-  tick: { fill: C.text, fontSize: 10, fontFamily: 'Rajdhani, sans-serif' },
+  tick: { fill: C.text, fontSize: 12, fontFamily: 'var(--font-ui)' },
   tickLine: { stroke: C.border },
 } as const
 
 const TOOLTIP_STYLE = {
-  background: '#0b1524',
-  border: '1px solid #1a2d45',
+  background: 'var(--bg-card)',
+  border: '1px solid var(--border-default)',
   borderRadius: 4,
-  color: '#e0eaff',
-  fontFamily: 'Rajdhani, sans-serif',
+  color: 'var(--text-primary)',
+  fontFamily: 'var(--font-ui)',
   fontSize: 12,
   padding: '6px 10px',
 } as const
@@ -65,7 +65,7 @@ function EmptyChart({ height, label }: { height: number; label: string }) {
         justifyContent: 'center',
         color: C.muted,
         fontSize: 12,
-        fontFamily: 'Rajdhani, sans-serif',
+        fontFamily: 'var(--font-ui)',
       }}
     >
       {label}

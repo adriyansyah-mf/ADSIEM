@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
+import { ArrowLeft, Bot } from 'lucide-react'
+import { PageHeader, Panel, QueryState } from '@/components/Workspace'
+import SeverityBadge from '@/components/SeverityBadge'
+import StatusBadge from '@/components/StatusBadge'
 import { useCase, useUpdateCase, useEscalateCase, useAddCaseNote, useCaseFeedback, useSubmitCaseFeedback } from '@/hooks/useCases'
 import { useBlockIp, useTasks } from '@/hooks/useTasks'
 import { useAuthStore } from '@/stores/auth'
@@ -13,102 +17,23 @@ import AlertDetailModal from '@/components/AlertDetailModal'
 import AiFeedbackWidget from '@/components/AiFeedbackWidget'
 import AiInvestigationPanel from '@/components/AiInvestigationPanel'
 
-const severityColors = {
-  critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
-  high:     { bg: 'rgba(255,107,0,0.15)', border: '#ff6b00', color: '#ff6b00' },
-  medium:   { bg: 'rgba(255,215,0,0.1)',  border: '#ffd700', color: '#ffd700' },
-  low:      { bg: 'rgba(0,255,136,0.1)',  border: '#00ff88', color: '#00ff88' },
-  info:     { bg: 'rgba(0,212,255,0.1)',  border: '#00d4ff', color: '#00d4ff' },
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const s = severity as keyof typeof severityColors
-  const c = severityColors[s] ?? severityColors.info
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 10px',
-      borderRadius: '4px',
-      border: `1px solid ${c.border}`,
-      background: c.bg,
-      color: c.color,
-      fontFamily: 'Rajdhani, sans-serif',
-      fontWeight: 700,
-      fontSize: '12px',
-      letterSpacing: '1px',
-      textTransform: 'uppercase',
-      boxShadow: `0 0 8px ${c.border}44`,
-    }}>
-      {severity}
-    </span>
-  )
-}
-
 function Box({ title, children, actions }: { title: string; children: React.ReactNode; actions?: React.ReactNode }) {
-  return (
-    <div style={{
-      borderRadius: '6px',
-      border: '1px solid var(--border)',
-      background: 'var(--bg-card)',
-      padding: '14px',
-      marginBottom: '12px',
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '10px',
-        marginBottom: '12px',
-      }}>
-        <div style={{
-          fontFamily: 'Rajdhani, sans-serif',
-          fontSize: '11px',
-          fontWeight: 700,
-          letterSpacing: '2px',
-          textTransform: 'uppercase',
-          color: 'var(--accent-cyan)',
-        }}>
-          {title}
-        </div>
-        {actions}
-      </div>
-      {children}
-    </div>
-  )
+  return <Panel title={title} actions={actions}>{children}</Panel>
 }
 
 function ActionBtn({ label, onClick, color, loading, disabled }: { label: string; onClick: () => void; color: string; loading?: boolean; disabled?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={loading || disabled}
-      style={{
-        padding: '8px 16px',
-        borderRadius: '4px',
-        border: `1px solid ${color}`,
-        background: `${color}18`,
-        color,
-        fontFamily: 'Rajdhani, sans-serif',
-        fontWeight: 700,
-        fontSize: '12px',
-        letterSpacing: '1px',
-        cursor: loading || disabled ? 'not-allowed' : 'pointer',
-        opacity: loading || disabled ? 0.6 : 1,
-        transition: 'all 0.15s',
-        width: '100%',
-        marginBottom: '6px',
-        textAlign: 'left',
-      }}
-    >
-      {loading ? 'WORKING...' : label}
-    </button>
-  )
+  const canManage = useAuthStore(state => state.hasRole('analyst'))
+  return <button onClick={onClick} disabled={loading || disabled || !canManage}
+    className={`ui-button w-full justify-start mb-2 ${color === 'var(--accent-red)' ? 'ui-button--danger' : ''}`}
+    title={canManage ? undefined : 'An analyst role is required for case actions'}>
+    {loading ? 'Working…' : label}
+  </button>
 }
 
 function AttackTimeline({ items }: { items: any[] }) {
   if (!items || items.length === 0) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', padding: '8px 0' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', padding: '8px 0' }}>
         No related events found in ±24h window.
       </div>
     )
@@ -125,8 +50,7 @@ function AttackTimeline({ items }: { items: any[] }) {
             <div style={{
               width: 10, height: 10, borderRadius: '50%', marginTop: 4, flexShrink: 0,
               background: item.type === 'alert' ? sevColor(item.severity) : '#64748b',
-              boxShadow: item.is_this_case ? `0 0 8px ${sevColor(item.severity)}` : 'none',
-              border: item.is_this_case ? `2px solid ${sevColor(item.severity)}` : '2px solid transparent',
+              border: '2px solid transparent',
             }} />
             {idx < items.length - 1 && (
               <div style={{ width: 1, flex: 1, minHeight: 16, background: '#1e2028', margin: '2px 0' }} />
@@ -135,21 +59,21 @@ function AttackTimeline({ items }: { items: any[] }) {
           {/* Event content */}
           <div style={{ flex: 1, paddingBottom: 10 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                 {new Date(item.ts).toLocaleString('en-US', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
               </span>
               {item.type === 'alert' && (
-                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: `${sevColor(item.severity)}22`, color: sevColor(item.severity), fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase' }}>
+                <span style={{ fontSize: 12, padding: '1px 5px', borderRadius: 2, background: `${sevColor(item.severity)}22`, color: sevColor(item.severity), fontFamily: 'var(--font-mono)', textTransform: 'none' }}>
                   {item.severity}
                 </span>
               )}
               {item.type === 'note' && (
-                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: 'rgba(100,116,139,0.15)', color: '#64748b', fontFamily: 'Share Tech Mono, monospace' }}>
+                <span style={{ fontSize: 12, padding: '1px 5px', borderRadius: 2, background: 'rgba(100,116,139,0.15)', color: '#64748b', fontFamily: 'var(--font-mono)' }}>
                   NOTE
                 </span>
               )}
               {item.is_this_case && (
-                <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 2, background: 'rgba(0,212,255,0.15)', color: '#00d4ff', fontFamily: 'Share Tech Mono, monospace' }}>
+                <span style={{ fontSize: 12, padding: '1px 5px', borderRadius: 2, background: 'rgba(0,212,255,0.15)', color: '#00d4ff', fontFamily: 'var(--font-mono)' }}>
                   THIS CASE
                 </span>
               )}
@@ -158,7 +82,7 @@ function AttackTimeline({ items }: { items: any[] }) {
               {item.title}
             </div>
             {item.source_ip && (
-              <div style={{ fontSize: 10, fontFamily: 'Share Tech Mono, monospace', color: 'var(--accent-cyan)', marginTop: 1 }}>
+              <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)', marginTop: 1 }}>
                 {item.source_ip}
               </div>
             )}
@@ -179,7 +103,7 @@ export default function CaseDetailPage() {
   const [blockIpValue, setBlockIpValue] = useState('')
   const [blockDuration, setBlockDuration] = useState(3600)
 
-  const { data: caseData, isLoading } = useCase(id!)
+  const { data: caseData, isLoading, isError, refetch } = useCase(id!)
   const update = useUpdateCase(id!)
   const escalate = useEscalateCase(id!)
   const addNote = useAddCaseNote(id!)
@@ -226,21 +150,10 @@ export default function CaseDetailPage() {
     })
   }
 
-  if (isLoading) {
-    return (
-      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-muted)', padding: '40px', textAlign: 'center' }}>
-        LOADING CASE...
-      </div>
-    )
-  }
-
-  if (!caseData) {
-    return (
-      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--accent-red)', padding: '40px', textAlign: 'center' }}>
-        CASE NOT FOUND
-      </div>
-    )
-  }
+  if (isLoading) return <QueryState kind="loading" title="Loading case…" description="Fetching the case record and investigation context." />
+  if (isError || !caseData) return <QueryState kind="error" title="Could not open this case"
+    description="The case may be unavailable or outside your workspace. Try again or return to Cases."
+    onRetry={() => { void refetch() }} />
 
   // campaign fields (worker/case_grouping.py) get their own box
   const ioc = (caseData.ioc_data ?? {}) as Record<string, unknown>
@@ -266,72 +179,19 @@ export default function CaseDetailPage() {
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   )
 
-  const statusColor = {
-    open: 'var(--accent-cyan)',
-    in_review: 'var(--accent-yellow)',
-    escalated: 'var(--accent-orange)',
-    resolved: 'var(--accent-green)',
-    closed: 'var(--text-muted)',
-  }[caseData.status] ?? 'var(--text-muted)'
-
   return (
-    <div>
-      {/* Back button + header */}
-      <div style={{ marginBottom: '16px' }}>
-        <button
-          onClick={() => navigate('/cases')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '4px 12px',
-            borderRadius: '4px',
-            border: '1px solid var(--border)',
-            background: 'transparent',
-            color: 'var(--text-secondary)',
-            fontFamily: 'Rajdhani, sans-serif',
-            fontWeight: 600,
-            fontSize: '12px',
-            letterSpacing: '1px',
-            cursor: 'pointer',
-            marginBottom: '12px',
-          }}
-        >
-          ← BACK TO CASES
-        </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <h1 style={{
-            fontFamily: 'Exo 2, sans-serif',
-            fontWeight: 700,
-            fontSize: '20px',
-            color: 'var(--text-primary)',
-            margin: 0,
-            flex: 1,
-          }}>
-            {caseData.created_by_ai && <span style={{ marginRight: '8px' }}>🤖</span>}
-            {caseData.title}
-          </h1>
-          <SeverityBadge severity={caseData.severity} />
-          <span style={{
-            display: 'inline-block',
-            padding: '2px 10px',
-            borderRadius: '4px',
-            border: `1px solid ${statusColor}`,
-            color: statusColor,
-            fontFamily: 'Rajdhani, sans-serif',
-            fontWeight: 700,
-            fontSize: '12px',
-            letterSpacing: '1px',
-            textTransform: 'uppercase',
-            background: `${statusColor}18`,
-          }}>
-            {caseData.status.replace('_', ' ')}
-          </span>
-        </div>
+    <div className="workspace case-page">
+      <PageHeader eyebrow="Investigations" title={caseData.title}
+        actions={<button className="ui-button" onClick={() => navigate('/cases')}><ArrowLeft size={14} /> Back to cases</button>} />
+      <div className="control-cluster">
+        <SeverityBadge severity={caseData.severity} />
+        <StatusBadge status={caseData.status} />
+        {caseData.created_by_ai && <span className="semantic-badge"><Bot size={14} /> AI-created case</span>}
+        <span className="text-muted-foreground text-xs">Created {format(new Date(caseData.created_at), 'dd MMM yyyy, HH:mm')} · {caseData.group_id}</span>
       </div>
-
+      {caseData.description && <Panel title="Case summary"><p className="whitespace-pre-wrap mb-0">{caseData.description}</p></Panel>}
       {/* 2-column layout */}
-      <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+      <div className="case-layout">
         {/* Left column (wider) */}
         <div style={{ flex: 1, minWidth: 0 }}>
           {/* AI investigation: the AI works the case on the endpoints */}
@@ -347,7 +207,7 @@ export default function CaseDetailPage() {
               <div>
                 <MarkdownNote
                   content={caseData.ai_reasoning}
-                  style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)', marginBottom: '12px' }}
+                  style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-primary)', marginBottom: '12px' }}
                 />
                 {(() => {
                   const pct = caseData.ai_confidence != null ? caseData.ai_confidence : null
@@ -360,16 +220,16 @@ export default function CaseDetailPage() {
                       gap: '8px',
                       padding: '8px 12px',
                       borderRadius: '4px',
-                      background: `${color}12`,
-                      border: `1px solid ${color}44`,
+                      background: `color-mix(in srgb, ${color} 10%, transparent)`,
+                      border: '1px solid var(--border-default)',
                     }}>
-                      <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '11px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
+                      <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal' }}>
                         AI CONFIDENCE
                       </span>
                       <div style={{ flex: 1, height: '4px', borderRadius: '2px', background: 'var(--border)', overflow: 'hidden' }}>
                         <div style={{ height: '100%', width: `${Math.round(pct * 100)}%`, background: color, borderRadius: '2px' }} />
                       </div>
-                      <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color }}>{Math.round(pct * 100)}%</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color }}>{Math.round(pct * 100)}%</span>
                     </div>
                   )
                 })()}
@@ -384,7 +244,7 @@ export default function CaseDetailPage() {
                 )}
               </div>
             ) : (
-              <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
+              <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
                 Pending AI analysis
               </div>
             )}
@@ -404,23 +264,23 @@ export default function CaseDetailPage() {
                 )}
                 {campaign.hosts.length > 0 && (
                   <div>
-                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '4px' }}>
+                    <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', marginBottom: '4px' }}>
                       AFFECTED HOSTS ({campaign.hosts.length})
                     </div>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                       {campaign.hosts.map(h => (
-                        <span key={h} style={{ fontFamily: 'Share Tech Mono, monospace', padding: '2px 8px', border: '1px solid var(--border)', borderRadius: '3px' }}>{h}</span>
+                        <span key={h} style={{ fontFamily: 'var(--font-mono)', padding: '2px 8px', border: '1px solid var(--border)', borderRadius: '3px' }}>{h}</span>
                       ))}
                     </div>
                   </div>
                 )}
                 {campaign.keys.length > 0 && (
                   <div>
-                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '4px' }}>
+                    <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', marginBottom: '4px' }}>
                       INDICATORS THAT TIE THIS CASE TOGETHER
                     </div>
                     {campaign.keys.map(k => (
-                      <div key={k} style={{ fontFamily: 'Share Tech Mono, monospace', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>{k}</div>
+                      <div key={k} style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>{k}</div>
                     ))}
                   </div>
                 )}
@@ -448,7 +308,7 @@ export default function CaseDetailPage() {
           {/* IOC Data */}
           {iocEntries.length > 0 && (
             <Box title="IOC Data">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div className="case-ioc-grid">
                 {iocEntries.map(([key, val]) => (
                   <div key={key} style={{
                     padding: '8px 10px',
@@ -456,10 +316,10 @@ export default function CaseDetailPage() {
                     background: 'var(--bg-panel)',
                     border: '1px solid var(--border)',
                   }}>
-                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', textTransform: 'uppercase', marginBottom: '3px' }}>
+                    <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', textTransform: 'none', marginBottom: '3px' }}>
                       {key === 'overall_risk' ? 'TI RISK SCORE' : key.replace(/_/g, ' ')}
                     </div>
-                    <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: key === 'overall_risk' ? (Number(val) >= 0.75 ? 'var(--accent-red)' : Number(val) >= 0.45 ? 'var(--accent-orange)' : 'var(--accent-yellow)') : 'var(--accent-cyan)', wordBreak: 'break-all' }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: key === 'overall_risk' ? (Number(val) >= 0.75 ? 'var(--accent-red)' : Number(val) >= 0.45 ? 'var(--accent-orange)' : 'var(--accent-yellow)') : 'var(--accent-cyan)', wordBreak: 'break-all' }}>
                       {key === 'overall_risk' ? `${Math.round(Number(val) * 100)}%` : Array.isArray(val)
                         ? (val as unknown[]).map((item, i) =>
                             typeof item === 'object' && item !== null
@@ -490,15 +350,15 @@ export default function CaseDetailPage() {
                     background: 'var(--bg-panel)',
                     border: '1px solid var(--border)',
                   }}>
-                    <div style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                    <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)', marginBottom: '4px' }}>
                       {r.title}
                     </div>
-                    <div style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    <div style={{ fontFamily: 'var(--font-ui)', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                       {r.content}
                     </div>
                     {r.url && (
                       <a href={r.url} target="_blank" rel="noopener noreferrer"
-                        style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--accent-cyan)', textDecoration: 'none', marginTop: '4px', display: 'block' }}>
+                        style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--accent-cyan)', textDecoration: 'none', marginTop: '4px', display: 'block' }}>
                         {r.url}
                       </a>
                     )}
@@ -522,30 +382,17 @@ export default function CaseDetailPage() {
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{
-                    display: 'inline-block',
-                    padding: '2px 8px',
-                    borderRadius: '3px',
-                    border: `1px solid ${severityColors[alertData.severity as keyof typeof severityColors]?.border ?? '#00d4ff'}`,
-                    background: severityColors[alertData.severity as keyof typeof severityColors]?.bg ?? 'transparent',
-                    color: severityColors[alertData.severity as keyof typeof severityColors]?.color ?? '#00d4ff',
-                    fontFamily: 'Rajdhani, sans-serif',
-                    fontWeight: 700,
-                    fontSize: '11px',
-                    textTransform: 'uppercase',
-                  }}>
-                    {alertData.severity}
-                  </span>
-                  <span style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>
+                  <SeverityBadge severity={alertData.severity} />
+                  <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>
                     {alertData.title}
                   </span>
                 </div>
                 {alertData.source_ip && (
-                  <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)', marginTop: '6px' }}>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--accent-cyan)', marginTop: '6px' }}>
                     SRC: {alertData.source_ip}
                   </div>
                 )}
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
                   {format(new Date(alertData.created_at), 'yyyy-MM-dd HH:mm:ss')}
                 </div>
               </div>
@@ -560,7 +407,7 @@ export default function CaseDetailPage() {
           <Box title="Timeline / Notes">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
               {sortedNotes.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>No notes yet</div>
+                <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>No notes yet</div>
               ) : sortedNotes.map(note => (
                 <div key={note.id} style={{
                   padding: '10px',
@@ -569,22 +416,23 @@ export default function CaseDetailPage() {
                   border: '1px solid var(--border)',
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 600, fontSize: '11px', color: note.is_ai_generated ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>
-                      {note.is_ai_generated ? '🤖 AI' : note.author_id ?? 'System'}
+                    <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 600, fontSize: '12px', color: note.is_ai_generated ? 'var(--accent-cyan)' : 'var(--text-secondary)' }}>
+                      {note.is_ai_generated ? 'AI' : note.author_id ?? 'System'}
                     </span>
-                    <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
                       {format(new Date(note.created_at), 'yyyy-MM-dd HH:mm:ss')}
                     </span>
                   </div>
                   <MarkdownNote
                     content={note.content}
-                    style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)' }}
+                    style={{ fontFamily: 'var(--font-ui)', fontSize: '14px', color: 'var(--text-primary)' }}
                   />
                 </div>
               ))}
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
               <textarea
+                aria-label="Case note"
                 value={noteText}
                 onChange={e => setNoteText(e.target.value)}
                 placeholder="Add a note..."
@@ -595,8 +443,8 @@ export default function CaseDetailPage() {
                   border: '1px solid var(--border)',
                   borderRadius: '4px',
                   color: 'var(--text-primary)',
-                  fontFamily: 'Exo 2, sans-serif',
-                  fontSize: '13px',
+                  fontFamily: 'var(--font-ui)',
+                  fontSize: '14px',
                   padding: '8px 10px',
                   resize: 'vertical',
                   outline: 'none',
@@ -611,10 +459,10 @@ export default function CaseDetailPage() {
                   border: '1px solid var(--accent-cyan)',
                   background: 'rgba(0,212,255,0.15)',
                   color: 'var(--accent-cyan)',
-                  fontFamily: 'Rajdhani, sans-serif',
+                  fontFamily: 'var(--font-ui)',
                   fontWeight: 700,
                   fontSize: '12px',
-                  letterSpacing: '1px',
+                  letterSpacing: 'normal',
                   cursor: addNote.isPending ? 'wait' : 'pointer',
                   opacity: addNote.isPending || !noteText.trim() ? 0.6 : 1,
                 }}
@@ -638,10 +486,10 @@ export default function CaseDetailPage() {
                       borderLeft: v === 'linear' ? '1px solid var(--border)' : 'none',
                       background: timelineView === v ? 'rgba(0,212,255,0.12)' : 'transparent',
                       color: timelineView === v ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                      fontFamily: 'Rajdhani, sans-serif',
+                      fontFamily: 'var(--font-ui)',
                       fontWeight: 700,
-                      fontSize: '11px',
-                      letterSpacing: '1px',
+                      fontSize: '12px',
+                      letterSpacing: 'normal',
                       padding: '5px 12px',
                       cursor: 'pointer',
                     }}
@@ -659,7 +507,7 @@ export default function CaseDetailPage() {
         </div>
 
         {/* Right column (narrower) */}
-        <div style={{ width: '240px', flexShrink: 0 }}>
+        <div className="case-sidebar">
           {/* Case Info */}
           <Box title="Case Info">
             {[
@@ -679,10 +527,10 @@ export default function CaseDetailPage() {
                 padding: '5px 0',
                 borderBottom: '1px solid var(--border)',
               }}>
-                <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px' }}>
+                <span style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal' }}>
                   {item!.label}
                 </span>
-                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-primary)' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)' }}>
                   {item!.value}
                 </span>
               </div>
@@ -693,7 +541,7 @@ export default function CaseDetailPage() {
           <Box title="Actions">
             {user?.id && (
               <ActionBtn
-                label="ASSIGN TO ME"
+                label="Assign to me"
                 onClick={() => update.mutate({ assignee_id: user.id })}
                 color="var(--accent-green)"
                 loading={update.isPending}
@@ -701,28 +549,28 @@ export default function CaseDetailPage() {
               />
             )}
             <ActionBtn
-              label="ESCALATE TO L2"
+              label="Escalate to L2"
               onClick={() => escalate.mutate()}
               color="var(--accent-orange)"
               loading={escalate.isPending}
               disabled={caseData.status === 'escalated'}
             />
             <ActionBtn
-              label="MARK IN REVIEW"
+              label="Mark in review"
               onClick={() => update.mutate({ status: 'in_review' })}
               color="var(--accent-yellow)"
               loading={update.isPending}
               disabled={caseData.status === 'in_review'}
             />
             <ActionBtn
-              label="RESOLVE"
+              label="Resolve case"
               onClick={() => update.mutate({ status: 'resolved' })}
               color="var(--accent-cyan)"
               loading={update.isPending}
               disabled={caseData.status === 'resolved' || caseData.status === 'closed'}
             />
             <ActionBtn
-              label="CLOSE"
+              label="Close case"
               onClick={() => update.mutate({ status: 'closed' })}
               color="var(--text-muted)"
               loading={update.isPending}
@@ -733,19 +581,19 @@ export default function CaseDetailPage() {
           {/* Remediations */}
           <Box title="Remediations">
             {!targetAgentId ? (
-              <div style={{ color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', lineHeight: 1.5 }}>
+              <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.5 }}>
                 No agent linked to this case — remediation actions need a linked alert with a known host.
               </div>
             ) : (
               <div>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '4px' }}>
+                <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', marginBottom: '4px' }}>
                   TARGET HOST
                 </div>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-primary)', marginBottom: '10px' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)', marginBottom: '10px' }}>
                   {alertData?.hostname ?? targetAgentId.slice(0, 8)}
                 </div>
 
-                <input
+                <label className="field mb-2"><span>IP address to block</span><input
                   value={blockIpValue}
                   onChange={e => setBlockIpValue(e.target.value)}
                   placeholder="IP address to block"
@@ -755,15 +603,15 @@ export default function CaseDetailPage() {
                     border: '1px solid var(--border)',
                     borderRadius: '4px',
                     color: 'var(--text-primary)',
-                    fontFamily: 'Share Tech Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                     fontSize: '12px',
                     padding: '7px 10px',
                     marginBottom: '6px',
                     outline: 'none',
                     boxSizing: 'border-box',
                   }}
-                />
-                <select
+                /></label>
+                <label className="field mb-2"><span>Block duration</span><select
                   value={blockDuration}
                   onChange={e => setBlockDuration(Number(e.target.value))}
                   style={{
@@ -772,7 +620,7 @@ export default function CaseDetailPage() {
                     border: '1px solid var(--border)',
                     borderRadius: '4px',
                     color: 'var(--text-primary)',
-                    fontFamily: 'Share Tech Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                     fontSize: '12px',
                     padding: '7px 10px',
                     marginBottom: '8px',
@@ -782,10 +630,10 @@ export default function CaseDetailPage() {
                   <option value={3600}>1 hour</option>
                   <option value={86400}>24 hours</option>
                   <option value={604800}>7 days</option>
-                </select>
+                </select></label>
 
                 <ActionBtn
-                  label="BLOCK IP ON HOST"
+                  label="Block IP on host"
                   onClick={handleBlockIp}
                   color="var(--accent-red)"
                   loading={blockIp.isPending}
@@ -794,19 +642,19 @@ export default function CaseDetailPage() {
 
                 {recentBlocks.length > 0 && (
                   <div style={{ marginTop: '10px' }}>
-                    <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '1px', marginBottom: '6px' }}>
+                    <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', marginBottom: '6px' }}>
                       RECENT BLOCKS
                     </div>
                     {recentBlocks.map(t => (
                       <div key={t.id} style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         padding: '5px 0', borderBottom: '1px solid var(--border)',
-                        fontFamily: 'Share Tech Mono, monospace', fontSize: '11px',
+                        fontFamily: 'var(--font-mono)', fontSize: '12px',
                       }}>
                         <span style={{ color: 'var(--text-secondary)' }}>{String((t.params as Record<string, unknown>)?.ip ?? '')}</span>
                         <span style={{
                           color: t.status === 'done' ? 'var(--accent-green)' : t.status === 'failed' ? 'var(--accent-red)' : 'var(--accent-yellow)',
-                          textTransform: 'uppercase',
+                          textTransform: 'none',
                         }}>
                           {t.status}
                         </span>

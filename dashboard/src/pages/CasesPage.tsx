@@ -1,418 +1,69 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Bot, RefreshCw } from 'lucide-react'
 import { format } from 'date-fns'
-import { useCases, useUpdateCase, useEscalateCase } from '@/hooks/useCases'
+import DataTable from '@/components/DataTable'
+import type { Column } from '@/components/DataTable'
+import SeverityBadge from '@/components/SeverityBadge'
+import StatusBadge from '@/components/StatusBadge'
+import { PageHeader, QueryState } from '@/components/Workspace'
+import { TimeRangeFilter } from '@/components/TimeRangeSelect'
+import { useCases } from '@/hooks/useCases'
+import { useWorkspaceFilters } from '@/hooks/useWorkspaceFilters'
 import { useAuthStore } from '@/stores/auth'
-import { TimeRangeFilter, type TimeRange } from '@/components/TimeRangeSelect'
+import { CaseQuickActions } from '@/components/CaseQuickActions'
 import type { Case } from '@/types'
 
-const filterInputStyle: React.CSSProperties = {
-  padding: '6px 10px',
-  borderRadius: '4px',
-  border: '1px solid var(--border)',
-  background: 'var(--bg-card)',
-  color: 'var(--text-primary)',
-  fontFamily: 'Share Tech Mono, monospace',
-  fontSize: '12px',
-  outline: 'none',
-}
-
-const severityColors = {
-  critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
-  high:     { bg: 'rgba(255,107,0,0.15)', border: '#ff6b00', color: '#ff6b00' },
-  medium:   { bg: 'rgba(255,215,0,0.1)',  border: '#ffd700', color: '#ffd700' },
-  low:      { bg: 'rgba(0,255,136,0.1)',  border: '#00ff88', color: '#00ff88' },
-  info:     { bg: 'rgba(0,212,255,0.1)',  border: '#00d4ff', color: '#00d4ff' },
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const s = severity as keyof typeof severityColors
-  const c = severityColors[s] ?? severityColors.info
-  return (
-    <div style={{
-      width: '36px',
-      height: '36px',
-      borderRadius: '4px',
-      border: `2px solid ${c.border}`,
-      background: c.bg,
-      color: c.color,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: 'Rajdhani, sans-serif',
-      fontWeight: 700,
-      fontSize: '11px',
-      letterSpacing: '0.5px',
-      textTransform: 'uppercase',
-      flexShrink: 0,
-      boxShadow: `0 0 8px ${c.border}44`,
-    }}>
-      {severity.slice(0, 3).toUpperCase()}
-    </div>
-  )
-}
-
-const STATUS_TABS = ['All', 'Open', 'In Review', 'Escalated', 'Resolved', 'Closed']
-const TAB_TO_API: Record<string, string | undefined> = {
-  'All': undefined,
-  'Open': 'open',
-  'In Review': 'in_review',
-  'Escalated': 'escalated',
-  'Resolved': 'resolved',
-  'Closed': 'closed',
-}
-
-function CaseCard({ c }: { c: Case }) {
-  const navigate = useNavigate()
-  const { user } = useAuthStore()
-  const update = useUpdateCase(c.id)
-  const escalate = useEscalateCase(c.id)
-  const sourceIp = c.ioc_data?.source_ip as string | undefined
-
-  const statusColor = {
-    open: 'var(--accent-cyan)',
-    in_review: 'var(--accent-yellow)',
-    escalated: 'var(--accent-orange)',
-    resolved: 'var(--accent-green)',
-    closed: 'var(--text-muted)',
-  }[c.status] ?? 'var(--text-muted)'
-
-  return (
-    <div style={{
-      borderRadius: '6px',
-      border: '1px solid var(--border)',
-      background: 'var(--bg-card)',
-      padding: '14px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '8px',
-      cursor: 'pointer',
-      transition: 'border-color 0.15s',
-    }}
-    onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border-glow)')}
-    onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-    onClick={() => navigate(`/cases/${c.id}`)}
-    >
-      {/* Top row */}
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-        <SeverityBadge severity={c.severity} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-            {c.created_by_ai && <span title="AI Generated" style={{ fontSize: '14px' }}>🤖</span>}
-            <span style={{
-              fontFamily: 'Exo 2, sans-serif',
-              fontWeight: 700,
-              fontSize: '14px',
-              color: 'var(--text-primary)',
-            }}>
-              {c.title}
-            </span>
-          </div>
-          {c.ai_reasoning && (
-            <div style={{
-              fontFamily: 'Exo 2, sans-serif',
-              fontSize: '12px',
-              color: 'var(--text-secondary)',
-              overflow: 'hidden',
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-            }}>
-              {c.ai_reasoning}
-            </div>
-          )}
-          {sourceIp && (
-            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)', marginTop: '3px' }}>
-              SRC: {sourceIp}
-            </div>
-          )}
-        </div>
-        <div style={{ flexShrink: 0, textAlign: 'right' }}>
-          <span style={{
-            display: 'inline-block',
-            padding: '2px 8px',
-            borderRadius: '3px',
-            border: `1px solid ${statusColor}`,
-            color: statusColor,
-            fontFamily: 'Rajdhani, sans-serif',
-            fontWeight: 700,
-            fontSize: '11px',
-            letterSpacing: '0.5px',
-            textTransform: 'uppercase',
-            background: `${statusColor}18`,
-          }}>
-            {c.status.replace('_', ' ')}
-          </span>
-          {c.escalated_at && (
-            <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--accent-orange)', marginTop: '3px' }}>
-              ESC {format(new Date(c.escalated_at), 'MM-dd HH:mm')}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Bottom row */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        paddingTop: '8px',
-        borderTop: '1px solid var(--border)',
-      }}
-      onClick={e => e.stopPropagation()}
-      >
-        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
-          {format(new Date(c.created_at), 'yyyy-MM-dd HH:mm')}
-        </span>
-        {c.alert_id && (
-          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
-            ALT:{c.alert_id.slice(0, 8)}
-          </span>
-        )}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-          <ActionBtn label="View Detail" onClick={() => navigate(`/cases/${c.id}`)} color="var(--accent-cyan)" />
-          {user?.id && (
-            <ActionBtn
-              label="Assign to Me"
-              onClick={() => update.mutate({ assignee_id: user.id })}
-              color="var(--accent-green)"
-              loading={update.isPending}
-            />
-          )}
-          {c.status !== 'escalated' && c.status !== 'resolved' && c.status !== 'closed' && (
-            <ActionBtn
-              label="Escalate"
-              onClick={() => escalate.mutate()}
-              color="var(--accent-orange)"
-              loading={escalate.isPending}
-            />
-          )}
-          {c.status !== 'closed' && (
-            <ActionBtn
-              label="Close"
-              onClick={() => update.mutate({ status: 'closed' })}
-              color="var(--text-muted)"
-              loading={update.isPending}
-            />
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ActionBtn({ label, onClick, color, loading }: { label: string; onClick: () => void; color: string; loading?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={loading}
-      style={{
-        padding: '3px 10px',
-        borderRadius: '3px',
-        border: `1px solid ${color}`,
-        background: 'transparent',
-        color,
-        fontFamily: 'Rajdhani, sans-serif',
-        fontWeight: 700,
-        fontSize: '10px',
-        letterSpacing: '0.5px',
-        cursor: loading ? 'wait' : 'pointer',
-        opacity: loading ? 0.6 : 1,
-        transition: 'all 0.15s',
-      }}
-    >
-      {loading ? '...' : label}
-    </button>
-  )
-}
-
-const PAGE_SIZE = 25
-
 export default function CasesPage() {
-  const [activeTab, setActiveTab] = useState('All')
+  const navigate = useNavigate()
   const [page, setPage] = useState(1)
-  const statusFilter = TAB_TO_API[activeTab]
-  const [severityFilter, setSeverityFilter] = useState('')
-  const [hostnameFilter, setHostnameFilter] = useState('')
-  const [searchInput, setSearchInput] = useState('')
-  const [searchFilter, setSearchFilter] = useState('')
-  const [timeFilter, setTimeFilter] = useState<TimeRange>({})
-
-  useEffect(() => {
-    const t = setTimeout(() => { setSearchFilter(searchInput); setPage(1) }, 400)
-    return () => clearTimeout(t)
-  }, [searchInput])
-
-  const { data, isLoading } = useCases(page, {
-    status: statusFilter,
-    severity: severityFilter || undefined,
-    hostname: hostnameFilter || undefined,
-    search: searchFilter || undefined,
-    start_time: timeFilter.start_time,
-    end_time: timeFilter.end_time,
+  const filters = useWorkspaceFilters()
+  const { params, update } = filters
+  const canManage = useAuthStore(state => state.hasRole('analyst'))
+  const userId = useAuthStore(state => state.user?.id)
+  useEffect(() => { setPage(1) }, [params])
+  const value = (key: string) => params.get(key) ?? ''
+  const query = useCases(page, {
+    status: value('status') || undefined, severity: value('severity') || undefined,
+    hostname: value('hostname') || undefined, search: value('search') || undefined,
+    start_time: value('start_time') || undefined, end_time: value('end_time') || undefined,
   })
-
-  const cases: Case[] = data?.items ?? []
-  const total = data?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-
-  const switchTab = (tab: string) => {
-    setActiveTab(tab)
-    setPage(1)
-  }
-
-  const openCount = cases.filter(c => c.status === 'open').length
-  const escalatedCount = cases.filter(c => c.status === 'escalated').length
-
-  return (
-    <div>
-      {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-        <div>
-          <h1 style={{
-            fontFamily: 'Rajdhani, sans-serif',
-            fontWeight: 700,
-            fontSize: '22px',
-            letterSpacing: '2px',
-            color: 'var(--accent-cyan)',
-            margin: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}>
-            <span>🎫</span> SECURITY CASES
-          </h1>
-          <div style={{ display: 'flex', gap: '16px', marginTop: '6px' }}>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)' }}>
-              OPEN: {openCount}
-            </span>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-orange)' }}>
-              ESCALATED: {escalatedCount}
-            </span>
-            <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)' }}>
-              TOTAL: {total}
-            </span>
-          </div>
-        </div>
+  const columns: readonly Column<Case>[] = [
+    { key: 'severity', header: 'Severity', render: row => <SeverityBadge severity={row.severity} /> },
+    { key: 'title', header: 'Case', render: row => <div className="table-primary">{row.title}
+      <div className="table-secondary line-clamp-2">{row.description || row.ai_reasoning || 'No summary provided'}</div>
+      {row.created_by_ai && <span className="control-cluster table-secondary mt-1"><Bot size={12} /> AI-created case</span>}
+    </div> },
+    { key: 'status', header: 'Status', render: row => <StatusBadge status={row.status} /> },
+    { key: 'assignee_id', header: 'Assigned to', render: row => row.assignee_id === userId ? 'You' : row.assignee_id ? <span className="font-mono text-xs break-all">{row.assignee_id}</span> : <span className="text-muted-foreground">Unassigned</span> },
+    { key: 'created_at', header: 'Created', render: row => <time dateTime={row.created_at} className="whitespace-nowrap">{format(new Date(row.created_at), 'dd MMM, HH:mm')}</time> },
+    { key: 'group_id', header: 'Group', hiddenByDefault: true, render: row => row.group_id },
+    { key: 'alert_id', header: 'Alert ID', hiddenByDefault: true, render: row => row.alert_id ?? '—' },
+  ]
+  const active = ['search', 'hostname', 'status', 'severity', 'start_time', 'end_time'].some(key => value(key))
+  return <div className="workspace">
+    <PageHeader eyebrow="Investigations" title="Cases" description="Manage investigations, ownership, and response decisions."
+      actions={<button className="ui-button" disabled={query.isFetching} onClick={() => { void query.refetch() }}><RefreshCw size={14} /> Refresh</button>} />
+    <section className="panel" aria-label="Case filters">
+      <div className="filter-bar">
+        <label className="field"><span>Search cases</span><input className="ui-input" value={filters.searchInput} placeholder="Search title or description…" onChange={event => filters.setSearchInput(event.target.value)} /></label>
+        <label className="field"><span>Hostname</span><input className="ui-input" value={value('hostname')} placeholder="Any hostname" onChange={event => update({ hostname: event.target.value })} /></label>
+        <label className="field"><span>Severity</span><select className="ui-input" value={value('severity')} onChange={event => update({ severity: event.target.value })}>
+          <option value="">All severities</option>{['critical', 'high', 'medium', 'low', 'info'].map(item => <option key={item} value={item}>{item.charAt(0).toUpperCase() + item.slice(1)}</option>)}
+        </select></label>
+        <label className="field"><span>Status</span><select className="ui-input" value={value('status')} onChange={event => update({ status: event.target.value })}>
+          <option value="">All statuses</option><option value="open">Open</option><option value="in_review">In review</option><option value="escalated">Escalated</option><option value="resolved">Resolved</option><option value="closed">Closed</option>
+        </select></label>
+        <div className="field"><span>Time window</span><TimeRangeFilter value={{ start_time: value('start_time') || undefined, end_time: value('end_time') || undefined }}
+          onChange={range => update({ start_time: range.start_time ?? '', end_time: range.end_time ?? '' })} selectClassName="ui-input" inputClassName="ui-input" /></div>
       </div>
-
-      {/* Filter tabs */}
-      <div style={{
-        display: 'flex',
-        gap: '4px',
-        marginBottom: '16px',
-        borderBottom: '1px solid var(--border)',
-        paddingBottom: '0',
-      }}>
-        {STATUS_TABS.map(tab => {
-          const isActive = activeTab === tab
-          return (
-            <button
-              key={tab}
-              onClick={() => switchTab(tab)}
-              style={{
-                padding: '7px 16px',
-                border: 'none',
-                borderBottom: isActive ? '2px solid var(--accent-cyan)' : '2px solid transparent',
-                background: 'transparent',
-                color: isActive ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                fontFamily: 'Rajdhani, sans-serif',
-                fontWeight: 700,
-                fontSize: '12px',
-                letterSpacing: '1px',
-                cursor: 'pointer',
-                transition: 'all 0.15s',
-              }}
-            >
-              {tab.toUpperCase()}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Filter bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
-        <input
-          value={searchInput}
-          onChange={e => setSearchInput(e.target.value)}
-          placeholder="Search title/description…"
-          style={{ ...filterInputStyle, width: '220px' }}
-        />
-        <input
-          value={hostnameFilter}
-          onChange={e => { setHostnameFilter(e.target.value); setPage(1) }}
-          placeholder="Hostname…"
-          style={{ ...filterInputStyle, width: '150px' }}
-        />
-        <select
-          value={severityFilter}
-          onChange={e => { setSeverityFilter(e.target.value); setPage(1) }}
-          style={filterInputStyle}
-        >
-          <option value="">All severities</option>
-          <option value="critical">Critical</option>
-          <option value="high">High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
-          <option value="info">Info</option>
-        </select>
-        <TimeRangeFilter
-          value={timeFilter}
-          onChange={r => { setTimeFilter(r); setPage(1) }}
-          selectStyle={filterInputStyle}
-          inputStyle={filterInputStyle}
-        />
-      </div>
-
-      {/* Cases list */}
-      {isLoading ? (
-        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
-          LOADING CASES...
-        </div>
-      ) : cases.length === 0 ? (
-        <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-muted)', padding: '24px', textAlign: 'center' }}>
-          NO CASES FOUND
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {cases.map(c => <CaseCard key={c.id} c={c} />)}
-        </div>
-      )}
-
-      {!isLoading && total > PAGE_SIZE && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '14px',
-          marginTop: '18px', padding: '10px 0',
-        }}>
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page <= 1}
-            style={{
-              padding: '6px 14px', borderRadius: '4px', border: '1px solid var(--border)',
-              background: 'transparent', color: page <= 1 ? 'var(--text-muted)' : 'var(--text-secondary)',
-              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
-              cursor: page <= 1 ? 'not-allowed' : 'pointer',
-            }}
-          >
-            ← PREV
-          </button>
-          <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)' }}>
-            PAGE {page} / {totalPages}
-          </span>
-          <button
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages}
-            style={{
-              padding: '6px 14px', borderRadius: '4px', border: '1px solid var(--border)',
-              background: 'transparent', color: page >= totalPages ? 'var(--text-muted)' : 'var(--text-secondary)',
-              fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
-              cursor: page >= totalPages ? 'not-allowed' : 'pointer',
-            }}
-          >
-            NEXT →
-          </button>
-        </div>
-      )}
-    </div>
-  )
+      <div className="filter-footer"><span>{query.isFetching ? 'Updating cases…' : query.data ? `${query.data.total.toLocaleString()} matching cases · refreshes every 15 seconds` : 'Waiting for case data'}
+        {canManage && ' · Expand a row for quick actions'}</span>{active && <button className="ui-button ui-button--quiet" onClick={filters.clear}>Clear filters</button>}</div>
+    </section>
+    {query.isPending ? <section className="panel"><QueryState kind="loading" title="Loading cases…" /></section>
+      : query.isError ? <section className="panel"><QueryState kind="error" title="Could not load cases" description="Your filters are preserved. Try again when the connection is available." onRetry={() => { void query.refetch() }} /></section>
+      : <DataTable columns={columns} data={query.data.items} total={query.data.total} page={page} pageSize={25} onPageChange={setPage}
+        onRowClick={row => navigate(`/cases/${row.id}`)} expandable={canManage} renderExpanded={row => <CaseQuickActions caseData={row} />}
+        exportFilename="cases-page.csv" emptyTitle="No cases match this view" emptyDescription={active ? 'Widen the filters or clear them to see more investigations.' : 'Open an alert and create a case to start an investigation.'} />}
+  </div>
 }

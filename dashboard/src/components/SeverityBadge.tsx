@@ -1,4 +1,6 @@
-const COLOR: Record<string, string> = {
+import type { CSSProperties } from 'react'
+
+const COLORS: Readonly<Record<string, string>> = {
   critical: 'var(--accent-red)',
   high: 'var(--accent-orange)',
   medium: 'var(--accent-yellow)',
@@ -6,26 +8,13 @@ const COLOR: Record<string, string> = {
   info: 'var(--accent-cyan)',
 }
 
-export default function SeverityBadge({ severity }: { severity: string }) {
-  const c = COLOR[severity] ?? 'var(--text-muted)'
+export default function SeverityBadge({ severity }: { readonly severity: string }) {
+  const color = COLORS[severity] ?? 'var(--text-muted)'
+  const style: CSSProperties & { '--badge-color': string } = { '--badge-color': color }
   return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: 3,
-        border: `1px solid ${c}`,
-        background: `color-mix(in srgb, ${c} 12%, transparent)`,
-        color: c,
-        fontFamily: 'Rajdhani, sans-serif',
-        fontWeight: 700,
-        fontSize: 11,
-        letterSpacing: '0.5px',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {severity}
+    <span className="semantic-badge" style={style}>
+      <span className="semantic-badge__dot" aria-hidden="true" />
+      {severity.charAt(0).toUpperCase() + severity.slice(1)}
     </span>
   )
 }

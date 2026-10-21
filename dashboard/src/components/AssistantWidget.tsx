@@ -123,21 +123,23 @@ export default function AssistantWidget() {
       <button
         onClick={() => setOpen(o => !o)}
         title="SOC Assistant"
+        aria-label={open ? 'Close SOC assistant' : 'Open SOC assistant'}
+        aria-expanded={open}
         style={{
           position: 'fixed', right: 24, bottom: 24, zIndex: 60,
-          width: 52, height: 52, borderRadius: '50%',
-          background: open ? 'var(--bg-card)' : 'rgba(0,212,255,0.12)',
-          border: '1px solid var(--accent-cyan)',
-          color: 'var(--accent-cyan)',
+          width: 44, height: 44, borderRadius: 8,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-default)',
+          color: 'var(--text-primary)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', boxShadow: '0 4px 20px rgba(0,212,255,0.25)',
+          cursor: 'pointer',
         }}
       >
         {open ? <X size={22} /> : <Bot size={22} />}
       </button>
 
       {open && (
-        <div style={{
+        <div role="region" aria-label="SOC assistant" onKeyDown={event => { if (event.key === 'Escape') setOpen(false) }} style={{
           position: 'fixed', right: 24, bottom: 88, zIndex: 60,
           width: 380, maxWidth: '92vw', height: 520, maxHeight: '70vh',
           background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 10,
