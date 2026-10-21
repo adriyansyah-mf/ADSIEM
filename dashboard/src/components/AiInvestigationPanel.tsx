@@ -8,6 +8,7 @@ import {
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 import MarkdownNote from '@/components/MarkdownNote'
+import { HashEnrichmentEvidence } from '@/components/HashEnrichmentEvidence'
 
 interface Step {
   ts: string
@@ -65,6 +66,7 @@ const TOOL_LABEL: Record<string, string> = {
   correlate_entity: 'Correlated entity', reconstruct_timeline: 'Reconstructed timeline', pivot_ioc: 'Pivoted on IOC',
   recent_fim_changes: 'Checked file integrity changes', agent_hygiene: 'Checked host hygiene',
   ueba_top_risky_entities: 'Checked UEBA risk', search_sop: 'Searched SOPs',
+  lookup_malwarebazaar: 'Looked up file hash in MalwareBazaar',
 }
 
 const mono: React.CSSProperties = { fontFamily: 'Share Tech Mono, monospace' }
@@ -125,6 +127,9 @@ function describe(step: Step, open: boolean, toggle: () => void): Row | null {
         detail: s.hosts?.length ? `hosts: ${s.hosts.join(', ')}` : 'no linked hosts' }
     case 'tool':
       return { icon: <Search size={13} />, title: TOOL_LABEL[s.tool] ?? s.tool, detail: argsText(s.args) }
+    case 'enrichment':
+      return { icon: <Search size={13} />, title: 'MalwareBazaar enrichment',
+        extra: <HashEnrichmentEvidence result={step.result} reason={step.reason} /> }
     case 'flow':
       return {
         icon: <Server size={13} />, tone: 'var(--accent-cyan)',

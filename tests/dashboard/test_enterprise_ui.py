@@ -68,7 +68,7 @@ def enterprise(page):
         "state": {"accessToken": "fixture-only", "user": USER}, "version": 0,
     })) + ")")
     state = {"mode": "normal", "requests": [], "writes": [], "agent": dict(AGENT),
-             "case": dict(CASE), "role": "superadmin", "write_error": False,
+             "case": dict(CASE), "role": "superadmin", "write_error": False, "investigations": [],
              "hunts": [dict(HUNT)], "schedules": [dict(SCHEDULE)], "ueba_errors": [],
              "ueba_status": {"status": "ready", "trained_at": ALERT["created_at"], "user_snapshot_count": 72, "ip_snapshot_count": 48, "host_snapshot_count": 12},
              "ueba_anomalies": [dict(UEBA_ANOMALY)], "ueba_history": [{"day": "2026-10-20", "max_risk": 60, "anomaly_count": 1}, {"day": "2026-10-21", "max_risk": 84.5, "anomaly_count": 2}]}
@@ -128,6 +128,8 @@ def enterprise(page):
         elif path == "/api/alerts/alert-fixture":
             body = {**ALERT, "rule": None, "rule_fired_24h": 1, "mitre": [], "event": None,
                     "agent": None, "ueba": None, "related": []}
+        elif path == "/api/cases/case-fixture/investigations":
+            body = state["investigations"]
         elif path == "/api/cases/case-fixture":
             if route.request.method == "PUT":
                 state["case"].update(route.request.post_data_json)
@@ -180,6 +182,41 @@ def enterprise(page):
     page.route(BASE_URL + "/api/**", respond)
     yield state, expect
     assert not errors, errors
+
+
+@pytest.mark.parametrize("status, message", [
+    ("found", "Known malware record"),
+    ("not_found", "Unknown to this provider — not a clean verdict"),
+    ("unavailable", "Provider unavailable — investigation continues"),
+])
+def test_investigation_displays_hash_enrichment_evidence(page, enterprise, status, message, tmp_path):
+    # Given persisted hash evidence from an AI-selected lookup.
+    state, expect = enterprise
+    h = "a" * 64
+    state["investigations"] = [{
+        "id": "investigation-fixture", "case_id": CASE["id"], "status": "finished",
+        "model": "scripted-fixture", "verdict": "inconclusive", "report": None,
+        "error": None, "commands": [], "created_at": ALERT["created_at"], "finished_at": ALERT["created_at"],
+        "steps": [{"kind": "enrichment", "ts": ALERT["created_at"], "reason": "Validate suspicious file",
+                   "result": {"provider": "MalwareBazaar", "status": status, "queried_hash": h,
+                              "checked_at": ALERT["created_at"], "cached": False,
+                              "sample": {"signature": "ExampleFamily", "tags": ["trojan"]} if status == "found" else None,
+                              "report_url": f"https://bazaar.abuse.ch/sample/{h}/" if status == "found" else None}}],
+    }]
+    # When the analyst opens the case's investigation activity.
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(BASE_URL + "/cases/case-fixture")
+    # Then provenance and distinct outcomes are visible without starting a new lookup.
+    expect(page.get_by_text("MalwareBazaar enrichment", exact=True)).to_be_visible()
+    expect(page.get_by_text(message, exact=False)).to_be_visible()
+    expect(page.get_by_text(h, exact=True)).to_be_visible()
+    if status == "found":
+        expect(page.get_by_text("ExampleFamily", exact=False)).to_be_visible()
+        expect(page.get_by_role("link", name="Provider report")).to_have_attribute(
+            "href", f"https://bazaar.abuse.ch/sample/{h}/")
+    assert not state["writes"]
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+    page.screenshot(path=str(tmp_path / f"malwarebazaar-{status}.png"))
 
 
 @pytest.mark.parametrize("width", [390, 768, 1440, 1920])
