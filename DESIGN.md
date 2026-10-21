@@ -105,6 +105,22 @@ Every flex/grid child carrying content can shrink (`min-width: 0`).
   neutral groups, and explicit Apply/Clear actions. Its draft survives free-text
   searches. Raw log and decoded event evidence opens read-only in `WorkspaceDialog`;
   long messages and unbroken values wrap without truncating the original data.
+- Threat hunting separates indicator submission, recurring schedules, and recent
+  investigations. The history describes the backend's latest-50 window, not a
+  global total. Status and risk remain separate semantic badges. A read-only
+  dialog exposes AI assessment, evidence counts, timestamps and the complete
+  wrapping timeline; its data follows history polling. Schedule creation is an
+  explicit, labelled form; pause/resume retains the schedule, while deletion
+  requires a named confirmation. Pending submissions lock their input draft,
+  failures retain it for retry, and list errors never appear as empty results.
+- Behavior analytics separates model readiness from entity risk. Loading or
+  failed model queries must never imply a cold model or zero snapshots. Entity
+  filters describe the backend's top-50 window, not a fleet-wide aggregate. Risk
+  values remain server-provided; display bands retain the existing 40/60/80
+  boundaries. Read-only detail dialogs distinguish risk and anomaly scores,
+  preserve full reasons/AI assessment/features, and load 30-day history through a
+  typed hook with encoded entity identifiers. Daily peaks have a readable chart
+  and a table alternative; missing days are not fabricated as zero values.
 
 Shared states: hover changes the surface, active retains a tonal wash, visible
 keyboard focus, disabled controls remain legible, and pending actions disable
