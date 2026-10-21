@@ -4,10 +4,11 @@ import type { Alert, AlertDetail } from '@/types'
 import SeverityBadge from './SeverityBadge'
 import StatusBadge from './StatusBadge'
 import { useUpdateAlert, useAddAlertNote, useAlertFeedback, useSubmitAlertFeedback } from '@/hooks/useAlerts'
+import { useAlertCases, useCreateCase } from '@/hooks/useCases'
 import { format, formatDistanceStrict } from 'date-fns'
 import {
   X, ShieldOff, CheckCircle, Copy, Search, Server, Activity, Link2, FileText, Target, LayoutList, Braces, Info,
-  ArrowLeft, Maximize2,
+  ArrowLeft, Maximize2, FolderPlus, Briefcase,
 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -288,6 +289,89 @@ function Overview({ a, d, onPivot, wide }: { a: Alert; d?: AlertDetail; onPivot:
   )
 }
 
+// ─── Case ────────────────────────────────────────────────────────
+
+const CASE_SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const
+
+/** What the analyst would otherwise retype: where, when, and what fired. */
+function caseDescription(a: Alert): string {
+  const lines = [
+    `Opened from alert "${a.title}" (${a.severity}) at ${format(new Date(a.created_at), 'yyyy-MM-dd HH:mm:ss')}.`,
+    a.hostname && `Host: ${a.hostname}`,
+    a.source_ip && `Source IP: ${a.source_ip}${a.source_ip_country ? ` (${a.source_ip_country})` : ''}`,
+    a.mitre_techniques?.length && `MITRE: ${a.mitre_techniques.join(', ')}`,
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
+/** Linked cases for this alert, and a form to open one by hand. */
+function AlertCasePanel({ alert, onOpenCase }: { alert: Alert; onOpenCase: (id: string) => void }) {
+  const { data: linked } = useAlertCases(alert.id)
+  const createCase = useCreateCase()
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState(alert.title)
+  const [severity, setSeverity] = useState<(typeof CASE_SEVERITIES)[number]>(
+    (CASE_SEVERITIES as readonly string[]).includes(alert.severity) ? alert.severity as (typeof CASE_SEVERITIES)[number] : 'medium')
+  const [description, setDescription] = useState(() => caseDescription(alert))
+  const cases = linked?.items ?? []
+
+  const submit = () => createCase.mutate(
+    { title: title.trim(), severity, description: description.trim() || undefined, alert_id: alert.id },
+    { onSuccess: (c) => { setOpen(false); onOpenCase(c.id) } },
+  )
+
+  return (
+    <div className="space-y-2">
+      <label className="block text-xs font-medium text-muted-foreground">Case</label>
+      {cases.map((c) => (
+        <button key={c.id} onClick={() => onOpenCase(c.id)}
+          className="flex w-full items-start gap-1.5 rounded border border-border px-2 py-1.5 text-left text-xs hover:bg-muted">
+          <Briefcase size={13} className="mt-0.5 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1 break-words">{c.title}</span>
+          <StatusBadge status={c.status} />
+        </button>
+      ))}
+      {!open && (
+        <button onClick={() => setOpen(true)}
+          className="flex w-full items-center justify-center gap-1.5 rounded border border-border px-2 py-1.5 text-xs hover:bg-muted">
+          <FolderPlus size={13} /> {cases.length ? 'Create another case' : 'Create case'}
+        </button>
+      )}
+      {open && (
+        <form className="space-y-2 rounded border border-border bg-muted/20 p-2"
+          onSubmit={(e) => { e.preventDefault(); if (title.trim()) submit() }}>
+          <div>
+            <label htmlFor="case-title" className="mb-1 block text-[11px] text-muted-foreground">Title</label>
+            <input id="case-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={255} required
+              className="w-full rounded border border-border bg-background px-2 py-1 text-xs" />
+          </div>
+          <div>
+            <label htmlFor="case-severity" className="mb-1 block text-[11px] text-muted-foreground">Severity</label>
+            <select id="case-severity" value={severity}
+              onChange={(e) => setSeverity(e.target.value as (typeof CASE_SEVERITIES)[number])}
+              className="w-full rounded border border-border bg-background px-2 py-1 text-xs">
+              {CASE_SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="case-description" className="mb-1 block text-[11px] text-muted-foreground">Description</label>
+            <textarea id="case-description" value={description} onChange={(e) => setDescription(e.target.value)} rows={5}
+              className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[11px]" />
+          </div>
+          <div className="flex gap-2">
+            <button type="submit" disabled={!title.trim() || createCase.isPending}
+              className="rounded bg-primary px-2 py-1 text-xs text-primary-foreground disabled:opacity-50">
+              {createCase.isPending ? 'Creating…' : 'Create case'}
+            </button>
+            <button type="button" onClick={() => setOpen(false)}
+              className="rounded border border-border px-2 py-1 text-xs hover:bg-muted">Cancel</button>
+          </div>
+        </form>
+      )}
+    </div>
+  )
+}
+
 // ─── Modal ───────────────────────────────────────────────────────
 
 /** Alert detail, shared by the full page (/alerts/:id) and the quick-look modal. */
@@ -451,6 +535,8 @@ function AlertDetailBody({ alert, detail, variant, onClose }: {
                 {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
               </select>
             </div>
+
+            <AlertCasePanel key={alert.id} alert={alert}onOpenCase={(id) => { onClose?.(); navigate(`/cases/${id}`) }} />
 
             {fpSuggestion && !suppressDone && (
               <div className="rounded border border-yellow-600/40 bg-yellow-900/20 p-2 text-xs">
