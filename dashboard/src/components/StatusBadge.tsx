@@ -1,32 +1,22 @@
-const COLOR: Record<string, string> = {
-  new: 'var(--accent-cyan)',
-  in_progress: 'var(--accent-yellow)',
-  resolved: 'var(--accent-green)',
-  false_positive: 'var(--text-muted)',
-  online: 'var(--accent-green)',
-  offline: 'var(--text-muted)',
+import type { CSSProperties } from 'react'
+
+const COLORS: Readonly<Record<string, string>> = {
+  new: 'var(--accent-cyan)', open: 'var(--accent-cyan)',
+  in_progress: 'var(--accent-yellow)', in_review: 'var(--accent-yellow)',
+  escalated: 'var(--accent-orange)',
+  pending_approval: 'var(--accent-yellow)', isolated: 'var(--accent-red)',
+  resolved: 'var(--accent-green)', online: 'var(--accent-green)',
+  closed: 'var(--text-muted)', false_positive: 'var(--text-muted)', offline: 'var(--text-muted)',
 }
 
-export default function StatusBadge({ status }: { status: string }) {
-  const c = COLOR[status] ?? 'var(--text-muted)'
+export default function StatusBadge({ status }: { readonly status: string }) {
+  const color = COLORS[status] ?? 'var(--text-muted)'
+  const style: CSSProperties & { '--badge-color': string } = { '--badge-color': color }
+  const label = status.replace(/_/g, ' ')
   return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: 3,
-        border: `1px solid ${c}`,
-        background: `color-mix(in srgb, ${c} 12%, transparent)`,
-        color: c,
-        fontFamily: 'Rajdhani, sans-serif',
-        fontWeight: 700,
-        fontSize: 11,
-        letterSpacing: '0.5px',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {status.replace('_', ' ')}
+    <span className="semantic-badge" style={style}>
+      <span className="semantic-badge__dot" aria-hidden="true" />
+      {label.charAt(0).toUpperCase() + label.slice(1)}
     </span>
   )
 }

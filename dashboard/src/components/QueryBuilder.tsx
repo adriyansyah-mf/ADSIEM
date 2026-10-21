@@ -1,4 +1,5 @@
 import { Plus, X } from 'lucide-react'
+import { useId } from 'react'
 
 export type Operator = 'contains' | 'equals' | 'not_equals' | 'starts_with' | 'exists' | 'not_exists' | 'gt' | 'gte' | 'lt' | 'lte'
 export type Condition = { field: string; operator: Operator; value: string }
@@ -36,6 +37,7 @@ interface Props {
 }
 
 export default function QueryBuilder({ node, onChange, fields, depth = 0 }: Props) {
+  const fieldsId = useId()
   const updateChild = (i: number, child: Condition | Group) => {
     const children = [...node.children]
     children[i] = child
@@ -52,12 +54,12 @@ export default function QueryBuilder({ node, onChange, fields, depth = 0 }: Prop
   }
 
   return (
-    <div className={depth > 0 ? 'pl-4 border-l-2 border-border space-y-2' : 'space-y-2'}>
-      <div className="flex items-center gap-2">
+    <div className="space-y-3 min-w-0" role="group" aria-label={depth ? `Nested filter group ${depth}` : 'Filter conditions'}>
+      <div className="control-cluster">
         <select
           value={node.logic}
           onChange={(e) => onChange({ ...node, logic: e.target.value as 'AND' | 'OR' })}
-          className="bg-muted border border-border rounded px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary"
+          aria-label="Match logic" className="ui-input w-auto"
         >
           <option value="AND">AND</option>
           <option value="OR">OR</option>
@@ -66,24 +68,25 @@ export default function QueryBuilder({ node, onChange, fields, depth = 0 }: Prop
       </div>
 
       {node.children.map((child, i) => (
-        <div key={i} className="flex items-start gap-2">
+        <div key={i} className="flex items-start gap-2 min-w-0">
           {isGroup(child) ? (
-            <div className="flex-1 rounded border border-border/60 p-2">
+            <div className="flex-1 min-w-0 rounded border border-border p-2">
               <QueryBuilder node={child} onChange={(c) => updateChild(i, c)} fields={fields} depth={depth + 1} />
             </div>
           ) : (
-            <div className="flex-1 flex flex-wrap items-center gap-2">
+            <div className="query-condition flex-1 min-w-0">
               <input
                 value={child.field}
                 onChange={(e) => updateChild(i, { ...child, field: e.target.value })}
-                list="qb-fields"
+                list={fieldsId}
+                aria-label={`Field ${i + 1}`}
                 placeholder="field"
-                className="bg-muted border border-border rounded px-2 py-1 text-xs font-mono w-44 focus:outline-none focus:ring-1 focus:ring-primary"
+                className="ui-input font-mono"
               />
               <select
                 value={child.operator}
                 onChange={(e) => updateChild(i, { ...child, operator: e.target.value as Operator })}
-                className="bg-muted border border-border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                aria-label={`Operator ${i + 1}`} className="ui-input"
               >
                 {OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
@@ -92,31 +95,29 @@ export default function QueryBuilder({ node, onChange, fields, depth = 0 }: Prop
                   value={child.value}
                   onChange={(e) => updateChild(i, { ...child, value: e.target.value })}
                   placeholder="value"
-                  className="bg-muted border border-border rounded px-2 py-1 text-xs flex-1 min-w-[120px] focus:outline-none focus:ring-1 focus:ring-primary"
+                  aria-label={`Value ${i + 1}`} className="ui-input"
                 />
               )}
             </div>
           )}
-          <button onClick={() => removeChild(i)} className="text-muted-foreground hover:text-destructive shrink-0 mt-1.5" title="Remove">
+          <button onClick={() => removeChild(i)} className="ui-icon-button" aria-label={`Remove ${isGroup(child) ? 'group' : 'condition'} ${i + 1}`} title="Remove">
             <X size={14} />
           </button>
         </div>
       ))}
 
-      <div className="flex gap-3">
-        <button onClick={addCondition} className="flex items-center gap-1 text-xs text-primary hover:underline">
-          <Plus size={12} /> Condition
+      <div className="control-cluster">
+        <button onClick={addCondition} className="ui-button">
+          <Plus size={14} /> Add condition
         </button>
-        <button onClick={addGroup} className="flex items-center gap-1 text-xs text-primary hover:underline">
-          <Plus size={12} /> Group
+        <button onClick={addGroup} className="ui-button">
+          <Plus size={14} /> Add group
         </button>
       </div>
 
-      {depth === 0 && (
-        <datalist id="qb-fields">
-          {fields.map((f) => <option key={f} value={f} />)}
-        </datalist>
-      )}
+      <datalist id={fieldsId}>
+        {fields.map((f) => <option key={f} value={f} />)}
+      </datalist>
     </div>
   )
 }

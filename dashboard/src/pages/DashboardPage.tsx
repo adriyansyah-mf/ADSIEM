@@ -1,584 +1,100 @@
-import { useState, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import { api } from '@/api/client'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { ArrowRight, RefreshCw } from 'lucide-react'
 import { format } from 'date-fns'
-import { Search, Loader2 } from 'lucide-react'
-import AlertDetailModal from '@/components/AlertDetailModal'
+import { PageHeader, Panel, QueryState } from '@/components/Workspace'
+import { AnalystWorkload, MetricCard, RecentActivity, ThreatLookup } from '@/components/DashboardWidgets'
 import { AlertsOverTimeChart, SeverityBars, TopSourcesChart, MttrTrendChart } from '@/components/MetricsCharts'
-import { useSocTimeseries, useTopSources, useMttrTrend } from '@/hooks/useMetrics'
-import type { Alert, Agent, Case, Event } from '@/types'
+import DataTable from '@/components/DataTable'
+import type { Column } from '@/components/DataTable'
+import SeverityBadge from '@/components/SeverityBadge'
+import StatusBadge from '@/components/StatusBadge'
+import { useAlerts } from '@/hooks/useAlerts'
+import { useSocMetrics, useSocTimeseries, useTopSources, useMttrTrend } from '@/hooks/useMetrics'
+import type { Alert } from '@/types'
 
-interface WorkloadItem { user_id: string; username: string; open_alerts: number; open_cases: number; total: number }
-
-const severityColors = {
-  critical: { bg: 'rgba(255,34,68,0.15)', border: '#ff2244', color: '#ff2244' },
-  high:     { bg: 'rgba(255,107,0,0.15)', border: '#ff6b00', color: '#ff6b00' },
-  medium:   { bg: 'rgba(255,215,0,0.1)',  border: '#ffd700', color: '#ffd700' },
-  low:      { bg: 'rgba(0,255,136,0.1)',  border: '#00ff88', color: '#00ff88' },
-  info:     { bg: 'rgba(0,212,255,0.1)',  border: '#00d4ff', color: '#00d4ff' },
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  const s = severity as keyof typeof severityColors
-  const c = severityColors[s] ?? severityColors.info
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '1px 7px',
-      borderRadius: '3px',
-      border: `1px solid ${c.border}`,
-      background: c.bg,
-      color: c.color,
-      fontFamily: 'Rajdhani, sans-serif',
-      fontWeight: 700,
-      fontSize: '11px',
-      letterSpacing: '0.5px',
-      textTransform: 'uppercase',
-      boxShadow: `0 0 6px ${c.border}44`,
-    }}>
-      {severity}
-    </span>
-  )
-}
-
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{
-      borderRadius: '6px',
-      border: '1px solid var(--border)',
-      background: 'var(--bg-card)',
-      padding: '14px',
-      marginBottom: '12px',
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: '10px',
-      }}>
-        <span style={{
-          fontFamily: 'Rajdhani, sans-serif',
-          fontSize: '11px',
-          fontWeight: 700,
-          letterSpacing: '2px',
-          textTransform: 'uppercase',
-          color: 'var(--accent-cyan)',
-        }}>
-          {title}
-        </span>
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function StatRow({ label, value, color, onClick }: { label: string; value: number; color: string; onClick?: () => void }) {
-  const [hovered, setHovered] = useState(false)
-  return (
-    <div
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '6px 4px',
-        borderBottom: '1px solid var(--border)',
-        cursor: onClick ? 'pointer' : 'default',
-        borderRadius: 3,
-        background: hovered && onClick ? 'rgba(255,255,255,0.04)' : 'transparent',
-        transition: 'background 0.12s',
-      }}
-    >
-      <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '12px', color: hovered && onClick ? color : 'var(--text-secondary)', transition: 'color 0.12s' }}>{label}</span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '14px', fontWeight: 700, color }}>{value}</span>
-        {onClick && <span style={{ color: 'var(--text-muted)', fontSize: 10, opacity: hovered ? 1 : 0, transition: 'opacity 0.12s' }}>→</span>}
-      </div>
-    </div>
-  )
-}
+const number = (value?: number) => value === undefined ? '—' : value.toLocaleString()
+const minutes = (value?: number | null) => value == null ? '—' : value >= 60 ? `${(value / 60).toFixed(1)}h` : `${value.toFixed(1)}m`
 
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null)
-  const [wideLayout, setWideLayout] = useState(() => window.matchMedia('(min-width: 1100px)').matches)
+  const [days, setDays] = useState(7)
+  const [since, setSince] = useState(() => new Date(Date.now() - 7 * 86_400_000).toISOString())
+  const metrics = useSocMetrics(days)
+  const timeseries = useSocTimeseries(days)
+  const sources = useTopSources(days)
+  const mttr = useMttrTrend(days)
+  const queue = useAlerts(1, 8, { status: 'new', start_time: since })
+  const reviewUrl = `/alerts?status=new&start_time=${encodeURIComponent(since)}`
+  const refresh = () => { void metrics.refetch(); void timeseries.refetch(); void sources.refetch(); void mttr.refetch(); void queue.refetch() }
+  const columns: readonly Column<Alert>[] = [
+    { key: 'severity', header: 'Severity', render: row => <SeverityBadge severity={row.severity} /> },
+    { key: 'title', header: 'Detection', render: row => <div className="table-primary">{row.title}
+      <div className="table-secondary">{row.hostname ?? 'Unknown host'}{row.source_ip ? ` · ${row.source_ip}` : ''}</div></div> },
+    { key: 'status', header: 'Status', render: row => <StatusBadge status={row.status} /> },
+    { key: 'created_at', header: 'Detected', render: row => <time className="whitespace-nowrap" dateTime={row.created_at}>{format(new Date(row.created_at), 'dd MMM, HH:mm')}</time> },
+  ]
 
-  useEffect(() => {
-    const wideQ = window.matchMedia('(min-width: 1100px)')
-    const apply = () => setWideLayout(wideQ.matches)
-    apply()
-    wideQ.addEventListener('change', apply)
-    return () => wideQ.removeEventListener('change', apply)
-  }, [])
-
-  const { data: allAlerts } = useQuery({
-    queryKey: ['alerts-dashboard'],
-    queryFn: () => api.get('/api/alerts', { params: { page_size: 200 } }).then(r => r.data),
-    refetchInterval: 30_000,
-  })
-
-  const { data: recentAlerts } = useQuery({
-    queryKey: ['alerts-recent'],
-    queryFn: () => api.get('/api/alerts', { params: { page_size: 20 } }).then(r => r.data),
-    refetchInterval: 30_000,
-  })
-
-  const { data: recentEvents } = useQuery({
-    queryKey: ['events-recent'],
-    queryFn: () => api.get('/api/events', { params: { page_size: 10 } }).then(r => r.data),
-    refetchInterval: 30_000,
-  })
-
-  const { data: casesData } = useQuery({
-    queryKey: ['cases-dashboard'],
-    queryFn: () => api.get('/api/cases', { params: { page_size: 50 } }).then(r => r.data),
-    refetchInterval: 30_000,
-  })
-
-  const { data: agentsData } = useQuery({
-    queryKey: ['agents-dashboard'],
-    queryFn: () => api.get('/api/agents', { params: { page_size: 500 } }).then(r => r.data),
-    refetchInterval: 30_000,
-  })
-
-  const { data: socMetrics } = useQuery({
-    queryKey: ['metrics-soc'],
-    queryFn: () => api.get('/api/metrics/soc').then(r => r.data),
-    refetchInterval: 60_000,
-  })
-
-  const { data: timeseries } = useSocTimeseries(7)
-  const { data: topSources } = useTopSources(7)
-  const { data: mttrTrend } = useMttrTrend(30)
-
-  const { data: workload = [] } = useQuery<WorkloadItem[]>({
-    queryKey: ['metrics-workload'],
-    queryFn: () => api.get('/api/metrics/workload').then(r => r.data),
-    refetchInterval: 60_000,
-  })
-
-  const [tiIoc, setTiIoc] = useState('')
-  const [tiType, setTiType] = useState('ip')
-  const [tiResult, setTiResult] = useState<Record<string, unknown> | null>(null)
-  const [tiLoading, setTiLoading] = useState(false)
-
-  const handleTiLookup = async () => {
-    const val = tiIoc.trim()
-    if (!val) return
-    setTiLoading(true)
-    setTiResult(null)
-    try {
-      const r = await api.get('/api/metrics/ti/quick', { params: { ioc: val, ioc_type: tiType } })
-      setTiResult(r.data)
-    } catch { setTiResult({ error: 'Lookup failed' }) }
-    finally { setTiLoading(false) }
-  }
-
-  const agents: Agent[] = agentsData?.items ?? []
-  const onlineAgentCount = agents.filter((a: Agent) => a.status === 'online').length
-
-  const alerts: Alert[] = allAlerts?.items ?? []
-  const cutoff24h = Date.now() - 24 * 60 * 60 * 1000
-  const todayAlerts = alerts.filter(a => new Date(a.created_at).getTime() >= cutoff24h)
-
-  const severityCounts = {
-    critical: alerts.filter(a => a.severity === 'critical').length,
-    high: alerts.filter(a => a.severity === 'high').length,
-    medium: alerts.filter(a => a.severity === 'medium').length,
-    low: alerts.filter(a => a.severity === 'low').length,
-  }
-
-  // Top 5 source IPs
-  const ipCounts: Record<string, number> = {}
-  alerts.forEach(a => {
-    if (a.source_ip) ipCounts[a.source_ip] = (ipCounts[a.source_ip] ?? 0) + 1
-  })
-  const topIPs = Object.entries(ipCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-
-  const recentAlertItems: Alert[] = recentAlerts?.items ?? []
-  const recentEventItems: Event[] = recentEvents?.items ?? []
-  const cases: Case[] = casesData?.items ?? []
-  const openCases = cases.filter(c => c.status === 'open' || c.status === 'in_review')
-
-  // Build case map for AI reasoning lookup
-  const caseByAlertId: Record<string, Case> = {}
-  cases.forEach(c => { if (c.alert_id) caseByAlertId[c.alert_id] = c })
-
-  return (
-    <>
-    <div style={{ display: 'flex', flexDirection: wideLayout ? 'row' : 'column', gap: '12px', height: '100%', minHeight: 0, alignItems: 'flex-start' }}>
-      {/* LEFT COLUMN */}
-      <div style={wideLayout
-        ? { width: '220px', flexShrink: 0, overflowY: 'auto', alignSelf: 'stretch' }
-        : { width: '100%' }}>
-        <SectionCard title="Alert Statistics">
-          <StatRow label="Critical" value={severityCounts.critical} color="#ff2244" onClick={() => navigate('/alerts?severity=critical')} />
-          <StatRow label="High" value={severityCounts.high} color="#ff6b00" onClick={() => navigate('/alerts?severity=high')} />
-          <StatRow label="Medium" value={severityCounts.medium} color="#ffd700" onClick={() => navigate('/alerts?severity=medium')} />
-          <StatRow label="Low" value={severityCounts.low} color="#00ff88" onClick={() => navigate('/alerts?severity=low')} />
-          <div style={{ marginTop: '6px', fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
-            LAST 24H: {todayAlerts.length} TOTAL
-          </div>
-        </SectionCard>
-
-        <SectionCard title="Top Source IPs">
-          {topIPs.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No data</div>
-          ) : topIPs.map(([ip, count]) => (
-            <div key={ip}
-              onClick={() => navigate(`/alerts?source_ip=${ip}`)}
-              style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '5px 4px',
-                borderBottom: '1px solid var(--border)',
-                cursor: 'pointer',
-                borderRadius: 3,
-                transition: 'background 0.12s',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.04)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-            >
-              <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--accent-cyan)' }}>{ip}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '13px', color: 'var(--accent-orange)' }}>{count}</span>
-                <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>→</span>
-              </div>
-            </div>
-          ))}
-        </SectionCard>
-
-        <SectionCard title="Live Events">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {recentEventItems.length === 0 ? (
-              <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No events</div>
-            ) : recentEventItems.map(ev => (
-              <div key={ev.id} style={{
-                padding: '5px 7px',
-                borderRadius: '4px',
-                background: 'var(--bg-panel)',
-                border: '1px solid var(--border)',
-              }}>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
-                  {format(new Date(ev.created_at), 'HH:mm:ss')}
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '2px' }}>
-                  {ev.event_action ?? 'event'}
-                </div>
-                {ev.source_ip && (
-                  <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--accent-cyan)' }}>
-                    {ev.source_ip}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard title="Quick TI Lookup">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', gap: '4px' }}>
-              <select value={tiType} onChange={e => setTiType(e.target.value)} style={{
-                background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '3px',
-                color: 'var(--text-primary)', fontSize: '11px', padding: '3px 4px',
-              }}>
-                <option value="ip">IP</option>
-                <option value="hash">Hash</option>
-                <option value="domain">Domain</option>
-              </select>
-              <input value={tiIoc} onChange={e => setTiIoc(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleTiLookup()}
-                placeholder="IoC value…" style={{
-                  flex: 1, background: 'var(--bg-panel)', border: '1px solid var(--border)',
-                  borderRadius: '3px', color: 'var(--text-primary)', fontSize: '11px',
-                  padding: '3px 6px', fontFamily: 'Share Tech Mono, monospace',
-                }} />
-              <button onClick={handleTiLookup} disabled={tiLoading} style={{
-                background: 'var(--accent-cyan)', color: '#000', border: 'none',
-                borderRadius: '3px', padding: '3px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center',
-              }}>
-                {tiLoading ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={11} />}
-              </button>
-            </div>
-            {tiResult && (
-              <div style={{
-                padding: '6px', borderRadius: '3px',
-                background: 'var(--bg-panel)', border: '1px solid var(--border)',
-                fontSize: '10px', fontFamily: 'Share Tech Mono, monospace',
-                color: 'var(--text-secondary)', overflowX: 'hidden',
-              }}>
-                {tiResult.error ? (
-                  <span style={{ color: '#ff2244' }}>{String(tiResult.error)}</span>
-                ) : (
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {JSON.stringify(tiResult, null, 2)}
-                  </pre>
-                )}
-              </div>
-            )}
-          </div>
-        </SectionCard>
-      </div>
-
-      {/* CENTER COLUMN */}
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', alignSelf: 'stretch' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: wideLayout ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)', gap: 12, marginBottom: 12, gridAutoRows: 'min-content' }}>
-          <SectionCard title="Alerts Over Time (7d)">
-            <AlertsOverTimeChart points={timeseries?.points ?? []} height={wideLayout ? 190 : 160} />
-          </SectionCard>
-          <SectionCard title="Severity Breakdown (7d)">
-            <SeverityBars bySeverity={socMetrics?.by_severity ?? {}} height={wideLayout ? 190 : 160} />
-          </SectionCard>
-          <SectionCard title="Top Source IPs (7d)">
-            <TopSourcesChart sources={topSources?.sources ?? []} height={wideLayout ? 190 : 160} />
-          </SectionCard>
-          <SectionCard title="Response Trend (30d)">
-            <MttrTrendChart points={mttrTrend?.points ?? []} height={wideLayout ? 190 : 160} />
-          </SectionCard>
-        </div>
-
-        <div style={{
-          borderRadius: '6px',
-          border: '1px solid var(--border)',
-          background: 'var(--bg-card)',
-          overflow: 'hidden',
-        }}>
-          <div style={{
-            padding: '12px 16px',
-            borderBottom: '1px solid var(--border)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          }}>
-            <span style={{
-              fontFamily: 'Rajdhani, sans-serif',
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '2px',
-              textTransform: 'uppercase',
-              color: 'var(--accent-cyan)',
-            }}>
-              Agentic Triage Feed
-            </span>
-            <span style={{
-              fontFamily: 'Share Tech Mono, monospace',
-              fontSize: '10px',
-              color: 'var(--text-muted)',
-            }}>
-              — LAST {recentAlertItems.length} ALERTS
-            </span>
-          </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: 'var(--bg-panel)' }}>
-                  {['TIME', 'ALERT', 'SEVERITY', 'AI REASONING', 'STATUS'].map(h => (
-                    <th key={h} style={{
-                      padding: '8px 12px',
-                      textAlign: 'left',
-                      fontFamily: 'Rajdhani, sans-serif',
-                      fontSize: '10px',
-                      fontWeight: 700,
-                      letterSpacing: '1.5px',
-                      color: 'var(--text-muted)',
-                      borderBottom: '1px solid var(--border)',
-                      whiteSpace: 'nowrap',
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {recentAlertItems.map((alert, idx) => {
-                  const linkedCase = caseByAlertId[alert.id]
-                  const reasoning = linkedCase?.ai_reasoning ?? 'Pending AI analysis'
-                  return (
-                    <tr key={alert.id}
-                    onClick={() => setSelectedAlert(alert)}
-                    style={{
-                      borderBottom: '1px solid var(--border)',
-                      background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)',
-                      transition: 'background 0.1s',
-                      cursor: 'pointer',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderLeft = '2px solid rgba(0,212,255,0.3)' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)'; e.currentTarget.style.borderLeft = '' }}
-                    >
-                      <td style={{ padding: '8px 12px', fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                        {format(new Date(alert.created_at), 'MM-dd HH:mm')}
-                      </td>
-                      <td style={{ padding: '8px 12px', maxWidth: '200px' }}>
-                        <div style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)' }}>
-                          {alert.title}
-                        </div>
-                        {alert.hostname && (
-                          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)' }}>
-                            {alert.hostname}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                        <SeverityBadge severity={alert.severity} />
-                      </td>
-                      <td style={{ padding: '8px 12px', maxWidth: '280px' }}>
-                        <div style={{
-                          fontFamily: 'Exo 2, sans-serif',
-                          fontSize: '11px',
-                          color: linkedCase ? 'var(--text-primary)' : 'var(--text-muted)',
-                          overflow: 'hidden',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                        }}>
-                          {reasoning}
-                        </div>
-                      </td>
-                      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '2px 7px',
-                          borderRadius: '3px',
-                          fontSize: '10px',
-                          fontFamily: 'Rajdhani, sans-serif',
-                          fontWeight: 700,
-                          letterSpacing: '0.5px',
-                          textTransform: 'uppercase',
-                          background: alert.status === 'new' ? 'rgba(0,212,255,0.1)' : 'rgba(0,255,136,0.1)',
-                          color: alert.status === 'new' ? 'var(--accent-cyan)' : 'var(--accent-green)',
-                          border: `1px solid ${alert.status === 'new' ? 'var(--accent-cyan)' : 'var(--accent-green)'}`,
-                        }}>
-                          {alert.status.replace('_', ' ')}
-                        </span>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {recentAlertItems.length === 0 && (
-                  <tr>
-                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
-                      NO ALERTS IN FEED
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      {/* RIGHT COLUMN */}
-      <div style={wideLayout
-        ? { width: '280px', flexShrink: 0, overflowY: 'auto', alignSelf: 'stretch' }
-        : { width: '100%' }}>
-        <SectionCard title="Active Cases">
-          {openCases.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No open cases</div>
-          ) : openCases.slice(0, 8).map(c => (
-            <div key={c.id} style={{
-              padding: '7px 0',
-              borderBottom: '1px solid var(--border)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '3px' }}>
-                {c.created_by_ai && <span title="AI Generated" style={{ fontSize: '12px' }}>🤖</span>}
-                <span style={{ fontFamily: 'Exo 2, sans-serif', fontWeight: 600, fontSize: '12px', color: 'var(--text-primary)', flex: 1 }}>
-                  {c.title}
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                <SeverityBadge severity={c.severity} />
-                <span style={{
-                  fontFamily: 'Rajdhani, sans-serif',
-                  fontSize: '10px',
-                  fontWeight: 600,
-                  color: 'var(--text-muted)',
-                  letterSpacing: '0.5px',
-                  textTransform: 'uppercase',
-                }}>{c.status.replace('_', ' ')}</span>
-              </div>
-              <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                {format(new Date(c.created_at), 'MM-dd HH:mm')}
-              </div>
-            </div>
-          ))}
-        </SectionCard>
-
-        <SectionCard title="Platform Stats">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {[
-              { label: 'TOTAL ALERTS', value: allAlerts?.total ?? '—', color: 'var(--accent-cyan)' },
-              { label: 'TOTAL CASES', value: casesData?.total ?? '—', color: 'var(--accent-green)' },
-              { label: 'AGENTS ONLINE', value: onlineAgentCount, color: 'var(--accent-orange)' },
-            ].map(m => (
-              <div key={m.label} style={{
-                padding: '8px', borderRadius: '4px',
-                background: 'var(--bg-panel)', border: '1px solid var(--border)',
-              }}>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  {m.label}
-                </div>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '20px', fontWeight: 700, color: m.color, marginTop: '2px' }}>
-                  {m.value}
-                </div>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard title="SOC Response">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {[
-              { label: 'AVG MTTD', value: socMetrics?.avg_ack_minutes != null ? `${Math.round(socMetrics.avg_ack_minutes)}m` : '—', color: '#00d4ff' },
-              { label: 'AVG MTTR', value: socMetrics?.avg_mttr_minutes != null ? `${Math.round(socMetrics.avg_mttr_minutes)}m` : '—', color: '#00ff88' },
-              { label: 'FP RATE', value: socMetrics?.false_positive_rate_pct != null ? `${(socMetrics.false_positive_rate_pct as number).toFixed(1)}%` : '—', color: '#ffd700' },
-            ].map(m => (
-              <div key={m.label} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '6px 8px', borderRadius: '3px',
-                background: 'var(--bg-panel)', border: '1px solid var(--border)',
-              }}>
-                <span style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '1px', fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  {m.label}
-                </span>
-                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '15px', fontWeight: 700, color: m.color }}>
-                  {m.value}
-                </span>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        <SectionCard title="Analyst Workload">
-          {workload.length === 0 ? (
-            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>No analysts assigned</div>
-          ) : workload.slice(0, 7).map((w) => {
-            const isPool = w.user_id === 'unassigned'
-            return (
-            <div key={w.user_id} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              padding: '5px 4px', borderBottom: '1px solid var(--border)',
-              background: isPool ? 'rgba(255,107,0,0.06)' : 'transparent',
-              borderRadius: isPool ? 3 : 0,
-              marginBottom: isPool ? 2 : 0,
-            }}>
-              <span style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '11px', color: isPool ? '#ff6b00' : 'var(--text-primary)', fontStyle: isPool ? 'italic' : 'normal' }}>
-                {w.username}
-              </span>
-              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                <span title="Open alerts" style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: '#ff6b00' }}>
-                  {w.open_alerts}A
-                </span>
-                <span title="Open cases" style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px', color: '#00d4ff' }}>
-                  {w.open_cases}C
-                </span>
-                <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', fontWeight: 700, color: isPool ? '#ff6b00' : 'var(--text-secondary)' }}>
-                  {w.total}
-                </span>
-              </div>
-            </div>
-          )})}
-        </SectionCard>
-      </div>
+  return <div className="workspace">
+    <PageHeader eyebrow="Security operations" title="Operations overview"
+      description="Your detection queue, response workload, and security trends in one workspace."
+      actions={<>
+        <select aria-label="Dashboard time window" className="ui-input w-auto" value={days}
+          onChange={event => { const value = Number(event.target.value); setDays(value); setSince(new Date(Date.now() - value * 86_400_000).toISOString()) }}>
+          <option value={1}>Last 24 hours</option><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option>
+        </select>
+        <button className="ui-icon-button" onClick={refresh} title="Refresh overview" aria-label="Refresh overview" disabled={metrics.isFetching}><RefreshCw size={16} /></button>
+        <Link to={reviewUrl} className="ui-button ui-button--primary">Review new alerts <ArrowRight size={14} /></Link>
+      </>} />
+    <div className="state-banner">
+      <span>{metrics.isFetching ? 'Updating overview…' : metrics.dataUpdatedAt ? `Updated ${format(new Date(metrics.dataUpdatedAt), 'HH:mm:ss')}` : 'Loading overview…'}</span>
+      <span>· Server totals · Last {days === 1 ? '24 hours' : `${days} days`}</span>
     </div>
-    {selectedAlert && <AlertDetailModal alert={selectedAlert} onClose={() => setSelectedAlert(null)} />}
-    </>
-  )
+    {metrics.isError && <section className="panel"><QueryState kind="error" title="Overview metrics are unavailable"
+      description={metrics.data ? 'The last successful totals are retained below. They may be out of date.' : 'Totals will appear after a successful refresh.'}
+      onRetry={() => { void metrics.refetch() }} /></section>}
+    <div className="metric-grid" aria-busy={metrics.isPending}>
+      <MetricCard title="New alerts" value={metrics.data ? number(metrics.data.by_status.new ?? 0) : '—'} detail="Awaiting triage · selected window" to={reviewUrl} />
+      <MetricCard title="Critical detections" value={metrics.data ? number(metrics.data.by_severity.critical ?? 0) : '—'} detail="All statuses · selected window" to={`/alerts?severity=critical&start_time=${encodeURIComponent(since)}`} />
+      <MetricCard title="Active cases" value={number(metrics.data?.open_cases)} detail="Created in selected window" to="/cases" />
+      <MetricCard title="Avg. acknowledgment" value={minutes(metrics.data?.avg_ack_minutes)} detail="Detected → acknowledged" />
+    </div>
+    <div className="dashboard-columns">
+      <div className="dashboard-stack">
+        <Panel title="Needs your team's attention" description={queue.data ? `Showing the latest ${queue.data.items.length} of ${queue.data.total.toLocaleString()} new alerts in this window` : 'Latest new alerts in the selected window'}
+          actions={<Link className="ui-button ui-button--quiet" to={reviewUrl}>View queue <ArrowRight size={14} /></Link>}>
+          {queue.isPending ? <QueryState kind="loading" title="Loading investigation queue…" />
+            : queue.isError ? <QueryState kind="error" title="Could not load the queue" onRetry={() => { void queue.refetch() }} />
+            : <DataTable columns={columns} data={queue.data.items} total={queue.data.total} page={1} pageSize={8}
+              onPageChange={() => navigate(reviewUrl)} onRowClick={alert => navigate(`/alerts/${alert.id}`)}
+              showToolbar={false} showPagination={false}
+              exportFilename="new-alerts-preview.csv" emptyTitle="The new-alert queue is clear"
+              emptyDescription="There are no new alerts in this time window. Open Alerts to review other statuses." />}
+        </Panel>
+        <Panel title="Detection volume" description={`Hourly alerts over the last ${days === 1 ? '24 hours' : `${days} days`}`}>
+          {timeseries.isPending ? <QueryState kind="loading" title="Loading detection trend…" />
+            : timeseries.isError ? <QueryState kind="error" title="Trend unavailable" onRetry={() => { void timeseries.refetch() }} />
+            : <AlertsOverTimeChart points={timeseries.data.points} height={220} />}
+        </Panel>
+        <div className="dashboard-charts">
+          <Panel title="Severity distribution" description="All detections in the selected window">
+            {metrics.isPending ? <QueryState kind="loading" title="Loading severity totals…" />
+              : metrics.isError ? <QueryState kind="error" title="Severity totals unavailable" onRetry={() => { void metrics.refetch() }} />
+              : <SeverityBars bySeverity={metrics.data.by_severity} height={200} />}
+          </Panel>
+          <Panel title="Response trend" description="Daily acknowledgment and resolution times">
+            {mttr.isPending ? <QueryState kind="loading" title="Loading response trend…" />
+              : mttr.isError ? <QueryState kind="error" title="Response trend unavailable" onRetry={() => { void mttr.refetch() }} />
+              : <MttrTrendChart points={mttr.data.points} height={200} />}
+          </Panel>
+        </div>
+        <Panel title="Top source addresses" description="Server-ranked by detection count in the selected window">
+          {sources.isPending ? <QueryState kind="loading" title="Loading source addresses…" />
+            : sources.isError ? <QueryState kind="error" title="Source addresses unavailable" onRetry={() => { void sources.refetch() }} />
+            : <TopSourcesChart sources={sources.data.sources} height={200} />}
+        </Panel>
+      </div>
+      <div className="dashboard-stack"><AnalystWorkload /><RecentActivity /><ThreatLookup /></div>
+    </div>
+  </div>
 }

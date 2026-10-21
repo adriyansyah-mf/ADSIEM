@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { X, Copy, Check, KeyRound, Trash2 } from 'lucide-react'
+import { Copy, Check, KeyRound, Trash2 } from 'lucide-react'
+import { WorkspaceDialog } from '@/components/WorkspaceDialog'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 import { useAuthStore } from '@/stores/auth'
@@ -92,31 +93,23 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  const input = 'w-full px-2 py-1 rounded border border-border bg-background text-sm'
+  const input = 'ui-input'
   const label_ = 'block text-xs font-semibold mb-1'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-auto rounded-lg border border-border bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div>
-            <h2 className="font-semibold">Deploy agent</h2>
-            <div className="text-xs text-muted-foreground">Run one command on the host: it downloads the agent, enrolls it and starts it.</div>
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={18} /></button>
-        </div>
-
-        <div className="px-4 py-4 space-y-5 text-sm">
+    <WorkspaceDialog title="Deploy agent" description="Run one command on the host to download, enroll, and start the agent." onClose={onClose} busy={createKey.isPending || revoke.isPending} wide>
+        <div className="space-y-5 text-sm">
           {/* 1. OS */}
           <div>
             <div className={label_}>1. Operating system</div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {TARGETS.map(t => {
                 const p = (t.value === 'windows' ? packages.find(x => x.type === 'msi') : undefined)
                   ?? packages.find(x => x.type === t.value)
                 return (
                   <button key={t.value} onClick={() => setTarget(t.value)} disabled={!p}
-                    className={`text-left px-3 py-2 rounded border ${target === t.value ? 'border-primary bg-primary/10' : 'border-border'} disabled:opacity-40`}>
+                    aria-pressed={target === t.value}
+                    className={`text-left px-3 py-2 rounded border border-border ${target === t.value ? 'bg-muted' : 'bg-background'} disabled:opacity-40`}>
                     <div className="font-medium">{t.label}</div>
                     <div className="text-xs text-muted-foreground">{p ? `v${p.version} · ${p.arch} · ${fmt(p.size_bytes)}` : 'package not built'}</div>
                     <div className="text-xs text-muted-foreground">{t.hint}</div>
@@ -127,15 +120,15 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
           </div>
 
           {/* 2. Server */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={label_}>2. Server address (as the host reaches it)</label>
-              <input value={server} onChange={e => setServer(e.target.value)} className={input} />
+              <input aria-label="Server address" value={server} onChange={e => setServer(e.target.value)} className={input} />
             </div>
             {target !== 'windows' && (
               <div>
                 <label className={label_}>Agent name (optional, default: hostname)</label>
-                <input value={name} onChange={e => setName(e.target.value)} placeholder="web-01" className={input} />
+                <input aria-label="Agent name" value={name} onChange={e => setName(e.target.value)} placeholder="web-01" className={input} />
               </div>
             )}
           </div>
@@ -161,24 +154,24 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
           <div>
             <div className={label_}>3. Enrollment key</div>
             <div className="rounded border border-border p-3 space-y-2">
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground">Label</label>
-                  <input value={label} onChange={e => setLabel(e.target.value)} className={input} />
+                  <input aria-label="Enrollment key label" value={label} onChange={e => setLabel(e.target.value)} className={input} />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground">Max agents (blank = ∞)</label>
-                  <input value={maxUses} onChange={e => setMaxUses(e.target.value.replace(/\D/g, ''))} placeholder="∞" className={input} />
+                  <input aria-label="Maximum agents" value={maxUses} onChange={e => setMaxUses(e.target.value.replace(/\D/g, ''))} placeholder="∞" className={input} />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground">Expires in days</label>
-                  <input value={expiresDays} onChange={e => setExpiresDays(e.target.value.replace(/\D/g, ''))} placeholder="never" className={input} />
+                  <input aria-label="Expires in days" value={expiresDays} onChange={e => setExpiresDays(e.target.value.replace(/\D/g, ''))} placeholder="never" className={input} />
                 </div>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="control-cluster">
                 {user?.role === 'superadmin' && (
                   <label className="flex items-center gap-1 text-xs">Group
-                    <input value={group} onChange={e => setGroup(e.target.value)} className="px-2 py-0.5 rounded border border-border bg-background text-xs w-28" />
+                    <input value={group} onChange={e => setGroup(e.target.value)} className="ui-input w-28" />
                   </label>
                 )}
                 <label className="flex items-center gap-1 text-xs cursor-pointer">
@@ -186,13 +179,13 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
                   New agents wait for approval
                 </label>
                 <button onClick={() => createKey.mutate()} disabled={createKey.isPending}
-                  className="ml-auto flex items-center gap-1 px-3 py-1 rounded bg-primary text-primary-foreground text-xs disabled:opacity-50">
+                  className="ui-button ml-auto">
                   <KeyRound size={12} /> Create key
                 </button>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground">…or paste an existing key</label>
-                <input value={key} onChange={e => setKey(e.target.value)} placeholder="enrollment key" className={`${input} font-mono`} />
+                <input aria-label="Existing enrollment key" value={key} onChange={e => setKey(e.target.value)} placeholder="enrollment key" className={`${input} font-mono`} />
               </div>
             </div>
           </div>
@@ -202,7 +195,7 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
             <div className="flex items-center justify-between mb-1">
               <div className={label_}>4. Run on the host{target === 'windows' ? ' (PowerShell as Administrator)' : ''}</div>
               {command && (
-                <button onClick={copy} className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-border hover:bg-muted">
+                <button onClick={copy} className="ui-button">
                   {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? 'Copied' : 'Copy'}
                 </button>
               )}
@@ -226,14 +219,14 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
                   const spent = k.max_uses != null && k.use_count >= k.max_uses
                   const expired = k.expires_at != null && new Date(k.expires_at) < new Date()
                   return (
-                    <div key={k.id} className="flex items-center gap-3 px-3 py-1.5 text-xs">
+                    <div key={k.id} className="control-cluster px-3 py-2 text-xs">
                       <span className="font-medium">{k.label || '(no label)'}</span>
                       <span className="text-muted-foreground">group {k.group_id}</span>
                       <span className="text-muted-foreground">{k.use_count}/{k.max_uses ?? '∞'} used</span>
                       {k.require_approval && <span className="text-amber-400">approval</span>}
                       {(spent || expired) && <span className="text-muted-foreground">{spent ? 'spent' : 'expired'}</span>}
                       {k.expires_at && !expired && <span className="text-muted-foreground">expires {new Date(k.expires_at).toLocaleDateString()}</span>}
-                      <button onClick={() => revoke.mutate(k.id)} title="Revoke" className="ml-auto text-destructive hover:opacity-70">
+                      <button onClick={() => revoke.mutate(k.id)} disabled={revoke.isPending} title="Revoke" aria-label={`Revoke enrollment key ${k.label || k.id}`} className="ui-icon-button ml-auto text-destructive">
                         <Trash2 size={12} />
                       </button>
                     </div>
@@ -243,7 +236,6 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </WorkspaceDialog>
   )
 }

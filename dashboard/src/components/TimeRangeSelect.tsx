@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export interface TimeRange {
   start_time?: string
@@ -26,6 +26,12 @@ const PRESET_MS: Record<string, number> = {
 // so a plain .toISOString() call is all that's needed to get UTC for the API.
 const localInputToIso = (v: string): string | undefined => (v ? new Date(v).toISOString() : undefined)
 
+const isoToLocalInput = (value?: string): string => {
+  if (!value) return ''
+  const date = new Date(value)
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+}
+
 /**
  * Preset dropdown (1h/24h/7d/30d) plus an optional custom from/to range.
  * Presets are resolved to a fixed ISO timestamp at selection time (not on
@@ -42,7 +48,10 @@ export function TimeRangeFilter({
   selectClassName?: string
   inputClassName?: string
 }) {
-  const [preset, setPreset] = useState('')
+  const [preset, setPreset] = useState(value.start_time || value.end_time ? 'custom' : '')
+  useEffect(() => {
+    if (!value.start_time && !value.end_time) setPreset('')
+  }, [value.start_time, value.end_time])
 
   const handlePreset = (p: string) => {
     setPreset(p)
@@ -54,20 +63,24 @@ export function TimeRangeFilter({
 
   return (
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-      <select value={preset} onChange={e => handlePreset(e.target.value)} style={selectStyle} className={selectClassName}>
+      <select aria-label="Time window" value={preset} onChange={e => handlePreset(e.target.value)} style={selectStyle} className={selectClassName}>
         {PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
       </select>
       {preset === 'custom' && (
         <>
           <input
+            aria-label="From date and time"
             type="datetime-local"
+            value={isoToLocalInput(value.start_time)}
             style={inputStyle}
             className={inputClassName}
             onChange={e => onChange({ ...value, start_time: localInputToIso(e.target.value) })}
           />
           <span style={{ fontSize: 11, opacity: 0.6 }}>to</span>
           <input
+            aria-label="To date and time"
             type="datetime-local"
+            value={isoToLocalInput(value.end_time)}
             style={inputStyle}
             className={inputClassName}
             onChange={e => onChange({ ...value, end_time: localInputToIso(e.target.value) })}

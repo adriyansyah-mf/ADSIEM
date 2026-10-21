@@ -1,609 +1,141 @@
-import { useState, useEffect } from 'react'
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useAuthStore } from '@/stores/auth'
+import { useEffect, useRef, useState } from 'react'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronRight, Menu, Search, Wifi, WifiOff } from 'lucide-react'
 import { api } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
 import AssistantWidget from '@/components/AssistantWidget'
-import {
-  LayoutDashboard, FileText, Activity, Bell, FolderOpen,
-  Brain, HeartPulse, Lock, ScanLine, Crosshair,
-  Terminal, Server, BookOpen, Wrench, Shield, Lightbulb,
-  Users, Settings, PanelLeftClose, PanelLeftOpen,
-  Webhook, ClipboardList, FileBarChart, Grid3x3, ChevronDown, Radio,
-  Menu, X, LogOut,
-  type LucideIcon,
-} from 'lucide-react'
+import { AppSidebar, pageLabel } from '@/components/AppSidebar'
+import type { Alert, Case } from '@/types'
 
-interface NavItem {
-  to: string
-  label: string
-  icon: LucideIcon
-  minRole?: string
+interface SearchResults {
+  readonly alerts: readonly Pick<Alert, 'id' | 'title'>[]
+  readonly cases: readonly Pick<Case, 'id' | 'title'>[]
 }
-
-const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
-  {
-    label: 'Monitor',
-    items: [
-      { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-      { to: '/logs', label: 'Logs', icon: FileText },
-      { to: '/events', label: 'Events', icon: Activity },
-      { to: '/live-events', label: 'Live Events', icon: Radio },
-      { to: '/alerts', label: 'Alerts', icon: Bell },
-      { to: '/cases', label: 'Cases', icon: FolderOpen },
-    ],
-  },
-  {
-    label: 'Analytics',
-    items: [
-      { to: '/ueba', label: 'UEBA', icon: Brain },
-      { to: '/hygiene', label: 'Hygiene', icon: HeartPulse },
-      { to: '/fim', label: 'FIM', icon: Lock },
-      { to: '/yara', label: 'YARA', icon: ScanLine },
-      { to: '/hunts', label: 'Threat Hunt', icon: Crosshair },
-      { to: '/mitre-heatmap', label: 'MITRE Heatmap', icon: Grid3x3 },
-      { to: '/reports', label: 'Reports', icon: FileBarChart },
-      { to: '/sop', label: 'SOP', icon: BookOpen },
-      { to: '/knowledge', label: 'Knowledge', icon: Lightbulb },
-      { to: '/handover', label: 'Handover', icon: ClipboardList },
-    ],
-  },
-  {
-    label: 'Response',
-    items: [
-      { to: '/live-response', label: 'Live Response', icon: Terminal },
-    ],
-  },
-  {
-    label: 'Configuration',
-    items: [
-      { to: '/agents', label: 'Agents', icon: Server },
-      { to: '/rules', label: 'Rules', icon: BookOpen },
-      { to: '/decoders', label: 'Decoders', icon: Wrench },
-      { to: '/soar', label: 'SOAR', icon: Shield },
-    ],
-  },
-]
-
-const ADMIN_ITEMS: NavItem[] = [
-  { to: '/webhooks', label: 'Webhooks', icon: Webhook, minRole: 'admin' },
-  { to: '/audit-logs', label: 'Audit Log', icon: ClipboardList, minRole: 'admin' },
-  { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
-  { to: '/users', label: 'Users', icon: Users, minRole: 'superadmin' },
-]
 
 export default function Layout() {
   const { pathname } = useLocation()
-  const { user, logout, hasRole, accessToken } = useAuthStore()
+  const { accessToken, user } = useAuthStore()
   const queryClient = useQueryClient()
-  const [clock, setClock] = useState(new Date())
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === '1')
-  const [mobileOpen, setMobileOpen] = useState(false)
-  const [isTablet, setIsTablet] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
   const [wsConnected, setWsConnected] = useState(false)
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const mobileNav = useRef<HTMLDialogElement>(null)
+  const searchRegion = useRef<HTMLDivElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
 
-  // Responsive breakpoints: <768px = mobile drawer, 768-1023px = forced icon rail, >=1024px = full sidebar.
+  useEffect(() => { localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0') }, [collapsed])
   useEffect(() => {
-    const tabletQ = window.matchMedia('(min-width: 768px) and (max-width: 1023px)')
-    const mobileQ = window.matchMedia('(max-width: 767px)')
-    const apply = () => {
-      setIsTablet(tabletQ.matches)
-      setIsMobile(mobileQ.matches)
-      if (mobileQ.matches) setMobileOpen(false)
-    }
-    apply()
-    tabletQ.addEventListener('change', apply)
-    mobileQ.addEventListener('change', apply)
-    return () => {
-      tabletQ.removeEventListener('change', apply)
-      mobileQ.removeEventListener('change', apply)
-    }
-  }, [])
-  useEffect(() => { setMobileOpen(false) }, [pathname])
-
+    mobileNav.current?.close()
+    setSearchOpen(false)
+  }, [pathname])
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMobileOpen(false)
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        document.getElementById('global-search-input')?.focus()
+    const timer = window.setTimeout(() => setQuery(search.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [search])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        searchInput.current?.focus()
       }
+      if (event.key === 'Escape') setSearchOpen(false)
+    }
+    const onPointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !searchRegion.current?.contains(event.target)) setSearchOpen(false)
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('pointerdown', onPointer)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', onPointer)
+    }
   }, [])
-
   useEffect(() => {
-    localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0')
-  }, [collapsed])
-
-  const { data: agentsData } = useQuery({
-    queryKey: ['agents-health'],
-    queryFn: () => api.get('/api/agents', { params: { page_size: 100 } }).then(r => r.data),
-    refetchInterval: 30_000,
-  })
-
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 1000)
-    return () => clearInterval(t)
+    const onResize = () => { if (window.innerWidth >= 768) mobileNav.current?.close() }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
   useEffect(() => {
     if (!accessToken) return
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${window.location.host}/api/ws/alerts?token=${accessToken}`)
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${protocol}://${window.location.host}/api/ws/alerts?token=${accessToken}`)
     ws.onopen = () => setWsConnected(true)
     ws.onclose = () => setWsConnected(false)
-    ws.onmessage = (e) => {
+    ws.onmessage = event => {
       try {
-        const data = JSON.parse(e.data)
-        if (data.type === 'new_alert') {
-          queryClient.invalidateQueries({ queryKey: ['alerts-recent'] })
-          queryClient.invalidateQueries({ queryKey: ['alerts-dashboard'] })
-          queryClient.invalidateQueries({ queryKey: ['alerts'] })
-          queryClient.invalidateQueries({ queryKey: ['metrics'] })
+        const data: unknown = JSON.parse(event.data)
+        if (data && typeof data === 'object' && 'type' in data && data.type === 'new_alert') {
+          for (const key of ['alerts-recent', 'alerts-dashboard', 'alerts', 'metrics']) {
+            void queryClient.invalidateQueries({ queryKey: [key] })
+          }
         }
-      } catch {}
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error
+      }
     }
-    const ping = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send('ping') }, 30000)
-    return () => { clearInterval(ping); ws.close() }
+    const ping = window.setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send('ping') }, 30_000)
+    return () => { window.clearInterval(ping); ws.close() }
   }, [accessToken, queryClient])
 
-  const onlineCount = (agentsData?.items ?? []).filter((a: { status: string }) => a.status === 'online').length
-  const totalCount = agentsData?.total ?? 0
-
-  const navigate = useNavigate()
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<{ alerts: any[]; cases: any[] } | null>(null)
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [adminMenuOpen, setAdminMenuOpen] = useState(false)
-
-  const handleSearch = async (q: string) => {
-    if (q.length < 2) { setSearchResults(null); return }
-    try {
-      const r = await api.get('/api/search', { params: { q, limit: 5 } })
-      setSearchResults(r.data)
-    } catch {
-      setSearchResults(null)
-    }
-  }
-
-  const isActive = (to: string) => to === '/' ? pathname === '/' : pathname.startsWith(to)
-
-  const allItems = [...NAV_GROUPS.flatMap(g => g.items), ...ADMIN_ITEMS]
-  const currentLabel = allItems.find(i => isActive(i.to))?.label ?? 'AD-SIEM'
-
-  const rail = (collapsed || isTablet) && !isMobile
-  const sidebarW = isMobile ? 216 : rail ? 56 : 216
+  const results = useQuery<SearchResults>({
+    queryKey: ['global-search', query],
+    queryFn: () => api.get('/api/search', { params: { q: query, limit: 5 } }).then(response => response.data),
+    enabled: query.length >= 2,
+  })
+  const visibleResults = searchOpen && search.trim().length >= 2
+  const currentLabel = pageLabel(pathname)
 
   return (
-    <div style={{ display: 'flex', height: '100dvh', overflow: 'hidden', background: '#0d0f14' }}>
-
-      {/* ── Mobile drawer backdrop ── */}
-      {isMobile && mobileOpen && (
-        <div
-          onClick={() => setMobileOpen(false)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 900,
-            background: 'rgba(0,0,0,0.6)',
-          }}
-        />
-      )}
-
-      {/* ── Sidebar ── */}
-      <aside style={{
-        width: sidebarW,
-        minWidth: sidebarW,
-        position: isMobile ? 'fixed' : 'static',
-        top: 0, bottom: 0, left: 0,
-        zIndex: 1000,
-        transform: isMobile ? (mobileOpen ? 'translateX(0)' : 'translateX(-100%)') : 'none',
-        transition: 'transform 0.2s ease, width 0.2s ease, min-width 0.2s ease',
-        display: 'flex',
-        flexDirection: 'column',
-        background: '#111318',
-        borderRight: '1px solid #1e2028',
-        overflow: 'hidden',
-        boxShadow: isMobile && mobileOpen ? '4px 0 24px rgba(0,0,0,0.5)' : 'none',
-      }}>
-
-        {/* Logo */}
-        <div style={{
-          height: 52,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '0 16px',
-          borderBottom: '1px solid #1e2028',
-          flexShrink: 0,
-        }}>
-          <img
-            src="/favicon.jpeg"
-            alt="AD-SIEM"
-            style={{
-              width: 28, height: 28, borderRadius: 6,
-              objectFit: 'cover', flexShrink: 0,
-            }}
-          />
-          {!collapsed && (
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.02em', lineHeight: 1.1 }}>
-                AD-SIEM
+    <div className="app-shell">
+      <a className="skip-link ui-button ui-button--primary" href="#workspace-content">Skip to content</a>
+      <div className="desktop-navigation"><AppSidebar collapsed={collapsed} onCollapse={() => setCollapsed(value => !value)} /></div>
+      <dialog className="mobile-navigation" ref={mobileNav} aria-label="Navigation">
+        <AppSidebar onNavigate={() => mobileNav.current?.close()} onClose={() => mobileNav.current?.close()} />
+      </dialog>
+      <div className="app-main">
+        <header className="app-header">
+          <div className="app-header__location">
+            <button className="ui-icon-button mobile-menu" onClick={() => mobileNav.current?.showModal()} aria-label="Open navigation"><Menu size={18} /></button>
+            <span className="breadcrumb-root">Workspace</span><ChevronRight size={14} aria-hidden="true" />
+            <span>{currentLabel}</span>
+          </div>
+          <div className="global-search" ref={searchRegion}>
+            <Search size={16} aria-hidden="true" />
+            <input ref={searchInput} id="global-search-input" aria-label="Search alerts and cases"
+              value={search} placeholder="Search alerts and cases…" onChange={event => { setSearch(event.target.value); setSearchOpen(true) }}
+              onFocus={() => setSearchOpen(true)} aria-expanded={visibleResults} aria-controls="global-search-results" />
+            <kbd>⌘ / Ctrl K</kbd>
+            {visibleResults && (
+              <div className="global-search__results" id="global-search-results" aria-label="Search results">
+                {query !== search.trim() || results.isPending ? <p role="status">Searching alerts and cases…</p>
+                  : results.isError ? <p role="alert">Search is unavailable. Try again in a moment.</p>
+                  : results.data && (
+                    <>
+                      {(['alerts', 'cases'] as const).map(type => (
+                        <div key={type}>
+                          <h2>{type === 'alerts' ? 'Alerts' : 'Cases'}</h2>
+                          {results.data[type].map(item => <Link key={item.id} to={`/${type}/${item.id}`}>{item.title}</Link>)}
+                        </div>
+                      ))}
+                      {results.data.alerts.length + results.data.cases.length === 0 && <p>No matching alerts or cases.</p>}
+                    </>
+                  )}
               </div>
-              <div style={{ fontSize: 10, color: '#64748b', letterSpacing: '0.04em' }}>
-                Security Operations
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Nav */}
-        <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
-          {NAV_GROUPS.map((group, gi) => {
-            const visibleItems = group.items.filter(i => hasRole(i.minRole ?? 'viewer'))
-            if (visibleItems.length === 0) return null
-            return (
-            <div key={group.label} style={{ marginBottom: 4 }}>
-              {!collapsed && (
-                <div style={{
-                  padding: gi === 0 ? '8px 16px 4px' : '12px 16px 4px',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: '0.08em',
-                  color: '#64748b',
-                  textTransform: 'uppercase',
-                }}>
-                  {group.label}
-                </div>
-              )}
-              {collapsed && gi > 0 && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
-              {visibleItems.map(item => {
-                const active = isActive(item.to)
-                const Icon = item.icon
-                return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    title={collapsed ? item.label : undefined}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: collapsed ? '8px 0' : '7px 16px',
-                      justifyContent: collapsed ? 'center' : 'flex-start',
-                      textDecoration: 'none',
-                      background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
-                      borderLeft: active ? '2px solid #3b82f6' : '2px solid transparent',
-                      color: active ? '#93c5fd' : '#64748b',
-                      transition: 'color 0.12s, background 0.12s',
-                    }}
-                  >
-                    <Icon size={15} strokeWidth={active ? 2 : 1.75} style={{ flexShrink: 0 }} />
-                    {!collapsed && (
-                      <span style={{
-                        fontSize: 13,
-                        fontWeight: active ? 500 : 400,
-                        color: active ? '#e2e8f0' : '#94a3b8',
-                        whiteSpace: 'nowrap',
-                        letterSpacing: '0.01em',
-                      }}>
-                        {item.label}
-                      </span>
-                    )}
-                  </Link>
-                )
-              })}
-            </div>
-            )
-          })}
-
-          {/* Admin */}
-          {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
-            <div style={{ marginTop: 4 }}>
-              {!collapsed && (
-                <div style={{
-                  padding: '12px 16px 4px',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: '0.08em',
-                  color: '#64748b',
-                  textTransform: 'uppercase',
-                }}>
-                  Administration
-                </div>
-              )}
-              {collapsed && <div style={{ height: 1, background: '#1e2028', margin: '6px 10px' }} />}
-              {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).map(item => {
-                const active = isActive(item.to)
-                const Icon = item.icon
-                return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    title={collapsed ? item.label : undefined}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: collapsed ? '8px 0' : '7px 16px',
-                      justifyContent: collapsed ? 'center' : 'flex-start',
-                      textDecoration: 'none',
-                      background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
-                      borderLeft: active ? '2px solid #3b82f6' : '2px solid transparent',
-                      color: active ? '#93c5fd' : '#64748b',
-                      transition: 'color 0.12s, background 0.12s',
-                    }}
-                  >
-                    <Icon size={15} strokeWidth={active ? 2 : 1.75} style={{ flexShrink: 0 }} />
-                    {!collapsed && (
-                      <span style={{
-                        fontSize: 13,
-                        fontWeight: active ? 500 : 400,
-                        color: active ? '#e2e8f0' : '#94a3b8',
-                        whiteSpace: 'nowrap',
-                        letterSpacing: '0.01em',
-                      }}>
-                        {item.label}
-                      </span>
-                    )}
-                  </Link>
-                )
-              })}
-            </div>
-          )}
-        </nav>
-
-        {/* Bottom: agent count + collapse (hidden on tablet/mobile — their mode is viewport-driven) */}
-        {!isTablet && !isMobile && (
-          <div style={{ borderTop: '1px solid #1e2028', flexShrink: 0 }}>
-            {!collapsed ? (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '10px 16px',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{
-                    width: 7, height: 7, borderRadius: '50%',
-                    background: onlineCount > 0 ? '#34d399' : '#374151',
-                    boxShadow: onlineCount > 0 ? '0 0 5px #34d399' : 'none',
-                    flexShrink: 0,
-                  }} />
-                  <span style={{ fontSize: 12, color: '#64748b' }}>
-                    <span style={{ color: onlineCount > 0 ? '#34d399' : '#64748b', fontWeight: 500 }}>{onlineCount}</span>
-                    <span> / {totalCount} agents</span>
-                  </span>
-                </div>
-                <button
-                  onClick={() => setCollapsed(true)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', padding: '8px', borderRadius: 4 }}
-                  title="Collapse sidebar"
-                >
-                  <PanelLeftClose size={14} />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setCollapsed(false)}
-                title="Expand sidebar"
-                style={{
-                  width: '100%', background: 'none', border: 'none',
-                  cursor: 'pointer', color: '#64748b',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  padding: '14px 0',
-                }}
-              >
-                <PanelLeftOpen size={14} />
-              </button>
             )}
           </div>
-        )}
-      </aside>
-
-      {/* ── Right side ── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-
-        {/* Topbar */}
-        <header style={{
-          height: 52,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          gap: isMobile ? 10 : 16,
-          padding: isMobile ? '0 12px' : '0 20px',
-          background: '#111318',
-          borderBottom: '1px solid #1e2028',
-        }}>
-          {isMobile && (
-            <button
-              onClick={() => setMobileOpen(o => !o)}
-              aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: '#94a3b8', display: 'flex', padding: 8, borderRadius: 4,
-              }}
-            >
-              {mobileOpen ? <X size={18} /> : <Menu size={18} />}
-            </button>
-          )}
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, minWidth: 0 }}>
-            <span style={{
-              fontSize: 15, fontWeight: 600, color: '#e2e8f0', letterSpacing: '0.01em',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: isMobile ? 120 : undefined,
-            }}>
-              {currentLabel}
+          <div className="workspace-scope" title={user?.group_id}>
+            <span className="connection-state" title={wsConnected ? 'Live alert updates connected' : 'Live updates disconnected; lists still refresh automatically'}>
+              {wsConnected ? <Wifi size={15} /> : <WifiOff size={15} />}
+              <span>{wsConnected ? 'Live' : 'Polling'}</span>
             </span>
-            {wsConnected && (
-              <span
-                title="Live feed connected"
-                style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', boxShadow: '0 0 6px #34d399', animation: 'pulse 2s infinite', flexShrink: 0, display: 'inline-block' }}
-              />
-            )}
-          </span>
-
-          {/* Global Search */}
-          <div style={{ flex: 1, maxWidth: isMobile ? undefined : 480, position: 'relative', margin: isMobile ? 0 : '0 16px', minWidth: 0 }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              background: '#0d0f14', border: '1px solid #1e2028',
-              borderRadius: 6, padding: '4px 10px',
-            }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-              </svg>
-              <input
-                id="global-search-input"
-                value={searchQuery}
-                onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true); handleSearch(e.target.value) }}
-                onFocus={() => setSearchOpen(true)}
-                onBlur={() => setSearchOpen(false)}
-                onKeyDown={e => { if (e.key === 'Escape') (e.target as HTMLInputElement).blur() }}
-                placeholder={isMobile ? 'Search…' : 'Search alerts, cases, IPs…'}
-                style={{
-                  background: 'none', border: 'none', outline: 'none',
-                  color: '#94a3b8', fontSize: 12, width: '100%', minWidth: 0,
-                }}
-              />
-            </div>
-            {searchOpen && searchResults && (searchResults.alerts.length > 0 || searchResults.cases.length > 0) && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
-                background: '#111318', border: '1px solid #1e2028', borderRadius: 6,
-                zIndex: 1000, overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-              }}>
-                {searchResults.alerts.map((a: any) => (
-                  <div
-                    key={a.id}
-                    onMouseDown={() => { navigate(`/alerts?open=${a.id}`); setSearchOpen(false); setSearchQuery('') }}
-                    style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid #1e2028', display: 'flex', gap: 8, alignItems: 'center' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1e2028' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                  >
-                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: 'rgba(255,34,68,0.15)', color: '#ff2244', fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                      {a.severity}
-                    </span>
-                    <span style={{ fontSize: 12, color: '#e2e8f0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {a.title}
-                    </span>
-                    <span style={{ fontSize: 10, color: '#475569', whiteSpace: 'nowrap' }}>alert</span>
-                  </div>
-                ))}
-                {searchResults.cases.map((c: any) => (
-                  <div
-                    key={c.id}
-                    onMouseDown={() => { navigate(`/cases/${c.id}`); setSearchOpen(false); setSearchQuery('') }}
-                    style={{ padding: '8px 14px', cursor: 'pointer', borderBottom: '1px solid #1e2028', display: 'flex', gap: 8, alignItems: 'center' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1e2028' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                  >
-                    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: 'rgba(0,212,255,0.1)', color: '#00d4ff', fontFamily: 'Share Tech Mono, monospace', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                      {c.status}
-                    </span>
-                    <span style={{ fontSize: 12, color: '#e2e8f0', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {c.title}
-                    </span>
-                    <span style={{ fontSize: 10, color: '#475569', whiteSpace: 'nowrap' }}>case</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div style={{ width: 1, height: 24, background: '#1e2028' }} />
-
-          {/* User */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 4 : 10, flexShrink: 0, marginLeft: 'auto' }}>
-            {!isMobile && (
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: '#cbd5e1', lineHeight: 1.2 }}>
-                  {user?.username ?? '—'}
-                </div>
-                <div style={{ fontSize: 11, color: '#475569', lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
-                  {clock.toLocaleTimeString('en-US', { hour12: false })}
-                </div>
-              </div>
-            )}
-            {!isMobile && ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).length > 0 && (
-              <div style={{ position: 'relative' }}>
-                <button
-                  onClick={() => setAdminMenuOpen(o => !o)}
-                  onBlur={() => setTimeout(() => setAdminMenuOpen(false), 150)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 4,
-                    padding: '5px 12px',
-                    borderRadius: 5,
-                    border: '1px solid #1e2028',
-                    background: adminMenuOpen ? '#1e2028' : 'transparent',
-                    color: '#94a3b8',
-                    fontSize: 12,
-                    fontWeight: 500,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Admin <ChevronDown size={13} />
-                </button>
-                {adminMenuOpen && (
-                  <div style={{
-                    position: 'absolute', top: '100%', right: 0, marginTop: 4,
-                    background: '#111318', border: '1px solid #1e2028', borderRadius: 6,
-                    zIndex: 1000, overflow: 'hidden', minWidth: 160,
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-                  }}>
-                    {ADMIN_ITEMS.filter(i => hasRole(i.minRole ?? 'viewer')).map(item => {
-                      const Icon = item.icon
-                      const active = isActive(item.to)
-                      return (
-                        <Link
-                          key={item.to}
-                          to={item.to}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 8,
-                            padding: '8px 14px',
-                            textDecoration: 'none',
-                            background: active ? 'rgba(59,130,246,0.1)' : 'transparent',
-                            color: active ? '#93c5fd' : '#cbd5e1',
-                            fontSize: 12.5,
-                          }}
-                        >
-                          <Icon size={14} strokeWidth={active ? 2 : 1.75} />
-                          {item.label}
-                        </Link>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-            <button
-              onClick={logout}
-              aria-label="Sign out"
-              className="sign-out-btn"
-              title="Sign out"
-              style={{
-                padding: isMobile ? 8 : '5px 12px',
-                borderRadius: 5,
-                border: '1px solid #1e2028',
-                background: 'transparent',
-                color: '#64748b',
-                fontSize: 12,
-                fontWeight: 500,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-              }}
-            >
-              <LogOut size={14} />
-              {!isMobile && <span style={{ marginLeft: 6 }}>Sign out</span>}
-            </button>
+            <span className="workspace-scope__group">{user?.role === 'superadmin' ? 'All groups' : user?.group_id}</span>
           </div>
         </header>
-
-        {/* Content */}
-        <main style={{ flex: 1, overflow: 'auto', padding: 20 }}>
-          <Outlet />
-        </main>
+        <main id="workspace-content" className="app-content" tabIndex={-1}><Outlet /></main>
       </div>
       <AssistantWidget />
     </div>
