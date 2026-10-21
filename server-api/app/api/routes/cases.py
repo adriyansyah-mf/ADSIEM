@@ -54,9 +54,12 @@ async def list_cases(
     status: str | None = None, severity: str | None = None,
     hostname: str | None = None, search: str | None = None,
     start_time: datetime | None = None, end_time: datetime | None = None,
+    alert_id: UUID | None = None,
 ):
     from sqlalchemy import func
     q = _case_q(group_filter)
+    if alert_id:
+        q = q.where(Case.alert_id == alert_id)
     if status:
         q = q.where(Case.status == status)
     if severity:
@@ -84,11 +87,31 @@ async def create_case(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_permission("cases:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    case = Case(**body.model_dump(), group_id=current_user.group_id)
+    alert = None
+    if body.alert_id:
+        # The alert must be visible to the caller; the case lives in the alert's
+        # group so that group's analysts see it (matters for superadmins).
+        alert = await fetch_scoped(db, Alert, body.alert_id, group_filter, detail="Alert not found")
+    case = Case(**body.model_dump(), group_id=alert.group_id if alert else current_user.group_id)
+    if alert:
+        ioc = {"source_ip": alert.source_ip, "mitre_techniques": list(alert.mitre_techniques or [])}
+        if alert.hostname:
+            ioc["hostname"] = alert.hostname
+            ioc["affected_hosts"] = [alert.hostname]
+        case.ioc_data = {k: v for k, v in ioc.items() if v}
     db.add(case)
+    await db.flush()
+    if alert:
+        db.add(CaseNote(
+            case_id=case.id, author_id=current_user.id, is_ai_generated=False,
+            content=(f"Case created manually by **{current_user.username}** from alert "
+                     f"[{alert.title}](/alerts/{alert.id}) ({alert.severity}"
+                     + (f", host {alert.hostname}" if alert.hostname else "") + ")."),
+        ))
     await db.commit()
-    await db.refresh(case)
+    case = await fetch_scoped(db, Case, case.id, None, options=[selectinload(Case.notes)], detail="Case not found")
     background.add_task(audit_log, db, current_user.id, "case_created", "case", str(case.id))
     return CaseOut.model_validate(case)
 

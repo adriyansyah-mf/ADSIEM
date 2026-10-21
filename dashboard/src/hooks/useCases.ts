@@ -23,6 +23,38 @@ export function useCases(page = 1, filters: CaseFilters = {}) {
   })
 }
 
+/** Cases whose primary alert is this one (the AI's or an analyst's). */
+export function useAlertCases(alertId: string) {
+  return useQuery<PaginatedResponse<Case>>({
+    queryKey: ['cases', 'by-alert', alertId],
+    queryFn: () => api.get('/api/cases', { params: { alert_id: alertId, page_size: 5 } }).then(r => r.data),
+  })
+}
+
+export interface CaseCreateBody {
+  title: string
+  description?: string
+  severity: Case['severity']
+  alert_id?: string
+}
+
+export function useCreateCase() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CaseCreateBody) => api.post('/api/cases', body).then(r => r.data as Case),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cases'] })
+      emitToast('Case created', 'success')
+    },
+    onError: (err: any) => {
+      const detail = err?.response?.status === 403
+        ? 'You need the cases:manage permission to create cases'
+        : err?.response?.data?.detail ?? 'Failed to create case'
+      emitToast(typeof detail === 'string' ? detail : 'Failed to create case', 'error')
+    },
+  })
+}
+
 export function useCase(id: string) {
   return useQuery<Case>({
     queryKey: ['case', id],
