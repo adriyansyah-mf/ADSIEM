@@ -35,6 +35,29 @@ EVENT = {"id": "event-fixture", "agent_id": "agent-fixture", "group_id": "financ
          "decoded_fields": {"process.command_line": "powershell.exe -NoProfile " + "evidence-" * 80 + "END-OF-DECODED-EVIDENCE", "source.ip": "192.0.2.42"}}
 
 
+HUNT = {"id": "hunt-fixture", "ioc_type": "ip", "ioc_value": "192.0.2.42", "status": "done",
+        "group_id": "finance", "alert_count": 2, "event_count": 7, "fim_count": 1, "risk_level": "high",
+        "analysis": json.dumps({"attack_narrative": "Review **suspicious activity** before containment.",
+                                "mitre_techniques": ["T1059.001"], "kill_chain_phase": "execution",
+                                "recommended_actions": ["Validate the endpoint owner"]}),
+        "timeline": [{"id": "alert-fixture", "time": ALERT["created_at"], "type": "alert", "severity": "high",
+                      "title": "evidence-" * 100 + "END-OF-HUNT-EVIDENCE"}],
+        "related_alert_ids": ["alert-fixture"], "created_at": ALERT["created_at"], "completed_at": ALERT["created_at"]}
+SCHEDULE = {"id": "schedule-fixture", "name": "Nightly finance hunt", "ioc_type": "ip", "ioc_value": "192.0.2.42",
+            "interval_hours": 24, "group_id": "finance", "is_enabled": True, "last_run_at": None,
+            "created_at": ALERT["created_at"]}
+UEBA_SCORE = {"entity_type": "user", "entity_value": "finance\\alex@example.test", "group_id": "finance",
+              "risk_score": 84.5, "anomaly_count": 3, "last_anomaly_at": ALERT["created_at"],
+              "last_seen_at": ALERT["created_at"], "updated_at": ALERT["created_at"]}
+UEBA_ANOMALY = {"id": "anomaly-fixture", "entity_type": "user", "entity_value": UEBA_SCORE["entity_value"],
+                "anomaly_score": 0.823, "risk_score": 84.5, "features": {"failed_ratio": 0.75, "unique_ips": 4},
+                "alert_id": "alert-fixture", "case_id": "case-fixture", "ai_action": "monitor",
+                "ai_narrative": "Verify the endpoint owner before response.", "detected_at": ALERT["created_at"],
+                "mitre_techniques": [{"id": "T1110", "name": "Brute Force"}],
+                "reasons": [{"feature": "failed_ratio", "value": 0.75, "z": 3.2,
+                             "text": "evidence-" * 90 + "END-OF-UEBA-EVIDENCE"}]}
+
+
 @pytest.fixture
 def enterprise(page):
     from playwright.sync_api import expect
@@ -45,7 +68,10 @@ def enterprise(page):
         "state": {"accessToken": "fixture-only", "user": USER}, "version": 0,
     })) + ")")
     state = {"mode": "normal", "requests": [], "writes": [], "agent": dict(AGENT),
-             "case": dict(CASE), "role": "superadmin", "write_error": False}
+             "case": dict(CASE), "role": "superadmin", "write_error": False,
+             "hunts": [dict(HUNT)], "schedules": [dict(SCHEDULE)], "ueba_errors": [],
+             "ueba_status": {"status": "ready", "trained_at": ALERT["created_at"], "user_snapshot_count": 72, "ip_snapshot_count": 48, "host_snapshot_count": 12},
+             "ueba_anomalies": [dict(UEBA_ANOMALY)], "ueba_history": [{"day": "2026-10-20", "max_risk": 60, "anomaly_count": 1}, {"day": "2026-10-21", "max_risk": 84.5, "anomaly_count": 2}]}
 
     def respond(route):
         url = urlparse(route.request.url)
@@ -60,6 +86,39 @@ def enterprise(page):
         body = []
         if path == "/api/auth/me":
             body = {**USER, "role": state["role"]}
+        elif path.startswith("/api/ueba/"):
+            part = "status" if path.endswith("/status") else "entities" if path.endswith("/entities") else "history" if path.endswith("/history") else "detail"
+            if part in state["ueba_errors"] or state["mode"] == "error":
+                status, body = 503, {"detail": "Fixture outage"}
+            elif part == "status":
+                body = state["ueba_status"]
+            elif part == "entities":
+                query = parse_qs(url.query)
+                entity_type = query.get("entity_type", ["user"])[0]
+                item = {**UEBA_SCORE, "entity_type": entity_type, "entity_value": "192.0.2.42" if entity_type == "ip" else UEBA_SCORE["entity_value"]}
+                body = [] if state["mode"] == "empty" or float(query.get("min_risk", [0])[0]) > 84.5 else [item]
+            elif part == "detail":
+                body = {"score": UEBA_SCORE, "anomalies": state["ueba_anomalies"]}
+            else:
+                body = {"entity_type": "user", "entity_value": UEBA_SCORE["entity_value"], "days": 30, "history": state["ueba_history"]}
+        elif path in ("/api/hunts", "/api/hunt-schedules"):
+            key = "hunts" if path == "/api/hunts" else "schedules"
+            if route.request.method == "POST":
+                template = HUNT if key == "hunts" else SCHEDULE
+                body = {**template, **route.request.post_data_json, "id": "created-fixture"}
+                if key == "hunts":
+                    body.update(status="pending", analysis=None, timeline=None, alert_count=0, event_count=0, fim_count=0, risk_level=None, completed_at=None)
+                state[key].insert(0, body)
+            else:
+                body = [] if state["mode"] == "empty" else state[key]
+                if state["mode"] == "error":
+                    status, body = 503, {"detail": "Fixture outage"}
+        elif path == "/api/hunt-schedules/schedule-fixture/toggle":
+            state["schedules"][0]["is_enabled"] = not state["schedules"][0]["is_enabled"]
+            body = state["schedules"][0]
+        elif path == "/api/hunt-schedules/schedule-fixture":
+            state["schedules"] = []
+            status, body = 204, None
         elif path == "/api/alerts":
             if state["mode"] == "error":
                 status, body = 503, {"detail": "Fixture outage"}
@@ -129,6 +188,8 @@ def enterprise(page):
     ("/cases/case-fixture", CASE["title"]),
     ("/cases", "Cases"), ("/agents", "Agents"),
     ("/logs", "Raw logs"), ("/events", "Events"),
+    ("/hunts", "Threat hunting"),
+    ("/ueba", "Behavior analytics"),
 ])
 def test_workspace_responsive(page, enterprise, width, route, title, tmp_path):
     _, expect = enterprise
@@ -494,3 +555,342 @@ def test_query_states_preserve_search(page, enterprise, resource, mode, tmp_path
     expect(page.get_by_role("heading", name=title, exact=True)).to_be_visible(timeout=15000)
     expect(page.get_by_role("textbox", name="Lucene query", exact=True)).to_have_value("unknown")
     page.screenshot(path=str(tmp_path / "query-state.png"))
+
+
+def test_hunt_submission_trims_input_and_preserves_failure(page, enterprise):
+    state, expect = enterprise
+    page.goto(BASE_URL + "/hunts")
+    value = page.get_by_role("textbox", name="Indicator value", exact=True)
+    value.fill("  finance-server  ")
+    page.get_by_role("combobox", name="Indicator type", exact=True).select_option("hostname")
+    state["write_error"] = True
+    value.press("Enter")
+    expect(page.get_by_role("alert").filter(has_text="Fixture outage")).to_be_visible()
+    expect(value).to_have_value("  finance-server  ")
+    state["write_error"] = False
+    page.get_by_role("button", name="Start hunt", exact=True).click()
+    expect(value).to_have_value("")
+    expect(page.get_by_role("cell", name="finance-server HOSTNAME", exact=True)).to_be_visible()
+    assert state["writes"][-1] == ("POST", "/api/hunts", {"ioc_type": "hostname", "ioc_value": "finance-server"})
+
+
+@pytest.mark.parametrize("width", [390, 1440])
+def test_hunt_details_preserve_long_evidence(page, enterprise, width, tmp_path):
+    _, expect = enterprise
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(BASE_URL + "/hunts")
+    row = page.locator("tbody tr[tabindex]").filter(has_text="192.0.2.42").last
+    row.focus()
+    page.keyboard.press("Enter")
+    dialog = page.get_by_role("dialog", name="Hunt · 192.0.2.42", exact=True)
+    expect(dialog).to_be_visible()
+    expect(dialog).to_contain_text("END-OF-HUNT-EVIDENCE")
+    expect(dialog).to_contain_text("suspicious activity")
+    expect(dialog).to_contain_text("T1059.001")
+    assert dialog.evaluate("el => el.scrollWidth <= el.clientWidth")
+    page.screenshot(path=str(tmp_path / "hunt-detail.png"))
+    dialog.evaluate("el => el.scrollTop = el.scrollHeight")
+    page.screenshot(path=str(tmp_path / "hunt-detail-end.png"))
+    page.keyboard.press("Escape")
+    expect(row).to_be_focused()
+
+
+@pytest.mark.parametrize("width", [390, 1440])
+def test_schedule_delete_requires_confirmation_and_retries(page, enterprise, tmp_path, width):
+    state, expect = enterprise
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(BASE_URL + "/hunts")
+    trigger = page.get_by_role("button", name="Delete Nightly finance hunt", exact=True)
+    trigger.click()
+    dialog = page.get_by_role("dialog", name="Delete Nightly finance hunt?", exact=True)
+    expect(dialog).to_be_visible()
+    assert not state["writes"]
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    expect(trigger).to_be_focused()
+    assert not state["writes"]
+    trigger.click()
+    state["write_error"] = True
+    dialog.get_by_role("button", name="Delete schedule", exact=True).click()
+    expect(dialog.get_by_role("alert")).to_contain_text("Fixture outage")
+    page.screenshot(path=str(tmp_path / "delete-schedule-error.png"))
+    state["write_error"] = False
+    dialog.get_by_role("button", name="Delete schedule", exact=True).click()
+    expect(dialog).not_to_be_visible()
+    expect(page.get_by_role("heading", name="No scheduled hunts", exact=True)).to_be_visible()
+
+
+def test_schedule_create_and_toggle(page, enterprise):
+    state, expect = enterprise
+    page.goto(BASE_URL + "/hunts")
+    page.get_by_role("button", name="Pause Nightly finance hunt", exact=True).click()
+    expect(page.get_by_role("button", name="Resume Nightly finance hunt", exact=True)).to_be_visible()
+    page.get_by_role("button", name="New schedule", exact=True).click()
+    page.get_by_role("textbox", name="Schedule name", exact=True).fill("  Weekly review  ")
+    page.get_by_role("textbox", name="Scheduled indicator value", exact=True).fill("  198.51.100.9  ")
+    page.get_by_role("spinbutton", name="Interval (hours)", exact=True).fill("48")
+    page.get_by_role("button", name="Create schedule", exact=True).click()
+    expect(page.get_by_role("cell", name="Weekly review", exact=True)).to_be_visible()
+    assert state["writes"][-1] == ("POST", "/api/hunt-schedules", {"name": "Weekly review", "ioc_type": "ip", "ioc_value": "198.51.100.9", "interval_hours": 48})
+
+
+@pytest.mark.parametrize("mode", ["empty", "error"])
+def test_hunt_history_and_schedule_query_states(page, enterprise, mode):
+    state, expect = enterprise
+    state["mode"] = mode
+    page.goto(BASE_URL + "/hunts")
+    titles = ["Could not load hunt history", "Could not load schedules"] if mode == "error" else ["No hunts yet", "No scheduled hunts"]
+    for title in titles:
+        expect(page.get_by_role("heading", name=title, exact=True)).to_be_visible(timeout=15000)
+    if mode == "error":
+        assert page.get_by_role("heading", name="No hunts yet", exact=True).count() == 0
+
+
+def test_hunt_submission_locks_draft_while_pending(page, enterprise):
+    _, expect = enterprise
+    held = []
+
+    def delay_start(route):
+        if route.request.method == "POST":
+            held.append(route)
+        else:
+            route.fallback()
+
+    page.route(BASE_URL + "/api/hunts", delay_start)
+    page.goto(BASE_URL + "/hunts")
+    value = page.get_by_role("textbox", name="Indicator value", exact=True)
+    value.fill("192.0.2.77")
+    page.get_by_role("button", name="Start hunt", exact=True).click()
+    expect(page.get_by_role("button", name="Starting…", exact=True)).to_be_disabled()
+    expect(value).to_be_disabled()
+    assert len(held) == 1
+    held[0].fulfill(status=201, content_type="application/json", body=json.dumps({**HUNT, "status": "pending"}))
+    expect(value).to_be_enabled()
+    expect(value).to_have_value("")
+
+
+def test_open_hunt_updates_when_polling_completes(page, enterprise):
+    state, expect = enterprise
+    state["hunts"] = [{**HUNT, "status": "running", "analysis": None, "timeline": None, "completed_at": None}]
+    page.clock.install()
+    page.goto(BASE_URL + "/hunts")
+    page.get_by_role("region", name="Hunt history", exact=True).get_by_role("cell", name="192.0.2.42 IP", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Hunt · 192.0.2.42", exact=True)
+    expect(dialog.get_by_role("heading", name="Hunt in progress…", exact=True)).to_be_visible()
+    state["hunts"] = [dict(HUNT)]
+    page.clock.fast_forward(8000)
+    expect(dialog).to_contain_text("suspicious activity")
+    expect(dialog).to_contain_text("END-OF-HUNT-EVIDENCE")
+
+
+@pytest.mark.parametrize("analysis", ["not-json-original-evidence", '{"attack_narrative":12,"mitre_techniques":{},"recommended_actions":[false]}'])
+def test_unexpected_hunt_analysis_does_not_crash(page, enterprise, analysis):
+    state, expect = enterprise
+    state["hunts"] = [{**HUNT, "analysis": analysis}]
+    page.goto(BASE_URL + "/hunts")
+    page.get_by_role("region", name="Hunt history", exact=True).get_by_role("cell", name="192.0.2.42 IP", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Hunt · 192.0.2.42", exact=True)
+    expect(dialog).to_contain_text("END-OF-HUNT-EVIDENCE")
+    if analysis == "not-json-original-evidence":
+        expect(dialog).to_contain_text("not-json-original-evidence")
+    else:
+        expect(dialog).to_contain_text("No narrative was returned.")
+
+
+def test_schedule_creation_failure_preserves_draft(page, enterprise, tmp_path):
+    state, expect = enterprise
+    state["write_error"] = True
+    page.set_viewport_size({"width": 390, "height": 900})
+    page.goto(BASE_URL + "/hunts")
+    page.get_by_role("button", name="New schedule", exact=True).click()
+    page.get_by_role("textbox", name="Schedule name", exact=True).fill("Analyst review")
+    value = page.get_by_role("textbox", name="Scheduled indicator value", exact=True)
+    value.fill("finance-server")
+    page.get_by_role("button", name="Create schedule", exact=True).click()
+    expect(page.get_by_role("alert")).to_contain_text("Fixture outage")
+    expect(value).to_have_value("finance-server")
+    assert page.locator("main").evaluate("el => el.scrollWidth <= el.clientWidth")
+    page.screenshot(path=str(tmp_path / "schedule-form-error.png"))
+
+
+def test_hunt_rejects_whitespace_without_request(page, enterprise):
+    state, expect = enterprise
+    page.goto(BASE_URL + "/hunts")
+    page.get_by_role("textbox", name="Indicator value", exact=True).fill("   ")
+    page.get_by_role("button", name="Start hunt", exact=True).click()
+    expect(page.get_by_role("alert")).to_contain_text("Enter an indicator value.")
+    assert not state["writes"]
+
+
+def test_schedule_interval_must_be_in_range(page, enterprise):
+    state, expect = enterprise
+    page.goto(BASE_URL + "/hunts")
+    page.get_by_role("button", name="New schedule", exact=True).click()
+    page.get_by_role("textbox", name="Schedule name", exact=True).fill("Review")
+    page.get_by_role("textbox", name="Scheduled indicator value", exact=True).fill("192.0.2.42")
+    interval = page.get_by_role("spinbutton", name="Interval (hours)", exact=True)
+    for invalid in ["0", "169", "1.5"]:
+        interval.fill(invalid)
+        page.get_by_role("button", name="Create schedule", exact=True).click()
+        assert not interval.evaluate("el => el.validity.valid")
+        assert not state["writes"]
+    interval.fill("168")
+    page.get_by_role("button", name="Create schedule", exact=True).click()
+    expect(page.get_by_role("cell", name="Review", exact=True)).to_be_visible()
+
+
+def test_failed_hunt_shows_returned_error(page, enterprise):
+    state, expect = enterprise
+    state["hunts"] = [{**HUNT, "status": "failed", "analysis": '{"attack_narrative":"Provider timeout; start a new hunt."}', "timeline": None}]
+    page.goto(BASE_URL + "/hunts")
+    page.get_by_role("region", name="Hunt history", exact=True).get_by_role("cell", name="192.0.2.42 IP", exact=True).click()
+    expect(page.get_by_role("dialog").get_by_role("alert")).to_contain_text("Provider timeout; start a new hunt.")
+
+
+def test_hunt_export_preserves_evidence_counts(page, enterprise):
+    _, expect = enterprise
+    page.goto(BASE_URL + "/hunts")
+    export = page.get_by_role("button", name="Export page", exact=True)
+    expect(export).to_be_enabled()
+    with page.expect_download() as pending:
+        export.click()
+    download = pending.value
+    assert download.suggested_filename == "hunts-recent.csv"
+    content = download.path().read_text()
+    assert '"192.0.2.42"' in content
+    assert '"2 alerts · 7 events · 1 FIM"' in content
+    assert '"2026-10-21T07:32:00Z"' in content
+
+
+def test_ueba_model_failure_is_not_collecting_data(page, enterprise):
+    state, expect = enterprise
+    state["ueba_errors"] = ["status"]
+    page.goto(BASE_URL + "/ueba")
+    expect(page.get_by_role("heading", name="Could not load model status", exact=True)).to_be_visible(timeout=15000)
+    expect(page.get_by_text("Collecting baseline data", exact=True)).to_have_count(0)
+    expect(page.get_by_role("cell", name=UEBA_SCORE["entity_value"], exact=True)).to_be_visible()
+
+
+@pytest.mark.parametrize("width", [390, 1440])
+def test_ueba_detail_keyboard_evidence_and_encoded_history(page, enterprise, width, tmp_path):
+    state, expect = enterprise
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(BASE_URL + "/ueba")
+    row = page.locator("tbody tr[tabindex]").first
+    row.focus()
+    page.keyboard.press("Enter")
+    dialog = page.get_by_role("dialog", name="Entity · " + UEBA_SCORE["entity_value"], exact=True)
+    expect(dialog).to_be_visible()
+    expect(dialog).to_contain_text("END-OF-UEBA-EVIDENCE")
+    expect(dialog).to_contain_text("failed_ratio")
+    expect(dialog).to_contain_text("Verify the endpoint owner before response.")
+    expect(dialog.get_by_role("link", name="Open case", exact=True)).to_have_attribute("href", "/cases/case-fixture")
+    expect(dialog.get_by_role("img", name="Daily maximum risk over the last 30 days", exact=True)).to_be_visible()
+    dialog.locator("summary").filter(has_text="Feature values").click()
+    expect(dialog.get_by_role("cell", name="0.75", exact=True)).to_be_visible()
+    dialog.locator("summary").filter(has_text="Daily risk values").click()
+    expect(dialog.get_by_role("cell", name="84.5", exact=True)).to_be_visible()
+    assert any(url.path == "/api/ueba/user/finance%5Calex%40example.test/history" and parse_qs(url.query).get("days") == ["30"] for url in state["requests"])
+    assert dialog.evaluate("el => el.scrollWidth <= el.clientWidth")
+    page.screenshot(path=str(tmp_path / "ueba-detail.png"))
+    dialog.evaluate("el => el.scrollTop = el.scrollHeight")
+    page.screenshot(path=str(tmp_path / "ueba-detail-end.png"))
+    page.keyboard.press("Escape")
+    expect(row).to_be_focused()
+
+
+def test_ueba_entity_type_and_risk_filter_contract(page, enterprise):
+    state, expect = enterprise
+    page.goto(BASE_URL + "/ueba")
+    page.get_by_role("combobox", name="Entity type", exact=True).select_option("ip")
+    expect(page.get_by_role("cell", name="192.0.2.42", exact=True)).to_be_visible()
+    page.get_by_role("combobox", name="Minimum risk", exact=True).select_option("60")
+    expect(page.get_by_role("cell", name="192.0.2.42", exact=True)).to_be_visible()
+    assert any(parse_qs(url.query).get("entity_type") == ["ip"] and parse_qs(url.query).get("min_risk") == ["60"] for url in state["requests"])
+
+
+@pytest.mark.parametrize("mode", ["empty", "error"])
+def test_ueba_entities_empty_and_error_are_distinct(page, enterprise, mode):
+    state, expect = enterprise
+    if mode == "error":
+        state["ueba_errors"] = ["entities"]
+    else:
+        state["mode"] = mode
+    page.goto(BASE_URL + "/ueba")
+    expect(page.get_by_role("heading", name="Could not load entities" if mode == "error" else "No entities match this view", exact=True)).to_be_visible(timeout=15000)
+    if mode == "error":
+        expect(page.get_by_role("heading", name="No entities match this view", exact=True)).to_have_count(0)
+
+
+def test_ueba_cold_model_shows_actual_snapshots(page, enterprise):
+    state, expect = enterprise
+    state["ueba_status"].update(status="cold", trained_at=None, user_snapshot_count=7, ip_snapshot_count=4)
+    page.goto(BASE_URL + "/ueba")
+    expect(page.get_by_text("Collecting baseline data", exact=True)).to_be_visible()
+    summary = page.get_by_role("region", name="Detection model", exact=True)
+    expect(summary).to_contain_text("User snapshots7")
+    expect(summary).to_contain_text("IP snapshots4")
+
+
+@pytest.mark.parametrize("part", ["detail", "history"])
+def test_ueba_detail_queries_fail_independently(page, enterprise, part, tmp_path):
+    state, expect = enterprise
+    state["ueba_errors"] = [part]
+    page.goto(BASE_URL + "/ueba")
+    page.get_by_role("cell", name=UEBA_SCORE["entity_value"], exact=True).click()
+    dialog = page.get_by_role("dialog", name="Entity · " + UEBA_SCORE["entity_value"], exact=True)
+    expect(dialog.get_by_role("heading", name="Could not load entity details" if part == "detail" else "Could not load risk history", exact=True)).to_be_visible(timeout=15000)
+    if part == "history":
+        expect(dialog).to_contain_text("END-OF-UEBA-EVIDENCE")
+    page.screenshot(path=str(tmp_path / "ueba-query-error.png"))
+    state["ueba_errors"] = []
+    dialog.get_by_role("button", name="Try again", exact=True).click()
+    expect(dialog).to_contain_text("END-OF-UEBA-EVIDENCE")
+    expect(dialog.get_by_role("img", name="Daily maximum risk over the last 30 days", exact=True)).to_be_visible()
+
+
+@pytest.mark.parametrize("history", [[], [{"day": "2026-10-21", "max_risk": 84.5, "anomaly_count": 2}]])
+def test_ueba_empty_and_single_day_history(page, enterprise, history, tmp_path):
+    state, expect = enterprise
+    state["ueba_history"] = history
+    state["ueba_anomalies"] = []
+    page.goto(BASE_URL + "/ueba")
+    page.get_by_role("cell", name=UEBA_SCORE["entity_value"], exact=True).click()
+    dialog = page.get_by_role("dialog", name="Entity · " + UEBA_SCORE["entity_value"], exact=True)
+    expect(dialog).to_contain_text("No anomalies recorded for this entity.")
+    if history:
+        chart = dialog.get_by_role("img", name="Daily maximum risk over the last 30 days", exact=True)
+        expect(chart).to_be_visible()
+        expect(chart.locator("circle")).to_have_count(1)
+        dialog.locator("summary").filter(has_text="Daily risk values").click()
+        expect(dialog.get_by_role("cell", name="84.5", exact=True)).to_be_visible()
+    else:
+        expect(dialog).to_contain_text("No risk history recorded in the last 30 days.")
+    page.screenshot(path=str(tmp_path / "ueba-history.png"))
+
+
+def test_ueba_csv_retains_numeric_risk_and_anomaly_counts(page, enterprise):
+    _, expect = enterprise
+    page.goto(BASE_URL + "/ueba")
+    export = page.get_by_role("button", name="Export page", exact=True)
+    expect(export).to_be_enabled()
+    with page.expect_download() as pending:
+        export.click()
+    download = pending.value
+    assert download.suggested_filename == "ueba-user-entities.csv"
+    content = download.path().read_text()
+    assert '"84.5","3","2026-10-21T07:32:00Z"' in content
+
+
+def test_ueba_loading_status_does_not_claim_cold_model(page, enterprise):
+    _, expect = enterprise
+    held = []
+    page.route(BASE_URL + "/api/ueba/status", lambda route: held.append(route))
+    page.goto(BASE_URL + "/ueba")
+    try:
+        expect(page.get_by_role("heading", name="Loading model status…", exact=True)).to_be_visible()
+        expect(page.get_by_text("Collecting baseline data", exact=True)).to_have_count(0)
+        expect(page.get_by_role("cell", name=UEBA_SCORE["entity_value"], exact=True)).to_be_visible()
+    finally:
+        for route in held:
+            route.fulfill(status=200, content_type="application/json", body='{"status":"ready","trained_at":null,"user_snapshot_count":72,"ip_snapshot_count":48,"host_snapshot_count":12}')
+    expect(page.get_by_text("Ready", exact=True)).to_be_visible()

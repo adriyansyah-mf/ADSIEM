@@ -7,6 +7,9 @@ const COLORS: Readonly<Record<string, string>> = {
   pending_approval: 'var(--accent-yellow)', isolated: 'var(--accent-red)',
   resolved: 'var(--accent-green)', online: 'var(--accent-green)',
   closed: 'var(--text-muted)', false_positive: 'var(--text-muted)', offline: 'var(--text-muted)',
+  pending: 'var(--text-muted)', running: 'var(--accent-cyan)', done: 'var(--accent-green)',
+  failed: 'var(--accent-red)', enabled: 'var(--accent-green)', paused: 'var(--text-muted)',
+  ready: 'var(--accent-green)', collecting_data: 'var(--accent-yellow)', monitor: 'var(--accent-yellow)', create_case: 'var(--accent-orange)', escalate: 'var(--accent-red)',
 }
 
 export default function StatusBadge({ status }: { readonly status: string }) {

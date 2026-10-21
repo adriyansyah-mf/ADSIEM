@@ -154,6 +154,28 @@ a.metric-card:hover { background: var(--bg-hover); }
 .data-table tbody tr:hover { background: var(--bg-hover); }
 .table-primary { font-weight: 500; max-width: 42ch; min-width: 20ch; white-space: normal; overflow-wrap: anywhere; }
 .table-secondary { color: var(--text-muted); font-size: 12px; margin-top: var(--space-1); }
+.hunt-search { display: grid; min-width: 0; grid-template-columns: minmax(160px, 1fr) minmax(0, 3fr) auto; align-items: end; gap: var(--space-3); }
+.hunt-form-grid { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.hunt-schedule-form { padding: var(--space-4); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--bg-panel); }
+.hunt-timeline { list-style: none; margin: 0; padding: 0; }
+.hunt-timeline li { padding-block: var(--space-4); border-top: 1px solid var(--border-default); overflow-wrap: anywhere; }
+.hunt-analysis { overflow-wrap: anywhere; }
+.hunt-analysis pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.hunt-analysis table { display: block; max-width: 100%; overflow-x: auto; }
+.hunt-analysis img { max-width: 100%; height: auto; }
+.hunt-analysis h1, .hunt-analysis h2, .hunt-analysis h3 { font-family: var(--font-ui) !important; letter-spacing: normal !important; text-transform: none !important; color: var(--text-primary) !important; }
+.hunt-analysis code { font-family: var(--font-mono) !important; }
+.ueba-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); padding: var(--space-4); }
+.ueba-model-stats { display: flex; flex-wrap: wrap; gap: var(--space-6); margin: 0; }
+.ueba-model-stats dt { color: var(--text-muted); font-size: 12px; }
+.ueba-model-stats dd { margin: var(--space-1) 0 0; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ueba-chart-frame { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: var(--space-2); }
+.ueba-chart-scale { display: flex; flex-direction: column; justify-content: space-between; padding-block: 20px; font-size: 12px; color: var(--text-muted); }
+.ueba-risk-chart { display: block; width: 100%; height: 160px; }
+.ueba-anomalies { list-style: none; margin: 0; padding: 0; }
+.ueba-anomalies > li { padding-block: var(--space-5); border-top: 1px solid var(--border-default); overflow-wrap: anywhere; }
+.ueba-assessment { padding: var(--space-4); background: var(--bg-panel); border: 1px solid var(--border-default); border-radius: var(--radius-control); }
+.ueba-assessment p { margin-bottom: var(--space-3); }
 .case-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--space-6); align-items: start; }
 .case-sidebar { min-width: 0; }
 .case-ioc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: var(--space-3); }
@@ -235,6 +257,8 @@ a.metric-card:hover { background: var(--bg-hover); }
   .filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
+  .ueba-filters { grid-template-columns: minmax(0, 1fr); }
+  .hunt-search, .hunt-form-grid { grid-template-columns: minmax(0, 1fr); }
   .telemetry-search, .query-condition, .evidence-metadata { grid-template-columns: minmax(0, 1fr); }
   .workspace { gap: var(--space-5); }
   .dashboard-charts, .filter-bar { grid-template-columns: minmax(0, 1fr); }

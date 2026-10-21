@@ -163,3 +163,124 @@ coverage. The existing approximately 1.89 MB main-bundle warning remains; this i
 not a bundle-performance, Lighthouse, full-app or WCAG-certification pass. No
 dependencies, backend API contracts, release artifacts or deployment were changed.
 Changes remain uncommitted; no push was performed.
+
+## Fourth implementation — Threat hunting
+
+Continued after the approved enterprise foundation was pushed as `f2de8cf`.
+This stage applies the same token system to `/hunts` only:
+
+- Labelled IOC submission trims input, rejects whitespace, preserves failed
+  drafts, and locks fields during a pending request. Existing IOC types and API
+  contracts are unchanged.
+- Scheduled hunts use the common table and separate enabled/paused status.
+  Creation has a labelled, responsive form and whole-hour interval validation
+  (1–168 hours, retaining the previous UI range). Pause/resume keeps the existing
+  endpoint; deletion names the schedule, requires confirmation, retains prior
+  results, and keeps failed requests retryable inside the dialog.
+- Recent hunts describe the API's latest-50 window rather than an inferred
+  system-wide total. Status and risk are separate. Keyboard row opening exposes
+  read-only AI analysis, MITRE, recommendations, timestamps, FIM counts and full
+  wrapping evidence. Open details follow the existing eight-second list polling.
+  Malformed analysis is shown as original text; unexpected structured field
+  types do not crash the view. AI assessment is explicitly labelled for review.
+  CSV evidence values include alert, event and FIM counts rather than exporting
+  only the first backing field.
+- Schedule network state now lives in dedicated TanStack Query hooks rather than
+  inside the page. No backend routes, permissions, dependencies or agents changed.
+
+Two initial browser regressions failed against the prior production build on the
+missing labelled controls/confirmation. A separate delayed-request regression
+caught editable pending drafts before the fields were disabled. One test selector
+was corrected to include the indicator type subtitle in a table cell's accessible
+name; production behavior was not weakened to accommodate it.
+The CSV-count regression also failed against the initial implementation before
+adding the composite export value.
+
+Fresh verification against the final production build:
+
+```text
+npm run build -- --outDir /tmp/adsiem-enterprise-stage4-build
+PASS (TypeScript + Vite; main JS 1,893.72 kB, gzip 563.84 kB)
+
+DASHBOARD_TEST_URL=http://127.0.0.1:33421 python -m pytest \
+  tests/dashboard/test_enterprise_ui.py -q --tb=short \
+  --basetemp=/tmp/adsiem-ui-stage4-verified
+92 passed in 117.39s
+
+check-accent-stripes: 3 file(s), no accent stripes
+git diff --check: PASS
+```
+
+Evidence: `/tmp/adsiem-ui-stage4-verified/`. Primary route captures include `/hunts`
+at 390/768/1440/1920px with end-scroll screenshots. Hunt detail and schedule-delete
+dialogs are captured at phone/desktop sizes; the schedule form's failed draft is
+captured on a phone. Tests also cover polling completion, malformed/failed
+analysis, whitespace rejection, interval limits and schedule mutations.
+
+Browser requests use synthetic fixtures, including mutations. No real hunt,
+schedule, Elasticsearch query, AI/provider call, database or endpoint action was
+executed. This is targeted browser QA, not full backend integration, a performance
+audit or WCAG certification. The existing large-main-bundle warning remains.
+Other specialized screens still need dedicated redesign. This stage is local,
+not committed, pushed or deployed.
+
+## Fifth implementation — Behavior analytics / UEBA
+
+The existing `/ueba` flow now follows the same approved enterprise design system:
+
+- Common heading, labelled entity/minimum-risk filters, and a shared table with
+  density, column selection and CSV. Counts explicitly describe the returned
+  top-50 set, not global totals. Raw numerical risks remain unchanged; display
+  severity bands use the prior 40/60/80 color boundaries.
+- A model-status panel separates pending, failed, ready and baseline-collection
+  states. Failed/pending status requests cannot produce a collecting-data claim
+  or zero snapshot counts. Snapshot observations are no longer presented as a
+  fixed elapsed-hour estimate. Model queries and entity queries fail independently.
+- Keyboard-accessible read-only entity dialogs retain complete reasons, MITRE,
+  AI assessment, case/alert navigation, numerical feature values, timestamps and
+  recent anomaly records. Risk score and model anomaly score are labelled
+  separately. Existing feature-display thresholds are retained and labelled;
+  they do not change the model risk calculation.
+- A typed history hook replaces the page's untyped inline request and encodes
+  entity identifiers consistently. Details/history have separate retryable error
+  states and preserve their existing endpoints. A responsive 30-day daily-maximum
+  chart has fixed-size readable axis labels and an expandable data-table
+  alternative. Empty and single-day histories are handled explicitly; missing
+  days are not inserted as zero risk.
+
+The status-failure regression was first run against the prior production build:
+it failed while that build displayed collecting data and zero snapshots. The
+initial implementation then passed all 13 targeted UEBA cases. Phone visual
+inspection caught unreadably scaled SVG-axis text; axis labels were moved into
+fixed-size HTML before the final regression run. Browser coverage also exercises
+encoded user identifiers, filter query parameters, full long evidence, Escape
+and focus return, open feature/daily-value tables, CSV raw numeric values,
+independent query retries, and model-pending behavior.
+
+Fresh verification against the final production build:
+
+```text
+npm run build -- --outDir /tmp/adsiem-enterprise-stage5-build
+PASS (TypeScript + Vite; main JS 1,892.25 kB, gzip 564.35 kB)
+
+DASHBOARD_TEST_URL=http://127.0.0.1:33601 python -m pytest \
+  tests/dashboard/test_enterprise_ui.py -q --tb=short \
+  --basetemp=/tmp/adsiem-ui-stage5-verified
+109 passed in 173.81s
+
+check-accent-stripes: 3 file(s), no accent stripes
+git diff --check: PASS
+```
+
+Evidence: `/tmp/adsiem-ui-stage5-verified/`. UEBA and the eight earlier primary
+routes are captured at 390/768/1440/1920px with end-scroll images. UEBA dialogs
+are captured at 390/1440px, including complete long evidence. Desktop/phone
+captures were visually inspected; table/modal overflow is checked by assertions.
+
+All browser API requests are intercepted by synthetic fixtures. No real model
+training/scoring, Redis, database, provider, endpoint or response action was
+exercised. Backend permission/group-scoping contracts and dependencies are
+unchanged. The existing approximately 1.89 MB main-bundle warning remains.
+This is not an independent review, backend integration, performance audit, or
+whole-application/WCAG certification. Hunting and UEBA remain local changes,
+not committed, pushed or deployed.
