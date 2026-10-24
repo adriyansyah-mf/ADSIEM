@@ -44,11 +44,19 @@ func waitPublisherSignal(t *testing.T, signal <-chan struct{}) {
 	}
 }
 
+// stopPublisher joins p as the Stop contract says: ErrPublisherRunning means
+// appends are still flushing (NTFS flushes are slow on CI runners), so call
+// Stop again, up to a generous bound.
 func stopPublisher(t *testing.T, p *Publisher) error {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	return p.Stop(ctx)
+	for attempt := 0; ; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := p.Stop(ctx)
+		cancel()
+		if !errors.Is(err, ErrPublisherRunning) || attempt == 9 {
+			return err
+		}
+	}
 }
 
 func TestPublisherSubmitWaitsForDurableFlush(t *testing.T) {
