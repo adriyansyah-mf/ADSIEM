@@ -128,13 +128,13 @@ func (rt *durableRuntime) report() any {
 	return r
 }
 
-func (rt *durableRuntime) startSender(t evidence.Transport, supportsV2 func() bool) {
+func (rt *durableRuntime) startSender(t evidence.Transport, supportsV2 func() bool, batchMax func() int) {
 	if rt.journal == nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.cancel, rt.done = cancel, make(chan struct{})
-	sender := &evidence.Sender{Journal: rt.journal, Transport: t, SupportsV2: supportsV2}
+	sender := &evidence.Sender{Journal: rt.journal, Transport: t, SupportsV2: supportsV2, BatchMax: batchMax}
 	rt.sender.Store(sender)
 	go func() {
 		defer close(rt.done)

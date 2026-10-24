@@ -11,19 +11,25 @@ import (
 )
 
 func TestHeartbeatEvidenceProtocolFollowsTheLatestResponse(t *testing.T) {
-	defer storeEvidenceProtocols(nil)
+	defer storeEvidenceProtocols(nil, 0)
 	for _, c := range []struct {
 		protocols []int
+		batchMax  int
 		want      bool
+		wantBatch int
 	}{
-		{[]int{2}, true},
-		{nil, false}, // the server disabled its inbox: stop sending v2
-		{[]int{1, 2, 3}, true},
-		{[]int{1, 3}, false},
+		{[]int{2}, 0, true, 0}, // a server without the batch endpoint
+		{[]int{2}, 500, true, 500},
+		{nil, 500, false, 0}, // the server disabled its inbox: stop sending v2
+		{[]int{1, 2, 3}, -1, true, 0},
+		{[]int{1, 3}, 0, false, 0},
 	} {
-		storeEvidenceProtocols(c.protocols)
+		storeEvidenceProtocols(c.protocols, c.batchMax)
 		if got := SupportsEvidenceV2(); got != c.want {
 			t.Fatalf("protocols %v: supported=%v", c.protocols, got)
+		}
+		if got := EvidenceBatchMax(); got != c.wantBatch {
+			t.Fatalf("protocols %v batch %d: batch max %d", c.protocols, c.batchMax, got)
 		}
 	}
 }

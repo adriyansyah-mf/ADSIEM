@@ -39,11 +39,26 @@ FLOW = {
 _flow_sent = False
 
 # MOCK_EVIDENCE=1: advertise durable ingest (evidence_protocols [2]) and answer
-# POST /api/ingest/v2/log with matching receipts, recorded in <out>/evidence.jsonl.
+# POST /api/ingest/v2/log (and the /v2/logs batch endpoint, evidence_batch_max
+# 500) with matching receipts, recorded in <out>/evidence.jsonl.
 # Receipts are stable per event ID (accepted, then duplicate) like server-api's,
 # but this is memory: it exercises the agent's durable mode, not PostgreSQL.
 EVIDENCE = bool(os.environ.get("MOCK_EVIDENCE"))
 _receipts: dict[str, str] = {}
+
+
+def _accept(envelope) -> dict:
+    """One result as server-api's batch endpoint returns it (also the single
+    endpoint's receipt minus protocol_version)."""
+    event_id = envelope.get("event_id") if isinstance(envelope, dict) else None
+    if not isinstance(envelope, dict) or envelope.get("protocol_version") != 2 or not event_id:
+        return {"event_id": event_id, "status": "rejected", "code": 422}
+    status = "duplicate" if event_id in _receipts else "accepted"
+    receipt = _receipts.setdefault(event_id, str(uuid.uuid4()))
+    if status == "accepted":
+        with open(OUT / "evidence.jsonl", "a") as fh:
+            fh.write(json.dumps(envelope) + "\n")
+    return {"event_id": event_id, "status": status, "receipt_id": receipt}
 
 SOURCES = json.loads(os.environ.get("MOCK_SOURCES") or "null") or [
     {"path": "eventlog:Application", "log_type": "windows_application", "is_enabled": True},
@@ -77,18 +92,18 @@ class Handler(BaseHTTPRequestHandler):
                 fh.write(json.dumps(payload) + "\n")
             return self._reply(200, {"config_hash": "mock", "log_sources": SOURCES, "fim_paths": [], "tasks": [],
                                      "uninstall_token_sha256": hashlib.sha256(UNINSTALL_TOKEN.encode()).hexdigest(),
-                                     "evidence_protocols": [2] if EVIDENCE else []})
+                                     "evidence_protocols": [2] if EVIDENCE else [],
+                                     "evidence_batch_max": 500 if EVIDENCE else 0})
         if path == "/api/ingest/v2/log" and EVIDENCE:
-            event_id = payload.get("event_id")
-            if payload.get("protocol_version") != 2 or not event_id:
+            result = _accept(payload)
+            if result["status"] == "rejected":
                 return self._reply(422, {"detail": "invalid_evidence_envelope"})
-            status = "duplicate" if event_id in _receipts else "accepted"
-            receipt = _receipts.setdefault(event_id, str(uuid.uuid4()))
-            if status == "accepted":
-                with open(OUT / "evidence.jsonl", "a") as fh:
-                    fh.write(json.dumps(payload) + "\n")
-            return self._reply(202, {"protocol_version": 2, "event_id": event_id, "status": status,
-                                     "receipt_id": receipt})
+            return self._reply(202, {"protocol_version": 2, **result})
+        if path == "/api/ingest/v2/logs" and EVIDENCE:
+            events = payload.get("events")
+            if payload.get("protocol_version") != 2 or not isinstance(events, list) or not 1 <= len(events) <= 500:
+                return self._reply(422, {"detail": "invalid_evidence_batch"})
+            return self._reply(200, {"protocol_version": 2, "results": [_accept(e) for e in events]})
         if path == "/api/ingest/log":
             with open(OUT / "logs.jsonl", "a") as fh:
                 fh.write(json.dumps(payload) + "\n")

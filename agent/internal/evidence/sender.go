@@ -74,6 +74,9 @@ type Sender struct {
 	Journal    *Journal
 	Transport  Transport
 	SupportsV2 func() bool // true once the server advertised protocol 2
+	// BatchMax, when set and above 1, is the advertised evidence_batch_max:
+	// events then go out in batches to BatchPath instead of one per request.
+	BatchMax func() int
 
 	// Optional; defaults suit production. Tests inject them.
 	Now            func() time.Time
@@ -87,6 +90,7 @@ type Sender struct {
 	mu       sync.Mutex
 	failures int // consecutive transient failures, for backoff
 	rejects  int // consecutive permanent rejections
+	split    int // >0: batch size narrowed after a request-level refusal
 	status   SenderStatus
 
 	acked       int // acknowledgements since the last compaction
@@ -134,6 +138,11 @@ type receipt struct {
 func (s *Sender) Step(ctx context.Context, now time.Time) error {
 	if s.SupportsV2 == nil || !s.SupportsV2() {
 		return s.block("protocol_unsupported", unsupportedRetry, nil)
+	}
+	if s.BatchMax != nil {
+		if n := s.BatchMax(); n > 1 {
+			return s.stepBatch(ctx, now, n)
+		}
 	}
 	e, ok, err := s.Journal.Peek(ctx)
 	if err != nil {
@@ -278,6 +287,7 @@ func (s *Sender) reject(ctx context.Context, e Envelope, code int) error {
 	}
 	s.mu.Lock()
 	s.rejects++
+	s.widen()
 	s.mu.Unlock()
 	// The raw event is not logged: it may contain sensitive data.
 	slog.Warn("evidence quarantined: rejected by the server", "event_id", e.EventID, "status", code)
@@ -320,12 +330,24 @@ func (s *Sender) block(reason string, after time.Duration, err error) error {
 	return &RetryError{Reason: reason, After: after, Err: err}
 }
 
-func (s *Sender) delivered() {
+func (s *Sender) delivered() { s.deliveredN(1) }
+
+func (s *Sender) deliveredN(n int) {
 	s.mu.Lock()
 	s.failures, s.rejects = 0, 0
-	s.acked++
+	s.acked += n
+	s.widen()
 	s.mu.Unlock()
 	s.setStatus("sending", "")
+}
+
+// widen grows a narrowed batch size back after progress. Caller holds s.mu.
+func (s *Sender) widen() {
+	if s.split > 0 {
+		if s.split *= 2; s.split >= sendBatchEvents {
+			s.split = 0
+		}
+	}
 }
 
 func (s *Sender) setStatus(state, reason string) {

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -146,7 +147,7 @@ func TestDurableModeBlocksCollectionWhenTheJournalCannotOpen(t *testing.T) {
 	if dropped := rt.buf.ResetDropped(); dropped != 1 {
 		t.Fatalf("blocked collection must show as dropped, got %d", dropped)
 	}
-	rt.startSender(client.New("http://127.0.0.1:1", "t"), func() bool { return true })
+	rt.startSender(client.New("http://127.0.0.1:1", "t"), func() bool { return true }, nil)
 	if rt.sender.Load() != nil {
 		t.Fatal("sender started without a journal")
 	}
@@ -168,7 +169,7 @@ func TestDurableSenderWaitsForProtocolThenDelivers(t *testing.T) {
 	cfg := durableConfig(t)
 	rt := openDurable(cfg, "web01")
 	var advertised atomic.Bool
-	rt.startSender(client.New(s.URL, "agent-token"), advertised.Load)
+	rt.startSender(client.New(s.URL, "agent-token"), advertised.Load, nil)
 	rt.buf.Push(tailer.Encode("syslog", "first"))
 	time.Sleep(200 * time.Millisecond)
 	if requests.Load() != 0 {
@@ -179,6 +180,44 @@ func TestDurableSenderWaitsForProtocolThenDelivers(t *testing.T) {
 	rt.shutdown()
 	if left := drain(t, cfg); len(left) != 0 {
 		t.Fatalf("delivered evidence still queued: %+v", left)
+	}
+}
+
+func TestDurableSenderUsesTheAdvertisedBatchEndpoint(t *testing.T) {
+	var batches atomic.Int32
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != evidence.BatchPath {
+			t.Errorf("posted to %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var req struct {
+			Events []evidence.Envelope `json:"events"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		batches.Add(1)
+		results := make([]map[string]any, len(req.Events))
+		for i, e := range req.Events {
+			results[i] = map[string]any{"event_id": e.EventID, "status": "accepted", "receipt_id": testReceipt}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"protocol_version": 2, "results": results})
+	}))
+	defer s.Close()
+
+	cfg := durableConfig(t)
+	rt := openDurable(cfg, "web01")
+	for i := 0; i < 5; i++ { // queued before the sender starts: one batch
+		rt.buf.Push(tailer.Encode("syslog", "line "+strconv.Itoa(i)))
+	}
+	waitFor(t, "journal", func() bool { return rt.journal.Snapshot().QueuedEvents == 5 })
+	rt.startSender(client.New(s.URL, "agent-token"), func() bool { return true }, func() int { return 500 })
+	waitFor(t, "delivery", func() bool { return rt.journal.Snapshot().LastReceiptAt != nil })
+	rt.shutdown()
+	if left := drain(t, cfg); len(left) != 0 {
+		t.Fatalf("delivered evidence still queued: %+v", left)
+	}
+	if batches.Load() != 1 {
+		t.Fatalf("%d batch requests for 5 queued events", batches.Load())
 	}
 }
 
@@ -277,7 +316,7 @@ func TestDurableReportKeepsCumulativeHealthAcrossRestarts(t *testing.T) {
 func TestDurableReportShowsTheSenderAndAnUnavailableJournal(t *testing.T) {
 	cfg := durableConfig(t)
 	rt := openDurable(cfg, "web01")
-	rt.startSender(client.New("http://127.0.0.1:1", "t"), func() bool { return false })
+	rt.startSender(client.New("http://127.0.0.1:1", "t"), func() bool { return false }, nil)
 	waitFor(t, "sender state", func() bool {
 		s, _ := reportJSON(t, rt)["sender"].(map[string]any)
 		return s != nil && s["state"] == "blocked" && s["reason"] == "protocol_unsupported"
@@ -298,7 +337,7 @@ func TestDurableReportShowsTheSenderAndAnUnavailableJournal(t *testing.T) {
 func TestDurableShutdownLeavesUnsentEvidenceAndDropsLateOffers(t *testing.T) {
 	cfg := durableConfig(t)
 	rt := openDurable(cfg, "web01")
-	rt.startSender(client.New("http://127.0.0.1:1", "t"), func() bool { return false })
+	rt.startSender(client.New("http://127.0.0.1:1", "t"), func() bool { return false }, nil)
 	rt.buf.Push(tailer.Encode("syslog", "kept"))
 	rt.shutdown()
 	rt.buf.Push(tailer.Encode("syslog", "after shutdown")) // a producer that has not exited yet

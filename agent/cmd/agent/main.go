@@ -307,7 +307,7 @@ func run(configPath string, stop <-chan struct{}) {
 	)
 
 	if durable != nil {
-		durable.startSender(c, heartbeat.SupportsEvidenceV2)
+		durable.startSender(c, heartbeat.SupportsEvidenceV2, heartbeat.EvidenceBatchMax)
 	} else {
 		go senderLoop(buf, c, cfg, spill, detector)
 	}
