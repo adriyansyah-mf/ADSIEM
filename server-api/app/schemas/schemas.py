@@ -1,6 +1,9 @@
 # server-api/app/schemas/schemas.py
 from __future__ import annotations
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+import hashlib
+import json
+import re
 from typing import Any, Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
@@ -160,6 +163,7 @@ class AgentTaskDef(BaseModel):
 
 class HeartbeatResponse(BaseModel):
     config_hash: str
+    evidence_protocols: list[int] = Field(default_factory=list)
     log_sources: list[LogSourceOut]
     fim_paths: list[str] = []
     tasks: list[AgentTaskDef] = []
@@ -167,6 +171,114 @@ class HeartbeatResponse(BaseModel):
     uninstall_token_sha256: str = ""  # agents >= 1.8.0 refuse removal without the token
 
 # ─── Ingest ──────────────────────────────────────────────────────
+
+def _evidence_timestamp(value: str, *, utc: bool = False) -> str:
+    # datetime stores microseconds; parse whole seconds separately so the immutable
+    # nanosecond fraction survives both normalization and PostgreSQL round trips.
+    match = re.fullmatch(
+        r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})",
+        value,
+    )
+    if match is None:
+        raise ValueError("collected_at must be RFC3339 with at most nanosecond precision")
+    seconds, fraction, offset = match.groups()
+    if offset != "Z" and (int(offset[1:3]) > 23 or int(offset[4:6]) > 59):
+        raise ValueError("invalid timestamp offset")
+    parsed = datetime.fromisoformat(seconds + offset.replace("Z", "+00:00"))
+    if utc:
+        parsed = parsed.astimezone(timezone.utc)
+        seconds = f"{parsed.year:04}-{parsed.month:02}-{parsed.day:02}T{parsed.hour:02}:{parsed.minute:02}:{parsed.second:02}"
+        offset = "Z"
+    if offset in {"+00:00", "-00:00"}:
+        offset = "Z"
+    fraction = (fraction or "").rstrip("0")
+    return seconds + ("." + fraction if fraction else "") + offset
+
+
+class EvidenceCursor(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    source: str
+    generation: str
+    identity: str
+    offset: int = Field(default=0, ge=-(1 << 63), lt=1 << 63, strict=True)
+    bookmark: str = ""
+    empty: bool = Field(default=False, strict=True)
+
+    @field_validator("source", "generation", "identity", "bookmark")
+    @classmethod
+    def valid_unicode(cls, value: str) -> str:
+        value.encode("utf-8")
+        return value
+
+
+class EvidenceEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    protocol_version: Literal[2]
+    event_id: UUID
+    agent_id: UUID
+    collected_at: str
+    hostname: str
+    log_type: str
+    location: str
+    raw_message: str
+    cursor: EvidenceCursor | None = None
+    legacy_import: bool = Field(default=False, strict=True)
+
+    @field_validator("event_id", "agent_id")
+    @classmethod
+    def nonzero_uuid(cls, value: UUID) -> UUID:
+        if value.int == 0:
+            raise ValueError("evidence identity must be a nonzero UUID")
+        return value
+
+    @field_validator("protocol_version", mode="before")
+    @classmethod
+    def integer_protocol(cls, value: int) -> int:
+        if type(value) is not int:
+            raise ValueError("protocol_version must be an integer")
+        return value
+
+    @field_validator("collected_at")
+    @classmethod
+    def valid_timestamp(cls, value: str) -> str:
+        try:
+            _evidence_timestamp(value, utc=True)
+        except OverflowError as exc:
+            raise ValueError("collected_at is outside the UTC timestamp range") from exc
+        return _evidence_timestamp(value)
+
+    @field_validator("hostname", "log_type", "location", "raw_message")
+    @classmethod
+    def valid_unicode(cls, value: str) -> str:
+        value.encode("utf-8")
+        return value
+
+    def canonical_json(self) -> str:
+        payload = self.model_dump(mode="json", exclude_defaults=True)
+        payload["collected_at"] = _evidence_timestamp(self.collected_at, utc=True)
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def digest(self) -> str:
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+    @property
+    def encoded_size(self) -> int:
+        # encoding/json uses compact UTF-8, escapes HTML and Unicode separators,
+        # and omits the zero-valued optional fields in the Go envelope/cursor.
+        encoded = json.dumps(self.model_dump(mode="json", exclude_defaults=True),
+                             ensure_ascii=False, separators=(",", ":"))
+        for character in "<>&\u2028\u2029":
+            encoded = encoded.replace(character, f"\\u{ord(character):04x}")
+        return len(encoded.encode("utf-8"))
+
+
+class EvidenceReceipt(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    protocol_version: Literal[2] = 2
+    event_id: UUID
+    status: Literal["accepted", "duplicate"]
+    receipt_id: UUID
+
 
 class LogIngestRequest(BaseModel):
     agent_id: UUID

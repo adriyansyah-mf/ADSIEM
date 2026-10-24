@@ -46,7 +46,11 @@ jobs:
           # the investigator test drives the app's own engine, bound from DATABASE_URL
           DATABASE_URL: "postgresql+asyncpg://soc:soc@localhost:5432/test"
         run: |
-          pytest tests/server-api tests/worker worker/tests \
+          # Separate processes mirror the deployed services: each owns its
+          # Prometheus registry and registers the same siem_llm_* metric names.
+          # Collecting both gateways in one interpreter causes duplicate metrics.
+          pytest tests/server-api
+          pytest tests/worker worker/tests \
             --ignore=tests/worker/test_pipeline.int.test.py \
             --deselect worker/tests/test_rag.py::test_embed_text_returns_384_dimensions \
             --deselect worker/tests/test_rag.py::test_embed_text_different_inputs_differ

@@ -4,22 +4,25 @@ import json
 import time
 from datetime import datetime, timezone
 from typing import Annotated
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 import structlog
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_agent
 from app.core.redis_client import get_redis
 from app.core.security import hash_token
 from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
                             FimWatchPath)
-from app.schemas.schemas import AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
+from app.schemas.schemas import EvidenceEnvelope, EvidenceReceipt, AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
 from app.services.agent_tamper import check_integrity, heartbeat_anomaly, uninstall_token_sha256
 from app.services.ingest import enqueue_log
+from app.services.evidence_inbox import MAX_REQUEST_BYTES, accept_evidence, check_evidence_durability
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 log = structlog.get_logger()
@@ -70,6 +73,35 @@ async def ingest_log(
         log.warning("last_log_mark_failed", agent_id=str(agent.id), error=str(exc))
     return {"status": "queued"}
 
+@router.post("/v2/log", status_code=202, response_model=EvidenceReceipt)
+async def ingest_evidence(
+    request: Request,
+    agent: Annotated[Agent, Depends(get_agent)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> EvidenceReceipt:
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            length = int(content_length)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid_content_length") from exc
+        if length < 0:
+            raise HTTPException(status_code=400, detail="invalid_content_length")
+        if length > MAX_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="evidence_request_too_large")
+    encoded = bytearray()
+    async for chunk in request.stream():
+        if len(encoded) + len(chunk) > MAX_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="evidence_request_too_large")
+        encoded.extend(chunk)
+    try:
+        body = EvidenceEnvelope.model_validate_json(encoded)
+    except ValidationError as exc:
+        # Do not echo rejected evidence (or invalid Unicode) in response/logs.
+        raise HTTPException(status_code=422, detail="invalid_evidence_envelope") from exc
+    return await accept_evidence(db, agent, body)
+
+
 @router.post("/heartbeat", response_model=HeartbeatResponse)
 async def heartbeat(
     body: HeartbeatRequest,
@@ -94,7 +126,8 @@ async def heartbeat(
         await db.execute(update(Agent).where(Agent.id == agent.id).values(
             status="offline", last_seen_at=now, stop_reason=(body.reason or "service_stop")[:30]))
         await db.commit()
-        return HeartbeatResponse(config_hash="", log_sources=[])
+        return HeartbeatResponse(config_hash="", log_sources=[], evidence_protocols=(
+            [2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []))
 
     integrity_updates, changes = check_integrity(agent, body.version, body.integrity)
     await db.execute(
@@ -161,6 +194,7 @@ async def heartbeat(
     ).hexdigest()
 
     return HeartbeatResponse(
+        evidence_protocols=([2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []),
         config_hash=config_hash,
         log_sources=[LogSourceOut.model_validate(s) for s in sources],
         fim_paths=fim_paths,

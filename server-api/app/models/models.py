@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer,
-    String, Text, ARRAY, UniqueConstraint
+    String, Text, ARRAY, UniqueConstraint, CheckConstraint, Index, text
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -670,3 +670,47 @@ class FlowLog(Base):
     ts      = Column(DateTime(timezone=True), nullable=False, default=now_utc)
     level   = Column(String(10), nullable=False, default="info")
     message = Column(Text, nullable=False)
+
+
+class EvidenceInbox(Base):
+    """Durable receipt, retained even after agent deletion.
+
+    payload is a JSONB *scalar string* containing canonical envelope JSON.
+    Consumers use json.loads(payload). This preserves NUL log characters, which
+    PostgreSQL rejects in JSONB object string values, and all timestamp digits.
+    payload_bytes charges the UTF-8 JSON serialization of that scalar, including
+    its outer escaping; it is independent of the Go wire-event size limit.
+    """
+    __tablename__ = "evidence_inbox"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "event_id", name="uq_evidence_inbox_agent_event"),
+        CheckConstraint("status IN ('pending', 'completed', 'dead_letter')", name="ck_evidence_status"),
+        CheckConstraint("payload_bytes >= 0", name="ck_evidence_payload_bytes"),
+        Index("idx_evidence_dispatch", "next_dispatch_at", postgresql_where=text("status = 'pending'")),
+        Index("idx_evidence_attempt", "next_attempt_at", postgresql_where=text("status = 'pending'")),
+        Index("idx_evidence_retention", "completed_at", postgresql_where=text("status = 'completed'")),
+    )
+    receipt_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(UUID(as_uuid=True), nullable=False)
+    event_id = Column(UUID(as_uuid=True), nullable=False)
+    group_id = Column(String(100), nullable=False)
+    hostname = Column(String(255), nullable=False)
+    payload_digest = Column(String(64), nullable=False)
+    payload = Column(JSONB, nullable=True)
+    payload_bytes = Column(BigInteger, nullable=False)
+    collected_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    status = Column(String(20), nullable=False, default="pending", server_default="pending")
+    failure_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error = Column(Text, nullable=True)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    next_dispatch_at = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    dispatch_count = Column(Integer, nullable=False, default=0, server_default="0")
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class EvidenceGroupUsage(Base):
+    __tablename__ = "evidence_group_usage"
+    __table_args__ = (CheckConstraint("payload_bytes >= 0", name="ck_evidence_usage_bytes"),)
+    group_id = Column(String(100), primary_key=True)
+    payload_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")

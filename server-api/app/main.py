@@ -430,6 +430,8 @@ async def lifespan(app: FastAPI):
         await _migrate_alerts_columns()
         from app.services.soar_schema import migrate_soar
         await migrate_soar()
+        from app.services.evidence_schema import migrate_evidence
+        await migrate_evidence()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
         await _migrate_agent_flow_poll()
