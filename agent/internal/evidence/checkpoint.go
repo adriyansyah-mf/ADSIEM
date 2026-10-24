@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"time"
 	"unicode/utf8"
 )
@@ -26,28 +27,25 @@ func (j *Journal) Ack(ctx context.Context, eventID, receiptID string) error {
 	if c.States[eventID].State != "" {
 		return ErrTerminal
 	}
-	err := j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) {
-		if e.EventID != eventID {
-			return false, nil
-		}
+	events, positions, err := j.occurrences(ctx, eventID)
+	if err != nil {
+		return j.readFailed(err)
+	}
+	for i, p := range positions {
 		found = true
-		encoded, err := json.Marshal(e)
+		encoded, err := json.Marshal(events[i])
 		if err != nil {
-			return false, err
+			return err
 		}
 		if original == nil {
 			original = encoded
 		} else if !bytes.Equal(original, encoded) {
-			return false, ErrConflict
+			return ErrConflict
 		}
 		if !acknowledged(c, p) {
 			addACK(&c, p)
 			changed = true
 		}
-		return false, nil
-	})
-	if err != nil {
-		return j.readFailed(err)
 	}
 	if !found {
 		return ErrUnknownEvent
@@ -77,15 +75,8 @@ func (j *Journal) MarkAttempt(ctx context.Context, eventID string, at time.Time)
 	if c.States[eventID].State != "" {
 		return ErrTerminal
 	}
-	err := j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) {
-		if e.EventID == eventID && !acknowledged(c, p) {
-			found = true
-			return true, nil
-		}
-		return false, nil
-	})
-	if err != nil {
-		return j.readFailed(err)
+	for _, p := range j.positions(eventID) {
+		found = found || !acknowledged(c, p)
 	}
 	if !found {
 		return ErrUnknownEvent
@@ -107,12 +98,13 @@ func (j *Journal) MarkAttempt(ctx context.Context, eventID string, at time.Time)
 func (j *Journal) FirstAttempt(ctx context.Context, eventID string) (time.Time, bool, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	found := false
-	err := j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) { found = e.EventID == eventID; return found, nil })
-	if err != nil {
-		return time.Time{}, false, j.readFailed(err)
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, false, err
 	}
-	if !found {
+	if j.closed {
+		return time.Time{}, false, os.ErrClosed
+	}
+	if len(j.positions(eventID)) == 0 {
 		return time.Time{}, false, ErrUnknownEvent
 	}
 	at := j.checkpoint.States[eventID].FirstAttempt
@@ -150,19 +142,12 @@ func (j *Journal) markTerminal(ctx context.Context, eventID string, target event
 		}
 		return ErrConflict
 	}
-	found := false
+	positions := j.positions(eventID)
 	covered := false
-	err := j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) {
-		if e.EventID == eventID {
-			found = true
-			covered = covered || acknowledged(c, p)
-		}
-		return false, nil
-	})
-	if err != nil {
-		return j.readFailed(err)
+	for _, p := range positions {
+		covered = covered || acknowledged(c, p)
 	}
-	if !found {
+	if len(positions) == 0 {
 		return ErrUnknownEvent
 	}
 	if covered {

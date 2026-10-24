@@ -55,6 +55,11 @@ type Journal struct {
 	storageGap bool
 	capacity   bool
 	bridgeLoss bridgeLoss
+	index      map[eventKey]indexEntry // event ID -> retained occurrences (index.go)
+	// peekFrom: every record before it was acknowledged or held/quarantined
+	// at the last Peek; reset when something can make an older record
+	// deliverable again (release, compaction).
+	peekFrom eventPosition
 }
 
 type journalDependencies struct {
@@ -96,6 +101,9 @@ func openWithDependencies(o Options, deps journalDependencies) (_ *Journal, err 
 	if err = j.recover(); err != nil {
 		return nil, fmt.Errorf("recover journal: %w", err)
 	}
+	if err = j.rebuildIndex(context.Background()); err != nil {
+		return nil, fmt.Errorf("index journal: %w", err)
+	}
 	return j, nil
 }
 
@@ -128,6 +136,8 @@ func (j *Journal) Append(ctx context.Context, e Envelope) error {
 	if err := j.admit(ctx, frameEvent, b); err != nil {
 		return err
 	}
+	last := j.segments[len(j.segments)-1]
+	j.indexAdd(e.EventID, eventPosition{last.sequence, last.size - int64(frameHeaderSize) - int64(len(b)), last.size})
 	if e.Cursor != nil {
 		j.cursors[e.Cursor.Source] = *e.Cursor
 	}

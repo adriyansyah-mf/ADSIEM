@@ -44,6 +44,8 @@ func (j *Journal) Compact(ctx context.Context) error {
 		}
 		return err
 	}
+	j.pruneIndex()
+	j.resetPeek()
 	// Windows denies deletion sharing on live handles. Close only after a
 	// successful publication, so quota refusal leaves the healthy writer usable.
 	if j.writer != nil {

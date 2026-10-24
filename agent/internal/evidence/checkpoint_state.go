@@ -130,10 +130,15 @@ type segmentScanner struct {
 	file          *os.File
 	segment       segment
 	maxEventBytes int
+	start         int64 // first record offset; zero means right after the header
 }
 
 func (s segmentScanner) walk(ctx context.Context, visit func(Envelope, eventPosition) (bool, error)) (bool, error) {
-	for offset := int64(segmentHeaderSize); offset < s.segment.size; {
+	offset := int64(segmentHeaderSize)
+	if s.start > offset {
+		offset = s.start
+	}
+	for offset < s.segment.size {
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}

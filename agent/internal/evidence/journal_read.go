@@ -18,23 +18,23 @@ func (j *Journal) checkDuplicate(ctx context.Context, e Envelope) error {
 	if err != nil {
 		return err
 	}
-	err = j.walkEvents(ctx, func(existing Envelope, p eventPosition) (bool, error) {
-		if existing.EventID != e.EventID {
-			return false, nil
-		}
+	existing, positions, err := j.occurrences(ctx, e.EventID)
+	if err != nil {
+		return j.readFailed(err)
+	}
+	for i, p := range positions {
 		if acknowledged(j.checkpoint, p) {
-			return false, ErrConflict
+			return ErrConflict
 		}
-		previous, err := json.Marshal(existing)
+		previous, err := json.Marshal(existing[i])
 		if err != nil {
-			return false, err
+			return err
 		}
 		if !bytes.Equal(previous, encoded) {
-			return false, ErrConflict
+			return ErrConflict
 		}
-		return false, nil
-	})
-	return j.readFailed(err)
+	}
+	return nil
 }
 
 func (j *Journal) Peek(ctx context.Context) (Envelope, bool, error) {
@@ -45,13 +45,22 @@ func (j *Journal) Peek(ctx context.Context) (Envelope, bool, error) {
 	}
 	var next Envelope
 	found := false
-	err := j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) {
+	// Resume where the last Peek stopped: everything before it was delivered
+	// or parked (resetPeek undoes this when that stops being true).
+	err := j.walkEventsFrom(ctx, j.peekFrom, func(e Envelope, p eventPosition) (bool, error) {
 		if acknowledged(j.checkpoint, p) || j.checkpoint.States[e.EventID].State != "" {
 			return false, nil
 		}
-		next = e
-		found = true
+		next, found = e, true
+		j.peekFrom = p
 		return true, nil
 	})
+	if err == nil && !found && len(j.segments) > 0 {
+		last := j.segments[len(j.segments)-1]
+		j.peekFrom = eventPosition{Sequence: last.sequence, Offset: last.size, End: last.size}
+	}
 	return next, found, j.readFailed(err)
 }
+
+// resetPeek makes the next Peek start from the oldest retained record.
+func (j *Journal) resetPeek() { j.peekFrom = eventPosition{} }

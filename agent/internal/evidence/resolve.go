@@ -92,14 +92,10 @@ func (j *Journal) Resolve(ctx context.Context, eventID, action, reason string, a
 	}
 	c := j.nextCheckpoint()
 	var positions []eventPosition
-	err := j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) {
-		if e.EventID == eventID && !acknowledged(c, p) {
+	for _, p := range j.positions(eventID) {
+		if !acknowledged(c, p) {
 			positions = append(positions, p)
 		}
-		return false, nil
-	})
-	if err != nil {
-		return j.readFailed(err)
 	}
 	if len(positions) == 0 {
 		return ErrUnknownEvent
@@ -124,5 +120,9 @@ func (j *Journal) Resolve(ctx context.Context, eventID, action, reason string, a
 	if len(c.Audit) > maxAudit {
 		c.Audit = c.Audit[len(c.Audit)-maxAudit:]
 	}
-	return j.publish(ctx, c)
+	if err := j.publish(ctx, c); err != nil {
+		return err
+	}
+	j.resetPeek() // a released record before the last Peek is deliverable again
+	return nil
 }

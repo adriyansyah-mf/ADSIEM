@@ -147,6 +147,7 @@ func BenchmarkCompact10k(b *testing.B) {
 		b.StopTimer()
 		o := benchOptions(b)
 		o.SegmentBytes = 256 << 10 // several segments, so compaction deletes files
+		o.MaxEventBytes = 64 << 10 // must fit a segment
 		j, err := Open(o)
 		if err != nil {
 			b.Fatal(err)
