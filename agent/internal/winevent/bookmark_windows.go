@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -17,7 +18,10 @@ var (
 	procEvtUpdateBookmark = modwevtapi.NewProc("EvtUpdateBookmark")
 )
 
-const evtRenderBookmark = 2
+const (
+	evtRenderBookmark   = 2
+	errInvalidOperation = syscall.Errno(4317) // ERROR_INVALID_OPERATION
+)
 
 // SubscribeResume streams channel events strictly after resume, each with the
 // bookmark just past it, until ctx ends (returning ctx.Err()). A bookmark that
@@ -83,7 +87,9 @@ func (s *windowsSubscription) next(max int) ([]handle, error) {
 	ok, _, err := procEvtNext.Call(s.h, uintptr(max), uintptr(unsafe.Pointer(&raw[0])), 0, 0,
 		uintptr(unsafe.Pointer(&returned)))
 	if ok == 0 {
-		if errors.Is(err, errNoMoreItems) {
+		// A subscription with nothing (yet) to deliver, e.g. on an empty
+		// channel, reports ERROR_INVALID_OPERATION instead of no-more-items.
+		if errors.Is(err, errNoMoreItems) || errors.Is(err, errInvalidOperation) {
 			windows.ResetEvent(s.signal)
 			return nil, nil
 		}

@@ -32,12 +32,6 @@ func (cfg *Config) defaultEvidence() error {
 		return fmt.Errorf("state directory: %w", err)
 	}
 	cfg.Agent.StateDir = state
-	if cfg.Buffer.SpillPath == "" {
-		cfg.Buffer.SpillPath = filepath.Join(state, "spill.log")
-	}
-	if cfg.Firewall.StatePath == "" {
-		cfg.Firewall.StatePath = filepath.Join(state, "firewall.json")
-	}
 	e := &cfg.Evidence
 	if e.Dir == "" {
 		e.Dir = filepath.Join(state, "evidence")
@@ -76,6 +70,14 @@ func (cfg *Config) defaultEvidence() error {
 	}
 	cfg.Agent.StateDir = resolvedState
 	e.Dir = resolvedDir
+	// derived from the canonical state directory, like the evidence directory
+	// (on Windows a short 8.3 name and its long name are the same directory)
+	if cfg.Buffer.SpillPath == "" {
+		cfg.Buffer.SpillPath = filepath.Join(resolvedState, "spill.log")
+	}
+	if cfg.Firewall.StatePath == "" {
+		cfg.Firewall.StatePath = filepath.Join(resolvedState, "firewall.json")
+	}
 	return nil
 }
 

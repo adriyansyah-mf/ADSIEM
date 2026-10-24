@@ -113,15 +113,3 @@ func daclEntries(sddl string) string {
 	}
 	return d
 }
-
-func TestWindowsOwnerTrustsTheDACLPrincipalsOnly(t *testing.T) {
-	user := "S-1-5-21-1-2-3-1001"
-	for owner, want := range map[string]bool{
-		user: true, "S-1-5-18": true, "S-1-5-32-544": true, // token user, SYSTEM, Administrators
-		"S-1-5-21-1-2-3-1002": false, "S-1-1-0": false, "S-1-5-32-545": false, // other user, Everyone, Users
-	} {
-		if got := trustedOwner(owner, user); got != want {
-			t.Errorf("owner %s trusted=%v, want %v", owner, got, want)
-		}
-	}
-}

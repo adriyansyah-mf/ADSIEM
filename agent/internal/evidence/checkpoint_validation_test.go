@@ -70,7 +70,7 @@ func TestAckIncompleteUnpublishedGenerationKeepsPriorCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, prefix := range []string{"checkpoint", "commit"} {
-		if err := os.WriteFile(filepath.Join(o.Dir, generationName(prefix, generation)), []byte("EVJ"), 0600); err != nil {
+		if err := writeOwned(filepath.Join(o.Dir, generationName(prefix, generation)), []byte("EVJ"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -42,7 +42,7 @@ func TestCheckpointCommittedPrefixTornFrameIsRefusedWithoutRepair(t *testing.T) 
 	}
 	binary.LittleEndian.PutUint32(header[8:12], length)
 	binary.LittleEndian.PutUint32(header[16:20], crc32.Checksum(header[:16], checksumTable))
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := writeOwned(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(o.Dir)
@@ -105,16 +105,16 @@ func TestCheckpointPostCommitTornTailRemainsRecoverable(t *testing.T) {
 			tail := frame[:frameHeaderSize+7]
 			switch location {
 			case "captured-segment-tail":
-				if err := os.WriteFile(path, append(append([]byte(nil), prefix...), tail...), 0600); err != nil {
+				if err := writeOwned(path, append(append([]byte(nil), prefix...), tail...), 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "new-segment-tail":
-				if err := os.WriteFile(filepath.Join(o.Dir, segmentName(2)), append(segmentHeader(o.AgentID, 2), tail...), 0600); err != nil {
+				if err := writeOwned(filepath.Join(o.Dir, segmentName(2)), append(segmentHeader(o.AgentID, 2), tail...), 0600); err != nil {
 					t.Fatal(err)
 				}
 			case "new-segment-header":
 				tail = segmentHeader(o.AgentID, 2)[:17]
-				if err := os.WriteFile(filepath.Join(o.Dir, segmentName(2)), tail, 0600); err != nil {
+				if err := writeOwned(filepath.Join(o.Dir, segmentName(2)), tail, 0600); err != nil {
 					t.Fatal(err)
 				}
 			}

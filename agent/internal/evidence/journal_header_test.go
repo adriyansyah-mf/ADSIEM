@@ -24,7 +24,7 @@ func TestRotationHeaderCrashPreservesAdmittedPrefix(t *testing.T) {
 			}
 			header := segmentHeader(o.AgentID, 2)
 			path := filepath.Join(o.Dir, "segment-00000000000000000002.evj")
-			if err := os.WriteFile(path, header[:cut], 0600); err != nil {
+			if err := writeOwned(path, header[:cut], 0600); err != nil {
 				t.Fatal(err)
 			}
 			j = openJournal(t, o)
@@ -55,7 +55,7 @@ func TestCorruptShortHeaderIsRefused(t *testing.T) {
 	}
 	data := []byte("broken")
 	path := firstSegment(t, o)
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := writeOwned(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	j, err := Open(o)
@@ -107,10 +107,10 @@ func TestInteriorShortHeaderIsRefused(t *testing.T) {
 	}
 	path := firstSegment(t, o)
 	prefix := segmentHeader(o.AgentID, 1)[:5]
-	if err := os.WriteFile(path, prefix, 0600); err != nil {
+	if err := writeOwned(path, prefix, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(o.Dir, "segment-00000000000000000002.evj"), segmentHeader(o.AgentID, 2), 0600); err != nil {
+	if err := writeOwned(filepath.Join(o.Dir, "segment-00000000000000000002.evj"), segmentHeader(o.AgentID, 2), 0600); err != nil {
 		t.Fatal(err)
 	}
 	j, err := Open(o)
@@ -142,7 +142,7 @@ func TestHeaderRepairRefusesWithoutForensicCapacity(t *testing.T) {
 	}
 	tailPath := filepath.Join(o.Dir, "segment-00000000000000000002.evj")
 	tail := segmentHeader(o.AgentID, 2)[:63]
-	if err := os.WriteFile(tailPath, tail, 0600); err != nil {
+	if err := writeOwned(tailPath, tail, 0600); err != nil {
 		t.Fatal(err)
 	}
 	o.MaxBytes = int64(len(before) + len(tail) + 32)
