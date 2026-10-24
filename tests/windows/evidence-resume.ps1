@@ -24,12 +24,20 @@ $packages = @(
     "./agent/internal/tailer"
 )
 $failed = @()
+$logs = Join-Path ($env:RUNNER_TEMP ?? $env:TEMP) "evidence-go-test"
+New-Item -ItemType Directory -Force -Path $logs | Out-Null
 foreach ($pkg in $packages) {
     Write-Host "==> go test $pkg"
-    go test -count=1 -v $pkg 2>&1 | ForEach-Object {
-        if ($_ -match '^(--- (FAIL|SKIP)|--- PASS: Test(Native|Windows)|FAIL|ok|panic)' -or $_ -match '_test\.go:\d+:') { Write-Host $_ }
+    $log = Join-Path $logs (($pkg -replace '[./]+', '-').Trim('-') + ".log")
+    # Every test with its duration (a slow one shows up), plus the usual failures.
+    go test -count=1 -v -timeout 25m $pkg 2>&1 | Tee-Object -FilePath $log | ForEach-Object {
+        if ($_ -match '^(--- (FAIL|SKIP|PASS)|FAIL|ok|panic)' -or $_ -match '_test\.go:\d+:') { Write-Host $_ }
     }
-    if ($LASTEXITCODE -ne 0) { $failed += $pkg }
+    if ($LASTEXITCODE -ne 0) {
+        $failed += $pkg
+        Write-Host "---- last lines of $pkg (running tests, goroutines)"
+        Get-Content $log -Tail 80 | ForEach-Object { Write-Host $_ }
+    }
 }
 if ($failed.Count -gt 0) {
     throw "native evidence tests failed: $($failed -join ', ')"
