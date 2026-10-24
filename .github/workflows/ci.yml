@@ -73,16 +73,15 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: agent/go.sum
 
-      - name: go test
-        run: go test ./tests/agent/...
+      # procexec and netwatch go:embed eBPF objects: build them so every
+      # package (cmd/agent included) is compiled and tested.
+      - name: Build eBPF objects
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq clang llvm
+          make -C agent bpf
 
-      # Every internal package except procexec/netwatch, which go:embed eBPF
-      # objects that need clang to build. Includes the evidence journal.
-      - name: go test (agent packages without eBPF)
-        run: >-
-          go test -race ./agent/internal/buffer ./agent/internal/config ./agent/internal/detect
-          ./agent/internal/evidence ./agent/internal/firewall ./agent/internal/heartbeat
-          ./agent/internal/tailer ./agent/internal/task
+      - name: go test (all agent packages)
+        run: go test -race ./agent/... ./tests/agent/...
 
       - name: Windows vet + build
         working-directory: agent

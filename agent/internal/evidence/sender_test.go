@@ -487,6 +487,42 @@ func (t trackedTransport) PostContext(ctx context.Context, path string, payload 
 	return resp, err
 }
 
+func TestSenderReclaimsDeliveredSegments(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var e Envelope
+		_ = json.NewDecoder(r.Body).Decode(&e)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(receiptFor(e.EventID, "accepted")))
+	}))
+	defer s.Close()
+	o := journalOptions(t)
+	o.SegmentBytes = 8 << 10 // many small segments
+	j := openJournal(t, o)
+	for i := 0; i < 200; i++ {
+		if err := j.Append(context.Background(), journalEvent(t, o)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := len(j.segments)
+	if before < 3 {
+		t.Fatalf("fixture has %d segments", before)
+	}
+	sender := &Sender{Journal: j, Transport: client.New(s.URL, "t"), SupportsV2: func() bool { return true },
+		CompactEvery: time.Nanosecond}
+	ctx, cancel := context.WithCancel(context.Background())
+	sender.Wait = func(ctx context.Context, d time.Duration) error { // idle once the backlog is gone
+		cancel()
+		return ctx.Err()
+	}
+	_ = sender.Run(ctx)
+	if _, ok, _ := j.Peek(context.Background()); ok {
+		t.Fatal("backlog not delivered")
+	}
+	if after := len(j.segments); after >= before || after > 1 {
+		t.Fatalf("delivered segments not reclaimed: %d -> %d", before, after)
+	}
+}
+
 func TestSenderRunDeliversThenWaitsUntilCanceled(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var e Envelope

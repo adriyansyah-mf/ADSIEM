@@ -80,11 +80,44 @@ type Sender struct {
 	Wait           func(context.Context, time.Duration) error
 	Jitter         func(time.Duration) time.Duration // backoff base -> delay
 	AttemptTimeout time.Duration
+	// CompactEvery bounds how often delivered segments are reclaimed
+	// (Journal.Compact scans the journal). Default one minute.
+	CompactEvery time.Duration
 
 	mu       sync.Mutex
 	failures int // consecutive transient failures, for backoff
 	rejects  int // consecutive permanent rejections
 	status   SenderStatus
+
+	acked       int // acknowledgements since the last compaction
+	compactedAt time.Time
+}
+
+const defaultCompactEvery = time.Minute
+
+// maybeCompact reclaims fully delivered segments, at most every CompactEvery
+// and only after something was acknowledged; without it the journal would
+// fill with delivered evidence and refuse new events.
+func (s *Sender) maybeCompact(ctx context.Context) {
+	every := s.CompactEvery
+	if every <= 0 {
+		every = defaultCompactEvery
+	}
+	s.mu.Lock()
+	due := s.acked > 0 && time.Since(s.compactedAt) >= every
+	s.mu.Unlock()
+	if !due {
+		return
+	}
+	if err := s.Journal.Compact(ctx); err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("evidence journal compaction failed", "err", err)
+		}
+		return
+	}
+	s.mu.Lock()
+	s.acked, s.compactedAt = 0, time.Now()
+	s.mu.Unlock()
 }
 
 type receipt struct {
@@ -290,6 +323,7 @@ func (s *Sender) block(reason string, after time.Duration, err error) error {
 func (s *Sender) delivered() {
 	s.mu.Lock()
 	s.failures, s.rejects = 0, 0
+	s.acked++
 	s.mu.Unlock()
 	s.setStatus("sending", "")
 }
@@ -342,6 +376,7 @@ func (s *Sender) Run(ctx context.Context) error {
 			return err
 		}
 		err := s.Step(ctx, s.now())
+		s.maybeCompact(ctx)
 		var delay time.Duration
 		var re *RetryError
 		switch {
