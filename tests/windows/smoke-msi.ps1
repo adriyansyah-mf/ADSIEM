@@ -52,9 +52,6 @@ $received = "logs.jsonl"
 if ($Durable) {
     $env:MOCK_EVIDENCE = "1"
     $received = "evidence.jsonl"
-    # -configure (run by the MSI) loads and rewrites the whole config, so this survives install.
-    New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-    Set-Content -Path (Join-Path $dataDir "config.yaml") -Value "evidence:`n  enabled: true" -Encoding ascii
 }
 $mock =Start-Process python -PassThru -NoNewWindow -ArgumentList @("tests\windows\mock_siem.py", $port, "`"$mockOut`"",
                                                                     "`"$tls\cert.pem`"", "`"$tls\key.pem`"")
@@ -78,6 +75,13 @@ try {
     if ($code -eq 0) { Fail "install without SERVER_URL/ENROLLMENT_KEY succeeded" }
     if (Get-Service SIEMAgent -ErrorAction SilentlyContinue) { Fail "service left behind by the failed install" }
     Write-Host "ok: install without properties refused (exit $code)"
+
+    if ($Durable) {
+        # After step 1 (which needs no config yet). -configure, run by the MSI,
+        # loads and rewrites the whole config, so this section survives install.
+        New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+        Set-Content -Path (Join-Path $dataDir "config.yaml") -Value "evidence:`n  enabled: true" -Encoding ascii
+    }
 
     # 2. Install the way the dashboard tells you to.
     $code = Invoke-Msiexec @("/i", "`"$Msi`"", "SERVER_URL=https://127.0.0.1:$port", "ENROLLMENT_KEY=ci-smoke-key-123",
