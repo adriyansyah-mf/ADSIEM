@@ -179,8 +179,9 @@ class Harness:
         es = self.port("elasticsearch", 9200)
         base = f"http://127.0.0.1:{es}"
 
-        def post(path, body):
-            req = urllib.request.Request(base + path, data=json.dumps(body).encode(), method="POST",
+        def call(path, body=None, method="POST"):
+            data = json.dumps(body).encode() if body is not None else None  # _refresh takes no body
+            req = urllib.request.Request(base + path, data=data, method=method,
                                          headers={"Content-Type": "application/json"})
             try:
                 with urllib.request.urlopen(req, timeout=60) as resp:
@@ -188,16 +189,18 @@ class Harness:
             except urllib.error.HTTPError as exc:
                 if exc.code == 404:  # nothing indexed yet
                     return {"hits": {"hits": []}}
-                raise
+                raise RuntimeError(f"elasticsearch {path}: {exc.code} {exc.read()[:500]!r}") from exc
 
-        post("/logs/_refresh", {})
+        call("/logs/_refresh")
         query = {"size": 5000, "_source": ["raw_message", "agent_id"], "sort": ["_doc"],
                  "query": {"term": {"agent_id": self.agent_id}}}
-        page = post("/logs/_search?scroll=1m", query)
+        page = call("/logs/_search?scroll=1m", query)
         docs = []
         while page["hits"]["hits"]:
             docs += [{"_id": h["_id"], **h["_source"]} for h in page["hits"]["hits"]]
-            page = post("/_search/scroll", {"scroll": "1m", "scroll_id": page["_scroll_id"]})
+            page = call("/_search/scroll", {"scroll": "1m", "scroll_id": page["_scroll_id"]})
+        if page.get("_scroll_id"):
+            call("/_search/scroll", {"scroll_id": page["_scroll_id"]}, method="DELETE")
         return docs
 
     def ours(self, rows: list[dict]) -> list[dict]:
