@@ -43,6 +43,61 @@ export interface Agent {
   flow_poll_at?: string | null
   enrolled_at: string
   log_sources: LogSource[]
+  /** Durable evidence delivery summary; absent from older API servers. */
+  evidence?: AgentEvidenceSummary
+}
+
+export type EvidenceDeliveryStatus = 'healthy' | 'backlogged' | 'blocked' | 'degraded' | 'not_reported'
+
+export interface AgentEvidenceSummary {
+  status: EvidenceDeliveryStatus
+  reason: string | null
+  reported_at: string | null
+  stale: boolean
+}
+
+export interface EvidenceSourceHealth {
+  state: 'healthy' | 'degraded' | 'paused' | 'unavailable'
+  reason: string
+  updated_at: string | null
+}
+
+/** The agent's last evidence_health heartbeat report (cumulative counters). */
+export interface EvidenceHealthSnapshot {
+  state: 'healthy' | 'degraded'
+  reason: string
+  queued_events: number
+  queued_bytes: number
+  oldest_queued_at: string | null
+  last_receipt_at: string | null
+  retries: number
+  quarantined: number
+  held: number
+  unknown_gaps: number
+  known_loss: Record<string, number>
+  sources: Record<string, EvidenceSourceHealth>
+  sender?: { state: 'idle' | 'sending' | 'retrying' | 'blocked'; reason: string; since: string | null; failures: number } | null
+}
+
+export interface EvidenceDeadLetter {
+  receipt_id: string
+  event_id: string
+  failure_count: number
+  last_error: string
+  received_at: string
+  collected_at: string
+}
+
+export interface AgentEvidence extends AgentEvidenceSummary {
+  agent_id: string
+  health: EvidenceHealthSnapshot | null
+  inbox: {
+    pending: number
+    completed: number
+    dead_letter: number
+    oldest_pending_at: string | null
+    dead_letters: EvidenceDeadLetter[]
+  }
 }
 
 export interface LogSource {

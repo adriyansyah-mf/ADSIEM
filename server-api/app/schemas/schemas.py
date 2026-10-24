@@ -6,7 +6,7 @@ import json
 import re
 from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator, model_validator
 
 # ─── Auth ────────────────────────────────────────────────────────
 
@@ -144,7 +144,18 @@ class AgentOut(BaseModel):
     flow_poll_at: datetime | None = None
     enrolled_at: datetime
     log_sources: list[LogSourceOut] = []
+    # read from the agent row for the summary below; the full snapshot is
+    # served by GET /api/agents/{id}/evidence
+    evidence_health: dict | None = Field(default=None, exclude=True)
+    evidence_health_at: datetime | None = Field(default=None, exclude=True)
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def evidence(self) -> dict:
+        """Durable evidence delivery summary: status, reason, reported_at, stale."""
+        from app.services.evidence_status import evidence_status
+        return evidence_status(self.evidence_health, self.evidence_health_at, datetime.now(timezone.utc))
 
 # ─── Evidence health (durable agents) ────────────────────────────
 # What agent/internal/evidence Health + Sender.Status send in the heartbeat.

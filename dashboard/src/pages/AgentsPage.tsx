@@ -8,6 +8,7 @@ import StatusBadge from '@/components/StatusBadge'
 import { PageHeader, QueryState } from '@/components/Workspace'
 import { AgentActions } from '@/components/AgentActions'
 import DeployAgentModal from '@/components/DeployAgentModal'
+import { EvidenceBadge, EvidenceHealthPanel } from '@/components/EvidenceHealth'
 import { useAgents } from '@/hooks/useAgents'
 import { useWorkspaceFilters } from '@/hooks/useWorkspaceFilters'
 import { useAuthStore } from '@/stores/auth'
@@ -31,6 +32,8 @@ export default function AgentsPage() {
     { key: 'status', header: 'State', render: row => <div className="control-cluster">
       <StatusBadge status={row.status} />{row.approved === false && <StatusBadge status="pending_approval" />}{row.is_isolated && <StatusBadge status="isolated" />}
     </div> },
+    { key: 'evidence', header: 'Evidence delivery', render: row => <EvidenceBadge summary={row.evidence} />,
+      exportValue: row => row.evidence?.status ?? 'not_reported' },
     { key: 'version', header: 'Version', render: row => <span className="font-mono">{row.version ?? '—'}</span> },
     { key: 'last_seen_at', header: 'Last seen', render: row => row.last_seen_at ? <time className="whitespace-nowrap" dateTime={row.last_seen_at} title={new Date(row.last_seen_at).toLocaleString()}>{formatDistanceToNow(new Date(row.last_seen_at), { addSuffix: true })}</time> : 'Never' },
     { key: 'sources', header: 'Log sources', render: row => row.log_sources.length, exportValue: row => row.log_sources.length },
@@ -54,7 +57,10 @@ export default function AgentsPage() {
         : <DataTable columns={columns} data={query.data.items} total={query.data.total} page={page} pageSize={pageSize}
           onPageChange={setPage} onPageSizeChange={size => { setPageSize(size); setPage(1) }}
           onRowClick={canManage ? row => navigate(`/agents/${row.id}/sources`) : undefined}
-          expandable={canManage} renderExpanded={row => <AgentActions agent={row} />}
+          expandable={canManage} renderExpanded={row => <div className="space-y-4">
+            <AgentActions agent={row} />
+            <EvidenceHealthPanel agent={row} canManage={canManage} />
+          </div>}
           exportFilename="agents-page.csv" emptyTitle="No agents match this view" emptyDescription={search || status ? 'Try a different hostname or clear the filters.' : canManage ? 'Deploy an agent to start collecting endpoint telemetry.' : 'An administrator can deploy agents for this group.'} />}
     {showInstall && <DeployAgentModal onClose={() => setShowInstall(false)} />}
   </div>

@@ -55,7 +55,7 @@ def test_invalid_or_unbounded_health_is_dropped_not_the_heartbeat():
 
 
 def test_status_needs_a_report_and_reads_the_sender():
-    from app.api.routes.evidence import evidence_status
+    from app.services.evidence_status import evidence_status
     now = datetime.now(timezone.utc)
     assert evidence_status(None, None, now)["status"] == "not_reported"
     ok = {"version": 1, "state": "healthy", "queued_events": 0}
@@ -73,6 +73,19 @@ def test_status_needs_a_report_and_reads_the_sender():
     assert evidence_status(degraded, now, now)["status"] == "degraded"
     stale = evidence_status(ok, now - timedelta(minutes=5), now)
     assert stale["stale"] is True and stale["status"] == "healthy"  # last known state, marked stale
+
+
+def test_agent_list_carries_the_summary_not_the_snapshot():
+    from types import SimpleNamespace
+    from app.schemas.schemas import AgentOut
+    now = datetime.now(timezone.utc)
+    row = dict(id=uuid4(), name="web01", hostname="web01", group_id="blue", version="1.9.0", status="online",
+               approved=True, is_isolated=False, last_seen_at=now, flow_poll_at=None, enrolled_at=now, log_sources=[])
+    legacy = AgentOut.model_validate(SimpleNamespace(**row, evidence_health=None, evidence_health_at=None))
+    assert legacy.model_dump()["evidence"]["status"] == "not_reported"
+    durable = AgentOut.model_validate(SimpleNamespace(**row, evidence_health=HEALTH, evidence_health_at=now)).model_dump()
+    assert durable["evidence"]["status"] == "degraded" and durable["evidence"]["reason"] == "capacity"
+    assert "evidence_health" not in durable and "evidence_health_at" not in durable
 
 
 async def test_heartbeat_stores_health_with_server_receipt_time(evidence_api):
