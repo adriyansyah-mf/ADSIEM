@@ -111,7 +111,41 @@ fixing the cause.
 | `Blocked (repeated_rejections)` | server rejects every record (validation bug) | fix the server; records were not quarantined past the first 5 |
 | `Backlogged` | events waiting, sender retrying | check connectivity, server 5xx/429 (group budget) |
 | `Degraded (capacity)` | local journal full; sources paused | restore delivery; never delete unconfirmed events to make space |
-| `Degraded (journal_unavailable)` | journal could not open; collection blocked | see agent log: permissions, disk, NTFS requirement on Windows |
+| `Degraded (journal_unavailable)` | journal could not open; collection blocked | see agent log: permissions, disk, NTFS requirement on Windows; for `corrupt` see below |
 | `Degraded (storage_failure)` | a journal write or read failed | check the disk; restart once fixed |
 | Unknown gaps > 0 | a file was rotated/truncated or a channel cleared while unread | expected occasionally; investigate if frequent |
 | `Stale` | no heartbeat for two intervals | agent down or unreachable; the last state is shown |
+
+### A corrupt journal (`journal_unavailable`, agent log says `corrupt`)
+
+A torn tail (the last, incomplete record after a crash) is repaired at start
+and its bytes are saved beside the segment. Damage *inside* the journal is
+not repaired: the agent refuses to open it, changes nothing on disk, and
+reports `Degraded (journal_unavailable)`. Verified by the `corruption`
+acceptance scenario: the damaged segment's SHA-256 is identical after the
+agent ran against it.
+
+While it is in this state:
+
+- nothing is delivered, including evidence admitted before the damage;
+- file sources lose nothing permanently as long as the files stay on disk:
+  the lines are still in the file and the cursor is in the preserved journal;
+- non-replayable sources (process/network telemetry, local detection
+  events) collected during the outage are dropped and **not counted**.
+
+Recovery today:
+
+1. Stop the agent. Copy the whole evidence directory somewhere safe: it is
+   the only copy of undelivered evidence and of the cursors.
+2. Get the agent log line naming the segment and offset, and keep it with the copy.
+3. Moving the directory aside and starting the agent creates a new, empty
+   journal. **This loses data silently:** a new journal has no cursors, so
+   every configured file is treated as newly enabled and starts at its end.
+   Lines the old journal held but had not delivered, and lines written while
+   the agent was blocked, are skipped without a loss counter. Do it only after
+   recording that window (from the last receipt the dashboard shows to the
+   restart) as an evidence gap in the case or audit trail.
+
+There is no salvage tool yet that imports the readable records and cursors
+of a damaged journal into a new one; see
+`docs/operations/agent-evidence-validation.md` (open items).

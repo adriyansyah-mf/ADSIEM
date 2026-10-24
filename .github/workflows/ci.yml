@@ -114,7 +114,7 @@ jobs:
       - name: Run scenario
         run: |
           python tests/evidence/run.py --build --scenario "${{ matrix.scenario }}" \
-            --count 5000 --output "evidence-artifacts/${{ matrix.scenario }}"
+            --count 10000 --output "evidence-artifacts/${{ matrix.scenario }}"
 
       - name: Upload evidence artifacts
         if: always()
