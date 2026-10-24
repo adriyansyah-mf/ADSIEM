@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/metrics"
 	"sort"
 	"strconv"
 	"testing"
@@ -96,8 +95,8 @@ func TestSustainedCapture(t *testing.T) {
 		"journal_dir": o.Dir, "duration_s": elapsed.Seconds(), "target_rate": rate,
 		"appended": appended, "delivered": delivered, "events_per_s": float64(appended) / elapsed.Seconds(),
 		"append_p50_us": pct(0.50), "append_p95_us": pct(0.95), "append_p99_us": pct(0.99),
-		"cpu_seconds": cpuSeconds(), "cpu_percent_of_one_core": 100 * cpuSeconds() / elapsed.Seconds(),
-		"peak_heap_bytes": peakHeap, "peak_disk_bytes": peakDisk, "samples": samples,
+		"cpu_seconds": processCPUSeconds(), "cpu_percent_of_one_core": 100 * processCPUSeconds() / elapsed.Seconds(),
+		"peak_heap_bytes": peakHeap, "peak_rss_bytes": peakRSSBytes(), "peak_disk_bytes": peakDisk, "samples": samples,
 	}
 	b, _ := json.MarshalIndent(report, "", "  ")
 	if path := os.Getenv("EVIDENCE_SOAK_REPORT"); path != "" {
@@ -135,15 +134,9 @@ func sample(j *Journal, dir string, start time.Time, appended int64) soakSample 
 		return nil
 	})
 	return soakSample{ElapsedS: time.Since(start).Seconds(), Appended: appended, Queued: h.QueuedEvents,
-		Indexed: h.IndexedEvents, HeapBytes: int64(m.HeapAlloc), DiskBytes: disk, CPUs: cpuSeconds()}
+		Indexed: h.IndexedEvents, HeapBytes: int64(m.HeapAlloc), DiskBytes: disk, CPUs: processCPUSeconds()}
 }
 
-// cpuSeconds is this process's CPU time (user + system), on every OS.
-func cpuSeconds() float64 {
-	s := []metrics.Sample{{Name: "/cpu/classes/total:cpu-seconds"}, {Name: "/cpu/classes/idle:cpu-seconds"}}
-	metrics.Read(s)
-	return s[0].Value.Float64() - s[1].Value.Float64()
-}
 
 func soakEvent(t *testing.T, o Options, n int) Envelope {
 	e, err := NewEnvelope(o.AgentID, "soak-host", Draft{LogType: "linux_auth", Location: "/var/log/auth.log",
