@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -178,6 +179,55 @@ func TestDurableSenderWaitsForProtocolThenDelivers(t *testing.T) {
 	rt.shutdown()
 	if left := drain(t, cfg); len(left) != 0 {
 		t.Fatalf("delivered evidence still queued: %+v", left)
+	}
+}
+
+func TestDurableStartupImportsTheLegacySpillOnce(t *testing.T) {
+	cfg := durableConfig(t)
+	cfg.Buffer.SpillPath = filepath.Join(t.TempDir(), "spill.log")
+	spill := "linux_auth\x00/var/log/auth.log\x00Failed password\nsyslog\x00\x00two\x1elines\n"
+	if err := os.WriteFile(cfg.Buffer.SpillPath, []byte(spill), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for run := 0; run < 2; run++ { // a second start must not import again
+		rt := openDurable(cfg, "web01")
+		rt.importLegacy(cfg.Buffer.SpillPath, cfg.Agent.ID, "web01")
+		rt.shutdown()
+	}
+	got := drain(t, cfg)
+	if len(got) != 2 || !got[0].LegacyImport || got[1].RawMessage != "two\nlines" {
+		t.Fatalf("imported %+v", got)
+	}
+	if b, _ := os.ReadFile(cfg.Buffer.SpillPath); string(b) != spill {
+		t.Fatal("the legacy spill was modified")
+	}
+}
+
+func TestDurableShutdownStopsABlockedImport(t *testing.T) {
+	cfg := durableConfig(t)
+	cfg.Evidence.MaxBytes, cfg.Evidence.SegmentBytes, cfg.Evidence.ReservedBytes = 64<<10, 32<<10, 16<<10
+	cfg.Buffer.SpillPath = filepath.Join(t.TempDir(), "spill.log")
+	line := "syslog\x00\x00" + strings.Repeat("y", 300) + "\n"
+	if err := os.WriteFile(cfg.Buffer.SpillPath, []byte(strings.Repeat(line, 400)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	saved := importRetry
+	importRetry = 10 * time.Millisecond
+	defer func() { importRetry = saved }()
+	rt := openDurable(cfg, "web01")
+	rt.importLegacy(cfg.Buffer.SpillPath, cfg.Agent.ID, "web01")
+	if rt.importDone == nil {
+		t.Fatal("a blocked import was not retried in the background")
+	}
+	if s := reportJSON(t, rt)["sources"].(map[string]any)["legacy-spill"].(map[string]any); s["reason"] != "migration_blocked" {
+		t.Fatalf("health %v", s)
+	}
+	done := make(chan struct{})
+	go func() { rt.shutdown(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown waited forever for the import")
 	}
 }
 

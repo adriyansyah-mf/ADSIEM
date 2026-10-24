@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,6 +35,9 @@ type durableRuntime struct {
 	sender    atomic.Pointer[evidence.Sender]
 	cancel    context.CancelFunc
 	done      chan struct{}
+
+	importCancel context.CancelFunc
+	importDone   chan struct{}
 
 	reportMu   sync.Mutex
 	lastReport *evidence.Health
@@ -138,6 +142,54 @@ func (rt *durableRuntime) startSender(t evidence.Transport, supportsV2 func() bo
 	}()
 }
 
+// importRetry is how often a migration blocked by a full journal is retried.
+var importRetry = time.Minute
+
+// importLegacy moves the legacy disk spill into the journal before any
+// producer starts: the legacy spill writer never runs in durable mode, so
+// this is its only reader. The spill file itself is left untouched. When the
+// journal is full the import keeps its progress and is retried in the
+// background as delivery frees space; collection starts meanwhile.
+func (rt *durableRuntime) importLegacy(path, agentID, hostname string) {
+	if rt.journal == nil || path == "" {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	err := evidence.ImportLegacy(ctx, rt.journal, path, agentID, hostname)
+	if err == nil {
+		cancel()
+		if fi, statErr := os.Stat(path); statErr == nil && fi.Size() > 0 {
+			slog.Info("legacy spill imported into the evidence journal (the file is kept)", "path", path)
+		}
+		return
+	}
+	slog.Warn("legacy spill import incomplete, retrying in the background", "path", path, "err", err, "retry_in", importRetry)
+	rt.importCancel, rt.importDone = cancel, make(chan struct{})
+	go func() {
+		defer close(rt.importDone)
+		t := time.NewTicker(importRetry)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			err := evidence.ImportLegacy(ctx, rt.journal, path, agentID, hostname)
+			if err == nil {
+				slog.Info("legacy spill imported into the evidence journal (the file is kept)", "path", path)
+				return
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			if !errors.Is(err, evidence.ErrMigrationBlocked) {
+				slog.Error("legacy spill import failed", "path", path, "err", err)
+			}
+		}
+	}()
+}
+
 // shutdown runs after every producer was stopped: stop the sender, drain the
 // publisher, then close the journal. A publisher that is still appending past
 // its deadline keeps the journal open (closing it would race the append); the
@@ -145,6 +197,10 @@ func (rt *durableRuntime) startSender(t evidence.Transport, supportsV2 func() bo
 func (rt *durableRuntime) shutdown() {
 	if rt.journal == nil {
 		return
+	}
+	if rt.importCancel != nil {
+		rt.importCancel()
+		<-rt.importDone
 	}
 	if rt.cancel != nil {
 		rt.cancel()

@@ -280,6 +280,37 @@ installable.
 | `go test -race ./agent/...` incl. 6 resolve and 6 CLI tests | Passed; Windows vet passed |
 | Go health reports (empty, backlog+loss+sources+sender, unavailable) validated with the server schema | 3/3 accepted |
 
+## 2026-10-25: Task 11 legacy spill migration and staged activation
+
+- `evidence.ImportLegacy` (commit e6f115d): spill untouched, completion is a
+  journal marker, progress is the import cursor in each record, stable IDs
+  from agent + spill fingerprint + line offset, `legacy_import` label,
+  grown spill continues, substituted file is a new import, oversized entries
+  counted as `legacy_import` loss, `ErrMigrationBlocked` with progress kept and
+  `legacy-spill` health `migration_blocked`.
+- Startup: in durable mode the agent imports `buffer.spill_path` before any
+  producer starts; a blocked import retries every minute in the background and
+  is stopped and joined at shutdown before the journal closes. The legacy
+  spill writer never opens in durable mode.
+- Packaged `config.yaml` (Linux, Windows) document the `evidence:` block,
+  commented out; a test uncomments and loads both. The local `agent/config.yaml`
+  was not touched.
+- Runbook: `docs/operations/agent-evidence-recovery.md` (backend first,
+  1% → 10% → fleet with review criteria, legacy spill upgrade, downgrade,
+  operator actions, symptom table).
+
+| Command | Result |
+| --- | --- |
+| `go test ./agent/internal/evidence -run TestImport` before `migration.go` | Build failed: undefined (red) |
+| Same after | 8 passed (original preserved, decoding, resume after each of 3 interruptions, deterministic IDs, missing/empty, grown/replaced spill, oversized, capacity block then resume) |
+| `go test -race ./agent/cmd/agent -run TestDurable` | 9 passed incl. import once across restarts and shutdown of a blocked import |
+| `go test -race ./agent/... ./tests/agent/...` | Passed |
+| Imported envelopes validated with server `EvidenceEnvelope` | 3/3 valid |
+| Windows vet + build | Passed |
+
+Not done here (Task 12): MSI smoke test in durable mode, fault-injection
+acceptance harness, benchmarks. Durable mode stays off by default.
+
 Order note: for the API, resolve library and CLI the implementation was
 written before its tests, so no red run was recorded for those parts; the
 agent reporter and sender-side tests were run after. Not manually inspected in

@@ -162,7 +162,8 @@ func run(configPath string, stop <-chan struct{}) {
 	if cfg.Evidence.Enabled {
 		durable = openDurable(cfg, mustHostname())
 		buf = durable.buf
-		heartbeat.EvidenceHealth = durable.report // before the heartbeat loop starts
+		heartbeat.EvidenceHealth = durable.report                                // before the heartbeat loop starts
+		durable.importLegacy(cfg.Buffer.SpillPath, cfg.Agent.ID, mustHostname()) // before any producer starts
 	} else {
 		buf = buffer.New(cfg.Agent.BufferSize)
 		if spill, err = buffer.OpenSpill(cfg.Buffer.SpillPath); err != nil {
