@@ -91,9 +91,11 @@ type evidenceReport struct {
 	Sender *evidence.SenderStatus `json:"sender,omitempty"`
 }
 
-// healthEvery bounds how often a heartbeat rescans the journal: Snapshot
-// walks every retained record, so a large backlog makes it expensive.
-const healthEvery = time.Minute
+// healthEvery bounds how often heartbeats take a journal Snapshot. Snapshot
+// counts from the in-memory index (milliseconds even for a full journal), so
+// every default heartbeat reports a current backlog; this only limits very
+// frequent heartbeat intervals.
+const healthEvery = 5 * time.Second
 
 // report returns the evidence health for the next heartbeat.
 func (rt *durableRuntime) report() any {
