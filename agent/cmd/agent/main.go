@@ -135,17 +135,25 @@ func run(configPath string, stop <-chan struct{}) {
 		slog.Warn("could not set the service's tamper protection", "err", err)
 	}
 
-	buf := buffer.New(cfg.Agent.BufferSize)
 	c := client.New(cfg.Server.URL, cfg.Agent.Token)
-	mgr := tailer.NewManager(buf)
-
-	spill, err := buffer.OpenSpill(cfg.Buffer.SpillPath)
-	if err != nil {
-		slog.Warn("disk spill unavailable; undelivered events will be lost on restart", "err", err)
-		spill = nil
+	// evidence.enabled: durable journal + receipt-aware sender. Otherwise the
+	// legacy memory queue, sender and disk spill. The two never mix.
+	var durable *durableRuntime
+	var buf *buffer.Buffer
+	var spill *buffer.Spill
+	if cfg.Evidence.Enabled {
+		durable = openDurable(cfg, mustHostname())
+		buf = durable.buf
 	} else {
-		defer spill.Close()
+		buf = buffer.New(cfg.Agent.BufferSize)
+		if spill, err = buffer.OpenSpill(cfg.Buffer.SpillPath); err != nil {
+			slog.Warn("disk spill unavailable; undelivered events will be lost on restart", "err", err)
+			spill = nil
+		} else {
+			defer spill.Close()
+		}
 	}
+	mgr := tailer.NewManager(buf)
 
 	// seed initial sources from config
 	initialSources := make([]heartbeat.LogSource, len(cfg.Logs))
@@ -198,6 +206,9 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Info("local detection enabled", "rules", detector.EnabledRules())
 		}
 	}
+	if durable != nil {
+		durable.setDetector(detector) // observes admissions instead of sends
+	}
 
 	// Live-response flows: long-polls the server and runs artifact plugins
 	flowCtx, stopFlows := context.WithCancel(context.Background())
@@ -211,10 +222,12 @@ func run(configPath string, stop <-chan struct{}) {
 
 	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
+	// Producers are stopped explicitly at shutdown, before the durable journal closes.
+	var stopProducers []func()
 	if procMon, err := procexec.Start(buf); err != nil {
 		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
 	} else {
-		defer procMon.Stop()
+		stopProducers = append(stopProducers, procMon.Stop)
 	}
 
 	// Network syscall telemetry (connect/accept/bind/DNS) with an `ss` snapshot
@@ -224,11 +237,11 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Warn("netwatch eBPF unavailable, continuing", "err", err)
 			if cfg.Netwatch.SnapshotFallback {
 				snap := netwatch.StartSnapshotter(buf, cfg.Server.URL)
-				defer snap.Stop()
+				stopProducers = append(stopProducers, snap.Stop)
 				slog.Info("netwatch running in snapshot mode (new connections only)", "interval", "10s")
 			}
 		} else {
-			defer netMon.Stop()
+			stopProducers = append(stopProducers, netMon.Stop)
 		}
 	}
 
@@ -270,8 +283,11 @@ func run(configPath string, stop <-chan struct{}) {
 		},
 	)
 
-	// sender loop
-	go senderLoop(buf, c, cfg, spill, detector)
+	if durable != nil {
+		durable.startSender(c, heartbeat.SupportsEvidenceV2)
+	} else {
+		go senderLoop(buf, c, cfg, spill, detector)
+	}
 
 	// periodic buffer diagnostics
 	go func() {
@@ -287,7 +303,14 @@ func run(configPath string, stop <-chan struct{}) {
 	heartbeat.SendStopping(cfg, c, getStopReason())
 	stopFlows()
 	mgr.StopAll()
-	flushBuffer(buf, c, cfg)
+	for i := len(stopProducers) - 1; i >= 0; i-- {
+		stopProducers[i]()
+	}
+	if durable != nil {
+		durable.shutdown() // the journal keeps what was not acknowledged
+	} else {
+		flushBuffer(buf, c, cfg)
+	}
 }
 
 func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill *buffer.Spill, detector *detect.Engine) {

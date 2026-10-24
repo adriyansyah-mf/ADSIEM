@@ -114,3 +114,54 @@ Not covered yet: a cross-service test that drives an HTTP v2 acceptance and
 then the worker against one schema (worker tests seed rows in the API's
 canonical JSON form instead), and Elasticsearch itself (`process_message` is
 mocked; it already writes with PUT by id). Independent Task 6 review pending.
+
+## 2026-10-24: Task 7 receipt-aware sender and runtime selection
+
+`agent/internal/evidence/sender.go`: `Sender{Journal, Transport, SupportsV2}`
+with `Step`/`Run`. An event is reclaimed only for HTTP 202 + protocol 2 + the
+same event ID + `accepted`/`duplicate` + a valid receipt UUID; a legacy
+`{"status":"queued"}` 202 keeps it. The first attempt is persisted before any
+network I/O; after 30 days without a receipt the event is held, never resent.
+Network errors, 408, 429 and 5xx back off 1-60 s with jitter and honor a
+Retry-After bounded to 1-300 s; `pending_approval`, 401 and other 403 retry
+every 60 s as blocked; 400/409/413/422 quarantine and move on, but after 5
+rejections in a row the sender stops quarantining and blocks
+(`repeated_rejections`) so a server-side validation regression cannot
+quarantine the backlog; unknown statuses block and keep evidence. Responses are
+read to at most 16 KiB and every body is closed. Until a heartbeat advertises
+`evidence_protocols: [2]` nothing is sent (checked every second, in memory);
+the heartbeat clears support when the server stops advertising it.
+
+`agent/cmd/agent/evidence.go`, behind `evidence.enabled` (default false):
+producers push into a sink buffer whose entries become publisher bridge
+offers; local detection observes every live admitted event once through the
+publisher; the legacy spill is never opened or drained and the legacy sender
+does not run; a journal open failure blocks collection (counted as heartbeat
+`buffer_dropped`) with no legacy fallback while heartbeat continues. Shutdown
+stops tailers and eBPF monitors explicitly, then the sender, then the
+publisher (bounded, three 10 s rounds; a still-appending publisher leaves the
+journal open), then closes the journal.
+
+| Command | Result |
+| --- | --- |
+| Sender tests before `sender.go` existed | Build failed: `Sender`/`Transport` undefined (red) |
+| `go test -race ./agent/internal/evidence -run 'TestSender|TestLegacySuccess'` | 15 tests and subtests passed |
+| `go test -race ./agent/cmd/agent -run TestDurable` | 5 passed (admission, once-per-event offline detection, blocked journal, protocol gating then delivery, shutdown) |
+| Same runtime/sender tests `-count=10 -race` | Passed, no flakes |
+| `go test ./agent/... ./tests/agent/...` | Passed |
+| `GOOS=windows go vet` and `go build ./agent/cmd/agent` | Passed |
+| Go-encoded envelopes (cursor/no cursor, NUL, `<&>`, ns, non-UTC offset) validated with server `EvidenceEnvelope` | 4/4 valid |
+
+Known limits, for later tasks:
+- Producers are not joined: `Stop` on tailers/eBPF monitors closes channels but
+  does not wait for their goroutines. A late offer after the publisher stopped
+  is refused and counted as dropped, never written to a closed journal. Joining
+  the tailer belongs to Task 8, which rewrites it.
+- A local detection raised while shutdown drains the bridge is refused (its
+  triggering event is kept).
+- Today's producers are bridge offers (not replayable): a crash loses offers
+  still in the 64-slot bridge. Task 8 makes file sources replayable.
+- `agent/cmd/agent` tests need the eBPF objects (`make -C agent bpf`), so CI's
+  non-eBPF Go step does not run them yet.
+- Sender status is exposed by `Sender.Status()` but not yet reported in the
+  heartbeat; that is Task 10.

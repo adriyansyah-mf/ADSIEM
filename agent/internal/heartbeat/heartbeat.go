@@ -166,6 +166,25 @@ type HeartbeatResponse struct {
 	// SHA-256 of this agent's uninstall token (server-side secret); kept
 	// locally so package removal can be refused without it.
 	UninstallTokenSHA256 string `json:"uninstall_token_sha256"`
+	// Durable ingest protocols the server accepts right now; [2] only while its
+	// inbox is enabled and healthy (server-api check_evidence_durability).
+	EvidenceProtocols []int `json:"evidence_protocols"`
+}
+
+var evidenceV2 atomic.Bool
+
+// SupportsEvidenceV2 reports whether the last successful heartbeat advertised
+// durable ingest protocol 2. The evidence sender sends nothing until it does.
+func SupportsEvidenceV2() bool { return evidenceV2.Load() }
+
+func storeEvidenceProtocols(protocols []int) {
+	supported := false
+	for _, p := range protocols {
+		supported = supported || p == 2
+	}
+	if evidenceV2.Swap(supported) != supported {
+		slog.Info("durable evidence protocol", "supported", supported)
+	}
 }
 
 // Loop sends heartbeats every interval.
@@ -209,6 +228,7 @@ func Loop(
 			var hbResp HeartbeatResponse
 			if err := json.Unmarshal(body, &hbResp); err == nil {
 				storeUninstallHash(hbResp.UninstallTokenSHA256)
+				storeEvidenceProtocols(hbResp.EvidenceProtocols)
 				if hbResp.ConfigHash != lastHash {
 					slog.Info("config updated", "hash", hbResp.ConfigHash)
 					lastHash = hbResp.ConfigHash

@@ -8,6 +8,24 @@ import (
 	"testing"
 )
 
+func TestHeartbeatEvidenceProtocolFollowsTheLatestResponse(t *testing.T) {
+	defer storeEvidenceProtocols(nil)
+	for _, c := range []struct {
+		protocols []int
+		want      bool
+	}{
+		{[]int{2}, true},
+		{nil, false}, // the server disabled its inbox: stop sending v2
+		{[]int{1, 2, 3}, true},
+		{[]int{1, 3}, false},
+	} {
+		storeEvidenceProtocols(c.protocols)
+		if got := SupportsEvidenceV2(); got != c.want {
+			t.Fatalf("protocols %v: supported=%v", c.protocols, got)
+		}
+	}
+}
+
 func TestIntegrityHashesBinaryAndConfig(t *testing.T) {
 	cfg := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(cfg, []byte("server: {url: x}\n"), 0o600); err != nil {
