@@ -213,6 +213,22 @@ func (j *Journal) Cursor(source string) (Cursor, bool) {
 	return c, ok
 }
 
+// Cursors returns a copy of every committed source cursor. Collectors use it to
+// find a rotated file identity under another name in their configured scope.
+func (j *Journal) Cursors() map[string]Cursor {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	out := make(map[string]Cursor, len(j.cursors))
+	for key, value := range j.cursors {
+		out[key] = value
+	}
+	return out
+}
+
+// MaxEventBytes is the largest encoded event the journal admits. Collectors
+// bound their per-source line buffers with it.
+func (j *Journal) MaxEventBytes() int { return j.options.MaxEventBytes }
+
 func (j *Journal) Close() error {
 	j.mu.Lock()
 	defer j.mu.Unlock()

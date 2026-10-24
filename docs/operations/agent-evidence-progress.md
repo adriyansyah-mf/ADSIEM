@@ -165,3 +165,58 @@ Known limits, for later tasks:
   non-eBPF Go step does not run them yet.
 - Sender status is exposed by `Sender.Status()` but not yet reported in the
   heartbeat; that is Task 10.
+
+## 2026-10-24: Task 8 durable file cursors
+
+`agent/internal/tailer/durable_file.go`: `TailDurable(ctx, path, logType,
+journal, sink)` for a file or glob. Each file has cursor source
+`file:<path>` with its platform identity (`identity_linux.go` dev:ino,
+`identity_windows.go` volume serial + file index; other OSes refuse with
+`ErrUnsupported`), a random generation per identity, and the offset just after
+the last complete admitted line, never the read-ahead position.
+
+- First enablement (no `source:<path>` marker) starts existing files at EOF;
+  files that appear later, including several glob arrivals between passes,
+  start at zero.
+- Restart resumes the committed cursor; lines written while stopped are read.
+- Partial lines stay pending and are reread from the committed offset.
+- Lines over `MaxEventBytes` are discarded with bounded memory, counted
+  (`oversize` loss) and their end offset committed; loss is recorded before
+  the offset, so a crash can count twice but never skips silently.
+- Running rotation drains the open file (one extra read after the rename is
+  seen), commits a drained marker unless the identity lives on under another
+  in-scope name, then reads the replacement from zero with a new generation.
+- Rotated while stopped: inside a glob scope the renamed identity resumes from
+  its cursor; otherwise an unknown gap is recorded and the replacement starts
+  at zero. Truncation below the cursor (copytruncate) records a gap and starts
+  a new generation at zero.
+- `ErrFull` and storage failures pause the source (health `paused`) and retry
+  the same draft with backoff up to 5 s; the cursor only moves after durable
+  admission, and stopping while paused keeps it.
+- Health uses one source per configured path (`file:<path or glob>`).
+
+`Manager.Update`/`StopAll` now wait for the sources they stop, restart a path
+whose log type changed, and never hold the manager while a source needs it.
+`NewDurableManager(journal, publisher)` runs files through `TailDurable`;
+Windows event log channels still use the publisher bridge until Task 9. The
+agent uses it in `evidence.enabled` mode, so shutdown now joins the tailers
+(closing the Task 7 gap for files).
+
+| Command | Result |
+| --- | --- |
+| Tailer tests before the implementation | Build failed: `TailDurable`/`durablePoll` undefined (red) |
+| `go test -race ./agent/internal/tailer` | 17 passed (15 new: read-ahead, cursor identity/location, first enablement at EOF, restart without skips, partial line across restart, oversize counted once, renamed open file drained, glob arrivals, missing rotated identity gap, rename in glob scope while stopped, copytruncate gap, disk pressure retry, stop while paused, storage failure, manager restart/join, manager disable) |
+| Same, `-count=5 -race` | Passed, no flakes |
+| `go test -race ./agent/... ./tests/agent/...` | Passed |
+| `GOOS=windows go vet` + test compile of tailer, Windows agent build, darwin vet | Passed |
+
+Known limits:
+- Windows was compiled and vetted, not executed: native NTFS identity and
+  rename-while-open behavior need the Windows runner (Task 12). Go opens files
+  without `FILE_SHARE_DELETE`, as the legacy tailer always did, so some Windows
+  writers cannot rename a log the agent holds open.
+- Cursor keys are per file path; date-named glob files leave old keys in the
+  journal's cursor map (small, unbounded over a long time).
+- Detection of copytruncate is by size: a truncation followed by a rewrite of
+  at least the old length before the next poll is not detectable.
+- eBPF monitors are still not joined at shutdown (late offers are refused).

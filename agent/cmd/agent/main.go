@@ -154,6 +154,9 @@ func run(configPath string, stop <-chan struct{}) {
 		}
 	}
 	mgr := tailer.NewManager(buf)
+	if durable != nil && durable.journal != nil {
+		mgr = tailer.NewDurableManager(durable.journal, durable.publisher) // files resume from durable cursors
+	}
 
 	// seed initial sources from config
 	initialSources := make([]heartbeat.LogSource, len(cfg.Logs))
