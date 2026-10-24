@@ -51,13 +51,10 @@ type trackedFile struct {
 }
 
 type durableTail struct {
-	ctx           context.Context
+	sourceGuard   // health: one entry per configured path
 	path, logType string
 	glob          bool
-	j             *evidence.Journal
 	sink          DurableSink
-	health        string // source name in evidence health: one per configured path
-	state         string // last health state written
 	maxLine       int
 	files         map[string]*trackedFile
 	lastDiscover  time.Time
@@ -71,8 +68,8 @@ type durableTail struct {
 // is canceled.
 func TailDurable(ctx context.Context, path, logType string, j *evidence.Journal, sink DurableSink) error {
 	t := &durableTail{
-		ctx: ctx, path: path, logType: logType, glob: isGlob(path), j: j, sink: sink,
-		health: fileSourcePrefix + path, maxLine: j.MaxEventBytes(),
+		sourceGuard: sourceGuard{ctx: ctx, j: j, health: fileSourcePrefix + path, label: path},
+		path:        path, logType: logType, glob: isGlob(path), sink: sink, maxLine: j.MaxEventBytes(),
 		files: map[string]*trackedFile{}, scratch: make([]byte, readChunk),
 	}
 	defer t.closeAll()
@@ -172,7 +169,7 @@ func (t *durableTail) discover(firstEnable bool) error {
 		if _, tracked := t.files[key]; tracked {
 			continue
 		}
-		f, err := os.Open(path)
+		f, err := openLog(path)
 		if err != nil {
 			t.setState("unavailable", "open_error")
 			continue
@@ -299,7 +296,7 @@ func (t *durableTail) identityInScope(identity, key string) bool {
 }
 
 func pathIdentity(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := openLog(path)
 	if err != nil {
 		return "", err
 	}
@@ -475,42 +472,61 @@ func (t *durableTail) oversize(tf *trackedFile, end int64) error {
 	return t.baseline(tf)
 }
 
+// sourceGuard is what every durable source shares: its health entry, and
+// journal writes that wait out disk pressure instead of dropping evidence.
+type sourceGuard struct {
+	ctx    context.Context
+	j      *evidence.Journal
+	health string // source name in evidence health
+	label  string // configured path, for logs
+	state  string // last health state written
+}
+
 // control runs a journal write, waiting out disk pressure.
-func (t *durableTail) control(write func() error) error { return t.retry(write) }
+func (g *sourceGuard) control(write func() error) error { return g.retry(write) }
 
 // retry repeats write while the journal is full or failing. It pauses the
 // source (visible in health) and stops when ctx ends.
-func (t *durableTail) retry(write func() error) error {
+func (g *sourceGuard) retry(write func() error) error {
 	wait := 100 * time.Millisecond
 	for {
 		err := write()
 		switch {
 		case err == nil:
-			if t.state == "paused" || t.state == "unavailable" || t.state == "" {
-				t.setState("healthy", "")
+			if g.state == "paused" || g.state == "unavailable" || g.state == "" {
+				g.setState("healthy", "")
 			}
 			return nil
 		case errors.Is(err, evidence.ErrOversize), errors.Is(err, evidence.ErrPublisherStopped),
 			errors.Is(err, evidence.ErrIdentityMismatch), errors.Is(err, evidence.ErrInvalidControl):
 			return err
-		case t.ctx.Err() != nil:
-			return t.ctx.Err()
+		case g.ctx.Err() != nil:
+			return g.ctx.Err()
 		}
 		reason := "storage_failure"
 		if errors.Is(err, evidence.ErrFull) {
 			reason = "capacity"
 		}
-		if t.state != "paused" {
-			slog.Warn("log source paused", "path", t.path, "reason", reason, "err", err)
+		if g.state != "paused" {
+			slog.Warn("log source paused", "path", g.label, "reason", reason, "err", err)
 		}
-		t.setState("paused", reason)
-		if !sleepCtx(t.ctx, wait) {
-			return t.ctx.Err()
+		g.setState("paused", reason)
+		if !sleepCtx(g.ctx, wait) {
+			return g.ctx.Err()
 		}
 		if wait *= 2; wait > maxPressureWait {
 			wait = maxPressureWait
 		}
 	}
+}
+
+// loss durably counts lost or unknown evidence and marks the source degraded.
+func (g *sourceGuard) loss(reason string, known int64, unknown bool) error {
+	if err := g.control(func() error { return g.j.RecordLoss(g.ctx, g.health, reason, known, unknown) }); err != nil {
+		return err
+	}
+	g.state = "degraded"
+	return nil
 }
 
 // atEOF detects copytruncate and rotation once everything readable was read.
@@ -578,20 +594,20 @@ func (t *durableTail) untrack(tf *trackedFile) {
 	delete(t.files, tf.key)
 }
 
-func (t *durableTail) setState(state, reason string) {
-	if t.state == state {
+func (g *sourceGuard) setState(state, reason string) {
+	if g.state == state {
 		return
 	}
 	if reason == "" {
 		reason = state // the journal requires a reason
 	}
-	if err := t.j.SetSourceState(t.ctx, t.health, state, reason); err != nil {
-		if t.ctx.Err() == nil {
-			slog.Warn("recording log source health", "path", t.path, "err", err)
+	if err := g.j.SetSourceState(g.ctx, g.health, state, reason); err != nil {
+		if g.ctx.Err() == nil {
+			slog.Warn("recording log source health", "path", g.label, "err", err)
 		}
 		return
 	}
-	t.state = state
+	g.state = state
 }
 
 func newGeneration() string {

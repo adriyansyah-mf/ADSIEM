@@ -9,6 +9,8 @@ import (
 	"syscall"
 )
 
+func openLog(path string) (*os.File, error) { return os.Open(path) }
+
 // fileIdentity is the open file's device and inode: stable across renames,
 // different for a new file created at the same path.
 func fileIdentity(f *os.File) (string, error) {

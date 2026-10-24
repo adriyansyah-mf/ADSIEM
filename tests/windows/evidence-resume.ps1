@@ -1,0 +1,37 @@
+<#
+  Native Windows evidence tests: the journal (NTFS identity, ACLs, flushes),
+  durable file cursors (share-delete opens, rename rotation) and Event Log
+  bookmarks. The event log tests create their own classic log (SIEMxxxx),
+  write markers, stop and resume from the same journal directory, clear only
+  that log to prove gap recovery, and remove it afterwards. They never touch
+  Security, System or another channel.
+
+  Needs an elevated prompt (creating an event log source does).
+    ./tests/windows/evidence-resume.ps1
+#>
+$ErrorActionPreference = "Stop"
+$principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "Run from an elevated prompt: the event log tests create and remove a test log."
+}
+
+$env:SIEM_NATIVE_EVENTLOG = "1"
+$packages = @(
+    "./agent/internal/evidence",
+    "./agent/internal/buffer",
+    "./agent/internal/config",
+    "./agent/internal/winevent",
+    "./agent/internal/tailer"
+)
+$failed = @()
+foreach ($pkg in $packages) {
+    Write-Host "==> go test $pkg"
+    go test -count=1 -v $pkg 2>&1 | ForEach-Object {
+        if ($_ -match '^(--- (FAIL|SKIP)|FAIL|ok|panic)' -or $_ -match '_test\.go:\d+:') { Write-Host $_ }
+    }
+    if ($LASTEXITCODE -ne 0) { $failed += $pkg }
+}
+if ($failed.Count -gt 0) {
+    throw "native evidence tests failed: $($failed -join ', ')"
+}
+Write-Host "ok: native evidence, cursor and bookmark tests passed"

@@ -37,19 +37,10 @@ func NewManager(buf *buffer.Buffer) *Manager {
 	}}
 }
 
-// NewDurableManager tails files into the journal from durable cursors.
-// Windows event log channels still go through the publisher's bridge until
-// they get bookmarks of their own.
+// NewDurableManager tails files and Windows event log channels into the
+// journal from durable cursors (file offsets, event log bookmarks).
 func NewDurableManager(j *evidence.Journal, p *evidence.Publisher) *Manager {
-	bridge := buffer.NewWithSink(func(entry string) error {
-		logType, location, raw := Decode(entry)
-		return p.TrySubmit(evidence.Draft{LogType: logType, Location: location, RawMessage: raw})
-	})
 	return &Manager{sources: make(map[string]*source), run: func(path, logType string, stop <-chan struct{}) {
-		if strings.HasPrefix(path, EventLogPrefix) {
-			TailEventLog(path, logType, bridge, stop)
-			return
-		}
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		go func() {
@@ -59,7 +50,11 @@ func NewDurableManager(j *evidence.Journal, p *evidence.Publisher) *Manager {
 			case <-ctx.Done():
 			}
 		}()
-		if err := TailDurable(ctx, path, logType, j, p); err != nil {
+		tail := TailDurable
+		if strings.HasPrefix(path, EventLogPrefix) {
+			tail = TailEventLogDurable
+		}
+		if err := tail(ctx, path, logType, j, p); err != nil {
 			slog.Error("durable tailer stopped", "path", path, "err", err)
 		}
 	}}
