@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,7 @@ func TestPackagedEvidenceExamplesLoadWhenUncommented(t *testing.T) {
 				t.Fatal(err)
 			}
 			state := t.TempDir()
+			b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n")) // Windows checkouts use CRLF
 			body := uncomment.ReplaceAll(b, []byte("$1"))
 			body = regexp.MustCompile(`(?m)^agent:\n`).ReplaceAll(body, []byte("agent:\n  state_dir: "+quote(state)+"\n"))
 			path := filepath.Join(t.TempDir(), "config.yaml")
