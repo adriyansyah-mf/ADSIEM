@@ -99,6 +99,24 @@ func BenchmarkRecover10k(b *testing.B) {
 	}
 }
 
+// BenchmarkSnapshot10k is one health snapshot of a 10,000-event backlog; the
+// journal lock is held for all of it, so appends wait this long.
+func BenchmarkSnapshot10k(b *testing.B) {
+	o := benchOptions(b)
+	j, err := Open(o)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer j.Close()
+	fill(b, j, o, benchEvents)
+	b.ResetTimer()
+	for range b.N {
+		if h := j.Snapshot(); h.QueuedEvents != benchEvents {
+			b.Fatalf("queued %d", h.QueuedEvents)
+		}
+	}
+}
+
 // BenchmarkReplay10k delivers a 10,000-event backlog the way the sender does:
 // Peek, mark the attempt, Ack, until empty. One op is the whole backlog.
 func BenchmarkReplay10k(b *testing.B) {

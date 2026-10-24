@@ -200,6 +200,7 @@ class EvidenceHealth(BaseModel):
     known_loss: dict[EvidenceLossReason, EvidenceCount] = Field(default_factory=dict)
     pending_loss: dict[EvidenceLossReason, EvidenceCount] = Field(default_factory=dict)
     loss_uncertain: bool = False
+    indexed_events: EvidenceCount = 0  # agent RAM index entries (~45-70 bytes each)
     sources: dict[Annotated[str, Field(max_length=512)], EvidenceSourceHealth] = Field(
         default_factory=dict, max_length=256)
     sender: EvidenceSenderStatus | None = None

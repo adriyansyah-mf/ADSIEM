@@ -74,6 +74,8 @@ export interface EvidenceHealthSnapshot {
   quarantined: number
   held: number
   unknown_gaps: number
+  /** Retained event IDs in the agent's RAM index; 0 from agents before it was reported. */
+  indexed_events?: number
   known_loss: Record<string, number>
   sources: Record<string, EvidenceSourceHealth>
   sender?: { state: 'idle' | 'sending' | 'retrying' | 'blocked'; reason: string; since: string | null; failures: number } | null

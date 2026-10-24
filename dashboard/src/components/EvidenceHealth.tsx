@@ -7,7 +7,9 @@ import { WorkspaceDialog } from '@/components/WorkspaceDialog'
 import { useAgentEvidence, useRetryEvidence } from '@/hooks/useAgents'
 import type { Agent, AgentEvidenceSummary, EvidenceDeadLetter } from '@/types'
 
-const NOT_REPORTED: AgentEvidenceSummary = { status: 'not_reported', reason: null, reported_at: null, stale: false }
+// Upper end of the measured agent index cost (BenchmarkIndexMemory), for an estimate only.
+const INDEX_BYTES_PER_EVENT = 65
+const NOT_REPORTED: AgentEvidenceSummary ={ status: 'not_reported', reason: null, reported_at: null, stale: false }
 
 // Reasons are short machine codes from the agent; say what they mean.
 const REASONS: Readonly<Record<string, string>> = {
@@ -87,6 +89,9 @@ export function EvidenceHealthPanel({ agent, canManage }: { readonly agent: Agen
       <div><dt className="table-secondary">Unknown gaps</dt><dd>{h.unknown_gaps.toLocaleString()}</dd></div>
       <div><dt className="table-secondary">Quarantined</dt><dd>{h.quarantined.toLocaleString()}</dd></div>
       <div><dt className="table-secondary">Held for an operator</dt><dd>{h.held.toLocaleString()}</dd></div>
+      {!!h.indexed_events && <div><dt className="table-secondary">Agent memory index</dt>
+        <dd title="Every retained event ID, delivered or not, until compaction; measured at 45-70 bytes each">
+          {h.indexed_events.toLocaleString()} events · ≈{bytes(h.indexed_events * INDEX_BYTES_PER_EVENT)}</dd></div>}
     </dl>}
     {sources.length > 0 && <div>
       <h4 className="text-xs font-medium text-muted-foreground">Log sources needing attention</h4>

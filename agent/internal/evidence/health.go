@@ -40,6 +40,9 @@ type Health struct {
 	// PendingLoss is volatile accounting, separate from durable KnownLoss.
 	PendingLoss   map[string]int64 `json:"pending_loss"`
 	LossUncertain bool             `json:"loss_uncertain"`
+	// IndexedEvents is the in-memory index size (retained event IDs, delivered
+	// or not, until compaction); about 45-70 bytes of RAM each.
+	IndexedEvents int64 `json:"indexed_events"`
 }
 
 func cloneTotals(h healthTotals) healthTotals {
@@ -142,21 +145,31 @@ func (j *Journal) Snapshot() Health {
 		case "":
 		}
 	}
-	// Snapshot has no context in its downstream contract. The scan is synchronous,
-	// frame-bounded and serialized like Peek; it starts no background work.
-	err := j.walkEvents(context.TODO(), func(e Envelope, p eventPosition) (bool, error) {
-		if acknowledged(j.checkpoint, p) {
-			return false, nil
+	// Counted from the index, not by reading the journal (that held the lock for
+	// seconds on a large backlog). Only the records collected in the oldest
+	// second are read, for the exact OldestQueuedAt.
+	h.IndexedEvents = int64(j.index.Len())
+	oldest := int64(math.MaxInt64)
+	var candidates []eventPosition
+	j.index.each(func(p indexedPosition) {
+		if acknowledged(j.checkpoint, p.eventPosition) {
+			return
 		}
 		h.QueuedEvents++
 		h.QueuedBytes += p.End - p.Offset
+		switch {
+		case p.collected < oldest:
+			oldest, candidates = p.collected, append(candidates[:0], p.eventPosition)
+		case p.collected == oldest:
+			candidates = append(candidates, p.eventPosition)
+		}
+	})
+	if err := j.readEach(candidates, func(e Envelope) {
 		if h.OldestQueuedAt == nil || e.CollectedAt.Before(*h.OldestQueuedAt) {
 			at := e.CollectedAt
 			h.OldestQueuedAt = &at
 		}
-		return false, nil
-	})
-	if err != nil {
+	}); err != nil {
 		j.storageGap = true
 	}
 	if j.storageGap {

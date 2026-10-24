@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"sort"
 )
 
 // The journal keeps an in-memory index from event ID to the positions of its
@@ -20,32 +21,54 @@ import (
 
 type eventKey [16]byte
 
-// packedPosition is an eventPosition in 12 bytes: what nearly every retained
-// event needs, since sequences and segment offsets stay far below 2^32.
-type packedPosition struct{ sequence, offset, end uint32 }
-
-func pack(p eventPosition) (packedPosition, bool) {
-	if p.Sequence > math.MaxUint32 || p.Offset < 0 || p.End > math.MaxUint32 || p.Offset > p.End {
-		return packedPosition{}, false
-	}
-	return packedPosition{uint32(p.Sequence), uint32(p.Offset), uint32(p.End)}, true
+// indexedPosition is a retained occurrence plus its collection time in Unix
+// seconds, so health can be computed without reading the journal.
+type indexedPosition struct {
+	eventPosition
+	collected int64
 }
 
-func (p packedPosition) unpack() eventPosition {
-	return eventPosition{Sequence: uint64(p.sequence), Offset: int64(p.offset), End: int64(p.end)}
+// packedPosition is an indexedPosition in 16 bytes: what nearly every
+// retained event needs, since sequences, segment offsets and Unix seconds
+// stay below 2^32 (until 2106).
+type packedPosition struct{ sequence, offset, end, collected uint32 }
+
+func pack(p indexedPosition) (packedPosition, bool) {
+	if p.Sequence > math.MaxUint32 || p.Offset < 0 || p.End > math.MaxUint32 || p.Offset > p.End ||
+		p.collected < 0 || p.collected > math.MaxUint32 {
+		return packedPosition{}, false
+	}
+	return packedPosition{uint32(p.Sequence), uint32(p.Offset), uint32(p.End), uint32(p.collected)}, true
+}
+
+func (p packedPosition) unpack() indexedPosition {
+	return indexedPosition{eventPosition{Sequence: uint64(p.sequence), Offset: int64(p.offset), End: int64(p.end)},
+		int64(p.collected)}
 }
 
 // eventIndex maps event IDs to retained occurrences: the oldest one packed
-// when it fits, every other one (duplicates, which are rare, or a position
+// when it fits, every other one (duplicates, which are rare, or a value
 // beyond 32 bits) in wide. A key's packed occurrence is always older than its
 // wide ones, because packing is tried only while the key has none.
 type eventIndex struct {
 	packed map[eventKey]packedPosition
-	wide   map[eventKey][]eventPosition
+	wide   map[eventKey][]indexedPosition
 }
 
 func newEventIndex() eventIndex {
-	return eventIndex{packed: map[eventKey]packedPosition{}, wide: map[eventKey][]eventPosition{}}
+	return eventIndex{packed: map[eventKey]packedPosition{}, wide: map[eventKey][]indexedPosition{}}
+}
+
+// each visits every indexed occurrence, in no particular order.
+func (x eventIndex) each(visit func(indexedPosition)) {
+	for _, pp := range x.packed {
+		visit(pp.unpack())
+	}
+	for _, ps := range x.wide {
+		for _, p := range ps {
+			visit(p)
+		}
+	}
 }
 
 // Len is the number of indexed event IDs.
@@ -71,15 +94,15 @@ func keyOf(eventID string) (eventKey, bool) {
 	return k, true
 }
 
-func (j *Journal) indexAdd(eventID string, p eventPosition) {
-	k, ok := keyOf(eventID)
+func (j *Journal) indexAdd(e Envelope, p eventPosition) {
+	k, ok := keyOf(e.EventID)
 	if !ok {
 		return
 	}
-	j.index.add(k, p)
+	j.index.add(k, indexedPosition{p, e.CollectedAt.Unix()})
 }
 
-func (x eventIndex) add(k eventKey, p eventPosition) {
+func (x eventIndex) add(k eventKey, p indexedPosition) {
 	_, hasPacked := x.packed[k]
 	_, hasWide := x.wide[k]
 	if !hasPacked && !hasWide {
@@ -94,9 +117,12 @@ func (x eventIndex) add(k eventKey, p eventPosition) {
 func (x eventIndex) get(k eventKey) []eventPosition {
 	var ps []eventPosition
 	if pp, ok := x.packed[k]; ok {
-		ps = append(ps, pp.unpack())
+		ps = append(ps, pp.unpack().eventPosition)
 	}
-	return append(ps, x.wide[k]...)
+	for _, p := range x.wide[k] {
+		ps = append(ps, p.eventPosition)
+	}
+	return ps
 }
 
 // positions returns every retained occurrence of eventID, oldest first.
@@ -112,7 +138,7 @@ func (j *Journal) positions(eventID string) []eventPosition {
 func (j *Journal) rebuildIndex(ctx context.Context) error {
 	j.index = newEventIndex()
 	return j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) {
-		j.indexAdd(e.EventID, p)
+		j.indexAdd(e, p)
 		return false, nil
 	})
 }
@@ -129,7 +155,7 @@ func (j *Journal) pruneIndex() {
 		}
 	}
 	for k, ps := range j.index.wide {
-		var kept []eventPosition
+		var kept []indexedPosition
 		for _, p := range ps {
 			if retained[p.Sequence] {
 				kept = append(kept, p)
@@ -155,24 +181,48 @@ func (j *Journal) pruneIndex() {
 
 // readAt decodes the event record at p.
 func (j *Journal) readAt(p eventPosition) (Envelope, error) {
-	for _, s := range j.segments {
-		if s.sequence != p.Sequence {
-			continue
+	var e Envelope
+	err := j.readEach([]eventPosition{p}, func(v Envelope) { e = v })
+	return e, err
+}
+
+// readEach decodes the event records at ps in journal order, opening each
+// segment once. ps is sorted in place.
+func (j *Journal) readEach(ps []eventPosition, visit func(Envelope)) error {
+	sort.Slice(ps, func(a, b int) bool {
+		return ps[a].Sequence < ps[b].Sequence || ps[a].Sequence == ps[b].Sequence && ps[a].Offset < ps[b].Offset
+	})
+	si := 0
+	for i := 0; i < len(ps); {
+		for si < len(j.segments) && j.segments[si].sequence < ps[i].Sequence {
+			si++
 		}
+		if si == len(j.segments) || j.segments[si].sequence != ps[i].Sequence {
+			return ErrCorrupt // indexed position in a segment that is gone
+		}
+		s := j.segments[si]
 		f, err := j.dir.open(s.name, os.O_RDONLY)
 		if err != nil {
-			return Envelope{}, err
+			return err
 		}
-		v, readErr := readRecord(io.NewSectionReader(f, 0, s.size), p.Offset, j.options.MaxEventBytes)
+		r := io.NewSectionReader(f, 0, s.size)
+		var readErr error
+		for ; i < len(ps) && ps[i].Sequence == s.sequence; i++ {
+			v, err := readRecord(r, ps[i].Offset, j.options.MaxEventBytes)
+			if err == nil && (v.kind != frameEvent || v.next != ps[i].End) {
+				err = ErrCorrupt
+			}
+			if err != nil {
+				readErr = err
+				break
+			}
+			visit(v.event)
+		}
 		if err := errors.Join(readErr, f.Close()); err != nil {
-			return Envelope{}, err
+			return err
 		}
-		if v.kind != frameEvent || v.next != p.End {
-			return Envelope{}, ErrCorrupt
-		}
-		return v.event, nil
 	}
-	return Envelope{}, ErrCorrupt // indexed position in a segment that is gone
+	return nil
 }
 
 // occurrences reads every retained occurrence of eventID. Like the scans it

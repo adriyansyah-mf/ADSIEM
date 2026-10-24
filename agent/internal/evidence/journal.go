@@ -137,7 +137,7 @@ func (j *Journal) Append(ctx context.Context, e Envelope) error {
 		return err
 	}
 	last := j.segments[len(j.segments)-1]
-	j.indexAdd(e.EventID, eventPosition{last.sequence, last.size - int64(frameHeaderSize) - int64(len(b)), last.size})
+	j.indexAdd(e, eventPosition{last.sequence, last.size - int64(frameHeaderSize) - int64(len(b)), last.size})
 	if e.Cursor != nil {
 		j.cursors[e.Cursor.Source] = *e.Cursor
 	}

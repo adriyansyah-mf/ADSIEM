@@ -69,6 +69,7 @@ def evidence_fixture(kind):
         summary, health = {"status": "not_reported", "reason": None, "reported_at": None, "stale": False}, None
     elif kind == "backlogged":
         health.update(queued_events=1284, queued_bytes=3 * 1024 * 1024, oldest_queued_at="2026-10-20T08:00:00Z",
+                      indexed_events=1_000_000,
                       sender={"state": "retrying", "reason": "network", "since": None, "failures": 6})
         summary.update(status="backlogged", reason="network")
     elif kind == "auth-blocked":
@@ -470,6 +471,11 @@ def test_agent_evidence_delivery_states(page, enterprise, kind, badge, detail):
     if kind == "disk-full":
         expect(panel.get_by_text("file:/var/log/auth.log")).to_be_visible()
         expect(panel.get_by_text("20 attempts", exact=False)).to_be_visible()
+    if kind == "backlogged":
+        expect(panel.get_by_text("Agent memory index")).to_be_visible()
+        expect(panel.get_by_text("1,000,000 events · ≈62 MiB")).to_be_visible()
+    else:  # not reported by older agents: nothing is shown
+        expect(panel.get_by_text("Agent memory index")).to_have_count(0)
 
 
 def test_legacy_agent_list_without_evidence_field_is_not_reported(page, enterprise):

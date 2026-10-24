@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 HEALTH = {"version": 1, "mode": "durable", "state": "degraded", "reason": "capacity",
-          "queued_events": 3, "queued_bytes": 1024, "known_loss": {"capacity": 2}, "unknown_gaps": 1,
+          "queued_events": 3, "queued_bytes": 1024, "indexed_events": 7, "known_loss": {"capacity": 2}, "unknown_gaps": 1,
           "sources": {"file:/var/log/auth.log": {"state": "paused", "reason": "capacity",
                                                  "updated_at": "2026-10-24T10:00:00Z"}},
           "sender": {"state": "retrying", "reason": "status_503", "failures": 2}}
@@ -96,7 +96,7 @@ async def test_heartbeat_stores_health_with_server_receipt_time(evidence_api):
     assert r.status_code == 200, r.text
     detail = (await evidence_api.client.get(f"/api/agents/{blue}/evidence")).json()
     assert detail["status"] == "degraded" and detail["reason"] == "capacity" and detail["stale"] is False
-    assert detail["health"]["known_loss"] == {"capacity": 2}
+    assert detail["health"]["known_loss"] == {"capacity": 2} and detail["health"]["indexed_events"] == 7
     assert detail["health"]["sources"]["file:/var/log/auth.log"]["state"] == "paused"
     assert datetime.fromisoformat(detail["reported_at"]) >= before
     assert detail["inbox"] == {"pending": 0, "completed": 0, "dead_letter": 0, "oldest_pending_at": None,
