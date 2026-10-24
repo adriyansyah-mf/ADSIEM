@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -44,6 +46,8 @@ type trackedFile struct {
 	pendingStart         int64 // file offset of pending[0]
 	readPos              int64 // file offset of the next read
 	discarding           bool  // inside a line longer than the event limit
+	fingerprint          string
+	fingerprintLen       int64 // bytes the fingerprint covers
 }
 
 type durableTail struct {
@@ -207,13 +211,17 @@ func (t *durableTail) startFile(key, path string, f *os.File, id string, firstEn
 	tf := &trackedFile{key: key, path: path, f: f, identity: id}
 	saved, ok := t.j.Cursor(key)
 	resume := func(c evidence.Cursor) error {
-		if size < c.Offset { // truncated below the committed offset: unread bytes are gone
+		// truncated below the committed offset, or another file that reuses the
+		// inode / file index (deleted and recreated while stopped): unread
+		// bytes of the old file are gone and this one is read from the start
+		if size < c.Offset || !sameContent(f, c.Bookmark) {
 			if err := t.gap(); err != nil {
 				return err
 			}
 			return t.fresh(tf, 0)
 		}
 		tf.generation, tf.offset = c.Generation, c.Offset
+		tf.fingerprint, tf.fingerprintLen = c.Bookmark, fingerprintLen(c.Bookmark)
 		return nil
 	}
 	switch {
@@ -222,7 +230,7 @@ func (t *durableTail) startFile(key, path string, f *os.File, id string, firstEn
 	case ok && saved.Identity == "": // the previous file at this path was fully drained
 		err = t.fresh(tf, 0)
 	default:
-		if c, moved := t.movedCursor(id, key); moved { // renamed inside the scope while stopped
+		if c, moved := t.movedCursor(f, id, key); moved { // renamed inside the scope while stopped
 			if err = resume(c); err == nil && tf.offset == c.Offset {
 				err = t.baseline(tf)
 			}
@@ -254,9 +262,12 @@ func (t *durableTail) startFile(key, path string, f *os.File, id string, firstEn
 }
 
 // movedCursor finds the committed cursor of identity under another in-scope name.
-func (t *durableTail) movedCursor(identity, key string) (evidence.Cursor, bool) {
+func (t *durableTail) movedCursor(f *os.File, identity, key string) (evidence.Cursor, bool) {
 	for source, c := range t.j.Cursors() {
 		if source == key || c.Identity != identity || !strings.HasPrefix(source, fileSourcePrefix) {
+			continue
+		}
+		if !sameContent(f, c.Bookmark) { // a reused identity, not the same file
 			continue
 		}
 		if !t.inScope(strings.TrimPrefix(source, fileSourcePrefix)) {
@@ -299,12 +310,64 @@ func pathIdentity(path string) (string, error) {
 // fresh starts a new generation of tf at offset and commits it as a baseline.
 func (t *durableTail) fresh(tf *trackedFile, offset int64) error {
 	tf.generation, tf.offset = newGeneration(), offset
+	tf.fingerprint, tf.fingerprintLen = "", 0
 	return t.baseline(tf)
 }
 
 func (t *durableTail) baseline(tf *trackedFile) error {
-	c := evidence.Cursor{Source: tf.key, Generation: tf.generation, Identity: tf.identity, Offset: tf.offset}
+	c := t.cursor(tf, tf.offset)
 	return t.control(func() error { return t.j.SaveBaseline(t.ctx, c) })
+}
+
+// cursor is tf's committed position at offset. Bookmark carries a fingerprint
+// of the file's first bytes (up to fingerprintBytes), so a resume can tell the
+// same file from a new one that reuses its inode or file index.
+func (t *durableTail) cursor(tf *trackedFile, offset int64) evidence.Cursor {
+	if tf.fingerprintLen < fingerprintBytes && offset > tf.fingerprintLen {
+		if fp := fingerprint(tf.f, offset); fp != "" {
+			tf.fingerprint, tf.fingerprintLen = fp, fingerprintLen(fp)
+		}
+	}
+	return evidence.Cursor{Source: tf.key, Generation: tf.generation, Identity: tf.identity,
+		Offset: offset, Bookmark: tf.fingerprint}
+}
+
+const fingerprintBytes = 256
+
+// fingerprint hashes the first min(offset, fingerprintBytes) bytes of f.
+func fingerprint(f *os.File, offset int64) string {
+	n := offset
+	if n > fingerprintBytes {
+		n = fingerprintBytes
+	}
+	if n <= 0 {
+		return ""
+	}
+	b := make([]byte, n)
+	if _, err := f.ReadAt(b, 0); err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("fp:%d:%s", n, hex.EncodeToString(sum[:16]))
+}
+
+func fingerprintLen(bookmark string) int64 {
+	var n int64
+	var hash string
+	if _, err := fmt.Sscanf(bookmark, "fp:%d:%s", &n, &hash); err != nil {
+		return 0
+	}
+	return n
+}
+
+// sameContent reports whether f starts with the bytes bookmark fingerprinted.
+// Cursors without a fingerprint (nothing read yet) match any file.
+func sameContent(f *os.File, bookmark string) bool {
+	n := fingerprintLen(bookmark)
+	if n == 0 {
+		return bookmark == "" || !strings.HasPrefix(bookmark, "fp:")
+	}
+	return fingerprint(f, n) == bookmark
 }
 
 func (t *durableTail) gap() error {
@@ -383,10 +446,8 @@ func (t *durableTail) lines(tf *trackedFile) error {
 // admit submits one line with the cursor just past it, retrying the same
 // draft under disk pressure; the cursor only moves after durable admission.
 func (t *durableTail) admit(tf *trackedFile, line string, end int64) error {
-	draft := evidence.Draft{
-		LogType: t.logType, Location: tf.path, RawMessage: line,
-		Cursor: &evidence.Cursor{Source: tf.key, Generation: tf.generation, Identity: tf.identity, Offset: end},
-	}
+	c := t.cursor(tf, end)
+	draft := evidence.Draft{LogType: t.logType, Location: tf.path, RawMessage: line, Cursor: &c}
 	err := t.retry(func() error {
 		_, err := t.sink.Submit(t.ctx, draft)
 		return err

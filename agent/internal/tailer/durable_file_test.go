@@ -395,6 +395,43 @@ func TestDurableTailMissingRotatedIdentityRecordsGap(t *testing.T) {
 	}
 }
 
+// Deleting and recreating a file while stopped can reuse its inode (CI's
+// overlay filesystem does). Rewriting in place reproduces that: same identity,
+// different content, size at least the committed offset.
+func TestDurableTailSameIdentityDifferentContentIsANewFile(t *testing.T) {
+	env := newTailEnv(t)
+	path := filepath.Join(t.TempDir(), "app.log")
+	writeFile(t, path, "")
+	r := env.tail(path, "syslog", nil)
+	env.baselined(t, path)
+	appendFile(t, path, "1\n")
+	waitFor(t, "1", func() bool { return len(r.cap.lines()) == 1 })
+	r.stop(t)
+	before := r.cap.snapshot()[0].Cursor
+
+	writeFile(t, path, "fresh\n") // same inode, new content
+	env.restart()
+	r = env.tail(path, "syslog", nil)
+	waitFor(t, "rewritten file", func() bool { return len(r.cap.lines()) == 1 })
+	time.Sleep(3 * durablePoll)
+	r.stop(t)
+	got := r.cap.snapshot()
+	if len(got) != 1 || got[0].RawMessage != "fresh" || got[0].Cursor.Generation == before.Generation {
+		t.Fatalf("resumed into the middle of another file: %v", r.cap.lines())
+	}
+	if gaps := env.journal.Snapshot().UnknownGaps; gaps != 1 {
+		t.Fatalf("unknown gaps %d, want 1", gaps)
+	}
+}
+
+func TestDurableTailFingerprintCoversTheFileStart(t *testing.T) {
+	drafts := runDurableTailFixture(t, strings.Repeat("y", 300)+"\nz\n", 2)
+	first, second := drafts[0].Cursor.Bookmark, drafts[1].Cursor.Bookmark
+	if !strings.HasPrefix(first, "fp:256:") || first != second {
+		t.Fatalf("fingerprints %q %q", first, second)
+	}
+}
+
 func TestDurableTailRenamedWhileStoppedResumesInGlobScope(t *testing.T) {
 	env := newTailEnv(t)
 	dir := t.TempDir()
