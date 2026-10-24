@@ -10,6 +10,18 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// trustedOwner accepts the principals the restricted DACL already trusts: the
+// agent's own token user, LocalSystem and BUILTIN\Administrators. An elevated
+// administrator creating or restoring state files gets the Administrators
+// group as owner by default; anyone else is refused.
+func trustedOwner(owner, tokenUser string) bool {
+	switch owner {
+	case tokenUser, "S-1-5-18", "S-1-5-32-544":
+		return true
+	}
+	return false
+}
+
 func (d *storageDir) restrict(f *os.File) error {
 	h := windows.Handle(f.Fd())
 	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
@@ -20,7 +32,7 @@ func (d *storageDir) restrict(f *os.File) error {
 	if err != nil {
 		return err
 	}
-	if owner.String() != d.owner {
+	if !trustedOwner(owner.String(), d.owner) {
 		return fmt.Errorf("journal object owner: %w", os.ErrPermission)
 	}
 	acl, _, err := d.security.DACL()

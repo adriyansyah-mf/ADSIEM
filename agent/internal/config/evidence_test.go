@@ -56,7 +56,11 @@ func TestEvidenceConfigCustomState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Then
+	// Then: Load canonicalizes the state directory (on Windows that also
+	// expands 8.3 short names such as RUNNER~1)
+	if state, err = filepath.EvalSymlinks(state); err != nil {
+		t.Fatal(err)
+	}
 	if cfg.Evidence.Dir != filepath.Join(state, "evidence") || cfg.Buffer.SpillPath != filepath.Join(state, "spill.log") || cfg.Firewall.StatePath != filepath.Join(state, "firewall.json") {
 		t.Fatalf("state paths not derived: %+v", cfg)
 	}

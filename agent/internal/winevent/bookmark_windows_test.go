@@ -46,11 +46,54 @@ func testChannel(t *testing.T) string {
 			t.Logf("removing test log %s: %v\n%s", name, err, out)
 		}
 	})
+	// A new classic log can be queried before it can be subscribed to: wait
+	// until a subscription stays open (the durable tailer retries instead).
 	waitNative(t, "channel "+name, func() bool {
-		_, err := Baseline(context.Background(), name)
-		return err == nil
+		if _, err := Baseline(context.Background(), name); err != nil {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		err := SubscribeResume(ctx, name, Resume{Empty: true, Initialized: true}, func(Event) error { return nil })
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Logf("channel %s not subscribable yet: %v", name, err)
+			return false
+		}
+		return true
 	})
 	return name
+}
+
+// await waits for marker, failing at once (with what arrived) when the
+// subscription ended early, instead of timing out blind.
+func (n *nativeRun) await(t *testing.T, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for n.count(marker) == 0 {
+		select {
+		case err := <-n.done:
+			t.Fatalf("subscription ended before %s: %v; events: %s", marker, err, n.describe())
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s; events: %s", marker, n.describe())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (n *nativeRun) describe() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var parts []string
+	for _, ev := range n.events {
+		line := ev.Line
+		if len(line) > 160 {
+			line = line[:160]
+		}
+		parts = append(parts, fmt.Sprintf("{record=%d err=%v line=%q}", ev.RecordID, ev.Err, line))
+	}
+	return fmt.Sprintf("%d %v", len(parts), parts)
 }
 
 func writeMarker(t *testing.T, channel string) string {
@@ -132,7 +175,7 @@ func TestNativeResumeAfterBookmarkExactlyOnce(t *testing.T) {
 
 	first := startResume(channel, base)
 	a := writeMarker(t, channel)
-	waitNative(t, "marker A", func() bool { return first.count(a) == 1 })
+	first.await(t, a)
 	if err := first.stop(t); !errors.Is(err, context.Canceled) {
 		t.Fatalf("stop: %v", err)
 	}
@@ -143,7 +186,7 @@ func TestNativeResumeAfterBookmarkExactlyOnce(t *testing.T) {
 
 	b := writeMarker(t, channel) // while "the agent" is down
 	second := startResume(channel, Resume{Bookmark: bookmark, Initialized: true})
-	waitNative(t, "marker B", func() bool { return second.count(b) == 1 })
+	second.await(t, b)
 	time.Sleep(time.Second)
 	if err := second.stop(t); !errors.Is(err, context.Canceled) {
 		t.Fatalf("stop: %v", err)
@@ -166,7 +209,7 @@ func TestNativeClearedChannelIsAGap(t *testing.T) {
 	}
 	run := startResume(channel, base)
 	a := writeMarker(t, channel)
-	waitNative(t, "marker A", func() bool { return run.count(a) == 1 })
+	run.await(t, a)
 	run.stop(t)
 	bookmark := run.last().Bookmark
 
@@ -186,6 +229,6 @@ func TestNativeClearedChannelIsAGap(t *testing.T) {
 	}
 
 	recovered := startResume(channel, Resume{Empty: true, Initialized: true})
-	waitNative(t, "marker C from the oldest event", func() bool { return recovered.count(c) == 1 })
+	recovered.await(t, c)
 	recovered.stop(t)
 }

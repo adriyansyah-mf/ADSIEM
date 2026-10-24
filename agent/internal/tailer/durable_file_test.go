@@ -312,7 +312,7 @@ func TestDurableTailRenamedOpenFileIsDrainedThenReplacementFromStart(t *testing.
 	waitFor(t, "a", func() bool { return len(r.cap.lines()) == 1 })
 
 	rotated := filepath.Join(dir, "app.log.1")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) // the writer keeps its handle
+	f, err := openAppendShared(path) // the writer keeps its handle
 	if err != nil {
 		t.Fatal(err)
 	}

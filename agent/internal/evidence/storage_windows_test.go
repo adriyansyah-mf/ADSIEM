@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -58,8 +59,10 @@ func TestWindowsExistingStateACLRestricted(t *testing.T) {
 		if err != nil || acl == nil {
 			t.Fatalf("missing restricted ACL: %v", err)
 		}
-		if sd.String() != j.dir.security.String() {
-			t.Fatalf("broad or unexpected ACL: %s", sd.String())
+		// Windows adds the auto-inherited flag (D:PAI) when it applies a
+		// protected DACL; compare the entries, not the flag spelling.
+		if got, want := daclEntries(sd.String()), daclEntries(j.dir.security.String()); got != want {
+			t.Fatalf("broad or unexpected ACL: %s, want entries %s", sd.String(), want)
 		}
 	}
 }
@@ -95,5 +98,30 @@ func TestWindowsRejectsReparseDirectory(t *testing.T) {
 	}
 	if err == nil || errors.Is(err, ErrLocked) {
 		t.Fatalf("reparse traversal accepted: %v", err)
+	}
+}
+
+// daclEntries is the ACE list of an SDDL string, without owner or DACL flags.
+func daclEntries(sddl string) string {
+	i := strings.Index(sddl, "D:")
+	if i < 0 {
+		return ""
+	}
+	d := sddl[i+2:]
+	if j := strings.IndexByte(d, '('); j >= 0 {
+		return d[j:]
+	}
+	return d
+}
+
+func TestWindowsOwnerTrustsTheDACLPrincipalsOnly(t *testing.T) {
+	user := "S-1-5-21-1-2-3-1001"
+	for owner, want := range map[string]bool{
+		user: true, "S-1-5-18": true, "S-1-5-32-544": true, // token user, SYSTEM, Administrators
+		"S-1-5-21-1-2-3-1002": false, "S-1-1-0": false, "S-1-5-32-545": false, // other user, Everyone, Users
+	} {
+		if got := trustedOwner(owner, user); got != want {
+			t.Errorf("owner %s trusted=%v, want %v", owner, got, want)
+		}
 	}
 }

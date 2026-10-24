@@ -27,7 +27,7 @@ $failed = @()
 foreach ($pkg in $packages) {
     Write-Host "==> go test $pkg"
     go test -count=1 -v $pkg 2>&1 | ForEach-Object {
-        if ($_ -match '^(--- (FAIL|SKIP)|FAIL|ok|panic)' -or $_ -match '_test\.go:\d+:') { Write-Host $_ }
+        if ($_ -match '^(--- (FAIL|SKIP)|--- PASS: Test(Native|Windows)|FAIL|ok|panic)' -or $_ -match '_test\.go:\d+:') { Write-Host $_ }
     }
     if ($LASTEXITCODE -ne 0) { $failed += $pkg }
 }
