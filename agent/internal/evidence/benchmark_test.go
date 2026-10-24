@@ -159,6 +159,54 @@ func BenchmarkReplay10k(b *testing.B) {
 	}
 }
 
+// BenchmarkReplayBatch10k is BenchmarkReplay10k the way the batch sender does
+// it: PeekBatch (200 events / 2 MiB), one MarkAttempts and one AckBatch each.
+func BenchmarkReplayBatch10k(b *testing.B) {
+	for range b.N {
+		b.StopTimer()
+		o := benchOptions(b)
+		j, err := Open(o)
+		if err != nil {
+			b.Fatal(err)
+		}
+		fill(b, j, o, benchEvents)
+		ctx := context.Background()
+		b.StartTimer()
+		delivered := 0
+		for {
+			batch, err := j.PeekBatch(ctx, sendBatchEvents, sendBatchBytes)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(batch) == 0 {
+				break
+			}
+			ids := make([]string, len(batch))
+			receipts := make([]Receipt, len(batch))
+			for i, e := range batch {
+				ids[i] = e.EventID
+				receipts[i] = Receipt{EventID: e.EventID, ReceiptID: "22222222-2222-4222-8222-222222222222"}
+			}
+			if err := j.MarkAttempts(ctx, ids, time.Now()); err != nil {
+				b.Fatal(err)
+			}
+			if err := j.AckBatch(ctx, receipts); err != nil {
+				b.Fatal(err)
+			}
+			delivered += len(batch)
+		}
+		b.StopTimer()
+		if delivered != benchEvents {
+			b.Fatalf("delivered %d", delivered)
+		}
+		b.ReportMetric(float64(delivered), "events")
+		if err := j.Close(); err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+	}
+}
+
 // BenchmarkCompact10k reclaims 10,000 acknowledged events.
 func BenchmarkCompact10k(b *testing.B) {
 	for range b.N {
