@@ -73,6 +73,9 @@ class Agent(Base):
     # Set by a "stopping" heartbeat (service_stop / system_shutdown), cleared by
     # the next normal one. The worker reports a stop that lasts (agent_monitor).
     stop_reason       = Column(String(30))
+    # last durable-evidence health snapshot (schemas.EvidenceHealth), stamped with server receipt time
+    evidence_health    = Column(JSONB)
+    evidence_health_at = Column(DateTime(timezone=True))
     enrolled_at  = Column(DateTime(timezone=True), default=now_utc)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

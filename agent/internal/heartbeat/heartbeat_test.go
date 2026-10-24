@@ -3,8 +3,10 @@ package heartbeat
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +25,20 @@ func TestHeartbeatEvidenceProtocolFollowsTheLatestResponse(t *testing.T) {
 		if got := SupportsEvidenceV2(); got != c.want {
 			t.Fatalf("protocols %v: supported=%v", c.protocols, got)
 		}
+	}
+}
+
+func TestLegacyHeartbeatOmitsEvidenceHealth(t *testing.T) {
+	b, err := json.Marshal(HeartbeatRequest{AgentID: "a", Status: "online"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "evidence_health") {
+		t.Fatalf("legacy heartbeat carries evidence_health: %s", b)
+	}
+	b, _ = json.Marshal(HeartbeatRequest{AgentID: "a", EvidenceHealth: map[string]int{"version": 1}})
+	if !strings.Contains(string(b), `"evidence_health":{"version":1}`) {
+		t.Fatalf("durable heartbeat lost evidence_health: %s", b)
 	}
 }
 

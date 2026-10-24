@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 import hashlib
 import json
 import re
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -146,6 +146,59 @@ class AgentOut(BaseModel):
     log_sources: list[LogSourceOut] = []
     model_config = {"from_attributes": True}
 
+# ─── Evidence health (durable agents) ────────────────────────────
+# What agent/internal/evidence Health + Sender.Status send in the heartbeat.
+# Bounded and enumerated: it is stored and shown, never used as a metric label.
+
+_MAX_COUNT = (1 << 63) - 1
+EvidenceCount = Annotated[int, Field(ge=0, le=_MAX_COUNT)]
+EvidenceLossReason = Literal["capacity", "oversize", "source_failure", "storage_failure", "rotation_gap", "legacy_import"]
+
+
+class EvidenceSourceHealth(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    state: Literal["healthy", "degraded", "paused", "unavailable"]
+    reason: str = Field(default="", max_length=256)
+    updated_at: datetime | None = None
+
+
+class EvidenceSenderStatus(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    state: Literal["idle", "sending", "retrying", "blocked"]
+    reason: str = Field(default="", max_length=64)
+    since: datetime | None = None
+    failures: int = Field(default=0, ge=0, le=1 << 31)
+
+
+class EvidenceHealth(BaseModel):
+    """Cumulative journal health: counters persist across restarts and failed heartbeats."""
+    model_config = ConfigDict(extra="ignore")  # newer agents may add fields
+    version: Literal[1]
+    mode: Literal["durable"] = "durable"
+    state: Literal["healthy", "degraded"]
+    reason: Literal["", "source_failure", "held", "quarantined", "storage_failure", "capacity",
+                    "journal_unavailable"] = ""
+    queued_events: EvidenceCount = 0
+    queued_bytes: EvidenceCount = 0
+    oldest_queued_at: datetime | None = None
+    last_receipt_at: datetime | None = None
+    retries: EvidenceCount = 0
+    quarantined: EvidenceCount = 0
+    held: EvidenceCount = 0
+    unknown_gaps: EvidenceCount = 0
+    known_loss: dict[EvidenceLossReason, EvidenceCount] = Field(default_factory=dict)
+    pending_loss: dict[EvidenceLossReason, EvidenceCount] = Field(default_factory=dict)
+    loss_uncertain: bool = False
+    sources: dict[Annotated[str, Field(max_length=512)], EvidenceSourceHealth] = Field(
+        default_factory=dict, max_length=256)
+    sender: EvidenceSenderStatus | None = None
+
+    @field_validator("known_loss", "pending_loss", "sources", mode="before")
+    @classmethod
+    def null_map_is_empty(cls, value):
+        return {} if value is None else value  # Go encodes an empty nil map as null
+
+
 class HeartbeatRequest(BaseModel):
     agent_id: UUID
     status: str = "online"
@@ -155,6 +208,17 @@ class HeartbeatRequest(BaseModel):
     integrity: dict[str, str] | None = None  # binary_sha256 / config_sha256, agents >= 1.7.0
     session: str | None = None  # one per agent process, with a rising seq (agents >= 1.8.0)
     seq: int | None = None
+    evidence_health: EvidenceHealth | None = None  # durable agents only
+
+    @field_validator("evidence_health", mode="wrap")
+    @classmethod
+    def drop_invalid_evidence_health(cls, value, handler):
+        # An invalid or unbounded health object is rejected on its own: the
+        # heartbeat still carries tasks and config, so it must not fail.
+        try:
+            return handler(value)
+        except ValueError:
+            return None
 
 class AgentTaskDef(BaseModel):
     id: UUID

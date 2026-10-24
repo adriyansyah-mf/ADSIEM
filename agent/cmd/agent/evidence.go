@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,9 +31,13 @@ type durableRuntime struct {
 	publisher *evidence.Publisher
 	buf       *buffer.Buffer
 	detector  atomic.Pointer[detect.Engine]
-	sender    *evidence.Sender
+	sender    atomic.Pointer[evidence.Sender]
 	cancel    context.CancelFunc
 	done      chan struct{}
+
+	reportMu   sync.Mutex
+	lastReport *evidence.Health
+	reportedAt time.Time
 }
 
 func openDurable(cfg *config.Config, hostname string) *durableRuntime {
@@ -74,16 +79,62 @@ func (rt *durableRuntime) setDetector(d *detect.Engine) {
 	}
 }
 
+// evidenceReport is the heartbeat's evidence_health: the journal's cumulative
+// health (it survives restarts and failed heartbeats) plus the sender state.
+type evidenceReport struct {
+	evidence.Health
+	Mode   string                 `json:"mode"`
+	Sender *evidence.SenderStatus `json:"sender,omitempty"`
+}
+
+// healthEvery bounds how often a heartbeat rescans the journal: Snapshot
+// walks every retained record, so a large backlog makes it expensive.
+const healthEvery = time.Minute
+
+// report returns the evidence health for the next heartbeat.
+func (rt *durableRuntime) report() any {
+	if rt.journal == nil {
+		return evidenceReport{Mode: "durable", Health: evidence.Health{
+			Version: 1, State: "degraded", Reason: "journal_unavailable",
+			KnownLoss: map[string]int64{}, PendingLoss: map[string]int64{}, Sources: map[string]evidence.SourceHealth{},
+		}}
+	}
+	rt.reportMu.Lock()
+	defer rt.reportMu.Unlock()
+	if rt.lastReport == nil || time.Since(rt.reportedAt) >= healthEvery {
+		h := rt.journal.Snapshot()
+		if h.KnownLoss == nil {
+			h.KnownLoss = map[string]int64{}
+		}
+		if h.PendingLoss == nil {
+			h.PendingLoss = map[string]int64{}
+		}
+		if h.Sources == nil {
+			h.Sources = map[string]evidence.SourceHealth{}
+		}
+		rt.lastReport, rt.reportedAt = &h, time.Now()
+	}
+	r := evidenceReport{Health: *rt.lastReport, Mode: "durable"}
+	if sender := rt.sender.Load(); sender != nil { // set by startSender after the heartbeat starts
+		s := sender.Status()
+		if s.State != "" {
+			r.Sender = &s
+		}
+	}
+	return r
+}
+
 func (rt *durableRuntime) startSender(t evidence.Transport, supportsV2 func() bool) {
 	if rt.journal == nil {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.cancel, rt.done = cancel, make(chan struct{})
-	rt.sender = &evidence.Sender{Journal: rt.journal, Transport: t, SupportsV2: supportsV2}
+	sender := &evidence.Sender{Journal: rt.journal, Transport: t, SupportsV2: supportsV2}
+	rt.sender.Store(sender)
 	go func() {
 		defer close(rt.done)
-		_ = rt.sender.Run(ctx)
+		_ = sender.Run(ctx)
 	}()
 }
 

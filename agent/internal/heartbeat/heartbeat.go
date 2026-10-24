@@ -45,6 +45,9 @@ type HeartbeatRequest struct {
 	// a replayed heartbeat (a sequence number going back).
 	Session string `json:"session,omitempty"`
 	Seq     int64  `json:"seq,omitempty"`
+	// Durable evidence mode only; legacy agents omit it and the server shows
+	// their evidence delivery as not reported.
+	EvidenceHealth any `json:"evidence_health,omitempty"`
 }
 
 // Session identifies this agent process in its heartbeats.
@@ -173,6 +176,11 @@ type HeartbeatResponse struct {
 
 var evidenceV2 atomic.Bool
 
+// EvidenceHealth, when set (durable evidence mode), returns the journal's
+// cumulative health for the heartbeat. Counters live in the journal, so a
+// failed heartbeat loses nothing: the next one reports the same totals.
+var EvidenceHealth func() any
+
 // SupportsEvidenceV2 reports whether the last successful heartbeat advertised
 // durable ingest protocol 2. The evidence sender sends nothing until it does.
 func SupportsEvidenceV2() bool { return evidenceV2.Load() }
@@ -214,6 +222,9 @@ func Loop(
 			Integrity:     integrity,
 			Session:       Session,
 			Seq:           seq.Add(1),
+		}
+		if EvidenceHealth != nil {
+			payload.EvidenceHealth = EvidenceHealth()
 		}
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
 		if err != nil {

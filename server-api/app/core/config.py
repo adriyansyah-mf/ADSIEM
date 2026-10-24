@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "info"
     EVIDENCE_INGEST_ENABLED: bool = False
     EVIDENCE_GROUP_BUDGET_BYTES: int = Field(default=1 << 30, gt=0)
+    # agents' heartbeat interval (agent config server.heartbeat_interval); evidence
+    # health older than two of them is shown as stale
+    AGENT_HEARTBEAT_INTERVAL_SECONDS: int = Field(default=30, gt=0)
     REDIS_STREAM_KEY: str = "siem:logs"
     # Hard cap on the log stream (approximate). The worker trims what it has
     # processed (worker/stream_maintenance.py); this only bites if the workers

@@ -116,6 +116,10 @@ async def heartbeat(
         return health_event(event, agent_id=agent.id, group_id=agent.group_id, hostname=agent.hostname, **fields)
 
     now = datetime.now(timezone.utc)
+    # Durable agents report evidence health; stamp it with our receipt time.
+    # Heartbeats without it (legacy agents) keep the last known snapshot.
+    evidence = ({"evidence_health": body.evidence_health.model_dump(mode="json"), "evidence_health_at": now}
+                if body.evidence_health is not None else {})
     anomaly = await _session_anomaly(redis, agent.id, body)
     if anomaly and agent.approved:
         await enqueue_log(redis, health("agent_heartbeat_anomaly", kind=anomaly, session=body.session,
@@ -124,7 +128,7 @@ async def heartbeat(
         # Offline now; the worker reports the stop only if the agent stays down
         # (a restart or an upgrade comes back within seconds and clears it).
         await db.execute(update(Agent).where(Agent.id == agent.id).values(
-            status="offline", last_seen_at=now, stop_reason=(body.reason or "service_stop")[:30]))
+            status="offline", last_seen_at=now, stop_reason=(body.reason or "service_stop")[:30], **evidence))
         await db.commit()
         return HeartbeatResponse(config_hash="", log_sources=[], evidence_protocols=(
             [2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []))
@@ -132,7 +136,8 @@ async def heartbeat(
     integrity_updates, changes = check_integrity(agent, body.version, body.integrity)
     await db.execute(
         update(Agent).where(Agent.id == agent.id)
-        .values(status="online", last_seen_at=now, version=body.version, stop_reason=None, **integrity_updates)
+        .values(status="online", last_seen_at=now, version=body.version, stop_reason=None,
+                **integrity_updates, **evidence)
     )
     await db.commit()
     if agent.approved:

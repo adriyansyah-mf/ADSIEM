@@ -146,7 +146,7 @@ func TestDurableModeBlocksCollectionWhenTheJournalCannotOpen(t *testing.T) {
 		t.Fatalf("blocked collection must show as dropped, got %d", dropped)
 	}
 	rt.startSender(client.New("http://127.0.0.1:1", "t"), func() bool { return true })
-	if rt.sender != nil {
+	if rt.sender.Load() != nil {
 		t.Fatal("sender started without a journal")
 	}
 	rt.shutdown()
@@ -178,6 +178,70 @@ func TestDurableSenderWaitsForProtocolThenDelivers(t *testing.T) {
 	rt.shutdown()
 	if left := drain(t, cfg); len(left) != 0 {
 		t.Fatalf("delivered evidence still queued: %+v", left)
+	}
+}
+
+func reportJSON(t *testing.T, rt *durableRuntime) map[string]any {
+	t.Helper()
+	b, err := json.Marshal(rt.report())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestDurableReportKeepsCumulativeHealthAcrossRestarts(t *testing.T) {
+	cfg := durableConfig(t)
+	rt := openDurable(cfg, "web01")
+	if err := rt.journal.RecordLoss(context.Background(), "file:/var/log/app.log", "oversize", 2, true); err != nil {
+		t.Fatal(err)
+	}
+	r := reportJSON(t, rt)
+	if r["mode"] != "durable" || r["version"] != float64(1) || r["unknown_gaps"] != float64(1) ||
+		r["known_loss"].(map[string]any)["oversize"] != float64(2) {
+		t.Fatalf("report %v", r)
+	}
+	for _, key := range []string{"known_loss", "pending_loss", "sources"} {
+		if r[key] == nil { // the server expects objects, not null
+			t.Fatalf("%s is null", key)
+		}
+	}
+	rt.shutdown()
+
+	// a failed heartbeat or a restart loses nothing: the counters are durable
+	rt = openDurable(cfg, "web01")
+	defer rt.shutdown()
+	r = reportJSON(t, rt)
+	if r["unknown_gaps"] != float64(1) || r["known_loss"].(map[string]any)["oversize"] != float64(2) {
+		t.Fatalf("counters reset across restart: %v", r)
+	}
+	if r["sources"].(map[string]any)["file:/var/log/app.log"].(map[string]any)["state"] != "degraded" {
+		t.Fatalf("source health %v", r["sources"])
+	}
+}
+
+func TestDurableReportShowsTheSenderAndAnUnavailableJournal(t *testing.T) {
+	cfg := durableConfig(t)
+	rt := openDurable(cfg, "web01")
+	rt.startSender(client.New("http://127.0.0.1:1", "t"), func() bool { return false })
+	waitFor(t, "sender state", func() bool {
+		s, _ := reportJSON(t, rt)["sender"].(map[string]any)
+		return s != nil && s["state"] == "blocked" && s["reason"] == "protocol_unsupported"
+	})
+	rt.shutdown()
+
+	broken := durableConfig(t)
+	if err := os.WriteFile(broken.Evidence.Dir, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	down := openDurable(broken, "web01")
+	r := reportJSON(t, down)
+	if r["state"] != "degraded" || r["reason"] != "journal_unavailable" || r["mode"] != "durable" {
+		t.Fatalf("unavailable journal reported as %v", r)
 	}
 }
 
