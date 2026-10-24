@@ -75,3 +75,42 @@ multi-agent group-capacity races, stale agent snapshots across group moves,
 commit rollback, retained receipts after deletion, auth/approval, actual
 synchronous-commit enforcement, schema/durability readiness, bounded streaming
 requests, and isolated test schemas. Independent Task 5 reviews are pending.
+
+## 2026-10-24: Task 6 inbox dispatch and worker ownership
+
+Branch `feat/agent-evidence` (Tasks 1-5 moved here from `feat/enterprise-ui`,
+rebased onto `feature/siem-implementation` without the MalwareBazaar commit).
+Durable mode is still not wired into the agent and `EVIDENCE_INGEST_ENABLED`
+stays false: Task 7 (receipt-aware sender) is the next prerequisite.
+
+Implemented in `worker/worker/evidence_inbox.py`: `evidence_event_id`
+(UUIDv5, namespace = agent UUID, name = event UUID string), `dispatch_once`
+(`FOR UPDATE SKIP LOCKED`, one non-transactional XADD pipeline, next dispatch
+committed only after XADD), `process_reference` (row lock, authoritative
+payload, 60 s attempt, completion committed before XACK), failure accounting in
+a fresh transaction (backoff 2^n s capped at 60 s, dead letter at 20 with the
+payload kept), `evidence_retention_once` (completed payloads released after
+7 days with the group budget in the same transaction, completed receipts
+deleted after 30 days), and supervised dispatch/retention loops in worker
+main. The consumer routes `kind=evidence_v2` references before legacy
+decoding, acks every outcome and never copies them into the legacy DLQ.
+`process_message` takes an optional stable `event_id`; legacy keeps uuid4.
+
+| Command | Result |
+| --- | --- |
+| New tests before `worker.evidence_inbox` existed | Collection failed: module missing (red) |
+| `pytest tests/worker/test_evidence_event_id.py tests/worker/test_evidence_inbox.int.py tests/worker/test_consumer_batching.py` with disposable Postgres (pgvector pg16) and Redis 7 | 15 passed, including the real-stream dispatch test |
+| Worker suites (CI command, Python 3.12) | 298 passed, 4 skipped |
+| `pytest tests/server-api` (Python 3.12, this branch) | 163 passed, 7 skipped (the MalwareBazaar tests live on `feat/enterprise-ui`) |
+
+Covered: immediate processing after dispatch despite a future
+`next_dispatch_at`, duplicate references, three concurrent dispatchers,
+Redis outage, trimmed stream redispatch, failure after indexing retried with
+the same identity, 20-failure dead letter, attempt timeout releasing the row
+lock, busy and missing references, retention (idempotent, never pending or
+dead-letter), NUL/Unicode payload round trip into `process_message`.
+
+Not covered yet: a cross-service test that drives an HTTP v2 acceptance and
+then the worker against one schema (worker tests seed rows in the API's
+canonical JSON form instead), and Elasticsearch itself (`process_message` is
+mocked; it already writes with PUT by id). Independent Task 6 review pending.
