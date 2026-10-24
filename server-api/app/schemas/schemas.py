@@ -239,6 +239,7 @@ class AgentTaskDef(BaseModel):
 class HeartbeatResponse(BaseModel):
     config_hash: str
     evidence_protocols: list[int] = Field(default_factory=list)
+    evidence_batch_max: int = 0  # >0: POST /api/ingest/v2/logs takes up to this many events
     log_sources: list[LogSourceOut]
     fim_paths: list[str] = []
     tasks: list[AgentTaskDef] = []

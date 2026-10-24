@@ -9,51 +9,65 @@ import (
 	"unicode/utf8"
 )
 
+// Receipt is a durable server receipt for one event.
+type Receipt struct{ EventID, ReceiptID string }
+
 // Ack persists receipt coverage for every identical local occurrence of eventID.
 // Held/quarantined evidence cannot be reclassified as remotely delivered.
 func (j *Journal) Ack(ctx context.Context, eventID, receiptID string) error {
+	return j.AckBatch(ctx, []Receipt{{EventID: eventID, ReceiptID: receiptID}})
+}
+
+// AckBatch is Ack for several events in one checkpoint publication. Any
+// invalid item (unknown, held/quarantined, conflicting copies, bad receipt)
+// refuses the whole batch and publishes nothing.
+func (j *Journal) AckBatch(ctx context.Context, receipts []Receipt) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if err := j.ready(ctx); err != nil {
 		return err
 	}
-	if err := ValidateAgentID(receiptID); err != nil {
-		return err
-	}
 	c := j.nextCheckpoint()
-	found := false
 	changed := false
-	var original []byte
-	if c.States[eventID].State != "" {
-		return ErrTerminal
-	}
-	events, positions, err := j.occurrences(ctx, eventID)
-	if err != nil {
-		return j.readFailed(err)
-	}
-	for i, p := range positions {
-		found = true
-		encoded, err := json.Marshal(events[i])
-		if err != nil {
+	for _, r := range receipts {
+		if err := ValidateAgentID(r.ReceiptID); err != nil {
 			return err
 		}
-		if original == nil {
-			original = encoded
-		} else if !bytes.Equal(original, encoded) {
-			return ErrConflict
+		if c.States[r.EventID].State != "" {
+			return ErrTerminal
 		}
-		if !acknowledged(c, p) {
-			addACK(&c, p)
+		events, positions, err := j.occurrences(ctx, r.EventID)
+		if err != nil {
+			return j.readFailed(err)
+		}
+		if len(positions) == 0 {
+			return ErrUnknownEvent
+		}
+		var original []byte
+		eventChanged := false
+		for i, p := range positions {
+			encoded, err := json.Marshal(events[i])
+			if err != nil {
+				return err
+			}
+			if original == nil {
+				original = encoded
+			} else if !bytes.Equal(original, encoded) {
+				return ErrConflict
+			}
+			if !acknowledged(c, p) {
+				addACK(&c, p)
+				eventChanged = true
+			}
+		}
+		if eventChanged {
+			delete(c.States, r.EventID)
 			changed = true
 		}
-	}
-	if !found {
-		return ErrUnknownEvent
 	}
 	if !changed {
 		return nil
 	}
-	delete(c.States, eventID)
 	at := j.now().UTC()
 	c.Health.LastReceiptAt = &at
 	return j.publish(ctx, c)
@@ -62,6 +76,12 @@ func (j *Journal) Ack(ctx context.Context, eventID, receiptID string) error {
 // MarkAttempt preserves the first attempt across retries and process restarts.
 // The Sender must compare FirstAttempt to its time and Hold at 30 days.
 func (j *Journal) MarkAttempt(ctx context.Context, eventID string, at time.Time) error {
+	return j.MarkAttempts(ctx, []string{eventID}, at)
+}
+
+// MarkAttempts is MarkAttempt for several events in one checkpoint publication;
+// any invalid item refuses the whole batch.
+func (j *Journal) MarkAttempts(ctx context.Context, eventIDs []string, at time.Time) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	if err := j.ready(ctx); err != nil {
@@ -71,26 +91,28 @@ func (j *Journal) MarkAttempt(ctx context.Context, eventID string, at time.Time)
 		return ErrInvalidControl
 	}
 	c := j.nextCheckpoint()
-	found := false
-	if c.States[eventID].State != "" {
-		return ErrTerminal
-	}
-	for _, p := range j.positions(eventID) {
-		found = found || !acknowledged(c, p)
-	}
-	if !found {
-		return ErrUnknownEvent
-	}
-	s := c.States[eventID]
-	if s.FirstAttempt.IsZero() {
-		s.FirstAttempt = at.UTC()
-	} else {
-		if c.Health.Retries == maxCounter {
-			return ErrInvalidControl
+	for _, eventID := range eventIDs {
+		if c.States[eventID].State != "" {
+			return ErrTerminal
 		}
-		c.Health.Retries++
+		found := false
+		for _, p := range j.positions(eventID) {
+			found = found || !acknowledged(c, p)
+		}
+		if !found {
+			return ErrUnknownEvent
+		}
+		s := c.States[eventID]
+		if s.FirstAttempt.IsZero() {
+			s.FirstAttempt = at.UTC()
+		} else {
+			if c.Health.Retries == maxCounter {
+				return ErrInvalidControl
+			}
+			c.Health.Retries++
+		}
+		c.States[eventID] = s
 	}
-	c.States[eventID] = s
 	return j.publish(ctx, c)
 }
 

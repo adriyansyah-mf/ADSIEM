@@ -62,5 +62,38 @@ func (j *Journal) Peek(ctx context.Context) (Envelope, bool, error) {
 	return next, found, j.readFailed(err)
 }
 
+// PeekBatch returns up to max deliverable events, oldest first, with their
+// frames totalling at most maxBytes (always at least one event). Like Peek it
+// consumes nothing.
+func (j *Journal) PeekBatch(ctx context.Context, max int, maxBytes int64) ([]Envelope, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.closed {
+		return nil, os.ErrClosed
+	}
+	var batch []Envelope
+	var size int64
+	first := true
+	err := j.walkEventsFrom(ctx, j.peekFrom, func(e Envelope, p eventPosition) (bool, error) {
+		if acknowledged(j.checkpoint, p) || j.checkpoint.States[e.EventID].State != "" {
+			return false, nil
+		}
+		frame := p.End - p.Offset
+		if len(batch) > 0 && size+frame > maxBytes {
+			return true, nil
+		}
+		if first {
+			j.peekFrom, first = p, false
+		}
+		batch, size = append(batch, e), size+frame
+		return len(batch) >= max, nil
+	})
+	if err == nil && len(batch) == 0 && len(j.segments) > 0 {
+		last := j.segments[len(j.segments)-1]
+		j.peekFrom = eventPosition{Sequence: last.sequence, Offset: last.size, End: last.size}
+	}
+	return batch, j.readFailed(err)
+}
+
 // resetPeek makes the next Peek start from the oldest retained record.
 func (j *Journal) resetPeek() { j.peekFrom = eventPosition{} }

@@ -22,7 +22,8 @@ from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTa
 from app.schemas.schemas import EvidenceEnvelope, EvidenceReceipt, AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
 from app.services.agent_tamper import check_integrity, heartbeat_anomaly, uninstall_token_sha256
 from app.services.ingest import enqueue_log
-from app.services.evidence_inbox import MAX_REQUEST_BYTES, accept_evidence, check_evidence_durability
+from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
+                                        accept_evidence, accept_evidence_batch, check_evidence_durability)
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 log = structlog.get_logger()
@@ -102,6 +103,37 @@ async def ingest_evidence(
     return await accept_evidence(db, agent, body)
 
 
+@router.post("/v2/logs", status_code=200)
+async def ingest_evidence_batch(
+    request: Request,
+    agent: Annotated[Agent, Depends(get_agent)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Durable evidence in batches: {"protocol_version": 2, "events": [...]},
+    one result per event (see accept_evidence_batch)."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > MAX_BATCH_REQUEST_BYTES:
+                raise HTTPException(status_code=413, detail="evidence_request_too_large")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid_content_length") from exc
+    encoded = bytearray()
+    async for chunk in request.stream():
+        if len(encoded) + len(chunk) > MAX_BATCH_REQUEST_BYTES:
+            raise HTTPException(status_code=413, detail="evidence_request_too_large")
+        encoded.extend(chunk)
+    try:
+        body = json.loads(encoded)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="invalid_evidence_batch") from exc
+    events = body.get("events") if isinstance(body, dict) else None
+    if (not isinstance(body, dict) or type(body.get("protocol_version")) is not int or body["protocol_version"] != 2
+            or not isinstance(events, list) or not 1 <= len(events) <= MAX_BATCH_EVENTS):
+        raise HTTPException(status_code=422, detail="invalid_evidence_batch")
+    return {"protocol_version": 2, "results": await accept_evidence_batch(db, agent, events)}
+
+
 @router.post("/heartbeat", response_model=HeartbeatResponse)
 async def heartbeat(
     body: HeartbeatRequest,
@@ -130,8 +162,9 @@ async def heartbeat(
         await db.execute(update(Agent).where(Agent.id == agent.id).values(
             status="offline", last_seen_at=now, stop_reason=(body.reason or "service_stop")[:30], **evidence))
         await db.commit()
-        return HeartbeatResponse(config_hash="", log_sources=[], evidence_protocols=(
-            [2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []))
+        protocols = [2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []
+        return HeartbeatResponse(config_hash="", log_sources=[], evidence_protocols=protocols,
+                                 evidence_batch_max=MAX_BATCH_EVENTS if protocols else 0)
 
     integrity_updates, changes = check_integrity(agent, body.version, body.integrity)
     await db.execute(
@@ -198,8 +231,10 @@ async def heartbeat(
         ).encode()
     ).hexdigest()
 
+    protocols = [2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []
     return HeartbeatResponse(
-        evidence_protocols=([2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []),
+        evidence_protocols=protocols,
+        evidence_batch_max=MAX_BATCH_EVENTS if protocols else 0,
         config_hash=config_hash,
         log_sources=[LogSourceOut.model_validate(s) for s in sources],
         fim_paths=fim_paths,
