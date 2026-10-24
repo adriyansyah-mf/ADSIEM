@@ -55,7 +55,7 @@ type Journal struct {
 	storageGap bool
 	capacity   bool
 	bridgeLoss bridgeLoss
-	index      map[eventKey]indexEntry // event ID -> retained occurrences (index.go)
+	index      eventIndex // event ID -> retained occurrences (index.go)
 	// peekFrom: every record before it was acknowledged or held/quarantined
 	// at the last Peek; reset when something can make an older record
 	// deliverable again (release, compaction).

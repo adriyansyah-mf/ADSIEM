@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"math"
 	"os"
 )
 
@@ -13,16 +14,49 @@ import (
 // acknowledgement, hold/quarantine, operator resolve) read only that event's
 // records instead of scanning the journal. Without it each of them was
 // proportional to the backlog and draining a backlog was quadratic. The index
-// costs memory proportional to retained events (16-byte key plus position,
-// see docs/operations/agent-evidence-validation.md for measurements); it is
+// costs memory proportional to retained events (16-byte key plus a 12-byte
+// position: 42-67 B per event with map overhead, BenchmarkIndexMemory); it is
 // rebuilt at open and pruned when compaction deletes segments.
 
 type eventKey [16]byte
 
-// indexEntry holds the first occurrence inline; duplicates are rare.
-type indexEntry struct {
-	first eventPosition
-	more  []eventPosition
+// packedPosition is an eventPosition in 12 bytes: what nearly every retained
+// event needs, since sequences and segment offsets stay far below 2^32.
+type packedPosition struct{ sequence, offset, end uint32 }
+
+func pack(p eventPosition) (packedPosition, bool) {
+	if p.Sequence > math.MaxUint32 || p.Offset < 0 || p.End > math.MaxUint32 || p.Offset > p.End {
+		return packedPosition{}, false
+	}
+	return packedPosition{uint32(p.Sequence), uint32(p.Offset), uint32(p.End)}, true
+}
+
+func (p packedPosition) unpack() eventPosition {
+	return eventPosition{Sequence: uint64(p.sequence), Offset: int64(p.offset), End: int64(p.end)}
+}
+
+// eventIndex maps event IDs to retained occurrences: the oldest one packed
+// when it fits, every other one (duplicates, which are rare, or a position
+// beyond 32 bits) in wide. A key's packed occurrence is always older than its
+// wide ones, because packing is tried only while the key has none.
+type eventIndex struct {
+	packed map[eventKey]packedPosition
+	wide   map[eventKey][]eventPosition
+}
+
+func newEventIndex() eventIndex {
+	return eventIndex{packed: map[eventKey]packedPosition{}, wide: map[eventKey][]eventPosition{}}
+}
+
+// Len is the number of indexed event IDs.
+func (x eventIndex) Len() int {
+	n := len(x.packed)
+	for k := range x.wide {
+		if _, ok := x.packed[k]; !ok {
+			n++
+		}
+	}
+	return n
 }
 
 func keyOf(eventID string) (eventKey, bool) {
@@ -42,12 +76,27 @@ func (j *Journal) indexAdd(eventID string, p eventPosition) {
 	if !ok {
 		return
 	}
-	if e, exists := j.index[k]; exists {
-		e.more = append(e.more, p)
-		j.index[k] = e
-		return
+	j.index.add(k, p)
+}
+
+func (x eventIndex) add(k eventKey, p eventPosition) {
+	_, hasPacked := x.packed[k]
+	_, hasWide := x.wide[k]
+	if !hasPacked && !hasWide {
+		if pp, fits := pack(p); fits {
+			x.packed[k] = pp
+			return
+		}
 	}
-	j.index[k] = indexEntry{first: p}
+	x.wide[k] = append(x.wide[k], p)
+}
+
+func (x eventIndex) get(k eventKey) []eventPosition {
+	var ps []eventPosition
+	if pp, ok := x.packed[k]; ok {
+		ps = append(ps, pp.unpack())
+	}
+	return append(ps, x.wide[k]...)
 }
 
 // positions returns every retained occurrence of eventID, oldest first.
@@ -56,16 +105,12 @@ func (j *Journal) positions(eventID string) []eventPosition {
 	if !ok {
 		return nil
 	}
-	e, exists := j.index[k]
-	if !exists {
-		return nil
-	}
-	return append([]eventPosition{e.first}, e.more...)
+	return j.index.get(k)
 }
 
 // rebuildIndex indexes every retained event (open, after recovery).
 func (j *Journal) rebuildIndex(ctx context.Context) error {
-	j.index = map[eventKey]indexEntry{}
+	j.index = newEventIndex()
 	return j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) {
 		j.indexAdd(e.EventID, p)
 		return false, nil
@@ -78,18 +123,33 @@ func (j *Journal) pruneIndex() {
 	for _, s := range j.segments {
 		retained[s.sequence] = true
 	}
-	for k, e := range j.index {
+	for k, pp := range j.index.packed {
+		if !retained[uint64(pp.sequence)] {
+			delete(j.index.packed, k)
+		}
+	}
+	for k, ps := range j.index.wide {
 		var kept []eventPosition
-		for _, p := range append([]eventPosition{e.first}, e.more...) {
+		for _, p := range ps {
 			if retained[p.Sequence] {
 				kept = append(kept, p)
 			}
 		}
 		if len(kept) == 0 {
-			delete(j.index, k)
+			delete(j.index.wide, k)
 			continue
 		}
-		j.index[k] = indexEntry{first: kept[0], more: kept[1:]}
+		// Keep the invariant: the oldest occurrence packed if the key has none.
+		if _, ok := j.index.packed[k]; !ok {
+			if pp, fits := pack(kept[0]); fits {
+				j.index.packed[k], kept = pp, kept[1:]
+			}
+		}
+		if len(kept) == 0 {
+			delete(j.index.wide, k)
+		} else {
+			j.index.wide[k] = kept
+		}
 	}
 }
 
