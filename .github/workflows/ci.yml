@@ -57,6 +57,7 @@ jobs:
           # Prometheus registry and registers the same siem_llm_* metric names.
           # Collecting both gateways in one interpreter causes duplicate metrics.
           pytest tests/server-api
+          pytest tests/evidence  # acceptance assertions; the Docker harness runs in evidence-acceptance
           pytest tests/worker worker/tests \
             --ignore=tests/worker/test_pipeline.int.test.py \
             --deselect worker/tests/test_rag.py::test_embed_text_returns_384_dimensions \
@@ -91,6 +92,38 @@ jobs:
         run: |
           go vet ./...
           go build -o /dev/null ./cmd/agent/
+
+  # End-to-end durable evidence under faults (tests/evidence/run.py): a
+  # disposable Compose project per scenario with PostgreSQL, Redis,
+  # Elasticsearch, server-api, worker, a fault proxy and the Linux agent.
+  evidence-acceptance:
+    name: Evidence acceptance (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [offline-restart, lost-response, redis-loss, worker-crash, quota, corruption, retention]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run scenario
+        run: |
+          python tests/evidence/run.py --build --scenario "${{ matrix.scenario }}" \
+            --count 5000 --output "evidence-artifacts/${{ matrix.scenario }}"
+
+      - name: Upload evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ matrix.scenario }}
+          path: evidence-artifacts/${{ matrix.scenario }}
+          retention-days: 14
+          if-no-files-found: warn
 
   dashboard-build:
     name: Dashboard build (tsc + vite)
