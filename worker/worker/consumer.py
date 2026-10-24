@@ -232,6 +232,15 @@ async def consume_loop(state: dict) -> None:
         except asyncio.CancelledError:
             break
         except Exception as exc:
+            if "NOGROUP" in str(exc):
+                # Redis restarted without its data: the stream and group are gone.
+                # Recreate them; the evidence dispatcher re-sends its references.
+                log.warning("consumer_group_recreated", error=str(exc))
+                try:
+                    await ensure_stream_group(redis)
+                    continue
+                except Exception as group_exc:  # noqa: BLE001 - Redis still down: retry below
+                    exc = group_exc
             log.error("consume_loop_error", error=str(exc))
             await asyncio.sleep(5)
 
