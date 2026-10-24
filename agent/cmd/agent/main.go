@@ -43,7 +43,25 @@ func main() {
 	verifyUninstall := flag.Bool("verify-uninstall", false,
 		"exit 0 only if -token (or $SIEM_UNINSTALL_TOKEN) is this agent's uninstall token; used by the MSI and .deb/.rpm removal")
 	uninstallToken := flag.String("token", "", "with -verify-uninstall: the uninstall token")
+	var ev evidenceCommand
+	flag.BoolVar(&ev.list, "evidence-list", false, "list held and quarantined durable evidence (agent stopped, as root/Administrator)")
+	flag.StringVar(&ev.release, "evidence-release", "", "event ID: deliver held or quarantined evidence again (needs -reason)")
+	flag.StringVar(&ev.discard, "evidence-discard", "", "event ID: drop held or quarantined evidence (needs -reason)")
+	flag.StringVar(&ev.reason, "reason", "", "with -evidence-release/-evidence-discard: why, kept in the journal audit")
+	flag.BoolVar(&ev.yes, "yes", false, "with -evidence-release: release held evidence despite the duplicate risk")
 	flag.Parse()
+
+	if ev.requested() {
+		cfg, err := config.Load(*configPath)
+		if err == nil {
+			err = runEvidenceCommand(cfg, ev, os.Stdout)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "siem-agent:", err)
+			os.Exit(2)
+		}
+		return
+	}
 
 	if *verifyUninstall {
 		token := *uninstallToken

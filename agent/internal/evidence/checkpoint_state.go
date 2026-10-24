@@ -40,6 +40,7 @@ type checkpoint struct {
 	ACKs         map[uint64][]ackSpan
 	States       map[string]eventState
 	Health       healthTotals
+	Audit        []AuditEntry `json:",omitempty"` // operator actions, newest last, bounded
 }
 
 func emptyCheckpoint(agentID string) checkpoint {

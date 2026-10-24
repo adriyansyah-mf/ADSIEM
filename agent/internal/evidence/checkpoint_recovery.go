@@ -189,6 +189,14 @@ func validateCheckpoint(c checkpoint) error {
 	if c.Health.Retries < 0 || c.Health.Held < 0 || c.Health.Quarantined < 0 || c.Health.UnknownGaps < 0 || len(c.Health.Sources) > 256 {
 		return ErrCorrupt
 	}
+	if len(c.Audit) > maxAudit {
+		return ErrCorrupt
+	}
+	for _, a := range c.Audit {
+		if (a.Action != "release" && a.Action != "discard") || !boundedText(a.Reason, 256) {
+			return ErrCorrupt
+		}
+	}
 	for key, value := range c.Health.KnownLoss {
 		if !lossReason(key) || value < 0 {
 			return ErrCorrupt

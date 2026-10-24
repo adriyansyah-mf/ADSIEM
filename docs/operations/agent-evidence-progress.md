@@ -220,3 +220,67 @@ Known limits:
 - Detection of copytruncate is by size: a truncation followed by a rewrite of
   at least the old length before the next poll is not detectable.
 - eBPF monitors are still not joined at shutdown (late offers are refused).
+- Follow-up (CI): deleting and recreating a file while stopped can reuse its
+  inode. File cursors now carry a fingerprint of the first 256 bytes in the
+  bookmark; a mismatch is a new file (gap, read from the start).
+
+## 2026-10-24: Task 9 Windows Event Log bookmarks
+
+`winevent.SubscribeResume`/`Baseline` (`resume.go` logic behind a small native
+API, `bookmark_windows.go` over wevtapi) and `tailer.TailEventLogDurable`; the
+durable manager uses them for `eventlog:` sources. Details in the commit
+messages. The native run is `tests/windows/evidence-resume.ps1`, the
+`native-evidence` job of `windows-agent.yml` (dispatched on this branch; it
+runs on pull requests too).
+
+Native results, honestly: the first Windows run of the whole evidence stack
+(Codex's Task 1-5 library included) failed in four places and took three more
+runs:
+
+| Run | Found | Fixed by |
+| --- | --- | --- |
+| 1 | journal refused files a test helper created (default owner Administrators); ACL test compared SDDL strings; config test compared 8.3 short paths; event log test readiness; rename test handle lacked share-delete | test fixes; a widened owner check, reverted in run 2 |
+| 2 | `EvtNext` reports `ERROR_INVALID_OPERATION` on an empty channel (a real bug: empty channels kept failing); spill/firewall default paths derived before canonicalization (real, minor); the widened owner check broke the group-owner regression | product fixes; crash tests create token-user-owned files (`writeOwned`) |
+| 3 | every bookmark, cursor and journal test passed except a publisher test stopping 65 flushed appends within one 3 s deadline | the helper retries Stop as its contract says |
+
+Passing natively: `TestNativeResumeAfterBookmarkExactlyOnce`,
+`TestNativeClearedChannelIsAGap`, `TestNativeDurableEventLogResumeExactlyOnce`
+(real journal, restart, clear of the test's own log), the durable file tests
+including rename of an open file, and the journal's owner/ACL/reparse tests.
+
+Not done: the MSI smoke test still runs the legacy mode; `mock_siem.py`
+supports v2 (`MOCK_EVIDENCE=1`) for when Task 11 makes durable mode
+installable.
+
+## 2026-10-24: Task 10 evidence health, operator controls, UI
+
+- Agent: heartbeat `evidence_health` = journal Health (cumulative, survives
+  restarts and failed heartbeats; rescanned at most once a minute because
+  `Snapshot` walks the whole journal) + `mode` + sender status, or
+  degraded/`journal_unavailable`.
+- API: bounded, enumerated `EvidenceHealth` schema; an invalid object is
+  dropped without failing the heartbeat; stored with server receipt time; a
+  heartbeat without it keeps the last snapshot. `AgentOut.evidence` summary;
+  `GET /api/agents/{id}/evidence`; `POST .../evidence/{receipt}/retry`
+  (agents:manage, scoped to the receipt's original group, dead letters only,
+  audited).
+- UI: Evidence delivery column (Not reported for legacy agents, Stale), detail
+  in the expanded row, retry behind a duplicate-risk confirmation.
+- Local: `siem-agent -evidence-list | -evidence-release <id> | -evidence-discard
+  <id> -reason ... [-yes]` with the agent stopped, as root/elevated; held
+  release needs `-yes`; parked evidence only; `Journal.Resolve` writes the
+  tombstone and a bounded audit entry in one durable checkpoint; metadata only
+  in output.
+
+| Command | Result |
+| --- | --- |
+| `pytest tests/server-api` | 176 passed, 7 skipped |
+| `pytest tests/dashboard/test_enterprise_ui.py` (Vite) | 117 passed, 8 new: six health states, older API, retry confirmation |
+| `npm --prefix dashboard run build` | Passed |
+| `go test -race ./agent/...` incl. 6 resolve and 6 CLI tests | Passed; Windows vet passed |
+| Go health reports (empty, backlog+loss+sources+sender, unavailable) validated with the server schema | 3/3 accepted |
+
+Order note: for the API, resolve library and CLI the implementation was
+written before its tests, so no red run was recorded for those parts; the
+agent reporter and sender-side tests were run after. Not manually inspected in
+a browser beyond the Playwright assertions.
