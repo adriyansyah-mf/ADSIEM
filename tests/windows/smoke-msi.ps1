@@ -192,6 +192,50 @@ try {
     Write-Host ("ok: live response: " + (($rowsBy.Keys | Sort-Object | ForEach-Object { "$_=$(@($rowsBy[$_]).Count)" }) -join ", ") +
         "; info: $($info.OSRelease) $($info.Kernel)")
 
+    # 4c'. Response tasks through the service (SYSTEM), queued like the server does:
+    #      kill a process, refuse lsass, quarantine a file so even an Administrator
+    #      cannot read it, then restore it.
+    function Send-Tasks($tasks) {
+        ConvertTo-Json -InputObject @($tasks) -Depth 5 | Set-Content (Join-Path $mockOut "tasks.json") -Encoding utf8
+    }
+    function Wait-Result([string]$id) {
+        $deadline = (Get-Date).AddSeconds(120)
+        $file = Join-Path $mockOut "task_results.jsonl"
+        while ((Get-Date) -lt $deadline) {
+            if (Test-Path $file) {
+                $found = Get-Content $file | ConvertFrom-Json | Where-Object { $_.id -eq $id } | Select-Object -First 1
+                if ($found) { return $found }
+            }
+            Start-Sleep 2
+        }
+        Fail "no result for task $id"
+    }
+    $victim = Start-Process cmd.exe -PassThru -WindowStyle Hidden -ArgumentList "/c ping -n 300 127.0.0.1"
+    $lsass = (Get-Process lsass).Id
+    $sample = Join-Path $work "quarantine-sample.exe"
+    Set-Content -Path $sample -Value "siem smoke sample" -Encoding ascii
+    Send-Tasks @(
+        @{ id = "smoke-kill"; task_type = "kill_process"; params = @{ pid = $victim.Id } },
+        @{ id = "smoke-kill-lsass"; task_type = "kill_process"; params = @{ pid = $lsass } },
+        @{ id = "smoke-quarantine"; task_type = "quarantine_file"; params = @{ path = $sample } }
+    )
+    $r = Wait-Result "smoke-kill"
+    if ($r.status -ne "done" -or -not $r.result.exited) { Fail "kill_process: $($r | ConvertTo-Json -Compress -Depth 5)" }
+    if (-not $victim.WaitForExit(5000)) { Fail "the killed process is still running" }
+    $r = Wait-Result "smoke-kill-lsass"
+    if ($r.status -ne "failed" -or -not $r.result.refused) { Fail "lsass was not refused: $($r | ConvertTo-Json -Compress -Depth 5)" }
+    if (-not (Get-Process -Id $lsass -ErrorAction SilentlyContinue)) { Fail "lsass is gone" }
+    $r = Wait-Result "smoke-quarantine"
+    if ($r.status -ne "done" -or -not $r.result.owner_changed) { Fail "quarantine_file: $($r | ConvertTo-Json -Compress -Depth 5)" }
+    $readable = $true
+    try { [IO.File]::ReadAllText($sample) | Out-Null } catch { $readable = $false }
+    if ($readable) { Fail "a quarantined file is still readable by an Administrator" }
+    Send-Tasks @(@{ id = "smoke-restore"; task_type = "restore_file"; params = @{ path = $sample } })
+    $r = Wait-Result "smoke-restore"
+    if ($r.status -ne "done") { Fail "restore_file: $($r | ConvertTo-Json -Compress -Depth 5)" }
+    if ((Get-Content $sample -Raw).Trim() -ne "siem smoke sample") { Fail "the restored file is not readable or changed" }
+    Write-Host "ok: response via the service: process killed, lsass refused, file quarantined and restored"
+
     # 4d. Tamper protection: the service DACL refuses an Administrator's stop
     # (msiexec runs as SYSTEM, so the uninstall below must still work).
     $refused = $false

@@ -3,83 +3,17 @@
 package task
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
 // Quarantine makes a file unreadable and immutable without deleting it, so an
-// analyst can still recover it. The original mode is recorded in the agent's
-// own state file, not on the target, because an attacker with write access to
-// the file's directory could otherwise rewrite the metadata.
-type QuarantineRecord struct {
-	Path        string    `json:"path"`
-	OriginalMode os.FileMode `json:"original_mode"`
-	Size        int64     `json:"size"`
-	SHA256      string    `json:"sha256"`
-	Immutable   bool      `json:"immutable"`
-	QuarantinedAt time.Time `json:"quarantined_at"`
-}
-
-type quarantineStore struct {
-	mu      sync.Mutex
-	path    string
-	entries map[string]QuarantineRecord
-}
-
-var qStore = &quarantineStore{}
-
-func setQuarantineStore(path string) {
-	qStore.mu.Lock()
-	defer qStore.mu.Unlock()
-	qStore.path = path
-	qStore.entries = nil
-}
-
-func (s *quarantineStore) load() map[string]QuarantineRecord {
-	if s.entries != nil {
-		return s.entries
-	}
-	s.entries = map[string]QuarantineRecord{}
-	if s.path == "" {
-		return s.entries
-	}
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		return s.entries
-	}
-	if err := json.Unmarshal(data, &s.entries); err != nil {
-		slog.Warn("quarantine state unreadable, starting fresh", "err", err)
-		s.entries = map[string]QuarantineRecord{}
-	}
-	return s.entries
-}
-
-func (s *quarantineStore) save() {
-	if s.path == "" || s.entries == nil {
-		return
-	}
-	data, err := json.MarshalIndent(s.entries, "", "  ")
-	if err != nil {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		slog.Warn("quarantine state dir failed", "err", err)
-		return
-	}
-	if err := os.WriteFile(s.path, data, 0o600); err != nil {
-		slog.Warn("quarantine state write failed", "err", err)
-	}
-}
+// analyst can still recover it (QuarantineRecord, quarantine_store.go).
 
 var quarantineProtectedDirs = []string{"/proc", "/sys", "/dev", "/boot"}
 
@@ -188,18 +122,4 @@ func chattrImmutable(path string, on bool) error {
 		return fmt.Errorf("chattr %s: %s: %w", flag, strings.TrimSpace(string(out)), err)
 	}
 	return nil
-}
-
-func hashFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }

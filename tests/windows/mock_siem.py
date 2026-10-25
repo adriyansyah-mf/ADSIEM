@@ -90,7 +90,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ingest/heartbeat":
             with open(OUT / "heartbeats.jsonl", "a") as fh:
                 fh.write(json.dumps(payload) + "\n")
-            return self._reply(200, {"config_hash": "mock", "log_sources": SOURCES, "fim_paths": [], "tasks": [],
+            # The test queues response tasks in <out>/tasks.json; they go out once.
+            tasks, queued = [], OUT / "tasks.json"
+            if queued.exists():
+                tasks = json.loads(queued.read_text())
+                queued.replace(OUT / "tasks.sent.json")
+            return self._reply(200, {"config_hash": "mock", "log_sources": SOURCES, "fim_paths": [], "tasks": tasks,
                                      "uninstall_token_sha256": hashlib.sha256(UNINSTALL_TOKEN.encode()).hexdigest(),
                                      "evidence_protocols": [2] if EVIDENCE else [],
                                      "evidence_batch_max": 500 if EVIDENCE else 0})
@@ -104,6 +109,10 @@ class Handler(BaseHTTPRequestHandler):
             if payload.get("protocol_version") != 2 or not isinstance(events, list) or not 1 <= len(events) <= 500:
                 return self._reply(422, {"detail": "invalid_evidence_batch"})
             return self._reply(200, {"protocol_version": 2, "results": [_accept(e) for e in events]})
+        if path.startswith("/api/tasks/") and path.endswith("/result"):
+            with open(OUT / "task_results.jsonl", "a") as fh:
+                fh.write(json.dumps({"id": path.split("/")[3], **payload}) + "\n")
+            return self._reply(200, {"status": "ok"})
         if path == "/api/ingest/log":
             with open(OUT / "logs.jsonl", "a") as fh:
                 fh.write(json.dumps(payload) + "\n")

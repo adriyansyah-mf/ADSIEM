@@ -21,7 +21,8 @@ $packages = @(
     "./agent/internal/buffer",
     "./agent/internal/config",
     "./agent/internal/winevent",
-    "./agent/internal/tailer"
+    "./agent/internal/tailer",
+    "./agent/internal/task" # kill_process / quarantine_file / restore_file / agent_integrity on Windows
 )
 $failed = @()
 $logs = Join-Path ($env:RUNNER_TEMP ?? $env:TEMP) "evidence-go-test"
