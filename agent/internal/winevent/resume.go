@@ -103,10 +103,13 @@ func baseline(api nativeAPI, channel string) (Resume, error) {
 	return Resume{Bookmark: xml, Initialized: true}, nil
 }
 
-// subscribeResume streams events after resume to emit until ctx ends. An emit
+// subscribeResume streams events after resume to emit until ctx ends, one
+// call per EvtNext batch (oldest first; each event carries the bookmark just
+// past it), so the caller can admit a batch in one group commit. An emit
 // error stops it and is returned: the caller's committed bookmark is unchanged
-// and it resubscribes from there. Every enumerated handle is closed.
-func subscribeResume(ctx context.Context, api nativeAPI, channel string, resume Resume, emit func(Event) error) error {
+// and it resubscribes from there. A failure moving the bookmark mid-batch
+// emits the events before it, then returns. Every enumerated handle is closed.
+func subscribeResume(ctx context.Context, api nativeAPI, channel string, resume Resume, emit func([]Event) error) error {
 	var (
 		bm    handle
 		err   error
@@ -156,23 +159,43 @@ func subscribeResume(ctx context.Context, api nativeAPI, channel string, resume 
 			if len(hs) == 0 {
 				break
 			}
+			evs := make([]Event, 0, len(hs))
 			for i, h := range hs {
 				ev, err := event(api, bm, h)
 				api.close(h)
-				if err == nil {
-					err = emit(ev)
-				}
 				if err != nil {
 					for _, rest := range hs[i+1:] {
 						api.close(rest)
 					}
+					if len(evs) > 0 {
+						if emitErr := emit(evs); emitErr != nil {
+							return emitErr
+						}
+					}
 					return err
 				}
+				evs = append(evs, ev)
+			}
+			if err := emit(evs); err != nil {
+				return err
 			}
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 		}
+	}
+}
+
+// eachEvent adapts a per-event emit to batches: events in order, stopping at
+// the first error.
+func eachEvent(emit func(Event) error) func([]Event) error {
+	return func(evs []Event) error {
+		for _, ev := range evs {
+			if err := emit(ev); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 }
 

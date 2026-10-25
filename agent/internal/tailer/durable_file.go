@@ -29,9 +29,12 @@ const (
 	maxPressureWait  = 5 * time.Second
 )
 
-// DurableSink admits one draft durably; *evidence.Publisher implements it.
+// DurableSink admits drafts durably, one or several per group commit;
+// *evidence.Publisher implements it.
 type DurableSink interface {
 	Submit(context.Context, evidence.Draft) (evidence.Envelope, error)
+	// SubmitBatch returns the admitted prefix; err concerns the next draft.
+	SubmitBatch(context.Context, []evidence.Draft) ([]evidence.Envelope, error)
 }
 
 // trackedFile is one open file. offset is the committed cursor: the byte just
@@ -404,11 +407,37 @@ func (t *durableTail) step(tf *trackedFile) (bool, error) {
 	return progressed, nil
 }
 
-// lines admits every complete line in pending, oldest first.
+// maxLineBatch bounds one group commit of lines (Journal.AppendBatch).
+const maxLineBatch = 256
+
+// lineBatch is the complete lines read but not admitted yet, each with the
+// cursor just past it.
+type lineBatch struct {
+	drafts []evidence.Draft
+	ends   []int64
+}
+
+// lines admits every complete line in pending, oldest first, sharing flushes:
+// all complete lines of a read go out in one group commit, so a burst costs a
+// flush per batch instead of per line. pending is only trimmed past lines
+// that were admitted (or counted as oversized).
 func (t *durableTail) lines(tf *trackedFile) error {
+	var batch lineBatch
+	scan := 0 // pending[:scan] is admitted or queued in batch
+	flush := func() error {
+		if err := t.admitLines(tf, &batch); err != nil {
+			return err
+		}
+		tf.trimPending(scan)
+		scan = 0
+		return nil
+	}
 	for {
-		idx := bytes.IndexByte(tf.pending, '\n')
+		idx := bytes.IndexByte(tf.pending[scan:], '\n')
 		if idx < 0 {
+			if err := flush(); err != nil {
+				return err
+			}
 			if !tf.discarding && len(tf.pending) > t.maxLine {
 				tf.discarding = true // keep memory bounded until the line ends
 			}
@@ -418,21 +447,31 @@ func (t *durableTail) lines(tf *trackedFile) error {
 			}
 			break
 		}
+		idx += scan
 		end := tf.pendingStart + int64(idx) + 1
-		line := bytes.TrimRight(tf.pending[:idx], "\r")
-		var err error
+		line := bytes.TrimRight(tf.pending[scan:idx], "\r")
 		switch {
 		case tf.discarding || len(line) > t.maxLine:
+			shift := scan
+			if err := flush(); err != nil { // keep order: earlier lines first
+				return err
+			}
+			idx -= shift // pending now starts where scan was; end is absolute
 			tf.discarding = false
-			err = t.oversize(tf, end)
+			if err := t.oversize(tf, end); err != nil {
+				return err
+			}
 		case len(line) > 0:
-			err = t.admit(tf, string(line), end)
+			c := t.cursor(tf, end)
+			batch.drafts = append(batch.drafts, evidence.Draft{LogType: t.logType, Location: tf.path, RawMessage: string(line), Cursor: &c})
+			batch.ends = append(batch.ends, end)
 		}
-		if err != nil {
-			return err
+		scan = idx + 1
+		if len(batch.drafts) >= maxLineBatch {
+			if err := flush(); err != nil {
+				return err
+			}
 		}
-		tf.pending = tf.pending[idx+1:]
-		tf.pendingStart = end
 	}
 	if cap(tf.pending) > 2*readChunk && len(tf.pending) < readChunk { // release a grown buffer
 		tf.pending = append([]byte(nil), tf.pending...)
@@ -440,22 +479,37 @@ func (t *durableTail) lines(tf *trackedFile) error {
 	return nil
 }
 
-// admit submits one line with the cursor just past it, retrying the same
-// draft under disk pressure; the cursor only moves after durable admission.
-func (t *durableTail) admit(tf *trackedFile, line string, end int64) error {
-	c := t.cursor(tf, end)
-	draft := evidence.Draft{LogType: t.logType, Location: tf.path, RawMessage: line, Cursor: &c}
-	err := t.retry(func() error {
-		_, err := t.sink.Submit(t.ctx, draft)
-		return err
-	})
-	if errors.Is(err, evidence.ErrOversize) { // the encoded event is over the limit
-		return t.oversize(tf, end)
+// trimPending drops the first n bytes of pending.
+func (tf *trackedFile) trimPending(n int) {
+	tf.pending = tf.pending[n:]
+	tf.pendingStart += int64(n)
+}
+
+// admitLines submits the batch, retrying what is left of it under disk
+// pressure; the cursor moves only past durably admitted lines. A line whose
+// encoded event is over the limit is counted as oversized, then the rest goes.
+func (t *durableTail) admitLines(tf *trackedFile, b *lineBatch) error {
+	for len(b.drafts) > 0 {
+		err := t.retry(func() error {
+			admitted, err := t.sink.SubmitBatch(t.ctx, b.drafts)
+			if n := len(admitted); n > 0 {
+				tf.offset = b.ends[n-1]
+				b.drafts, b.ends = b.drafts[n:], b.ends[n:]
+			}
+			return err
+		})
+		if errors.Is(err, evidence.ErrOversize) {
+			if err := t.oversize(tf, b.ends[0]); err != nil {
+				return err
+			}
+			b.drafts, b.ends = b.drafts[1:], b.ends[1:]
+			continue
+		}
+		if err != nil {
+			return err
+		}
 	}
-	if err != nil {
-		return err
-	}
-	tf.offset = end
+	b.drafts, b.ends = b.drafts[:0], b.ends[:0]
 	return nil
 }
 
@@ -569,7 +623,11 @@ func (t *durableTail) atEOF(tf *trackedFile) error {
 		if tf.discarding || len(line) > t.maxLine {
 			err = t.oversize(tf, tf.readPos)
 		} else {
-			err = t.admit(tf, string(line), tf.readPos)
+			c := t.cursor(tf, tf.readPos)
+			err = t.admitLines(tf, &lineBatch{
+				drafts: []evidence.Draft{{LogType: t.logType, Location: tf.path, RawMessage: string(line), Cursor: &c}},
+				ends:   []int64{tf.readPos},
+			})
 		}
 		if err != nil {
 			return err

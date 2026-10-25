@@ -108,40 +108,8 @@ func openWithDependencies(o Options, deps journalDependencies) (_ *Journal, err 
 }
 
 func (j *Journal) Append(ctx context.Context, e Envelope) error {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	if e.AgentID != j.options.AgentID {
-		return ErrIdentityMismatch
-	}
-	if e.ProtocolVersion != 2 {
-		return fmt.Errorf("event protocol: %w", ErrCorrupt)
-	}
-	if err := ValidateAgentID(e.EventID); err != nil {
-		return err
-	}
-	if e.Cursor != nil {
-		if e.Cursor.Source == "" {
-			return ErrInvalidControl
-		}
-		c := *e.Cursor
-		e.Cursor = &c
-	}
-	if err := j.checkDuplicate(ctx, e); err != nil {
-		return err
-	}
-	b, err := json.Marshal(e)
-	if err != nil {
-		return fmt.Errorf("encode event: %w", err)
-	}
-	if err := j.admit(ctx, frameEvent, b); err != nil {
-		return err
-	}
-	last := j.segments[len(j.segments)-1]
-	j.indexAdd(e, eventPosition{last.sequence, last.size - int64(frameHeaderSize) - int64(len(b)), last.size})
-	if e.Cursor != nil {
-		j.cursors[e.Cursor.Source] = *e.Cursor
-	}
-	return nil
+	_, err := j.AppendBatch(ctx, []Envelope{e})
+	return err
 }
 
 func (j *Journal) SaveBaseline(ctx context.Context, c Cursor) error {

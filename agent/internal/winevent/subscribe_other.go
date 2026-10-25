@@ -14,6 +14,11 @@ func SubscribeResume(ctx context.Context, channel string, resume Resume, emit fu
 	return ErrUnsupported
 }
 
+// SubscribeResumeBatch is only available on Windows.
+func SubscribeResumeBatch(ctx context.Context, channel string, resume Resume, emit func([]Event) error) error {
+	return ErrUnsupported
+}
+
 // Baseline is only available on Windows.
 func Baseline(ctx context.Context, channel string) (Resume, error) {
 	return Resume{}, ErrUnsupported

@@ -25,7 +25,8 @@ type fakeAPI struct {
 	failNext  error
 	badRender map[uint64]bool
 	badXML    map[uint64]bool
-	unparsed  bool // createBookmark rejects the saved XML
+	unparsed  bool            // createBookmark rejects the saved XML
+	badUpdate map[uint64]bool // moving the bookmark past these records fails
 }
 
 func newFake(records ...uint64) *fakeAPI {
@@ -133,6 +134,9 @@ func (f *fakeAPI) updateBookmark(bm, ev handle) error {
 	if _, ok := f.open[ev]; !ok {
 		return errors.New("event handle already closed")
 	}
+	if f.badUpdate[f.events[ev]] {
+		return errors.New("update bookmark failed")
+	}
 	f.bookmarks[bm] = f.events[ev]
 	return nil
 }
@@ -175,7 +179,7 @@ func collect(t *testing.T, f *fakeAPI, resume Resume, n int, emitErr func(Event)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var got []Event
-	err := subscribeResume(ctx, lockedFake{f}, "T", resume, func(ev Event) error {
+	err := subscribeResume(ctx, lockedFake{f}, "T", resume, eachEvent(func(ev Event) error {
 		if emitErr != nil {
 			if err := emitErr(ev); err != nil {
 				return err
@@ -186,7 +190,7 @@ func collect(t *testing.T, f *fakeAPI, resume Resume, n int, emitErr func(Event)
 			cancel()
 		}
 		return nil
-	})
+	}))
 	if leaks := f.leaks(); len(leaks) != 0 {
 		t.Fatalf("handles left open: %v", leaks)
 	}

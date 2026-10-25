@@ -34,7 +34,8 @@ func (c *fakeChannel) baseline(ctx context.Context, channel string) (winevent.Re
 	return winevent.Resume{Bookmark: fmt.Sprintf("bm:%d", c.records[len(c.records)-1]), Initialized: true}, nil
 }
 
-func (c *fakeChannel) subscribe(ctx context.Context, channel string, resume winevent.Resume, emit func(winevent.Event) error) error {
+// subscribe delivers what is new as one batch per poll, like one EvtNext.
+func (c *fakeChannel) subscribe(ctx context.Context, channel string, resume winevent.Resume, emit func([]winevent.Event) error) error {
 	c.mu.Lock()
 	c.resumes = append(c.resumes, resume)
 	if len(c.failures) > 0 {
@@ -63,15 +64,21 @@ func (c *fakeChannel) subscribe(ctx context.Context, channel string, resume wine
 		}
 		bad := c.bad
 		c.mu.Unlock()
+		var batch []winevent.Event
 		for _, r := range pending {
 			ev := winevent.Event{Line: fmt.Sprintf("EventID=701 Record=%d", r), Bookmark: fmt.Sprintf("bm:%d", r), RecordID: uint64(r)}
 			if bad[r] {
 				ev.Line, ev.Err = "", errors.New("render failed")
 			}
-			if err := emit(ev); err != nil {
+			batch = append(batch, ev)
+		}
+		if len(batch) > 0 {
+			if err := emit(batch); err != nil {
 				return err
 			}
-			sent[r] = true
+			for _, r := range pending {
+				sent[r] = true
+			}
 		}
 		select {
 		case <-ctx.Done():

@@ -20,11 +20,12 @@ import (
 //	EVIDENCE_SOAK=1h EVIDENCE_SOAK_RATE=200 EVIDENCE_SOAK_REPORT=soak.json \
 //	  go test ./agent/internal/evidence -run TestSustainedCapture -timeout 0 -v
 //
-// One producer appends at RATE events/s (each a durable admission) while a
-// drainer delivers in batches the way the batch sender does, so the journal
-// stays near steady state. The JSON report has throughput, append latency
-// percentiles, process CPU, peak heap and the journal's bytes on disk,
-// sampled every minute. EVIDENCE_SOAK_DIR places the journal (default: a
+// One producer appends at RATE events/s, each commit taking every event that
+// is due (a group commit, as tailers do; EVIDENCE_SOAK_BATCH=1 for one flush
+// per event), while a drainer delivers in batches the way the batch sender
+// does, so the journal stays near steady state. The JSON report has
+// throughput, commit latency and lag (due to admitted) percentiles, process
+// CPU, peak heap and RSS, and the journal's bytes on disk, sampled every minute. EVIDENCE_SOAK_DIR places the journal (default: a
 // temp dir; give a real disk, /tmp may be tmpfs).
 func TestSustainedCapture(t *testing.T) {
 	duration, err := time.ParseDuration(os.Getenv("EVIDENCE_SOAK"))
@@ -54,25 +55,39 @@ func TestSustainedCapture(t *testing.T) {
 	drained := make(chan int64, 1)
 	go func() { drained <- drain(ctx, t, j) }()
 
-	var latencies []time.Duration
+	// Like a tailer, append everything that is due in one group commit
+	// (EVIDENCE_SOAK_BATCH caps it; 1 is the old one-flush-per-event path).
+	maxBatch := 256
+	if v, err := strconv.Atoi(os.Getenv("EVIDENCE_SOAK_BATCH")); err == nil && v > 0 {
+		maxBatch = v
+	}
+	var latencies, lags []time.Duration // per commit; lag = oldest event's wait from due to admitted
 	var samples []soakSample
 	start := time.Now()
 	nextSample := start.Add(time.Minute)
 	interval := time.Duration(float64(time.Second) / rate)
 	var appended int64
-	for n := 0; ctx.Err() == nil; n++ {
-		due := start.Add(time.Duration(n) * interval)
+	var commits int64
+	for ctx.Err() == nil {
+		due := start.Add(time.Duration(appended) * interval)
 		if d := time.Until(due); d > 0 {
 			time.Sleep(d)
 		}
-		e := soakEvent(t, o, n)
-		began := time.Now()
-		if err := j.Append(context.Background(), e); err != nil {
-			t.Fatalf("append %d: %v", n, err)
+		ready := int(time.Since(start)/interval) - int(appended) + 1
+		ready = min(max(ready, 1), maxBatch)
+		batch := make([]Envelope, ready)
+		for k := range batch {
+			batch[k] = soakEvent(t, o, int(appended)+k)
 		}
-		latencies = append(latencies, time.Since(began))
-		appended++
-		if time.Now().After(nextSample) {
+		began := time.Now()
+		if n, err := j.AppendBatch(context.Background(), batch); err != nil || n != ready {
+			t.Fatalf("append at %d: admitted %d of %d: %v", appended, n, ready, err)
+		}
+		now := time.Now()
+		latencies, lags = append(latencies, now.Sub(began)), append(lags, now.Sub(due))
+		appended += int64(ready)
+		commits++
+		if now.After(nextSample) {
 			samples = append(samples, sample(j, o.Dir, start, appended))
 			nextSample = nextSample.Add(time.Minute)
 		}
@@ -82,8 +97,12 @@ func TestSustainedCapture(t *testing.T) {
 	elapsed := time.Since(start)
 
 	sort.Slice(latencies, func(a, b int) bool { return latencies[a] < latencies[b] })
+	sort.Slice(lags, func(a, b int) bool { return lags[a] < lags[b] })
 	pct := func(p float64) float64 {
 		return float64(latencies[int(p*float64(len(latencies)-1))].Microseconds())
+	}
+	lagMS := func(p float64) float64 {
+		return float64(lags[int(p*float64(len(lags)-1))].Microseconds()) / 1000
 	}
 	var peakHeap, peakDisk int64
 	for _, s := range samples {
@@ -94,7 +113,9 @@ func TestSustainedCapture(t *testing.T) {
 		"os": runtime.GOOS, "arch": runtime.GOARCH, "cpus": runtime.NumCPU(), "go": runtime.Version(), "host": host,
 		"journal_dir": o.Dir, "duration_s": elapsed.Seconds(), "target_rate": rate,
 		"appended": appended, "delivered": delivered, "events_per_s": float64(appended) / elapsed.Seconds(),
+		"max_batch": maxBatch, "commits": commits, "mean_batch": float64(appended) / float64(commits),
 		"append_p50_us": pct(0.50), "append_p95_us": pct(0.95), "append_p99_us": pct(0.99),
+		"lag_p50_ms": lagMS(0.50), "lag_p95_ms": lagMS(0.95), "lag_max_ms": lagMS(1),
 		"cpu_seconds": processCPUSeconds(), "cpu_percent_of_one_core": 100 * processCPUSeconds() / elapsed.Seconds(),
 		"peak_heap_bytes": peakHeap, "peak_rss_bytes": peakRSSBytes(), "peak_disk_bytes": peakDisk, "samples": samples,
 	}

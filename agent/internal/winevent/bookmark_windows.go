@@ -28,6 +28,12 @@ const (
 // no longer names a retained event returns ErrBookmarkGap. An emit error stops
 // it and is returned unchanged.
 func SubscribeResume(ctx context.Context, channel string, resume Resume, emit func(Event) error) error {
+	return SubscribeResumeBatch(ctx, channel, resume, eachEvent(emit))
+}
+
+// SubscribeResumeBatch is SubscribeResume delivering each EvtNext batch at
+// once, so the caller can admit it in one group commit.
+func SubscribeResumeBatch(ctx context.Context, channel string, resume Resume, emit func([]Event) error) error {
 	return subscribeResume(ctx, &windowsAPI{}, channel, resume, emit)
 }
 

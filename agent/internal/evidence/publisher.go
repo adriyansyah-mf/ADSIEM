@@ -64,6 +64,35 @@ func (p *Publisher) Submit(ctx context.Context, d Draft) (Envelope, error) {
 	return e, nil
 }
 
+// SubmitBatch is Submit for several drafts in one group commit
+// (Journal.AppendBatch). It returns the admitted envelopes, oldest first; when
+// err is not nil it concerns drafts[len(admitted)], and later drafts were not
+// admitted.
+func (p *Publisher) SubmitBatch(ctx context.Context, drafts []Draft) ([]Envelope, error) {
+	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		return nil, ErrPublisherStopped
+	}
+	p.work.Add(1)
+	p.mu.Unlock()
+	defer p.work.Done()
+	at := p.now().UTC()
+	events := make([]Envelope, 0, len(drafts))
+	for _, d := range drafts {
+		e, err := NewEnvelope(p.agentID, p.hostname, d, at)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	n, err := p.journal.AppendBatch(ctx, events)
+	for _, e := range events[:n] {
+		p.observed(e)
+	}
+	return events[:n], err
+}
+
 // TrySubmit returns nil for a volatile bridge offer, never for durability. It
 // snapshots identity, collection time and cursor before offering and never
 // acquires Journal.mu or writes to disk. Rejections and later append failures

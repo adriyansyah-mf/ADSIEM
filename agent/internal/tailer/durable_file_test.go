@@ -67,6 +67,8 @@ type capture struct {
 	drafts []evidence.Draft
 	tries  []evidence.Draft
 	fail   func(try int, d evidence.Draft) error
+	// batches is the size of every successful group commit, in order.
+	batches []int
 }
 
 func (c *capture) Submit(ctx context.Context, d evidence.Draft) (evidence.Envelope, error) {
@@ -87,6 +89,35 @@ func (c *capture) Submit(ctx context.Context, d evidence.Draft) (evidence.Envelo
 		c.mu.Unlock()
 	}
 	return e, err
+}
+
+// SubmitBatch keeps fail per draft: the first failing draft ends the batch
+// there, after the drafts before it are admitted (AppendBatch semantics).
+func (c *capture) SubmitBatch(ctx context.Context, drafts []evidence.Draft) ([]evidence.Envelope, error) {
+	var injected error
+	n := len(drafts)
+	for i, d := range drafts {
+		c.mu.Lock()
+		c.tries = append(c.tries, d)
+		try := len(c.tries)
+		fail := c.fail
+		c.mu.Unlock()
+		if fail != nil {
+			if err := fail(try, d); err != nil {
+				injected, n = err, i
+				break
+			}
+		}
+	}
+	admitted, err := c.sink.SubmitBatch(ctx, drafts[:n])
+	c.mu.Lock()
+	c.drafts = append(c.drafts, drafts[:len(admitted)]...)
+	c.batches = append(c.batches, len(admitted))
+	c.mu.Unlock()
+	if err != nil {
+		return admitted, err
+	}
+	return admitted, injected
 }
 
 func (c *capture) lines() []string {
