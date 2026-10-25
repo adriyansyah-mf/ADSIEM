@@ -1,6 +1,9 @@
 package task
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestGlobBraces(t *testing.T) {
 	rx, err := globRegexp("C:/Users/*/Downloads/**/*.{exe,dll,ps1}")
@@ -18,7 +21,8 @@ func TestGlobBraces(t *testing.T) {
 			t.Errorf("%s: got %v, want %v", path, got, want)
 		}
 	}
-	if root := globRoot("/home/{a,b}/x"); root != "/home" {
+	// filepath.Dir: the walk root uses the OS separator (\home on Windows).
+	if root := globRoot("/home/{a,b}/x"); root != filepath.FromSlash("/home") {
 		t.Errorf("globRoot stops at a brace: got %q", root)
 	}
 	if rx, _ := globRegexp("/tmp/{unclosed"); !rx.MatchString("/tmp/{unclosed") {

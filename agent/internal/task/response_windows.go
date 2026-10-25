@@ -50,13 +50,15 @@ func killProcess(pid int, force bool, graceSeconds float64) (KillResult, error) 
 		return refuse("refusing to kill the agent's own process")
 	}
 
-	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	// Classify with query rights first: they are granted even for protected
+	// processes (services.exe is PPL on current Windows), so a critical process
+	// is refused by policy before terminate access is ever requested.
+	q, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return res, fmt.Errorf("kill_process: open pid %d: %w", pid, err)
 	}
-	defer windows.CloseHandle(h)
-
-	image, err := processImage(h)
+	image, err := processImage(q)
+	windows.CloseHandle(q)
 	if err != nil {
 		return res, fmt.Errorf("kill_process: pid %d image: %w", pid, err)
 	}
@@ -67,6 +69,15 @@ func killProcess(pid int, force bool, graceSeconds float64) (KillResult, error) 
 	if isAncestor(pid) {
 		return refuse("refusing to kill an ancestor of the agent")
 	}
+
+	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			return res, fmt.Errorf("kill_process: pid %d (%s) denies termination (a protected process?): %w", pid, res.Comm, err)
+		}
+		return res, fmt.Errorf("kill_process: open pid %d: %w", pid, err)
+	}
+	defer windows.CloseHandle(h)
 
 	grace := time.Duration(graceSeconds * float64(time.Second))
 	if grace <= 0 {
