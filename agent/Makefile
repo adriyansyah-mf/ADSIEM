@@ -30,7 +30,7 @@ $(NETWATCH_OBJ): internal/netwatch/bpf/netwatch.bpf.c
 		-o $(NETWATCH_OBJ)
 
 build: bpf
-	CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=$(VERSION)" \
+	CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.Version=$(VERSION) -X main.UpdateKeys=$(UPDATE_KEYS)" \
 		-o bin/siem-agent ./cmd/agent/
 
 package-deb: bpf

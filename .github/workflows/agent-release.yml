@@ -13,6 +13,13 @@ on:
 permissions:
   contents: write
 
+# Self-update trust (agent/internal/update): agents built here trust these
+# base64 ed25519 public keys (repository variable), and the release job signs
+# every deb/rpm/msi with the matching private key (repository secret
+# AGENT_UPDATE_SIGNING_KEY, made with `siem-update-sign keygen`).
+env:
+  UPDATE_KEYS: ${{ vars.AGENT_UPDATE_PUBLIC_KEYS }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -85,7 +92,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} go build \
-            -ldflags="-s -w -X main.Version=${VERSION}" \
+            -ldflags="-s -w -X main.Version=${VERSION} -X main.UpdateKeys=${UPDATE_KEYS}" \
             -o "dist/packages/siem-agent-linux-${{ matrix.arch }}" \
             ./cmd/agent/
 
@@ -194,6 +201,33 @@ jobs:
           path: dist
           pattern: packages-*
           merge-multiple: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      # A .sig per package: without one, agents never install it as an update.
+      - name: Sign packages for self-update
+        env:
+          SIEM_UPDATE_SIGNING_KEY: ${{ secrets.AGENT_UPDATE_SIGNING_KEY }}
+        run: |
+          shopt -s nullglob
+          pkgs=(dist/*.deb dist/*.rpm dist/*.msi)
+          if [ -z "$SIEM_UPDATE_SIGNING_KEY" ]; then
+            if [ -n "$UPDATE_KEYS" ]; then
+              echo "::error::AGENT_UPDATE_PUBLIC_KEYS is set but AGENT_UPDATE_SIGNING_KEY is not: agents would trust a key no package is signed with"
+              exit 1
+            fi
+            echo "::warning::AGENT_UPDATE_SIGNING_KEY not set: packages are unsigned and cannot be rolled out as updates"
+            exit 0
+          fi
+          (cd agent && go build -o ../siem-update-sign ./cmd/siem-update-sign)
+          ./siem-update-sign sign "${pkgs[@]}"
+          if [ -n "$UPDATE_KEYS" ]; then
+            ./siem-update-sign verify -pub "$UPDATE_KEYS" "${pkgs[@]}"
+          fi
+          rm siem-update-sign
 
       - name: Create release
         uses: softprops/action-gh-release@v2

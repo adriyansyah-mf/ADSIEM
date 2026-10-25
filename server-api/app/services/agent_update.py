@@ -100,9 +100,16 @@ def _load(sig_path: Path) -> dict | None:
 
 
 def signed_packages() -> list[dict]:
-    if not PACKAGES_DIR.is_dir():
-        return []
-    out = [p for f in sorted(PACKAGES_DIR.glob("*.sig")) if (p := _load(f))]
+    """Current build first, then archive/ (earlier builds kept for rollbacks,
+    agent/packaging/publish-packages.sh); a file name appears once."""
+    out, seen = [], set()
+    for d in (PACKAGES_DIR, PACKAGES_DIR / "archive"):
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.sig")):
+            if (p := _load(f)) and p["file"] not in seen:
+                seen.add(p["file"])
+                out.append({**p, "archived": d != PACKAGES_DIR})
     return out
 
 
@@ -121,7 +128,7 @@ def package_path(filename: str) -> Path | None:
     """The signed package file an agent may download, or None."""
     for p in signed_packages():
         if p["file"] == filename and offerable(p):
-            return PACKAGES_DIR / filename
+            return PACKAGES_DIR / "archive" / filename if p["archived"] else PACKAGES_DIR / filename
     return None
 
 

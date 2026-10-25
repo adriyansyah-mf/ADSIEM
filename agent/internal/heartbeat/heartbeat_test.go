@@ -8,7 +8,42 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/siem-platform/agent/internal/update"
 )
+
+// The server's offer (services/agent_update.offer_for) and the agent's status
+// (schemas.AgentUpdateStatus) are one contract across two languages.
+func TestUpdateOfferAndStatusWireFormat(t *testing.T) {
+	var resp HeartbeatResponse
+	body := `{"config_hash":"h","update":{"version":"2.0.0","revision":3,
+		"url":"/api/agent/update/package/siem-agent_2.0.0_amd64.deb",
+		"signed":{"manifest":"bWFu","signature":"c2ln","key_id":"k1"}}}`
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatal(err)
+	}
+	o := resp.Update
+	if o == nil || o.Version != "2.0.0" || o.Revision != 3 || o.Signed.Manifest != "bWFu" || o.Signed.KeyID != "k1" {
+		t.Fatalf("offer %+v", o)
+	}
+	var none HeartbeatResponse
+	_ = json.Unmarshal([]byte(`{"config_hash":"h","update":null}`), &none)
+	if none.Update != nil {
+		t.Fatal("null offer decoded as an offer")
+	}
+
+	b, _ := json.Marshal(HeartbeatRequest{AgentID: "a", Update: &update.Status{Kind: "deb", OS: "linux",
+		Arch: "amd64", State: "failed", Target: "2.0.0", Revision: 3, Attempts: 1, Error: "x"}})
+	for _, want := range []string{`"kind":"deb"`, `"state":"failed"`, `"target":"2.0.0"`, `"revision":3`, `"attempts":1`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("status %s lacks %s", b, want)
+		}
+	}
+	b, _ = json.Marshal(HeartbeatRequest{AgentID: "a"})
+	if strings.Contains(string(b), `"update"`) {
+		t.Fatalf("no updater, yet the heartbeat reports one: %s", b)
+	}
+}
 
 func TestHeartbeatEvidenceProtocolFollowsTheLatestResponse(t *testing.T) {
 	defer storeEvidenceProtocols(nil, 0)

@@ -157,6 +157,7 @@ func run(configPath string, stop <-chan struct{}) {
 	}
 
 	c := client.New(cfg.Server.URL, cfg.Agent.Token)
+	heartbeat.Updater = newUpdater(cfg, c) // before the heartbeat loop starts
 	// evidence.enabled: durable journal + receipt-aware sender. Otherwise the
 	// legacy memory queue, sender and disk spill. The two never mix.
 	var durable *durableRuntime

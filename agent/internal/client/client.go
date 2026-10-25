@@ -62,6 +62,18 @@ func (c *Client) PostContext(ctx context.Context, path string, payload any) (*ht
 	return http.DefaultClient.Do(req)
 }
 
+// GetContext is a GET bound to ctx (no 10s cap): package downloads.
+func (c *Client) GetContext(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+	if c.AgentToken != "" {
+		req.Header.Set("X-Agent-Token", c.AgentToken)
+	}
+	return http.DefaultClient.Do(req)
+}
+
 // PostWithRetry retries up to maxAttempts with exponential backoff.
 func (c *Client) PostWithRetry(path string, payload any, maxAttempts int) error {
 	backoff := time.Second

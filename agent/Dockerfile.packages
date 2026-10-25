@@ -15,6 +15,11 @@ RUN clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
     -I internal \
     -c internal/netwatch/bpf/netwatch.bpf.c \
     -o internal/netwatch/bpf/netwatch.bpf.o
+# Public keys built into these agents for self-update (base64 ed25519, comma
+# separated). Sign with SIEM_UPDATE_SIGNING_KEY at run time (see CMD).
+ARG UPDATE_KEYS=""
+ENV UPDATE_KEYS=${UPDATE_KEYS}
+RUN go build -o /usr/local/bin/siem-update-sign ./cmd/siem-update-sign
 RUN export VERSION="$(cat VERSION)" \
     && bash packaging/build-deb.sh >/dev/null \
     && ARCH=x86_64 bash packaging/build-rpm.sh >/dev/null \
@@ -26,6 +31,11 @@ ARG AGENT_RELEASES=https://github.com/adriyansyah-mf/ADSIEM/releases/download
 RUN VERSION="$(cat VERSION)" \
     && (curl -fsSL -o "dist/packages/siem-agent-${VERSION}-x64.msi" \
           "${AGENT_RELEASES}/agent-v${VERSION}/siem-agent-${VERSION}-x64.msi" \
-        || { rm -f "dist/packages/siem-agent-${VERSION}-x64.msi"; echo "no MSI released for ${VERSION}; serving the zip"; })
-# /output is the agent_packages volume: replace the previous build's files
-CMD ["sh", "-c", "rm -f /output/siem-agent* && cp dist/packages/siem-agent* /output/ && ls -l /output"]
+        || { rm -f "dist/packages/siem-agent-${VERSION}-x64.msi"; echo "no MSI released for ${VERSION}; serving the zip"; }) \
+    && (curl -fsSL -o "dist/packages/siem-agent-${VERSION}-x64.msi.sig" \
+          "${AGENT_RELEASES}/agent-v${VERSION}/siem-agent-${VERSION}-x64.msi.sig" \
+        || rm -f "dist/packages/siem-agent-${VERSION}-x64.msi.sig")
+# /output is the agent_packages volume. With SIEM_UPDATE_SIGNING_KEY in the
+# environment the locally built packages are signed for self-update (the
+# released MSI keeps the release's signature); see packaging/publish-packages.sh.
+CMD ["sh", "packaging/publish-packages.sh"]

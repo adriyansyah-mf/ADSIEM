@@ -19,6 +19,7 @@ import (
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
+	"github.com/siem-platform/agent/internal/update"
 )
 
 type LogSource struct {
@@ -48,6 +49,21 @@ type HeartbeatRequest struct {
 	// Durable evidence mode only; legacy agents omit it and the server shows
 	// their evidence delivery as not reported.
 	EvidenceHealth any `json:"evidence_health,omitempty"`
+	// Self-update status (agents >= 1.9.0); the server offers updates only to
+	// agents reporting it.
+	Update *update.Status `json:"update,omitempty"`
+}
+
+// Updater, when set, reports its status on every heartbeat and receives the
+// server's update offers.
+var Updater *update.Updater
+
+func updateStatus() *update.Status {
+	if Updater == nil {
+		return nil
+	}
+	s := Updater.Status()
+	return &s
 }
 
 // Session identifies this agent process in its heartbeats.
@@ -147,6 +163,9 @@ func currentIntegrity() *Integrity {
 // SendStopping tells the server this agent is stopping on purpose, so it can
 // tell a stopped service (alert) from a host shutting down or a lost network.
 func SendStopping(cfg *config.Config, c *client.Client, reason string) {
+	if s := updateStatus(); s != nil && s.State == "installing" {
+		reason = "agent_update" // the installer is stopping the service
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	resp, err := c.PostContext(ctx, "/api/ingest/heartbeat", HeartbeatRequest{
@@ -174,6 +193,8 @@ type HeartbeatResponse struct {
 	EvidenceProtocols []int `json:"evidence_protocols"`
 	// >0: the server takes this many events per POST /api/ingest/v2/logs.
 	EvidenceBatchMax int `json:"evidence_batch_max"`
+	// Set while this agent's group rollout wants it on another version.
+	Update *update.Offer `json:"update"`
 }
 
 var (
@@ -242,6 +263,7 @@ func Loop(
 		if EvidenceHealth != nil {
 			payload.EvidenceHealth = EvidenceHealth()
 		}
+		payload.Update = updateStatus()
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
 		if err != nil {
 			slog.Error("heartbeat failed", "err", err)
@@ -256,6 +278,9 @@ func Loop(
 			if err := json.Unmarshal(body, &hbResp); err == nil {
 				storeUninstallHash(hbResp.UninstallTokenSHA256)
 				storeEvidenceProtocols(hbResp.EvidenceProtocols, hbResp.EvidenceBatchMax)
+				if Updater != nil {
+					Updater.Offer(hbResp.Update)
+				}
 				if hbResp.ConfigHash != lastHash {
 					slog.Info("config updated", "hash", hbResp.ConfigHash)
 					lastHash = hbResp.ConfigHash

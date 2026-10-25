@@ -273,6 +273,21 @@ async def test_new_target_restarts_at_ring_zero_and_needs_a_package(env):
     assert (await set_target(env, "latest")).status_code == 422
 
 
+async def test_rollback_to_an_archived_build(env):
+    """publish-packages.sh moves earlier signed builds to archive/: still offered."""
+    (env.dir / "archive").mkdir()
+    old = sign(env.dir / "archive", env.priv, version="1.8.0")
+    sign(env.dir, env.priv, version="1.9.0")
+    await env.add_agent("canary", ring=0, version="1.9.0")
+    assert (await set_target(env, "1.8.0")).status_code == 200
+    offer = await env.beat("canary", version="1.9.0", update=status())
+    assert offer["version"] == "1.8.0" and offer["url"].endswith("/" + old)
+    pkg = await env.client.get(offer["url"], headers={"X-Agent-Token": "canary-token"})
+    assert pkg.status_code == 200 and pkg.content == PKG
+    listed = {p["version"]: p["archived"] for p in (await env.client.get("/api/agent-updates/packages")).json()}
+    assert listed == {"1.9.0": False, "1.8.0": True}
+
+
 async def test_server_keys_refuse_packages_they_do_not_verify(env):
     sign(env.dir, env.priv)
     other = Ed25519PrivateKey.generate()

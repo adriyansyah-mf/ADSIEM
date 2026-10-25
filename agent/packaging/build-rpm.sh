@@ -20,7 +20,7 @@ RPMBUILD_ROOT="${HOME}/rpmbuild"
 echo "==> Building binary (GOOS=linux GOARCH=${GOARCH})"
 cd "$AGENT_DIR"
 CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH}" go build \
-  -ldflags="-s -w -X main.Version=${VERSION}" \
+  -ldflags="-s -w -X main.Version=${VERSION} -X main.UpdateKeys=${UPDATE_KEYS:-}" \
   -o "dist/siem-agent-${GOARCH}" \
   ./cmd/agent/
 
