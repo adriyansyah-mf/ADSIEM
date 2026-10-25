@@ -36,7 +36,7 @@ agent/
 | Network telemetry | `internal/netwatch/netwatch.go` | connect/accept/bind/DNS → `linux_network_*`; needs tracefs + CAP_SYS_ADMIN |
 | Netwatch fallback | `internal/netwatch/fallback.go` | `ss -tunapH` every 10s when eBPF cannot attach |
 | Local detection engine | `internal/detect/detect.go` | sliding window + cooldown + block caps; emits `local_detection` |
-| Local rule set | `internal/detect/defaults.go` | ssh_bruteforce, port_scan, webshell_upload — all disabled by default |
+| Local rule set | `internal/detect/defaults.go` | ssh_bruteforce, port_scan, windows_logon_bruteforce (4625 LogonType 3/10), webshell_upload — all disabled by default |
 | Offline spill | `internal/buffer/spill.go` | undelivered entries to disk; replayed on boot **and** on reconnect |
 | Firewall rule engine | `internal/firewall/engine.go` | nft backend + guard + JSON state; degrades to noop |
 | Anti-lockout rules | `internal/firewall/guard.go` | refuses blocks covering SIEM IP / gateway / loopback |
@@ -45,7 +45,7 @@ agent/
 | Live-response flows (Velociraptor-style) | `internal/task/flow.go` | long-polls `/api/agent/flows/poll`, runs sources sequentially, 500-row batches to `/update`, enforces timeout/max_rows, honours server cancel; a plugin ignoring ctx is abandoned after 5s |
 | Flow plugins | `internal/task/plugins.go` | registry must match `PLUGINS` in `server-api/app/services/flow_artifacts.py`; plugins emit rows and must check ctx; glob/hash/yara never enter `/proc` `/sys` `/dev` unless the root is inside them (`/proc/kmsg` reads block forever) |
 | Legacy task collectors | `internal/task/collectors.go`, `runner.go` | fixed task types via heartbeat (isolate/block-IP still use this path) |
-| Windows isolate/block-IP | `internal/task/isolation_windows.go` | `netsh advfirewall` (`SIEM-*` rules); the nft engine has no Windows backend |
+| Windows firewall | `internal/firewall/netsh.go`, `internal/task/isolation_windows.go` | engine backend `netsh` (auto on Windows; `SIEM-FW-<id>-in/-out` rules, swept on expiry since Windows rules never time out) carries local detection blocks, server-synced rules and `block_ip` when `firewall.enabled`; isolation stays direct `netsh` (`SIEM-Isolate-*`, both directions) |
 | YARA scans | `internal/task/yara.go` | |
 | Self-update | `internal/update`, `cmd/agent/update.go`, `cmd/siem-update-sign` | installs the heartbeat's offer only if a trusted ed25519 key (`-X main.UpdateKeys` + `update.trusted_keys`) signed its manifest and the download matches it; deb/rpm in a `systemd-run` transient unit, MSI detached; outcome in `update/state.json` across the restart. Operator guide: `docs/operations/agent-self-update.md` |
 
@@ -64,6 +64,8 @@ agent/
 - **Local blocks reuse the firewall guard**: a rule that would block the SIEM IP, gateway or loopback is refused and the detection records `block_error` instead of blocking.
 - **An installer must never be the agent's child on Linux**: the package's prerm stops `siem-agent.service`, which kills its whole cgroup, a `systemd-run --wait` client included. The transient unit is only started; its wrapper writes `install.result` and restarts the service after a failure. Never delete the downloaded package after a failed wait: dpkg may still be reading it.
 - **Self-update keeps the package manager's view right**: the deb keeps the token-bearing `config.yaml` with `--force-confold`; the MSI allows downgrades (`AllowDowngrades`) because a rollback is a downgrade.
+- **Expired rules are swept by the engine** (`Engine.Sweep`, every 15 s on a real backend). Windows rules never time out, and even nft's self-expiring elements stayed in the engine's applied set, where they counted against the detection cap (`BlockedEntries`) until local blocking silently stopped.
+- **Windows local blocking needs both** `firewall.enabled: true` (the MSI's default config leaves it off: the engine is then noop and `block_ip` falls back to direct netsh) and `detect.enabled: true` with `windows_logon_bruteforce` in `detect.rules`.
 - **Undelivered entries are spilled to disk** and replayed both at boot and when a send succeeds after a failure; without the reconnect replay they stay stranded until restart.
 - **Config mutation is write-back**: after successful enrollment the agent rewrites `config.yaml`; log sources/FIM paths are then server-driven, not config-driven.
 - **Buffer contract**: `Pop()` returns `(entry, ok)`; sender must re-`Push` on 5xx.

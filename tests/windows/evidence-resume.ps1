@@ -25,6 +25,7 @@ $packages = @(
     "./agent/internal/task", # kill_process / quarantine_file / restore_file / agent_integrity on Windows
     "./agent/internal/etw",  # real ETW sessions: kernel logger and manifest providers
     "./agent/internal/winsensor", # ETW process telemetry, end to end
+    "./agent/internal/firewall",  # Windows Defender Firewall backend and expiry
     "./agent/internal/update"     # self-update: MSI detection, verification
 )
 $failed = @()
