@@ -97,8 +97,11 @@ const (
 	// condition still sees all of them (up to maxMatches).
 	MaxReportedMatches = 16
 	maxMatches         = 100_000
-	stepBudget         = 200_000_000
 )
+
+// stepBudget bounds the regex/hex machine steps per string and scan
+// (a few seconds of work); tests lower it.
+var stepBudget int64 = 200_000_000
 
 // Scan runs every rule over data.
 func (r *Rules) Scan(ctx context.Context, data []byte) (Result, error) {
