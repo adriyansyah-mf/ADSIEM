@@ -7,9 +7,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
-from app.core.limiter import limiter
 from app.core.database import engine, Base
-from app.core.es_client import ensure_index as ensure_es_index
 import app.models.models  # noqa: F401 — ensure all models are registered before create_all
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
 from app.api.routes.cases import router as cases_router
@@ -25,22 +23,6 @@ from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.flows import router as flows_router, artifact_router as flow_artifacts_router, agent_router as agent_flows_router
 from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
-from app.api.routes.audit_logs import router as audit_logs_router
-from app.api.routes.export import router as export_router
-from app.api.routes.suppressions import router as suppressions_router
-from app.api.routes.metrics import router as metrics_router
-from app.api.routes.handover import router as handover_router
-from app.api.routes.hunt_schedules import router as hunt_schedules_router
-from app.api.routes.sop import router as sop_router
-from app.api.routes.knowledge import router as knowledge_router
-from app.api.routes.soar import router as soar_router
-from app.api.routes.search import router as search_router
-from app.api.routes.reports import router as reports_router
-from app.api.routes.assistant import router as assistant_router
-from app.api.routes.mitre import router as mitre_router
-from app.api.routes.ws import router as ws_router, manager as ws_manager
-from app.api.routes.stream import router as stream_router
-from app.api.routes.elastic import router as elastic_router
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -419,47 +401,8 @@ async def _ws_redis_listener():
 _STARTUP_LOCK_KEY = 727501001  # arbitrary fixed key for the session-level advisory lock below
 
 async def lifespan(app: FastAPI):
-    from sqlalchemy import text
-    # Multiple server-api replicas start concurrently (docker compose recreates
-    # both at once). Without this lock they'd all run create_all + the
-    # _migrate_* ALTER TABLE statements at the same time, and Postgres
-    # serializes concurrent ALTER TABLE on the same relation — with enough
-    # migration functions this chain of AccessExclusiveLock waits can stall
-    # for a very long time (observed: 70s+, health check timing out and the
-    # container never becoming ready). A session-level advisory lock makes
-    # only one replica run migrations at a time; the rest wait briefly, then
-    # find everything already exists via IF NOT EXISTS and proceed instantly.
-    lock_conn = await engine.connect()
-    await lock_conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": _STARTUP_LOCK_KEY})
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        await _seed_settings()
-        await _migrate_ueba_columns()
-        await _migrate_alerts_columns()
-        from app.services.soar_schema import migrate_soar
-        await migrate_soar()
-        from app.services.evidence_schema import migrate_evidence
-        await migrate_evidence()
-        await _migrate_webhook_payload_format()
-        await _migrate_mfa_columns()
-        await _migrate_agent_flow_poll()
-        await _migrate_agent_integrity()
-        await _migrate_agent_evidence_health()
-        await _migrate_audit_log_group()
-        await _migrate_agent_enrollment_columns()
-        await _migrate_rule_source_columns()
-        await _migrate_drop_alerts_event_fk()
-        from app.services.knowledge_schema import migrate_knowledge
-        await migrate_knowledge()
-        from app.services.investigator import mark_stale_interrupted
-        await mark_stale_interrupted()
-    finally:
-        await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
-        await lock_conn.close()
-    await ensure_es_index()
-    import asyncio
-    _listener_task = asyncio.create_task(_ws_redis_listener())
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     yield
     _listener_task.cancel()
 
@@ -481,11 +424,6 @@ for router in [
     logs.router, events.router, alerts.router, rules.router,
     decoders.router, webhooks.router, system.router, cases_router, settings_router, hygiene_router, ueba_router, fim_router, hunts_router,
     tasks_router, fleet_router, artifacts_router, yara_router,
-    flows_router, flow_artifacts_router, agent_flows_router,
-    enrollment_tokens_router, audit_logs_router,
-    export_router, suppressions_router, metrics_router, handover_router,
-    hunt_schedules_router, sop_router, soar_router, search_router,
-    reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
-    investigations_router, knowledge_router, evidence_router,
+    enrollment_tokens_router,
 ]:
     app.include_router(router)

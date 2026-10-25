@@ -18,8 +18,8 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_scoped_group, fetch_scoped, assert_group_access
 from app.core.security import generate_agent_token, hash_token
-from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
-                            EnrollmentToken, User)
+from app.models.models import Agent, AgentLogSource, AgentTask, EnrollmentToken, User
+from app.models.models import now_utc
 from app.schemas.schemas import (
     AgentOut, AgentUpdate, EnrollRequest, EnrollResponse,
     FirewallRuleIn, FirewallRuleOut, LogSourceIn, LogSourceOut, PaginatedResponse
@@ -118,17 +118,33 @@ async def enroll_agent(
     background: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    # Authorization: a per-token row (hashed, expirable, limited or unlimited
-    # uses) first; the legacy global token is a fallback only when configured.
-    group_id, token_row = await _resolve_enrollment_token(db, body.enrollment_token)
-    needs_approval = bool(token_row and token_row.require_approval)
+    # Validate enrollment token: DB-issued tokens take priority, fall back to env var
+    db_token = None
+    token_result = await db.execute(
+        select(EnrollmentToken).where(
+            EnrollmentToken.token_hash == hash_token(body.enrollment_token),
+            EnrollmentToken.is_active == True,
+        )
+    )
+    db_token = token_result.scalar_one_or_none()
+
+    if db_token:
+        if db_token.expires_at and db_token.expires_at < now_utc():
+            db_token.is_active = False
+            await db.commit()
+            raise HTTPException(status_code=401, detail="Enrollment token has expired")
+        effective_group = db_token.group_id
+    elif body.enrollment_token == settings.AGENT_ENROLLMENT_TOKEN:
+        effective_group = body.group
+    else:
+        raise HTTPException(status_code=401, detail="Invalid enrollment token")
 
     raw_token = generate_agent_token()
     # Upsert: reuse the existing agent for the same hostname+group so a rebuilt
     # host doesn't leave a duplicate behind...
     result = await db.execute(
         select(Agent).options(selectinload(Agent.log_sources))
-        .where(Agent.hostname == body.hostname, Agent.group_id == group_id)
+        .where(Agent.hostname == body.hostname, Agent.group_id == effective_group)
         .order_by(Agent.enrolled_at.desc())
         .limit(1)
     )
@@ -166,8 +182,8 @@ async def enroll_agent(
         # last_seen_at must be set here: agent_monitor ages agents out by it, and
         # a NULL would leave an agent that never heartbeats "online" forever.
         agent = Agent(
-            name=body.name or body.hostname, hostname=body.hostname,
-            group_id=group_id, version=body.version,
+            name=body.name, hostname=body.hostname,
+            group_id=effective_group, version=body.version,
             token_hash=hash_token(raw_token), status="online",
             last_seen_at=now, approved=not needs_approval,
         )
@@ -176,8 +192,11 @@ async def enroll_agent(
         for src in body.log_sources:
             db.add(AgentLogSource(agent_id=agent.id, path=src.path, log_type=src.log_type, is_enabled=src.is_enabled))
 
-    if token_row is not None:
-        token_row.used_by_agent_id = agent.id
+    # Mark DB token as used (one-time)
+    if db_token:
+        db_token.is_active = False
+        db_token.used_at = now_utc()
+        db_token.used_by_agent_id = agent.id
 
     await db.commit()
     background.add_task(audit_log, db, None, "agent_enrolled", "agent", str(agent.id),
