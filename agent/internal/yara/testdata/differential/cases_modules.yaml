@@ -1,0 +1,131 @@
+# Module cases (pe, elf, math, hash). Same format as cases.yaml.
+
+- name: pe-functions
+  rules: |
+    import "pe"
+    rule is_pe { condition: pe.is_pe == 1 }
+    rule imp2 { condition: pe.imports("kernel32.dll", "Sleep") }
+    rule imp_case { condition: pe.imports("KERNEL32.DLL", "sleep") }
+    rule imp_dll { condition: pe.imports("kernel32.dll") == 3 }
+    rule imp_user32 { condition: pe.imports("user32.dll", "MessageBoxA") and pe.imports("user32.dll", "wsprintfA") }
+    rule exp { condition: pe.exports("FixtureAdd") and not pe.exports("Nope") }
+    rule exp_case { condition: pe.exports("fixtureadd") }
+    rule exp_ord { condition: pe.exports(2) and not pe.exports(9) }
+    rule exp_index { condition: pe.exports_index("FixtureMul") == 1 }
+    rule dll { condition: pe.is_dll() }
+    rule b32 { condition: pe.is_32bit() }
+    rule b64 { condition: pe.is_64bit() }
+    rule sect { condition: pe.section_index(".text") == 0 }
+    rule sect_off { condition: pe.section_index(pe.entry_point) == 0 }
+    rule rva { condition: pe.rva_to_offset(pe.entry_point_raw) == pe.entry_point }
+    rule ep_kw { condition: entrypoint == pe.entry_point }
+    rule loop_sect { condition: for any s in pe.sections : (s.name == ".idata" and s.characteristics & pe.SECTION_MEM_WRITE != 0) }
+    rule loop_imports { condition: for any i in pe.import_details : (i.library_name iequals "user32.dll" and i.number_of_functions == 2) }
+    rule machine { condition: pe.machine == pe.MACHINE_AMD64 or pe.machine == pe.MACHINE_I386 }
+    rule dirs { condition: pe.data_directories[pe.IMAGE_DIRECTORY_ENTRY_IMPORT].virtual_address != 0 }
+    rule ver { condition: pe.linker_version.major > 0 and pe.os_version.major >= 4 }
+    rule not_pe_undef { condition: not defined pe.number_of_sections }
+  inputs: ["file:pe64.exe", "file:dll32.dll", "file:elf_exec", "MZ", "hex:4d5a", "not a pe at all"]
+
+- name: pe-imphash
+  rules: |
+    import "pe"
+    rule h64 { condition: pe.imphash() == "a3df42afbeef9444e322b10880aae35d" }
+    rule h32 { condition: pe.imphash() == "1a67d89b03c01e9eda442c400e85f4fc" }
+    rule d { condition: defined pe.imphash() }
+    rule l { condition: pe.imphash() matches /^[0-9a-f]{32}$/ }
+  inputs: ["file:pe64.exe", "file:dll32.dll", "x"]
+
+- name: pe-unsupported-signatures
+  rules: |
+    import "pe"
+    rule s { condition: pe.number_of_signatures == 0 }
+  inputs: ["file:pe64.exe"]
+  unsupported: authenticode signatures
+
+- name: pe-malformed
+  rules: |
+    import "pe"
+    rule a { condition: pe.is_pe == 1 and pe.number_of_sections >= 0 }
+    rule b { condition: for any s in pe.sections : (s.raw_data_size > 0) }
+  inputs:
+    - "hex:4d5a90000300000004000000ffff0000b800000000000000400000000000000000000000000000000000000000000000000000000000000000000000400000005045000064860100"
+    - "hex:4d5a90000300000004000000ffff0000b800000000000000400000000000000000000000000000000000000000000000000000000000000000000000f0ffff00"
+    - "hex:4d5a90000300000004000000ffff0000b8000000000000004000000000000000000000000000000000000000000000000000000000000000000000004000000050450000"
+
+- name: elf-functions
+  rules: |
+    import "elf"
+    rule exec { condition: elf.type == elf.ET_EXEC }
+    rule dyn { condition: elf.type == elf.ET_DYN }
+    rule rel { condition: elf.type == elf.ET_REL and elf.machine == elf.EM_AARCH64 }
+    rule x64 { condition: elf.machine == elf.EM_X86_64 }
+    rule ep { condition: defined elf.entry_point and entrypoint == elf.entry_point }
+    rule text { condition: for any s in elf.sections : (s.name == ".text" and s.flags & elf.SHF_EXECINSTR != 0) }
+    rule load { condition: for any s in elf.segments : (s.type == elf.PT_LOAD and s.flags & elf.PF_X != 0) }
+    rule sym { condition: for any s in elf.symtab : (s.name == "fixture_function" and s.type == elf.STT_FUNC) }
+    rule dynsym { condition: for any s in elf.dynsym : (s.name == "printf" or s.name == "puts") }
+    rule needed { condition: for any d in elf.dynamic : (d.type == elf.DT_NEEDED) }
+    rule counts { condition: elf.number_of_sections > 3 and elf.number_of_segments >= 0 }
+    rule not_elf { condition: not defined elf.type }
+  inputs: ["file:elf_exec", "file:elf_dyn", "file:elf_hello", "file:elf_aarch64.o", "file:pe64.exe", "\x7fELF"]
+
+- name: math-functions
+  rules: |
+    import "math"
+    rule e1 { condition: math.entropy(0, filesize) > 7.9 }
+    rule e2 { condition: math.entropy("aaaa") == 0 and math.entropy("ab") == 1 }
+    rule e3 { condition: math.entropy(filesize, 1) >= 0 or not defined math.entropy(filesize, 1) }
+    rule m1 { condition: math.mean(0, filesize) > 100 and math.mean(0, filesize) < 150 }
+    rule m2 { condition: math.mean("ab") == 97.5 }
+    rule d1 { condition: math.deviation(0, filesize, math.MEAN_BYTES) > 60 }
+    rule d2 { condition: math.deviation("ab", 97.0) == 0.5 }
+    rule s1 { condition: math.serial_correlation(0, filesize) < 0.1 and math.serial_correlation(0, filesize) > -0.1 }
+    rule s2 { condition: math.serial_correlation("abcabc") < 0 }
+    rule p1 { condition: math.monte_carlo_pi(0, filesize) < 0.1 }
+    rule p2 { condition: not defined math.monte_carlo_pi("abc") }
+    rule c1 { condition: math.count(0x41) == 0 or math.count(0x41) > 0 }
+    rule c2 { condition: math.count(0x61, 0, 3) == 2 }
+    rule c3 { condition: math.percentage(0x61, 0, 4) == 0.5 }
+    rule mo { condition: math.mode() == 0x61 and math.mode(2, 2) == 0x62 }
+    rule ir { condition: math.in_range(math.entropy(0, filesize), 1.0, 2.0) }
+    rule mm { condition: math.max(1, 2) == 2 and math.min(1, 2) == 1 and math.max(-1, 1) == -1 }
+    rule ab { condition: math.abs(-5) == 5 and math.to_number(1 == 1) == 1 }
+    rule ts { condition: math.to_string(255) == "255" and math.to_string(255, 16) == "ff" and math.to_string(8, 8) == "10" }
+  inputs: ["aaba", "abab", "file:pe64.exe", "file:elf_hello"]
+
+- name: math-uniform
+  rules: |
+    import "math"
+    rule e { condition: math.entropy(0, filesize) == 8.0 }
+    rule m { condition: math.mean(0, filesize) == 127.5 }
+    rule p { condition: math.monte_carlo_pi(0, filesize) < 0.5 }
+    rule s { condition: math.serial_correlation(0, filesize) > 0.9 }
+    rule d { condition: math.deviation(0, filesize, math.MEAN_BYTES) == 64.0 }
+  inputs: ["hex:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff"]
+
+- name: hash-functions
+  rules: |
+    import "hash"
+    rule md5 { condition: hash.md5(0, filesize) == "900150983cd24fb0d6963f7d28e17f72" }
+    rule md5s { condition: hash.md5("abc") == "900150983cd24fb0d6963f7d28e17f72" }
+    rule sha1 { condition: hash.sha1(0, filesize) == "a9993e364706816aba3e25717850c26c9cd0d89d" }
+    rule sha256 { condition: hash.sha256(0, 3) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" }
+    rule crc { condition: hash.crc32(0, filesize) == 0x352441c2 and hash.crc32("abc") == 0x352441c2 }
+    rule sum { condition: hash.checksum32(0, filesize) == 294 }
+    rule part { condition: hash.md5(1, 1) == hash.md5("b") }
+    rule trunc { condition: hash.md5(0, 100) == hash.md5(0, filesize) }
+    rule oob { condition: not defined hash.md5(filesize, 1) and not defined hash.md5(-1, 1) }
+    rule empty { condition: hash.md5(0, 0) == "d41d8cd98f00b204e9800998ecf8427e" }
+  inputs: ["abc", "abd", ""]
+
+- name: module-errors
+  rules: |
+    import "pe"
+    rule a { condition: pe.number_of_sectons == 1 }
+  inputs: ["x"]
+
+- name: module-not-imported
+  rules: |
+    rule a { condition: pe.is_pe == 1 }
+  inputs: ["x"]

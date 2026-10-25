@@ -246,6 +246,7 @@ class HeartbeatResponse(BaseModel):
     tasks: list[AgentTaskDef] = []
     firewall: list[dict] = []
     uninstall_token_sha256: str = ""  # agents >= 1.8.0 refuse removal without the token
+    yara_rules_hash: str = ""  # enabled YARA rule set; agents fetch it from /api/ingest/yara-rules
 
 # ─── Ingest ──────────────────────────────────────────────────────
 

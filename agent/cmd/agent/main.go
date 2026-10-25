@@ -29,6 +29,7 @@ import (
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/winsensor"
+	"github.com/siem-platform/agent/internal/yarascan"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=x.y.z"
@@ -319,11 +320,27 @@ func run(configPath string, stop <-chan struct{}) {
 		}
 	}
 
+	// On-access YARA scanning of risky directories with the server's rules
+	yaraScanner := yarascan.New(yarascan.Options{
+		Roots:       cfg.Yara.WatchPaths,
+		MaxFileSize: cfg.Yara.MaxFileSizeMB << 20,
+		Push:        func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+	})
+	go yaraScanner.SyncLoop(flowCtx, c)
+	if !cfg.Yara.Disabled {
+		go func() {
+			if err := yaraScanner.Run(flowCtx); err != nil {
+				slog.Warn("yara on-access scanning unavailable", "err", err)
+			}
+		}()
+	}
+
 	// heartbeat loop — drives log source + FIM path updates + task dispatch
 	go heartbeat.Loop(cfg, buf, c,
 		func(resp heartbeat.HeartbeatResponse) {
 			mgr.Update(resp.LogSources)
 			fimWatcher.UpdatePaths(resp.FimPaths)
+			yaraScanner.Want(resp.YaraRulesHash)
 			fwEngine.RefreshGuard(cfg.Server.URL)
 
 			if len(resp.Firewall) > 0 || fwEngine.BlockedEntries() > 0 {

@@ -26,11 +26,25 @@ function ScanResultView({ taskId }: { taskId: string }) {
       <Loader2 size={12} className="animate-spin" /> Scanning…
     </div>
   )
-  const result = task.result as { scanned_files: number; matches: Array<{ rule_name: string; file: string; matched_strings: string[] }> } | null
+  const result = task.result as {
+    scanned_files: number
+    skipped_files?: number
+    matches: Array<{ rule_name: string; file: string; matched_strings: string[] }>
+    rule_errors?: Array<{ rule: string; error: string }>
+    warnings?: string[]
+  } | null
   if (!result) return null
   return (
     <div className="space-y-2 mt-2">
-      <p className="text-xs text-muted-foreground">Scanned {result.scanned_files} files · {result.matches?.length ?? 0} matches</p>
+      <p className="text-xs text-muted-foreground">
+        Scanned {result.scanned_files} files{result.skipped_files ? ` (${result.skipped_files} skipped)` : ''} · {result.matches?.length ?? 0} matches
+      </p>
+      {(result.rule_errors ?? []).map((e, i) => (
+        <p key={`e${i}`} className="text-xs text-amber-400 font-mono">Rule {e.rule} not loaded: {e.error}</p>
+      ))}
+      {(result.warnings ?? []).map((w, i) => (
+        <p key={`w${i}`} className="text-xs text-amber-400">{w}</p>
+      ))}
       {(result.matches ?? []).length === 0
         ? <p className="text-xs text-emerald-400">No matches found.</p>
         : (result.matches ?? []).map((m, i) => (
@@ -110,6 +124,11 @@ export default function YaraPage() {
           </button>
         </div>
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        Enabled rules also run on every agent as files are created or changed in temp, download and web
+        directories; matches raise a “YARA Rule Matched On Endpoint” alert at the rule’s meta severity (or score).
+      </p>
 
       {/* Scan panel */}
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
