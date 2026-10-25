@@ -14,8 +14,8 @@ import (
 
 func firewallRule(t *testing.T, name string) string {
 	t.Helper()
-	out, err := execPowerShell(context.Background(), "Get-NetFirewallRule -DisplayName '"+name+"' -ErrorAction SilentlyContinue | "+
-		"ForEach-Object { $_.Action.ToString() + ' ' + $_.Direction.ToString() + ' ' + (($_ | Get-NetFirewallAddressFilter).RemoteAddress -join ',') }")
+	out, err := execPowerShell(context.Background(), findRulesScript(name,
+		"ForEach-Object { $_.Action.ToString() + ' ' + $_.Direction.ToString() + ' ' + (($_ | Get-NetFirewallAddressFilter).RemoteAddress -join ',') }"))
 	if err != nil {
 		t.Fatalf("query %s: %v", name, err)
 	}

@@ -126,8 +126,7 @@ func (b *NetshBackend) Flush() error { return b.Ensure() }
 func (b *NetshBackend) names() ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), netshTimeout)
 	defer cancel()
-	out, err := b.ps(ctx, "Get-NetFirewallRule -DisplayName '"+netshPrefix+"*' -ErrorAction SilentlyContinue | "+
-		"Select-Object -ExpandProperty DisplayName")
+	out, err := b.ps(ctx, findRulesScript(netshPrefix+"*", "Select-Object -ExpandProperty DisplayName"))
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +137,15 @@ func (b *NetshBackend) names() ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// findRulesScript pipes the firewall rules whose display name matches
+// pattern into then. No match is not an error (Get-NetFirewallRule fails
+// with ObjectNotFound, even under SilentlyContinue, and its message is
+// translated: the category is not); anything else still fails the script.
+func findRulesScript(pattern, then string) string {
+	return "$ErrorActionPreference = 'Stop'; try { Get-NetFirewallRule -DisplayName '" + pattern + "' | " + then +
+		" } catch { if ($_.CategoryInfo.Category -ne 'ObjectNotFound') { throw } }"
 }
 
 func (b *NetshBackend) netsh(args ...string) error {
