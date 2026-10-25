@@ -225,3 +225,23 @@ func TestSenderWithoutBatchSupportUsesTheSingleEndpoint(t *testing.T) {
 	}
 	idle(t, j)
 }
+
+// A batch needs one attempt record per event in the checkpoint. With a small
+// control reserve a full batch does not fit: the sender must narrow the batch
+// and keep delivering, not retry the same oversized batch forever.
+func TestBatchSenderNarrowsWhenTheControlReserveCannotHoldABatch(t *testing.T) {
+	sender, j, _, calls := newBatchFixture(t, 200, acceptAll) // journalOptions: 16 KiB reserve
+	for i := 0; i < 100; i++ {
+		err := sender.Step(context.Background(), time.Now().UTC())
+		if errors.Is(err, ErrIdle) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+	}
+	idle(t, j)
+	if calls.Load() < 2 {
+		t.Fatalf("delivered in %d request(s): the batch was never narrowed", calls.Load())
+	}
+}

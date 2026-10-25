@@ -488,11 +488,13 @@ func (t trackedTransport) PostContext(ctx context.Context, path string, payload 
 }
 
 func TestSenderReclaimsDeliveredSegments(t *testing.T) {
+	// The batch endpoint: one request and one compaction for the backlog, not
+	// a compaction per event (minutes on Windows, where every flush is slow).
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var e Envelope
-		_ = json.NewDecoder(r.Body).Decode(&e)
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(receiptFor(e.EventID, "accepted")))
+		var req batchRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		_, results := acceptAll(req.Events)
+		_ = json.NewEncoder(w).Encode(batchResponse{ProtocolVersion: 2, Results: results})
 	}))
 	defer s.Close()
 	o := journalOptions(t)
@@ -508,7 +510,7 @@ func TestSenderReclaimsDeliveredSegments(t *testing.T) {
 		t.Fatalf("fixture has %d segments", before)
 	}
 	sender := &Sender{Journal: j, Transport: client.New(s.URL, "t"), SupportsV2: func() bool { return true },
-		CompactEvery: time.Nanosecond}
+		BatchMax: func() int { return 500 }, CompactEvery: time.Nanosecond}
 	ctx, cancel := context.WithCancel(context.Background())
 	sender.Wait = func(ctx context.Context, d time.Duration) error { // idle once the backlog is gone
 		cancel()

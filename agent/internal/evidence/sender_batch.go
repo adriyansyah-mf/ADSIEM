@@ -88,6 +88,14 @@ func (s *Sender) stepBatch(ctx context.Context, now time.Time, advertised int) e
 	}
 	// Persist the attempts before any network I/O: the 30-day window starts here.
 	if err := s.Journal.MarkAttempts(ctx, ids, now); err != nil {
+		if errors.Is(err, ErrFull) && len(ids) > 1 {
+			// One attempt record per event: a small control reserve cannot hold
+			// a whole batch of them. Narrow the batch instead of retrying it forever.
+			s.mu.Lock()
+			s.split = max(len(ids)/2, 1)
+			s.mu.Unlock()
+			return nil
+		}
 		return err
 	}
 	return s.deliverBatch(ctx, batch)
