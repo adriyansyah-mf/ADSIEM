@@ -457,7 +457,263 @@ class EnrollmentToken(Base):
     group_id         = Column(String(100), nullable=False, default="default")
     expires_at       = Column(DateTime(timezone=True), nullable=True)
     is_active        = Column(Boolean, nullable=False, default=True)
-    used_at          = Column(DateTime(timezone=True), nullable=True)
+    # how many agents may enroll with it; NULL = unlimited (a deployment key).
+    # No ORM default: SQLAlchemy would apply it to an explicit None too.
+    max_uses         = Column(Integer, nullable=True)
+    use_count        = Column(Integer, nullable=False, default=0, server_default="0")
+    # agents enrolled with it stay pending until approved in the dashboard
+    require_approval = Column(Boolean, nullable=False, default=False, server_default="false")
+    used_at          = Column(DateTime(timezone=True), nullable=True)  # last use
     used_by_agent_id = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at       = Column(DateTime(timezone=True), default=now_utc)
+
+class AlertSuppression(Base):
+    __tablename__ = "alert_suppressions"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type  = Column(String(20),  nullable=False)  # ip | hostname | user | rule_title
+    entity_value = Column(String(255), nullable=False)
+    reason       = Column(Text)
+    group_id     = Column(String(100), nullable=False, default="default")
+    is_active    = Column(Boolean, nullable=False, default=True)
+    created_by   = Column(UUID(as_uuid=True))
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class ShiftHandover(Base):
+    __tablename__ = "shift_handovers"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id     = Column(String(100), nullable=False, default="default")
+    shift_label  = Column(String(50), nullable=False, default="day")  # day|night|morning|evening
+    summary      = Column(Text, nullable=False)
+    open_alerts  = Column(Integer, nullable=False, default=0)
+    open_cases   = Column(Integer, nullable=False, default=0)
+    escalations  = Column(Integer, nullable=False, default=0)
+    created_by   = Column(UUID(as_uuid=True))
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class HuntSchedule(Base):
+    __tablename__ = "hunt_schedules"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name            = Column(String(255), nullable=False)
+    ioc_type        = Column(String(20), nullable=False)
+    ioc_value       = Column(String(255), nullable=False)
+    interval_hours  = Column(Integer, nullable=False, default=24)
+    group_id        = Column(String(100), nullable=False, default="default")
+    is_enabled      = Column(Boolean, nullable=False, default=True)
+    last_run_at     = Column(DateTime(timezone=True))
+    created_by      = Column(UUID(as_uuid=True))
+    created_at      = Column(DateTime(timezone=True), default=now_utc)
+
+
+class SopDocument(Base):
+    __tablename__ = "sop_documents"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id     = Column(String(100), nullable=False, default="default")
+    filename     = Column(String(500), nullable=False)
+    content_type = Column(String(100), nullable=False, default="text/plain")
+    raw_text     = Column(Text, nullable=False)
+    status       = Column(String(20), nullable=False, default="pending")
+    uploaded_by  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+    updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class KnowledgeEntry(Base):
+    """What the AI should know about this environment and about attacks:
+    analyst notes ("10.0.0.5 is our Nessus scanner") and reference material
+    (PayloadsAllTheThings). Chunked and embedded by the worker
+    (worker/knowledge.py) into knowledge_chunks; notes with a scope also match
+    alerts exactly on IP, host, user or rule."""
+    __tablename__ = "knowledge_entries"
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id   = Column(String(100), nullable=False, default="default")  # "*" = every group
+    kind       = Column(String(20), nullable=False, default="note")     # note | reference
+    source     = Column(String(50), nullable=False, default="analyst")  # analyst | payloadsallthethings
+    source_ref = Column(Text)                                            # e.g. "SQL Injection/README.md#Union"
+    title      = Column(String(300), nullable=False)
+    content    = Column(Text, nullable=False)
+    scope      = Column(JSONB, nullable=False, default=dict)             # {"ips": [], "hosts": [], "users": [], "rules": []}
+    enabled    = Column(Boolean, nullable=False, default=True)
+    expires_at = Column(DateTime(timezone=True))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    indexed_at = Column(DateTime(timezone=True))                         # NULL or < updated_at: (re)embed
+
+
+class SopChunk(Base):
+    __tablename__ = "sop_chunks"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id  = Column(UUID(as_uuid=True), ForeignKey("sop_documents.id", ondelete="CASCADE"),
+                          nullable=False)
+    group_id     = Column(String(100), nullable=False, default="default")
+    chunk_index  = Column(Integer, nullable=False)
+    chunk_text   = Column(Text, nullable=False)
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+
+class AiFeedback(Base):
+    """Analyst rating of an AI triage verdict (alert or case). Feeds the RAG
+    index (see worker/worker/rag.py index_feedback/retrieve_feedback_context)
+    so future triage prompts surface past corrections instead of repeating
+    them — retrieval-based adaptation rather than model fine-tuning."""
+    __tablename__ = "ai_feedback"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entity_type     = Column(String(20), nullable=False)   # "alert" | "case"
+    entity_id       = Column(UUID(as_uuid=True), nullable=False)
+    context_text    = Column(Text, nullable=False)         # title/description snapshot, embedded for retrieval
+    ai_verdict      = Column(String(50))
+    rating          = Column(String(20), nullable=False)   # "correct" | "incorrect"
+    correct_verdict = Column(String(50))
+    note            = Column(Text)
+    group_id        = Column(String(100), nullable=False, default="default")
+    created_by      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at      = Column(DateTime(timezone=True), default=now_utc)
+
+class SoarPlaybook(Base):
+    __tablename__ = "soar_playbooks"
+    id                 = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name               = Column(String(255), nullable=False)
+    description        = Column(Text)
+    trigger_conditions = Column(JSONB, nullable=False, default=dict)
+    graph              = Column(JSONB)          # workflow graph; NULL = legacy linear actions
+    trigger_event      = Column(String(30))     # from the graph's Trigger node
+    is_enabled         = Column(Boolean, nullable=False, default=True)
+    group_id           = Column(String(100), nullable=False, default="default")
+    created_at         = Column(DateTime(timezone=True), default=now_utc)
+    updated_at         = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class SoarRun(Base):
+    __tablename__ = "soar_playbook_runs"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    playbook_id   = Column(UUID(as_uuid=True), ForeignKey("soar_playbooks.id", ondelete="CASCADE"), nullable=False)
+    group_id      = Column(String(100), nullable=False, default="default")
+    status        = Column(String(20), nullable=False, default="queued")  # queued|running|waiting|resume|success|failed|cancelled
+    trigger_event = Column(String(30), nullable=False)
+    alert_id      = Column(UUID(as_uuid=True))
+    graph         = Column(JSONB, nullable=False)   # snapshot, so edits don't change a run in flight
+    context       = Column(JSONB, nullable=False, default=dict)
+    waiting_node  = Column(String(40))
+    wait_until    = Column(DateTime(timezone=True))
+    error         = Column(Text)
+    created_by    = Column(UUID(as_uuid=True))
+    created_at    = Column(DateTime(timezone=True), default=now_utc)
+    updated_at    = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    finished_at   = Column(DateTime(timezone=True))
+
+class SoarRunStep(Base):
+    __tablename__ = "soar_playbook_run_steps"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id      = Column(UUID(as_uuid=True), ForeignKey("soar_playbook_runs.id", ondelete="CASCADE"), nullable=False)
+    node_id     = Column(String(40), nullable=False)
+    node_type   = Column(String(20), nullable=False)
+    status      = Column(String(20), nullable=False)   # success|error|waiting
+    output_name = Column(String(20))
+    input       = Column(JSONB)
+    output      = Column(JSONB)
+    error       = Column(Text)
+    attempts    = Column(Integer, nullable=False, default=1)
+    started_at  = Column(DateTime(timezone=True), default=now_utc)
+    duration_ms = Column(Integer)
+
+class SoarAction(Base):
+    __tablename__ = "soar_actions"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    playbook_id = Column(UUID(as_uuid=True), ForeignKey("soar_playbooks.id", ondelete="CASCADE"), nullable=False)
+    action_type = Column(String(50), nullable=False)
+    order_index = Column(Integer, nullable=False, default=0)
+    params      = Column(JSONB, nullable=False, default=dict)
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+
+# ─── Live response flows (artifact collections) ──────────────────
+
+class FlowArtifact(Base):
+    """Custom artifact YAML; built-ins live in app/artifacts/ and are never stored."""
+    __tablename__ = "flow_artifacts"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(100), unique=True, nullable=False)
+    description = Column(Text)
+    content     = Column(Text, nullable=False)
+    group_id    = Column(String(100), nullable=False, default="default")
+    created_by  = Column(UUID(as_uuid=True))
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+
+class Flow(Base):
+    """One artifact collection on one agent: scheduled → running → finished|error|cancelled."""
+    __tablename__ = "flows"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id         = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    artifact         = Column(String(100), nullable=False)
+    artifact_content = Column(Text, nullable=False)  # snapshot: later edits don't change a past flow
+    params           = Column(JSONB, nullable=False, default=dict)
+    request          = Column(JSONB, nullable=False, default=dict)
+    status           = Column(String(20), nullable=False, default="scheduled", index=True)
+    cancel_pending   = Column(Boolean, nullable=False, default=False)
+    total_rows       = Column(Integer, nullable=False, default=0)
+    error            = Column(Text)
+    timeout          = Column(Integer, nullable=False)
+    max_rows         = Column(Integer, nullable=False)
+    created_by       = Column(UUID(as_uuid=True))
+    created_at       = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    started_at       = Column(DateTime(timezone=True))
+    completed_at     = Column(DateTime(timezone=True))
+
+class FlowRowBatch(Base):
+    __tablename__ = "flow_row_batches"
+    id         = Column(BigInteger, primary_key=True, autoincrement=True)
+    flow_id    = Column(UUID(as_uuid=True), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False, index=True)
+    source     = Column(String(64), nullable=False)
+    rows       = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+class FlowLog(Base):
+    __tablename__ = "flow_logs"
+    id      = Column(BigInteger, primary_key=True, autoincrement=True)
+    flow_id = Column(UUID(as_uuid=True), ForeignKey("flows.id", ondelete="CASCADE"), nullable=False, index=True)
+    ts      = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    level   = Column(String(10), nullable=False, default="info")
+    message = Column(Text, nullable=False)
+
+
+class EvidenceInbox(Base):
+    """Durable receipt, retained even after agent deletion.
+
+    payload is a JSONB *scalar string* containing canonical envelope JSON.
+    Consumers use json.loads(payload). This preserves NUL log characters, which
+    PostgreSQL rejects in JSONB object string values, and all timestamp digits.
+    payload_bytes charges the UTF-8 JSON serialization of that scalar, including
+    its outer escaping; it is independent of the Go wire-event size limit.
+    """
+    __tablename__ = "evidence_inbox"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "event_id", name="uq_evidence_inbox_agent_event"),
+        CheckConstraint("status IN ('pending', 'completed', 'dead_letter')", name="ck_evidence_status"),
+        CheckConstraint("payload_bytes >= 0", name="ck_evidence_payload_bytes"),
+        Index("idx_evidence_dispatch", "next_dispatch_at", postgresql_where=text("status = 'pending'")),
+        Index("idx_evidence_attempt", "next_attempt_at", postgresql_where=text("status = 'pending'")),
+        Index("idx_evidence_retention", "completed_at", postgresql_where=text("status = 'completed'")),
+    )
+    receipt_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(UUID(as_uuid=True), nullable=False)
+    event_id = Column(UUID(as_uuid=True), nullable=False)
+    group_id = Column(String(100), nullable=False)
+    hostname = Column(String(255), nullable=False)
+    payload_digest = Column(String(64), nullable=False)
+    payload = Column(JSONB, nullable=True)
+    payload_bytes = Column(BigInteger, nullable=False)
+    collected_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    status = Column(String(20), nullable=False, default="pending", server_default="pending")
+    failure_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error = Column(Text, nullable=True)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    next_dispatch_at = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    dispatch_count = Column(Integer, nullable=False, default=0, server_default="0")
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class EvidenceGroupUsage(Base):
+    __tablename__ = "evidence_group_usage"
+    __table_args__ = (CheckConstraint("payload_bytes >= 0", name="ck_evidence_usage_bytes"),)
+    group_id = Column(String(100), primary_key=True)
+    payload_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")
