@@ -201,8 +201,9 @@ func (u *Updater) run(o Offer) {
 	u.save() // before the installer: it stops this process
 	u.mu.Unlock()
 	slog.Info("installing agent update", "from", u.version, "to", o.Version, "kind", u.kind)
+	// The package stays until the next start (load): an installer outliving a
+	// failed wait may still be reading it.
 	if err := u.install(ctx, u.kind, pkg, u.logPath()); err != nil {
-		_ = os.Remove(pkg)
 		u.finish(fmt.Errorf("%w%s", err, tail(u.logPath())))
 		return
 	}

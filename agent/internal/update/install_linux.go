@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -47,28 +49,53 @@ func installArgv(kind, pkg string) ([]string, error) {
 	return nil, fmt.Errorf("no installer for %q packages", kind)
 }
 
-// systemdRunArgv runs argv in a transient unit: the package scripts stop
-// siem-agent.service, which kills everything in its cgroup, so the installer
-// must not be our child. --wait reports its exit status while we are alive;
-// once we are stopped, the new process reads the result from the state file.
-func systemdRunArgv(argv []string, logPath string, now time.Time) []string {
+// installScript runs the package manager, records its exit status for us and,
+// when it failed, starts the agent again: the package's prerm already stopped
+// the service, and nothing else would bring the old version back.
+const installScript = `log=$1; res=$2; shift 2; "$@" >"$log" 2>&1; rc=$?; echo "$rc" >"$res"; ` +
+	`[ "$rc" -eq 0 ] || systemctl start siem-agent.service; exit "$rc"`
+
+// systemdRunArgv runs argv in a transient unit. The package scripts stop
+// siem-agent.service, and stopping kills everything in its cgroup: neither the
+// installer nor a `systemd-run --wait` client may be ours, so the unit is only
+// started here and its result read from resultPath.
+func systemdRunArgv(argv []string, logPath, resultPath string, now time.Time) []string {
 	return append([]string{"systemd-run",
 		"--unit=siem-agent-update-" + strconv.FormatInt(now.Unix(), 10),
-		"--collect", "--wait", "--quiet",
+		"--collect", "--quiet",
 		"--setenv=DEBIAN_FRONTEND=noninteractive",
-		"/bin/sh", "-c", `log=$1; shift; exec "$@" >"$log" 2>&1`, "sh", logPath}, argv...)
+		"/bin/sh", "-c", installScript, "sh", logPath, resultPath}, argv...)
 }
 
-// InstallPackage is the Install for this platform.
+// InstallPackage is the Install for this platform. It returns when the
+// installer finished, unless the installer stops this process first; then the
+// next process reports the outcome.
 func InstallPackage(ctx context.Context, kind, pkg, logPath string) error {
 	argv, err := installArgv(kind, pkg)
 	if err != nil {
 		return err
 	}
-	full := systemdRunArgv(argv, logPath, time.Now())
-	out, err := exec.CommandContext(ctx, full[0], full[1:]...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %v %s", argv[0], err, out)
+	result := filepath.Join(filepath.Dir(logPath), "install.result")
+	_ = os.Remove(result)
+	full := systemdRunArgv(argv, logPath, result, time.Now())
+	if out, err := exec.CommandContext(ctx, full[0], full[1:]...).CombinedOutput(); err != nil {
+		return fmt.Errorf("systemd-run: %v %s", err, out)
 	}
-	return nil
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%s still running: %w", argv[0], ctx.Err())
+		case <-tick.C:
+		}
+		raw, err := os.ReadFile(result)
+		if err != nil {
+			continue
+		}
+		if rc := strings.TrimSpace(string(raw)); rc != "0" {
+			return fmt.Errorf("%s exited %s", argv[0], rc)
+		}
+		return nil
+	}
 }
