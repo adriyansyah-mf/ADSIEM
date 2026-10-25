@@ -13,5 +13,8 @@ type Sensor struct{}
 // Start is only available on Windows.
 func Start(*buffer.Buffer) (*Sensor, error) { return nil, etw.ErrUnsupported }
 
+// Dropped is always 0 off Windows.
+func (*Sensor) Dropped() uint64 { return 0 }
+
 // Stop is a no-op off Windows.
 func (*Sensor) Stop() {}

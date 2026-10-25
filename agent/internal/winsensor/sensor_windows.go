@@ -4,8 +4,10 @@ package winsensor
 
 import (
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -22,38 +24,64 @@ type Sensor struct {
 	stop     chan struct{}
 	done     chan struct{}
 	once     sync.Once
+	dropped  atomic.Uint64 // events lost because the agent was behind
 }
+
+type kind int
+
+const (
+	kernelProcess kind = iota
+	providerProcess
+	networkEvent
+	dnsEvent
+)
 
 type source struct {
-	kernel bool
-	ev     *etw.Event
+	kind kind
+	ev   *etw.Event
 }
 
-// Start begins process telemetry: a private kernel logger session (command
-// lines and users) and Microsoft-Windows-Kernel-Process (image paths and
-// integrity levels), joined per process.
+// LogTypeStatus reports the sensor's own losses (events dropped because the
+// agent fell behind), so they are visible on the server.
+const LogTypeStatus = "windows_etw_status"
+
+// Start begins process, network and DNS telemetry: a private kernel logger
+// session (command lines, users), Microsoft-Windows-Kernel-Process (image
+// paths, integrity levels), Kernel-Network TCP connect/accept and DNS-Client
+// query completions, the last three filtered to those events in the kernel.
 func Start(buf *buffer.Buffer) (*Sensor, error) {
-	s := &Sensor{events: make(chan source, 4096), stop: make(chan struct{}), done: make(chan struct{})}
-	push := func(kernel bool) func(*etw.Event) {
+	s := &Sensor{events: make(chan source, 8192), stop: make(chan struct{}), done: make(chan struct{})}
+	push := func(k kind) func(*etw.Event) {
 		return func(ev *etw.Event) {
 			select {
-			case s.events <- source{kernel, ev}:
-			default: // the agent is behind: drop rather than stall the ETW consumer
+			case s.events <- source{k, ev}:
+			default: // the agent is behind: count and drop rather than stall the ETW consumer
+				s.dropped.Add(1)
 			}
 		}
 	}
-	kernel, err := etw.Start(etw.Config{Name: "SIEMAgent-Kernel", KernelFlags: etw.KernelProcess}, push(true))
-	if err != nil {
-		return nil, err
+	configs := []struct {
+		cfg etw.Config
+		k   kind
+	}{
+		{etw.Config{Name: "SIEMAgent-Kernel", KernelFlags: etw.KernelProcess}, kernelProcess},
+		{etw.Config{Name: "SIEMAgent-Process", Providers: []etw.Provider{{GUID: kernelProcessProvider,
+			Keywords: 0x10, EventIDs: []uint16{1}}}}, providerProcess}, // WINEVENT_KEYWORD_PROCESS, ProcessStart
+		{etw.Config{Name: "SIEMAgent-Network", Providers: []etw.Provider{{GUID: kernelNetworkProvider,
+			Keywords: 0x10 | 0x20, EventIDs: networkEventIDs}}}, networkEvent}, // IPv4 | IPv6
+		{etw.Config{Name: "SIEMAgent-DNS", Providers: []etw.Provider{{GUID: dnsClientProvider,
+			EventIDs: dnsEventIDs}}}, dnsEvent},
 	}
-	s.sessions = append(s.sessions, kernel)
-	prov, err := etw.Start(etw.Config{Name: "SIEMAgent-Process",
-		Providers: []etw.Provider{{GUID: kernelProcessProvider, Keywords: 0x10}}}, push(false)) // WINEVENT_KEYWORD_PROCESS
-	if err != nil {
-		kernel.Close()
-		return nil, err
+	for _, c := range configs {
+		ses, err := etw.Start(c.cfg, push(c.k))
+		if err != nil {
+			for _, started := range s.sessions {
+				started.Close()
+			}
+			return nil, err
+		}
+		s.sessions = append(s.sessions, ses)
 	}
-	s.sessions = append(s.sessions, prov)
 
 	devices := newDeviceMap()
 	j := newProcessJoiner(processImagePath, devices.dosPath)
@@ -65,27 +93,48 @@ func (s *Sensor) run(j *processJoiner, buf *buffer.Buffer) {
 	defer close(s.done)
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
-	emit := func(lines []string) {
+	report := time.NewTicker(time.Minute)
+	defer report.Stop()
+	var reported uint64
+	emit := func(logType string, lines ...string) {
 		for _, l := range lines {
-			buf.Push(tailer.Encode(LogTypeProcess, l))
+			if l != "" {
+				buf.Push(tailer.Encode(logType, l))
+			}
 		}
 	}
 	for {
 		select {
 		case <-s.stop:
-			emit(j.flush(time.Now().Add(joinWindow)))
+			emit(LogTypeProcess, j.flush(time.Now().Add(joinWindow))...)
 			return
 		case src := <-s.events:
-			if src.kernel {
-				emit(j.kernel(src.ev, time.Now()))
-			} else {
-				emit(j.provider(src.ev, time.Now()))
+			now := time.Now()
+			switch src.kind {
+			case kernelProcess:
+				emit(LogTypeProcess, j.kernel(src.ev, now)...)
+			case providerProcess:
+				emit(LogTypeProcess, j.provider(src.ev, now)...)
+			case networkEvent:
+				emit(LogTypeNetwork, j.network(src.ev))
+			case dnsEvent:
+				emit(LogTypeDNS, j.dns(src.ev))
 			}
 		case now := <-tick.C:
-			emit(j.flush(now))
+			emit(LogTypeProcess, j.flush(now)...)
+		case <-report.C:
+			if d := s.dropped.Load(); d != reported {
+				slog.Warn("etw sensor dropped events: the agent fell behind", "dropped", d-reported)
+				emit(LogTypeStatus, line(255, [][2]string{{"Channel", "ETW"}, {"Provider", "SIEMAgent"},
+					{"Dropped", strconv.FormatUint(d-reported, 10)}, {"DroppedTotal", strconv.FormatUint(d, 10)}}))
+				reported = d
+			}
 		}
 	}
 }
+
+// Dropped is the number of events lost because the agent fell behind.
+func (s *Sensor) Dropped() uint64 { return s.dropped.Load() }
 
 // Stop ends the sessions and flushes what is pending.
 func (s *Sensor) Stop() {
