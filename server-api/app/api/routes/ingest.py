@@ -21,6 +21,7 @@ from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTa
                             FimWatchPath)
 from app.schemas.schemas import EvidenceEnvelope, EvidenceReceipt, AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
 from app.services.agent_tamper import check_integrity, heartbeat_anomaly, uninstall_token_sha256
+from app.services import yara_ruleset
 from app.services.ingest import enqueue_log
 from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
                                         accept_evidence, accept_evidence_batch, check_evidence_durability)
@@ -224,9 +225,10 @@ async def heartbeat(
         for r in fw_rules
     ]
 
+    yara_hash, _ = await yara_ruleset.enabled_ruleset(db)
     config_hash = hashlib.sha256(
         json.dumps(
-            {"sources": sources_data, "fim_paths": fim_paths, "firewall": firewall_data},
+            {"sources": sources_data, "fim_paths": fim_paths, "firewall": firewall_data, "yara": yara_hash},
             sort_keys=True,
         ).encode()
     ).hexdigest()
@@ -241,4 +243,18 @@ async def heartbeat(
         tasks=[AgentTaskDef(id=t.id, task_type=t.task_type, params=t.params or {}) for t in pending_tasks],
         firewall=firewall_data,
         uninstall_token_sha256=uninstall_token_sha256(agent.id),
+        yara_rules_hash=yara_hash,
     )
+
+
+@router.post("/yara-rules")
+async def agent_yara_rules(
+    agent: Annotated[Agent, Depends(get_agent)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """The enabled YARA rules for on-access scanning (heartbeats carry
+    only their hash)."""
+    if not agent.approved:
+        raise HTTPException(status_code=403, detail="agent not approved")
+    digest, rules = await yara_ruleset.enabled_ruleset(db)
+    return {"hash": digest, "rules": rules}

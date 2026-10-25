@@ -1,0 +1,15 @@
+title: YARA Rule Matched On Endpoint (High)
+id: rule-yara-match-high
+description: A file the agent saw being created or changed in a temp, download or web directory matched a high-severity YARA rule (yara.rule names it, file.path and file.hash.sha256 identify the file).
+logsource:
+  product: yara
+  service: match
+detection:
+  selection:
+    event.action: yara_match
+    yara.severity: high
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.t1204
