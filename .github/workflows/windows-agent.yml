@@ -132,16 +132,22 @@ jobs:
           ./tests/windows/update-msi.ps1 -Old agent/dist/packages/siem-agent-9.0.0-x64.msi `
             -New agent/dist/packages/siem-agent-9.0.1-x64.msi -Signer agent/siem-update-sign.exe
 
+      # upload-artifact needs one root: C:\ProgramData and the work dir are on different drives
+      - name: Collect the agent's update files
+        if: failure()
+        shell: pwsh
+        run: |
+          $d = "$env:RUNNER_TEMP\msi-update-diagnostics"
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          Copy-Item -Recurse -ErrorAction SilentlyContinue C:\ProgramData\SIEMAgent\update, C:\ProgramData\SIEMAgent\agent.log $d
+          Copy-Item -ErrorAction SilentlyContinue "$env:RUNNER_TEMP\siem-update\*.log", "$env:RUNNER_TEMP\siem-update\mock\heartbeats.jsonl" $d
+
       - name: Keep the agent's update files
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: msi-update-diagnostics
-          path: |
-            C:\ProgramData\SIEMAgent\update
-            C:\ProgramData\SIEMAgent\agent.log
-            ${{ runner.temp }}\siem-update\*.log
-            ${{ runner.temp }}\siem-update\mock\heartbeats.jsonl
+          path: ${{ runner.temp }}/msi-update-diagnostics
           if-no-files-found: warn
 
   # Durable journal capture on each native OS (agent/internal/evidence/soak_test.go),

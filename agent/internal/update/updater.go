@@ -83,7 +83,40 @@ type Updater struct {
 	mu   sync.Mutex
 	st   state
 	busy bool
+
+	// detection retried while it fails: the MSI starts the service before it
+	// registers the product, so a fresh install can look like no MSI at all
+	detect     func() (string, error)
+	detectedAt time.Time
+	kindFailed bool
 }
+
+const redetectEvery = 30 * time.Second
+
+// Redetect makes a failed install-kind detection retry (at most every 30 s).
+func (u *Updater) Redetect(detect func() (string, error)) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.detect, u.detectedAt = detect, u.now()
+}
+
+// redetect: called with mu held.
+func (u *Updater) redetect() {
+	if !u.kindFailed || u.detect == nil || u.now().Sub(u.detectedAt) < redetectEvery {
+		return
+	}
+	u.detectedAt = u.now()
+	if kind, err := u.detect(); err == nil {
+		u.kind, u.kindFailed = kind, false
+		u.reason = ""
+		if len(u.keys) == 0 {
+			u.reason = noKeyReason
+		}
+		slog.Info("self-update available", "kind", kind)
+	}
+}
+
+const noKeyReason = "no trusted update key (built without one and update.trusted_keys is empty)"
 
 // New prepares updates for this agent. kind is from DetectKind; kindErr makes
 // the agent report "unsupported" with that reason, as does having no key.
@@ -92,9 +125,9 @@ func New(stateDir, version string, keys []ed25519.PublicKey, kind string, kindEr
 		fetch: fetch, install: install, now: time.Now}
 	switch {
 	case kindErr != nil:
-		u.reason = kindErr.Error()
+		u.reason, u.kindFailed = kindErr.Error(), true
 	case len(keys) == 0:
-		u.reason = "no trusted update key (built without one and update.trusted_keys is empty)"
+		u.reason = noKeyReason
 	}
 	u.load()
 	return u
@@ -149,6 +182,7 @@ func (u *Updater) save() {
 func (u *Updater) Status() Status {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	u.redetect()
 	s := Status{Kind: u.kind, OS: runtime.GOOS, Arch: runtime.GOARCH}
 	if u.reason != "" {
 		s.Kind, s.State, s.Error = "", "unsupported", u.reason
@@ -166,12 +200,13 @@ func (u *Updater) Status() Status {
 // runs at a time; a failed one is retried with backoff, MaxAttempts times per
 // offer revision.
 func (u *Updater) Offer(o *Offer) {
-	if o == nil || u.reason != "" || o.Version == u.version {
+	if o == nil || o.Version == u.version {
 		return
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.busy {
+	u.redetect()
+	if u.busy || u.reason != "" {
 		return
 	}
 	if o.Version != u.st.Target || o.Revision != u.st.Revision {

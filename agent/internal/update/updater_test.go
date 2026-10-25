@@ -248,6 +248,37 @@ func TestUnsupportedWithoutKeyOrInstaller(t *testing.T) {
 	}
 }
 
+// A fresh MSI install starts the service before the product is registered:
+// detection is retried until it succeeds, then updates work.
+func TestDetectionIsRetriedUntilTheInstallIsRegistered(t *testing.T) {
+	pub, priv := keypair(t)
+	h := newHarness(t, t.TempDir(), "1.0.0", pub)
+	clock := time.Now()
+	h.u = New(t.TempDir(), "1.0.0", []ed25519.PublicKey{pub}, "", errors.New("agent not installed from the MSI"),
+		h.u.fetch, h.u.install)
+	h.u.now = func() time.Time { return clock }
+	registered := false
+	h.u.Redetect(func() (string, error) {
+		if !registered {
+			return "", errors.New("agent not installed from the MSI")
+		}
+		return "deb", nil
+	})
+	if s := h.u.Status(); s.State != "unsupported" {
+		t.Fatalf("%+v", s)
+	}
+	registered = true
+	if s := h.u.Status(); s.State != "unsupported" {
+		t.Fatalf("detected again inside the 30 s interval: %+v", s)
+	}
+	clock = clock.Add(redetectEvery)
+	if s := h.u.Status(); s.State != "idle" || s.Kind != "deb" {
+		t.Fatalf("after registration: %+v", s)
+	}
+	h.u.Offer(offer(t, priv, nil))
+	<-h.installed
+}
+
 func TestSameVersionIsNotReinstalled(t *testing.T) {
 	pub, priv := keypair(t)
 	h := newHarness(t, t.TempDir(), "2.0.0", pub)

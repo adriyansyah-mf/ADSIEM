@@ -51,6 +51,9 @@ func newUpdater(cfg *config.Config, c *client.Client) *update.Updater {
 		return err
 	}
 	u := update.New(cfg.Agent.StateDir, Version, keys, kind, kindErr, fetch, update.InstallPackage)
+	if !cfg.Update.Disabled {
+		u.Redetect(update.DetectKind) // the MSI registers itself after it starts the service
+	}
 	s := u.Status()
 	slog.Info("self-update", "state", s.State, "kind", s.Kind, "trusted_keys", len(keys), "reason", s.Error)
 	return u
