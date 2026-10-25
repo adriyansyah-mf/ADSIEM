@@ -58,6 +58,37 @@ UEBA_ANOMALY = {"id": "anomaly-fixture", "entity_type": "user", "entity_value": 
                              "text": "evidence-" * 90 + "END-OF-UEBA-EVIDENCE"}]}
 
 
+def evidence_fixture(kind):
+    """API responses for one evidence delivery state (summary, detail)."""
+    health = {"state": "healthy", "reason": "", "queued_events": 0, "queued_bytes": 0, "oldest_queued_at": None,
+              "last_receipt_at": ALERT["created_at"], "retries": 0, "quarantined": 0, "held": 0, "unknown_gaps": 0,
+              "known_loss": {}, "sources": {}, "sender": {"state": "idle", "reason": "", "since": None, "failures": 0}}
+    summary = {"status": "healthy", "reason": None, "reported_at": ALERT["created_at"], "stale": False}
+    inbox = {"pending": 0, "completed": 120, "dead_letter": 0, "oldest_pending_at": None, "dead_letters": []}
+    if kind == "legacy":
+        summary, health = {"status": "not_reported", "reason": None, "reported_at": None, "stale": False}, None
+    elif kind == "backlogged":
+        health.update(queued_events=1284, queued_bytes=3 * 1024 * 1024, oldest_queued_at="2026-10-20T08:00:00Z",
+                      indexed_events=1_000_000,
+                      sender={"state": "retrying", "reason": "network", "since": None, "failures": 6})
+        summary.update(status="backlogged", reason="network")
+    elif kind == "auth-blocked":
+        health.update(queued_events=40, queued_bytes=8192, sender={"state": "blocked", "reason": "auth_blocked",
+                                                                   "since": None, "failures": 0})
+        summary.update(status="blocked", reason="auth_blocked")
+    elif kind == "disk-full":
+        health.update(state="degraded", reason="capacity", queued_events=90000, queued_bytes=1 << 30,
+                      known_loss={"capacity": 37}, unknown_gaps=2, quarantined=1,
+                      sources={"file:/var/log/auth.log": {"state": "paused", "reason": "capacity", "updated_at": None}})
+        summary.update(status="degraded", reason="capacity")
+        inbox.update(dead_letter=1, dead_letters=[{"receipt_id": "receipt-fixture", "event_id": "8d5c0b1e-0000-4000-8000-000000000001",
+                                                    "failure_count": 20, "last_error": "RuntimeError: elasticsearch unavailable",
+                                                    "received_at": ALERT["created_at"], "collected_at": ALERT["created_at"]}])
+    elif kind == "stale":
+        summary.update(stale=True)
+    return {"agent_id": "agent-fixture", **summary, "health": health, "inbox": inbox}
+
+
 @pytest.fixture
 def enterprise(page):
     from playwright.sync_api import expect
@@ -68,6 +99,7 @@ def enterprise(page):
         "state": {"accessToken": "fixture-only", "user": USER}, "version": 0,
     })) + ")")
     state = {"mode": "normal", "requests": [], "writes": [], "agent": dict(AGENT),
+             "evidence": evidence_fixture("legacy"),
              "case": dict(CASE), "role": "superadmin", "write_error": False,
              "hunts": [dict(HUNT)], "schedules": [dict(SCHEDULE)], "ueba_errors": [],
              "ueba_status": {"status": "ready", "trained_at": ALERT["created_at"], "user_snapshot_count": 72, "ip_snapshot_count": 48, "host_snapshot_count": 12},
@@ -135,6 +167,12 @@ def enterprise(page):
         elif path == "/api/cases/case-fixture/escalate":
             state["case"]["status"] = "escalated"
             body = state["case"]
+        elif path == "/api/agents/agent-fixture/evidence":
+            body = state["evidence"]
+        elif path.startswith("/api/agents/agent-fixture/evidence/") and path.endswith("/retry"):
+            state["evidence"]["inbox"]["dead_letters"] = []
+            state["evidence"]["inbox"]["dead_letter"] = 0
+            body = {"status": "pending"}
         elif path == "/api/agents/agent-fixture/isolate":
             state["agent"]["is_isolated"] = route.request.method == "POST"
             body = state["agent"]
@@ -403,6 +441,67 @@ def test_viewer_cannot_see_mutation_controls(page, enterprise, resource):
     expect(page.get_by_role("button", name="Isolate host", exact=True)).not_to_be_visible()
     expect(page.get_by_role("button", name="Expand record", exact=True)).not_to_be_visible()
     assert not state["writes"]
+
+
+EVIDENCE_STATES = [
+    # kind, table badge, panel text that must show
+    ("legacy", "Not reported", "does not report durable evidence delivery"),
+    ("healthy", "Healthy", "reported"),
+    ("backlogged", "Backlogged", "1,284 events · 3.0 MiB"),
+    ("auth-blocked", "Blocked", "the server rejected the agent token"),
+    ("disk-full", "Degraded", "37 local evidence storage is full"),
+    ("stale", "Stale", "no recent heartbeat, last known state"),
+]
+
+
+@pytest.mark.parametrize("kind, badge, detail", EVIDENCE_STATES)
+def test_agent_evidence_delivery_states(page, enterprise, kind, badge, detail):
+    state, expect = enterprise
+    evidence = evidence_fixture(kind)
+    state["evidence"] = evidence
+    state["agent"]["evidence"] = {k: evidence[k] for k in ("status", "reason", "reported_at", "stale")}
+    page.goto(BASE_URL + "/agents")
+    row = page.get_by_role("row").filter(has_text="WIN-FIN-042")
+    expect(row.get_by_text(badge, exact=True).first).to_be_visible()
+    if kind == "legacy":
+        expect(row.get_by_text("Healthy", exact=True)).to_have_count(0)  # never implied by an online heartbeat
+    page.get_by_role("button", name="Expand record", exact=True).click()
+    panel = page.get_by_role("region", name="Evidence delivery")
+    expect(panel.get_by_text(detail, exact=False).first).to_be_visible()
+    if kind == "disk-full":
+        expect(panel.get_by_text("file:/var/log/auth.log")).to_be_visible()
+        expect(panel.get_by_text("20 attempts", exact=False)).to_be_visible()
+    if kind == "backlogged":
+        expect(panel.get_by_text("Agent memory index")).to_be_visible()
+        expect(panel.get_by_text("1,000,000 events · ≈62 MiB")).to_be_visible()
+    else:  # not reported by older agents: nothing is shown
+        expect(panel.get_by_text("Agent memory index")).to_have_count(0)
+
+
+def test_legacy_agent_list_without_evidence_field_is_not_reported(page, enterprise):
+    state, expect = enterprise
+    state["agent"].pop("evidence", None)  # an older API server
+    page.goto(BASE_URL + "/agents")
+    row = page.get_by_role("row").filter(has_text="WIN-FIN-042")
+    expect(row.get_by_text("Not reported", exact=True)).to_be_visible()
+
+
+def test_dead_letter_retry_requires_confirmation(page, enterprise):
+    state, expect = enterprise
+    state["evidence"] = evidence_fixture("disk-full")
+    page.goto(BASE_URL + "/agents")
+    page.get_by_role("button", name="Expand record", exact=True).click()
+    page.get_by_role("button", name="Retry", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Retry failed evidence?")
+    expect(dialog).to_be_visible()
+    expect(dialog.get_by_text("may run again", exact=False)).to_be_visible()
+    assert not state["writes"]
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    assert not state["writes"]
+    page.get_by_role("button", name="Retry", exact=True).click()
+    page.get_by_role("dialog", name="Retry failed evidence?").get_by_role("button", name="Retry event", exact=True).click()
+    expect(page.get_by_role("dialog")).to_have_count(0)
+    assert ("POST", "/api/agents/agent-fixture/evidence/receipt-fixture/retry", None) in state["writes"]
 
 
 def test_agent_response_failure_stays_retryable(page, enterprise):

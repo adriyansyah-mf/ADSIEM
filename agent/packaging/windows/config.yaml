@@ -37,3 +37,13 @@ logs:
 # the service by hand, uncomment and reboot (the agent applies it at start):
 # anti_tamper:
 #   unlock_service: true
+
+# Durable evidence (staged rollout, off by default): events are journaled on
+# disk and only removed after the server confirms durable receipt; event log
+# channels resume from bookmarks. Needs a local fixed NTFS volume. Enable only
+# once the server advertises it (EVIDENCE_INGEST_ENABLED) and per the rollout
+# in docs/operations/agent-evidence-recovery.md.
+# evidence:
+#   enabled: true
+#   dir: evidence            # inside %ProgramData%\SIEMAgent
+#   max_bytes: 1073741824    # 1 GiB local budget, never evicts unconfirmed events

@@ -79,6 +79,7 @@ type Config struct {
 	Netwatch     NetwatchConfig     `yaml:"netwatch"`
 	Detect       DetectConfig       `yaml:"detect"`
 	Buffer       BufferConfig       `yaml:"buffer"`
+	Evidence     EvidenceConfig     `yaml:"evidence"`
 	LiveResponse LiveResponseConfig `yaml:"live_response"`
 	AntiTamper   AntiTamperConfig   `yaml:"anti_tamper"`
 }
@@ -101,14 +102,8 @@ func Load(path string) (*Config, error) {
 	if cfg.Firewall.Backend == "" {
 		cfg.Firewall.Backend = "auto"
 	}
-	if cfg.Firewall.StatePath == "" {
-		cfg.Firewall.StatePath = "/var/lib/siem-agent/firewall.json"
-	}
-	if cfg.Buffer.SpillPath == "" {
-		cfg.Buffer.SpillPath = "/var/lib/siem-agent/spill.log"
-	}
-	if cfg.Agent.StateDir == "" {
-		cfg.Agent.StateDir = "/var/lib/siem-agent"
+	if err := cfg.defaultEvidence(); err != nil {
+		return nil, err
 	}
 	if cfg.Agent.ConfigPath == "" {
 		cfg.Agent.ConfigPath = path

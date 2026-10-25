@@ -6,8 +6,12 @@
   uninstall removes the service. Needs Administrator and python on PATH.
 
   pwsh tests\windows\smoke-msi.ps1 -Msi agent\dist\packages\siem-agent-0.0.1-x64.msi
+
+  -Durable: the same, in durable evidence mode (evidence.enabled in the config
+  before install; the mock advertises protocol 2). The event must arrive through
+  the durable endpoints only, and heartbeats must report evidence health.
 #>
-param([Parameter(Mandatory)][string]$Msi)
+param([Parameter(Mandatory)][string]$Msi, [switch]$Durable)
 $ErrorActionPreference = "Stop"
 
 $Msi = (Resolve-Path $Msi).Path
@@ -44,7 +48,12 @@ $tls = Join-Path $work "tls"
 python tests\windows\make_cert.py $tls
 if ($LASTEXITCODE -ne 0) { throw "make_cert.py failed" }
 $env:MOCK_FLOW = "1"
-$mock = Start-Process python -PassThru -NoNewWindow -ArgumentList @("tests\windows\mock_siem.py", $port, "`"$mockOut`"",
+$received = "logs.jsonl"
+if ($Durable) {
+    $env:MOCK_EVIDENCE = "1"
+    $received = "evidence.jsonl"
+}
+$mock =Start-Process python -PassThru -NoNewWindow -ArgumentList @("tests\windows\mock_siem.py", $port, "`"$mockOut`"",
                                                                     "`"$tls\cert.pem`"", "`"$tls\key.pem`"")
 $caCert = $null
 try {
@@ -66,6 +75,13 @@ try {
     if ($code -eq 0) { Fail "install without SERVER_URL/ENROLLMENT_KEY succeeded" }
     if (Get-Service SIEMAgent -ErrorAction SilentlyContinue) { Fail "service left behind by the failed install" }
     Write-Host "ok: install without properties refused (exit $code)"
+
+    if ($Durable) {
+        # After step 1 (which needs no config yet). -configure, run by the MSI,
+        # loads and rewrites the whole config, so this section survives install.
+        New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+        Set-Content -Path (Join-Path $dataDir "config.yaml") -Value "evidence:`n  enabled: true" -Encoding ascii
+    }
 
     # 2. Install the way the dashboard tells you to.
     $code = Invoke-Msiexec @("/i", "`"$Msi`"", "SERVER_URL=https://127.0.0.1:$port", "ENROLLMENT_KEY=ci-smoke-key-123",
@@ -100,10 +116,21 @@ try {
         if ((Get-Date) -gt $deadline) { Fail "event '$marker' never reached the server" }
         eventcreate /T INFORMATION /ID 999 /L APPLICATION /SO SIEMSmoke /D $marker | Out-Null
         Start-Sleep 5
-        if (Test-Path (Join-Path $mockOut "logs.jsonl")) {
-            $line = Get-Content (Join-Path $mockOut "logs.jsonl") | ConvertFrom-Json |
+        if (Test-Path (Join-Path $mockOut $received)) {
+            $line = Get-Content (Join-Path $mockOut $received) | ConvertFrom-Json |
                 Where-Object { $_.raw_message -like "*$marker*" } | Select-Object -First 1
         }
+    }
+    if ($Durable) {
+        $legacy = Join-Path $mockOut "logs.jsonl"
+        if ((Test-Path $legacy) -and (Select-String -Path $legacy -SimpleMatch $marker -Quiet)) {
+            Fail "durable mode also sent '$marker' through the legacy endpoint"
+        }
+        if ($line.protocol_version -ne 2 -or -not $line.event_id) { Fail "not a durable envelope: $($line | ConvertTo-Json -Compress)" }
+        $reported = Get-Content (Join-Path $mockOut "heartbeats.jsonl") | ConvertFrom-Json |
+            Where-Object { $_.evidence_health -and $_.evidence_health.mode -eq "durable" } | Select-Object -Last 1
+        if (-not $reported) { Fail "no heartbeat reported durable evidence health" }
+        Write-Host "ok: durable delivery (event $($line.event_id)); health state=$($reported.evidence_health.state)"
     }
     if ($line.log_type -ne "windows_application") { Fail "log_type '$($line.log_type)'" }
     if ($line.raw_message -notmatch '^EventID=999 Channel="Application" Provider="SIEMSmoke"') {

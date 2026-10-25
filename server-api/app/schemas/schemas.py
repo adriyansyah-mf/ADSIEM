@@ -1,9 +1,12 @@
 # server-api/app/schemas/schemas.py
 from __future__ import annotations
-from datetime import date, datetime
-from typing import Any, Literal, Optional
+from datetime import date, datetime, timezone
+import hashlib
+import json
+import re
+from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator, model_validator
 
 # ─── Auth ────────────────────────────────────────────────────────
 
@@ -141,7 +144,72 @@ class AgentOut(BaseModel):
     flow_poll_at: datetime | None = None
     enrolled_at: datetime
     log_sources: list[LogSourceOut] = []
+    # read from the agent row for the summary below; the full snapshot is
+    # served by GET /api/agents/{id}/evidence
+    evidence_health: dict | None = Field(default=None, exclude=True)
+    evidence_health_at: datetime | None = Field(default=None, exclude=True)
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def evidence(self) -> dict:
+        """Durable evidence delivery summary: status, reason, reported_at, stale."""
+        from app.services.evidence_status import evidence_status
+        return evidence_status(self.evidence_health, self.evidence_health_at, datetime.now(timezone.utc))
+
+# ─── Evidence health (durable agents) ────────────────────────────
+# What agent/internal/evidence Health + Sender.Status send in the heartbeat.
+# Bounded and enumerated: it is stored and shown, never used as a metric label.
+
+_MAX_COUNT = (1 << 63) - 1
+EvidenceCount = Annotated[int, Field(ge=0, le=_MAX_COUNT)]
+EvidenceLossReason = Literal["capacity", "oversize", "source_failure", "storage_failure", "rotation_gap", "legacy_import"]
+
+
+class EvidenceSourceHealth(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    state: Literal["healthy", "degraded", "paused", "unavailable"]
+    reason: str = Field(default="", max_length=256)
+    updated_at: datetime | None = None
+
+
+class EvidenceSenderStatus(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    state: Literal["idle", "sending", "retrying", "blocked"]
+    reason: str = Field(default="", max_length=64)
+    since: datetime | None = None
+    failures: int = Field(default=0, ge=0, le=1 << 31)
+
+
+class EvidenceHealth(BaseModel):
+    """Cumulative journal health: counters persist across restarts and failed heartbeats."""
+    model_config = ConfigDict(extra="ignore")  # newer agents may add fields
+    version: Literal[1]
+    mode: Literal["durable"] = "durable"
+    state: Literal["healthy", "degraded"]
+    reason: Literal["", "source_failure", "held", "quarantined", "storage_failure", "capacity",
+                    "journal_unavailable"] = ""
+    queued_events: EvidenceCount = 0
+    queued_bytes: EvidenceCount = 0
+    oldest_queued_at: datetime | None = None
+    last_receipt_at: datetime | None = None
+    retries: EvidenceCount = 0
+    quarantined: EvidenceCount = 0
+    held: EvidenceCount = 0
+    unknown_gaps: EvidenceCount = 0
+    known_loss: dict[EvidenceLossReason, EvidenceCount] = Field(default_factory=dict)
+    pending_loss: dict[EvidenceLossReason, EvidenceCount] = Field(default_factory=dict)
+    loss_uncertain: bool = False
+    indexed_events: EvidenceCount = 0  # agent RAM index entries (~45-70 bytes each)
+    sources: dict[Annotated[str, Field(max_length=512)], EvidenceSourceHealth] = Field(
+        default_factory=dict, max_length=256)
+    sender: EvidenceSenderStatus | None = None
+
+    @field_validator("known_loss", "pending_loss", "sources", mode="before")
+    @classmethod
+    def null_map_is_empty(cls, value):
+        return {} if value is None else value  # Go encodes an empty nil map as null
+
 
 class HeartbeatRequest(BaseModel):
     agent_id: UUID
@@ -152,6 +220,17 @@ class HeartbeatRequest(BaseModel):
     integrity: dict[str, str] | None = None  # binary_sha256 / config_sha256, agents >= 1.7.0
     session: str | None = None  # one per agent process, with a rising seq (agents >= 1.8.0)
     seq: int | None = None
+    evidence_health: EvidenceHealth | None = None  # durable agents only
+
+    @field_validator("evidence_health", mode="wrap")
+    @classmethod
+    def drop_invalid_evidence_health(cls, value, handler):
+        # An invalid or unbounded health object is rejected on its own: the
+        # heartbeat still carries tasks and config, so it must not fail.
+        try:
+            return handler(value)
+        except ValueError:
+            return None
 
 class AgentTaskDef(BaseModel):
     id: UUID
@@ -160,6 +239,8 @@ class AgentTaskDef(BaseModel):
 
 class HeartbeatResponse(BaseModel):
     config_hash: str
+    evidence_protocols: list[int] = Field(default_factory=list)
+    evidence_batch_max: int = 0  # >0: POST /api/ingest/v2/logs takes up to this many events
     log_sources: list[LogSourceOut]
     fim_paths: list[str] = []
     tasks: list[AgentTaskDef] = []
@@ -167,6 +248,114 @@ class HeartbeatResponse(BaseModel):
     uninstall_token_sha256: str = ""  # agents >= 1.8.0 refuse removal without the token
 
 # ─── Ingest ──────────────────────────────────────────────────────
+
+def _evidence_timestamp(value: str, *, utc: bool = False) -> str:
+    # datetime stores microseconds; parse whole seconds separately so the immutable
+    # nanosecond fraction survives both normalization and PostgreSQL round trips.
+    match = re.fullmatch(
+        r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})",
+        value,
+    )
+    if match is None:
+        raise ValueError("collected_at must be RFC3339 with at most nanosecond precision")
+    seconds, fraction, offset = match.groups()
+    if offset != "Z" and (int(offset[1:3]) > 23 or int(offset[4:6]) > 59):
+        raise ValueError("invalid timestamp offset")
+    parsed = datetime.fromisoformat(seconds + offset.replace("Z", "+00:00"))
+    if utc:
+        parsed = parsed.astimezone(timezone.utc)
+        seconds = f"{parsed.year:04}-{parsed.month:02}-{parsed.day:02}T{parsed.hour:02}:{parsed.minute:02}:{parsed.second:02}"
+        offset = "Z"
+    if offset in {"+00:00", "-00:00"}:
+        offset = "Z"
+    fraction = (fraction or "").rstrip("0")
+    return seconds + ("." + fraction if fraction else "") + offset
+
+
+class EvidenceCursor(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    source: str
+    generation: str
+    identity: str
+    offset: int = Field(default=0, ge=-(1 << 63), lt=1 << 63, strict=True)
+    bookmark: str = ""
+    empty: bool = Field(default=False, strict=True)
+
+    @field_validator("source", "generation", "identity", "bookmark")
+    @classmethod
+    def valid_unicode(cls, value: str) -> str:
+        value.encode("utf-8")
+        return value
+
+
+class EvidenceEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    protocol_version: Literal[2]
+    event_id: UUID
+    agent_id: UUID
+    collected_at: str
+    hostname: str
+    log_type: str
+    location: str
+    raw_message: str
+    cursor: EvidenceCursor | None = None
+    legacy_import: bool = Field(default=False, strict=True)
+
+    @field_validator("event_id", "agent_id")
+    @classmethod
+    def nonzero_uuid(cls, value: UUID) -> UUID:
+        if value.int == 0:
+            raise ValueError("evidence identity must be a nonzero UUID")
+        return value
+
+    @field_validator("protocol_version", mode="before")
+    @classmethod
+    def integer_protocol(cls, value: int) -> int:
+        if type(value) is not int:
+            raise ValueError("protocol_version must be an integer")
+        return value
+
+    @field_validator("collected_at")
+    @classmethod
+    def valid_timestamp(cls, value: str) -> str:
+        try:
+            _evidence_timestamp(value, utc=True)
+        except OverflowError as exc:
+            raise ValueError("collected_at is outside the UTC timestamp range") from exc
+        return _evidence_timestamp(value)
+
+    @field_validator("hostname", "log_type", "location", "raw_message")
+    @classmethod
+    def valid_unicode(cls, value: str) -> str:
+        value.encode("utf-8")
+        return value
+
+    def canonical_json(self) -> str:
+        payload = self.model_dump(mode="json", exclude_defaults=True)
+        payload["collected_at"] = _evidence_timestamp(self.collected_at, utc=True)
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def digest(self) -> str:
+        return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
+
+    @property
+    def encoded_size(self) -> int:
+        # encoding/json uses compact UTF-8, escapes HTML and Unicode separators,
+        # and omits the zero-valued optional fields in the Go envelope/cursor.
+        encoded = json.dumps(self.model_dump(mode="json", exclude_defaults=True),
+                             ensure_ascii=False, separators=(",", ":"))
+        for character in "<>&\u2028\u2029":
+            encoded = encoded.replace(character, f"\\u{ord(character):04x}")
+        return len(encoded.encode("utf-8"))
+
+
+class EvidenceReceipt(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    protocol_version: Literal[2] = 2
+    event_id: UUID
+    status: Literal["accepted", "duplicate"]
+    receipt_id: UUID
+
 
 class LogIngestRequest(BaseModel):
     agent_id: UUID

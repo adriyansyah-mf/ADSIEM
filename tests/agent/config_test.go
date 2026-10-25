@@ -10,7 +10,7 @@ import (
 func TestLoadConfig(t *testing.T) {
 	content := `
 agent:
-  id: test-001
+  id: 11111111-1111-4111-8111-111111111111
   name: test
   group: prod
   token: "tok"
@@ -31,8 +31,8 @@ logs:
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if cfg.Agent.ID != "test-001" {
-		t.Errorf("expected agent id test-001, got %s", cfg.Agent.ID)
+	if cfg.Agent.ID != "11111111-1111-4111-8111-111111111111" {
+		t.Errorf("expected configured agent UUID, got %s", cfg.Agent.ID)
 	}
 	if cfg.Agent.BufferSize != 5000 {
 		t.Errorf("expected buffer_size 5000, got %d", cfg.Agent.BufferSize)
@@ -43,13 +43,16 @@ logs:
 }
 
 func TestLoadDefaultsWhenZero(t *testing.T) {
-	content := "agent:\n  id: x\nserver:\n  url: http://x\n"
+	content := "agent:\n  id: 22222222-2222-4222-8222-222222222222\nserver:\n  url: http://x\n"
 	f, _ := os.CreateTemp("", "config-*.yaml")
 	f.WriteString(content)
 	f.Close()
 	defer os.Remove(f.Name())
 
-	cfg, _ := config.Load(f.Name())
+	cfg, err := config.Load(f.Name())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
 	if cfg.Agent.BufferSize != 10000 {
 		t.Errorf("expected default buffer_size 10000, got %d", cfg.Agent.BufferSize)
 	}

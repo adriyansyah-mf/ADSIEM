@@ -10,11 +10,34 @@ on:
       - "dashboard/src/lib/deployCommands.ts"
       - ".github/workflows/windows-agent.yml"
   workflow_dispatch:
+    inputs:
+      soak_duration:
+        description: "Also run the sustained evidence capture on Linux and Windows for this long (e.g. 1h); empty skips it"
+        default: ""
+      soak_rate:
+        description: "Sustained capture events per second"
+        default: "200"
 
 permissions:
   contents: read
 
 jobs:
+  # Durable evidence on real Windows: journal, file cursors, Event Log
+  # bookmarks against a disposable test log (tests/windows/evidence-resume.ps1).
+  native-evidence:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: agent/go.sum
+
+      - name: Native evidence, cursor and bookmark tests
+        shell: pwsh
+        run: ./tests/windows/evidence-resume.ps1
+
   msi-smoke:
     runs-on: windows-latest
     steps:
@@ -41,9 +64,87 @@ jobs:
         shell: pwsh
         run: ./tests/windows/smoke-msi.ps1 -Msi agent/dist/packages/siem-agent-0.0.1-x64.msi
 
+  # The same MSI in durable evidence mode, on a fresh runner (no prior install).
+  msi-smoke-durable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install smoke-test dependencies
+        run: pip install cryptography
+
+      - name: Build MSI
+        working-directory: agent
+        shell: pwsh
+        run: ./packaging/build-msi.ps1 -Version 0.0.1
+
+      - name: Install, enroll, ship an event durably, uninstall
+        shell: pwsh
+        run: ./tests/windows/smoke-msi.ps1 -Msi agent/dist/packages/siem-agent-0.0.1-x64.msi -Durable
+
       - name: Keep the MSI
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: siem-agent-msi
           path: agent/dist/packages/*.msi
+
+  # Durable journal capture on each native OS (agent/internal/evidence/soak_test.go),
+  # only when dispatched with soak_duration: it takes that long.
+  soak:
+    name: Sustained capture (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    if: inputs.soak_duration != ''
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: agent/go.sum
+
+      - name: Capture
+        shell: bash
+        env:
+          EVIDENCE_SOAK: ${{ inputs.soak_duration }}
+          EVIDENCE_SOAK_RATE: ${{ inputs.soak_rate }}
+          EVIDENCE_SOAK_DIR: ${{ runner.temp }}
+          EVIDENCE_SOAK_REPORT: ${{ runner.temp }}/soak-${{ matrix.os }}.json
+        run: go test ./agent/internal/evidence -run TestSustainedCapture -count=1 -timeout 0 -v
+
+      - name: Record the runner
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "os=${{ matrix.os }}"
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              powershell -NoProfile -Command "Get-CimInstance Win32_Processor | Select -Expand Name; Get-Volume | Format-Table -AutoSize | Out-String"
+            else
+              lscpu | grep 'Model name'; df -T "$RUNNER_TEMP"
+            fi
+          } > "$RUNNER_TEMP/runner-${{ matrix.os }}.txt" 2>&1
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-soak-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/soak-${{ matrix.os }}.json
+            ${{ runner.temp }}/runner-${{ matrix.os }}.txt
+          if-no-files-found: warn

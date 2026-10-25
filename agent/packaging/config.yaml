@@ -25,3 +25,13 @@ logs:
 # them on this host regardless, uncomment:
 # live_response:
 #   disable_commands: true
+
+# Durable evidence (staged rollout, off by default): events are journaled on
+# disk and only removed after the server confirms durable receipt. Enable only
+# once the server advertises it (EVIDENCE_INGEST_ENABLED) and per the rollout
+# in docs/operations/agent-evidence-recovery.md. On first start the legacy
+# spill is imported into the journal (the file itself is kept).
+# evidence:
+#   enabled: true
+#   dir: evidence            # inside agent.state_dir (/var/lib/siem-agent)
+#   max_bytes: 1073741824    # 1 GiB local budget, never evicts unconfirmed events

@@ -6,6 +6,7 @@ type Buffer struct {
 	mu      sync.Mutex
 	items   []string
 	cap     int
+	sink    func(string) error
 	dropped int64
 	pushed  int64
 	popped  int64
@@ -15,7 +16,24 @@ func New(capacity int) *Buffer {
 	return &Buffer{items: make([]string, 0, capacity), cap: capacity}
 }
 
+// NewWithSink forwards offers without retaining entries. The sink defines
+// admission semantics; in particular a bridge offer is not durable admission.
+func NewWithSink(sink func(string) error) *Buffer {
+	return &Buffer{sink: sink}
+}
+
 func (b *Buffer) Push(item string) {
+	if b.sink != nil {
+		// A detector invoked by the sink may reenter Push.
+		err := b.sink(item)
+		b.mu.Lock()
+		b.pushed++
+		if err != nil {
+			b.dropped++
+		}
+		b.mu.Unlock()
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if len(b.items) >= b.cap {

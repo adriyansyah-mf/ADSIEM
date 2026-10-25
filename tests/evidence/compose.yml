@@ -1,0 +1,160 @@
+# tests/evidence/compose.yml: disposable backend + Linux agent for the
+# durable evidence fault harness. Run only through tests/evidence/run.py,
+# which picks a unique project name (so volumes and networks are per run),
+# random loopback host ports, and removes exactly that project afterwards.
+# Nothing here touches the development stack (docker-compose.yml).
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+asyncpg://evd:evd@postgres:5432/evd
+  REDIS_URL: redis://redis:6379/0
+  REDIS_STREAM_KEY: siem:logs
+  REDIS_CONSUMER_GROUP: siem-workers
+  ELASTICSEARCH_URL: http://elasticsearch:9200
+  JWT_SECRET: evidence-harness-only-not-a-secret-0123456789abcdef
+  LOG_LEVEL: info
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: evd
+      POSTGRES_USER: evd
+      POSTGRES_PASSWORD: evd
+    volumes:
+      - pg:/var/lib/postgresql/data
+      - ../../db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evd -d evd"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports: ["127.0.0.1::5432"]
+
+  redis:
+    image: redis:7-alpine
+    # No persistence: a restart is a Redis that lost every stream and group.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.enrollment.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - es:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    ports: ["127.0.0.1::9200"]
+
+  api:
+    image: ${EVD_API_IMAGE:-adsiem-evidence-api:local}
+    build:
+      context: ../..
+      dockerfile: server-api/Dockerfile
+    environment:
+      <<: *backend-env
+      AGENT_ENROLLMENT_TOKEN: evidence-harness-enroll
+      EVIDENCE_INGEST_ENABLED: "true"
+      EVIDENCE_GROUP_BUDGET_BYTES: ${EVD_BUDGET_BYTES:-1073741824}
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:8000/health').raise_for_status()\""]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+    ports: ["127.0.0.1::8000"]
+
+  # A second replica: the proxy alternates between the two, so a retry after
+  # a lost response usually lands on the other one.
+  api2:
+    image: ${EVD_API_IMAGE:-adsiem-evidence-api:local}
+    environment:
+      <<: *backend-env
+      AGENT_ENROLLMENT_TOKEN: evidence-harness-enroll
+      EVIDENCE_INGEST_ENABLED: "true"
+      EVIDENCE_GROUP_BUDGET_BYTES: ${EVD_BUDGET_BYTES:-1073741824}
+    depends_on:
+      api: {condition: service_healthy}  # api creates the schema first
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx; httpx.get('http://localhost:8000/health').raise_for_status()\""]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+  worker:
+    image: ${EVD_WORKER_IMAGE:-adsiem-evidence-worker:local}
+    build:
+      context: ../../worker
+    environment:
+      <<: *backend-env
+      DECODERS_DIR: /app/decoders
+      RULES_DIR: /app/rules
+      NINEROUTER_BASE_URL: http://127.0.0.1:9/v1  # no LLM in the harness
+    volumes:
+      - ../../decoders:/app/decoders:ro
+      - ../../rules:/app/rules:ro
+    depends_on:
+      api: {condition: service_healthy}
+
+  proxy:
+    image: python:3.12-alpine
+    command: ["python", "/harness/fault_proxy.py"]
+    environment:
+      UPSTREAMS: http://api:8000,http://api2:8000
+    volumes:
+      - ./:/harness:ro
+      - source:/data:ro  # serves the producer's progress on the control port
+    ports: ["127.0.0.1::8081"]
+    depends_on:
+      api: {condition: service_healthy}
+      api2: {condition: service_healthy}
+
+  agent:
+    image: adsiem-evidence-agent:local
+    build:
+      context: ../../agent
+      dockerfile: ../tests/evidence/agent.Dockerfile
+    hostname: evd-agent
+    # The config arrives in EVD_AGENT_CONFIG and is written once: after
+    # enrollment the agent rewrites it with its identity and token.
+    entrypoint: ["/bin/sh", "-c", "test -s /etc/siem-agent/config.yaml || printf '%s\\n' \"$$EVD_AGENT_CONFIG\" > /etc/siem-agent/config.yaml; exec /usr/local/bin/siem-agent -config /etc/siem-agent/config.yaml"]
+    environment:
+      EVD_AGENT_CONFIG: ${EVD_AGENT_CONFIG:-}
+    volumes:
+      - agent-etc:/etc/siem-agent
+      - agent-state:/var/lib/siem-agent
+      - source:/data
+    depends_on:
+      proxy: {condition: service_started}
+
+  producer:
+    image: python:3.12-alpine
+    command: ["python", "/harness/producer.py"]
+    environment:
+      EVD_RUN: ${EVD_RUN:-local}
+      EVD_COUNT: ${EVD_COUNT:-10000}
+      EVD_RATE: ${EVD_RATE:-500}
+      EVD_START: ${EVD_START:-0}
+    volumes:
+      - ./:/harness:ro
+      - source:/data
+
+volumes:
+  pg:
+  es:
+  agent-etc:
+  agent-state:
+  source:
