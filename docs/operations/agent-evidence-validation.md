@@ -87,6 +87,29 @@ runners, AMD EPYC 7763, 4 vCPUs; Linux ext4 root, Windows NTFS.
 Heap (`HeapAlloc`, garbage included) ranged 3-17 MiB on both; RSS stayed
 under 40 MB, so the hour shows no growth beyond the batch working set.
 
+### One-hour sustained capture with group commit (runs 40173950482, 40173959289)
+
+Same runners and test at `c77ba5c`, now committing every due event at once
+(`AppendBatch`, as tailers and the Event Log source do), at 200 and 1000
+events/s. Lag is the wait from an event being due to its admission.
+
+| | Windows 200/s | Windows 1000/s | Linux 200/s | Linux 1000/s |
+| --- | --- | --- | --- | --- |
+| Achieved rate | **200.0** (was 127.4) | **1000.0** | 200.0 | 1000.0 |
+| Appended / delivered | 720,000 / 719,993 | 3,599,999 / 3,599,967 | 720,001 / 719,991 | 3,600,001 / 3,599,970 |
+| Mean events per commit | 3.2 | 26.9 | 1.0 | 1.16 |
+| Lag p50 / p95 / max | 22 / 65 / 914 ms | 51 / 75 / 1,179 ms | 0.9 / 2.2 / 196 ms | 0.8 / 2.9 / 828 ms |
+| Commit p50 / p95 | 13.1 / 41.3 ms | 25.7 / 41.9 ms | 0.28 / 1.6 ms | 0.25 / 0.51 ms |
+| Process CPU (one core) | 27.6% | 40.0% | 8.2% | 18.7% |
+| Peak RSS | 31 MB | 36 MB | 57 MB | 188 MB |
+| Peak journal on disk | 21 MB | 42 MB | 12 MB | 42 MB |
+| Backlog during the run | 1-11 events | 32-73 events | 3-10 events | 9-52 events |
+
+Commits on NTFS still cost tens of milliseconds, but batches grow with the
+load (27 events per flush at 1000/s), so the rate is held and the backlog
+stays bounded instead of growing. Delivered trails appended only by the last
+batch in flight when the hour ended.
+
 ### Corrections to earlier numbers
 
 - Early append and replay figures were taken on `/tmp`, which is tmpfs here:
@@ -101,19 +124,23 @@ under 40 MB, so the hour shows no growth beyond the batch working set.
 
 ## Open items
 
-1. **Durable throughput on Windows.** One producer reached only 127 ev/s
-   (target 200) with p95 append 38.5 ms during the hour. Each append flushes
-   on its own (`FlushFileBuffers` is slow on NTFS), and each delivered batch
-   publishes the checkpoint twice (attempts, then receipts), each with several
-   flushes, under the lock appends need. A Windows agent is therefore limited
-   to roughly 130 durable events/s in total today: enough for a workstation,
-   not for a busy domain controller's Security log. Revising this (group
-   commit: several frames per flush, still flushed before any admission is
-   reported) is a design change for review. **Rollout on Windows is held on
-   this.**
-2. While blocked on a corrupt journal (before an operator runs the salvage),
+1. While blocked on a corrupt journal (before an operator runs the salvage),
    non-replayable sources (process/network telemetry, local detection) are
    dropped without a count. Files lose nothing as long as they stay on disk.
+2. Lag peaks of about one second appear on both OSes (max 0.8-1.2 s against a
+   p95 of 3-75 ms), most likely segment rotation and checkpoint publication
+   holding the journal lock. Acceptable for log evidence; not yet attributed.
+3. Peak RSS was 188 MB on Linux at 1000 ev/s against 36 MB on Windows at the
+   same rate. The heap rose and fell (10 to 104 to 79 MiB) with no growth
+   trend, so no leak is indicated, but the difference is not explained yet.
+4. Event Log tests on Windows run 2-6x slower since group commit (e.g. 1.2 s
+   to 6.8 s); they pass, and file-tailer tests are unchanged. Not explained yet.
+
+Resolved: Windows durable throughput. Before group commit one producer
+reached only 127 of 200 ev/s on NTFS (p95 append 38.5 ms), because every event
+paid its own flush. Group commit (`c77ba5c`) shares flushes between adjacent
+admissions without changing what an admission means; the hour above holds 200
+and 1000 ev/s on Windows.
 
 Resolved: recovery from a corrupt journal used to be "move it aside", which
 restarted every file at its end and skipped data silently.
@@ -128,9 +155,12 @@ not hold was retried forever (`59d800e`).
 
 ## Gate status
 
-Linux: every row passed. Windows: every correctness row passed in
-40132026970 (the earlier timeout was one test compacting after each of 200
-events: 143 s on NTFS; it now drains in one batch). **Not passed overall**:
+**Passed on both OSes** at `a6f6c4b` (merged in #57): every acceptance row in
+CI and the end-to-end harness (40173942640), native Windows journal, cursor,
+bookmark and salvage tests plus MSI smoke in both modes (40176533352), and the
+one-hour captures at 200 and 1000 ev/s on Linux and Windows.
 
-- Open item 1, Windows durable throughput, needs a decision and a re-measure.
-- Windows `native-evidence` for `4313ed6` (salvage): run 40172461041.
+The feature stays off by default. Turn it on in the order of
+`agent-evidence-recovery.md`: server inbox first, then a few agents, watching
+the Evidence delivery panel, before a wider rollout. Open items 1-4 are not
+correctness gaps; keep watching 2 and 3 in the first deployments.
