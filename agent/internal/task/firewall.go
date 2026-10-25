@@ -13,8 +13,15 @@ func (r *Runner) firewallEngine() (*firewall.Engine, error) {
 	return r.fw, nil
 }
 
+// useNativeBlock: on Windows, block_ip goes through the firewall engine (its
+// anti-lockout guard, persistence and expiry) when the engine enforces rules
+// (firewall.enabled), and through netsh directly otherwise, as before.
+func (r *Runner) useNativeBlock() bool {
+	return nativeFirewall && (r.fw == nil || !r.fw.Enforcing())
+}
+
 func (r *Runner) handleBlockIP(params map[string]any) (any, error) {
-	if nativeFirewall {
+	if r.useNativeBlock() {
 		rule, err := firewall.ParseRule(params)
 		if err != nil {
 			return nil, err
@@ -51,7 +58,7 @@ func (r *Runner) handleBlockIP(params map[string]any) (any, error) {
 }
 
 func (r *Runner) handleUnblockIP(params map[string]any) (any, error) {
-	if nativeFirewall {
+	if r.useNativeBlock() {
 		rule, err := firewall.ParseRule(params)
 		if err != nil {
 			return nil, fmt.Errorf("a valid ip is required: %w", err)

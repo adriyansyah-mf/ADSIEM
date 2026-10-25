@@ -10,9 +10,9 @@ import (
 	"github.com/siem-platform/agent/internal/firewall"
 )
 
-// The firewall engine's backend is nftables, which Windows doesn't have (it
-// would degrade to noop and silently not isolate), so on Windows the
-// isolate/block tasks use Windows Defender Firewall via netsh
+// Isolation on Windows always uses Windows Defender Firewall directly (it
+// blocks both directions, stronger than the engine's inbound-only isolate);
+// block_ip uses the engine (netsh backend) when it enforces, else netsh here
 // (isolation_windows.go). Rules are parsed with the same firewall.ParseRule.
 const nativeFirewall = true
 

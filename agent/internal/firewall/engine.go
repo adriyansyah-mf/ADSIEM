@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -69,17 +70,20 @@ func New(opts Options) *Engine {
 	default:
 		e.backend = selectBackend(opts.Backend)
 		if !e.backend.Available() {
-			e.degraded = fmt.Sprintf("backend %s unavailable (no nft binary or CAP_NET_ADMIN)", e.backend.Name())
+			e.degraded = fmt.Sprintf("backend %s unavailable (nft: no binary or CAP_NET_ADMIN; netsh: not elevated)", e.backend.Name())
 			slog.Warn("firewall gate degraded to noop", "backend", e.backend.Name())
 			e.backend = NewNoop(false)
 		} else if err := e.backend.Ensure(); err != nil {
-			e.degraded = fmt.Sprintf("cannot create nft table: %v", err)
+			e.degraded = fmt.Sprintf("cannot prepare %s backend: %v", e.backend.Name(), err)
 			slog.Warn("firewall gate degraded to noop", "err", err)
 			e.backend = NewNoop(false)
 		}
 	}
 
 	e.replayState()
+	if _, noop := e.backend.(*NoopBackend); !noop {
+		go e.sweepLoop()
+	}
 	return e
 }
 
@@ -87,12 +91,64 @@ func selectBackend(name string) Backend {
 	switch name {
 	case "noop":
 		return NewNoop(false)
-	case "nft", "auto", "":
+	case "nft":
+		return NewNft()
+	case "netsh":
+		return NewNetsh()
+	case "auto", "":
+		if runtime.GOOS == "windows" {
+			return NewNetsh()
+		}
 		return NewNft()
 	default:
-		slog.Warn("unknown firewall backend, falling back to nft", "backend", name)
-		return NewNft()
+		slog.Warn("unknown firewall backend, falling back to the platform default", "backend", name)
+		return selectBackend("auto")
 	}
+}
+
+// sweepEvery bounds how long an expired rule outlives its TTL.
+const sweepEvery = 15 * time.Second
+
+func (e *Engine) sweepLoop() {
+	t := time.NewTicker(sweepEvery)
+	defer t.Stop()
+	for now := range t.C {
+		e.Sweep(now)
+	}
+}
+
+// Sweep removes rules whose TTL has passed. Windows firewall rules never
+// expire on their own; nft elements do, but the engine must still forget them
+// or they keep counting against the local detection cap (BlockedEntries).
+func (e *Engine) Sweep(now time.Time) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	removed := 0
+	for id, r := range e.applied {
+		if r.TTL <= 0 || now.Before(r.CreatedAt.Add(r.TTL)) {
+			continue
+		}
+		if err := e.backend.Remove(r); err != nil {
+			slog.Warn("expired firewall rule not removed, retrying later", "rule", id, "err", err)
+			continue
+		}
+		delete(e.applied, id)
+		e.emit("firewall_rule_expired", r, "")
+		removed++
+	}
+	if removed > 0 {
+		e.persist()
+	}
+	return removed
+}
+
+// Enforcing reports whether rules really reach a firewall (not disabled,
+// dry-run or degraded to noop).
+func (e *Engine) Enforcing() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, noop := e.backend.(*NoopBackend)
+	return !noop
 }
 
 func (e *Engine) Status() map[string]any {

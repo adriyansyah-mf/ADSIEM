@@ -48,6 +48,25 @@ func DefaultRules() []Rule {
 			enabled:   false,
 		},
 		{
+			// Windows Security 4625 (failed logon) over the network (LogonType 3:
+			// SMB, WinRM...) or RDP (10), as winevent.FormatXML writes it.
+			// IpAddress may be IPv4-mapped IPv6. A higher threshold than SSH:
+			// mistyped RDP/NLA passwords are common.
+			Key:       "windows_logon_bruteforce",
+			LogType:   "windows_security",
+			Match:     regexp.MustCompile(`^EventID=4625 .*\bLogonType="(?:3|10)"`),
+			GroupExpr: regexp.MustCompile(`\bIpAddress="(?:::ffff:)?(\d{1,3}(?:\.\d{1,3}){3})"`),
+			Threshold: 10,
+			Window:    60 * time.Second,
+			Cooldown:  10 * time.Minute,
+			Action:    actionBlock,
+			BlockFor:  10 * time.Minute,
+			Title:     "Local: Windows logon brute force (RDP/SMB)",
+			Severity:  SeverityHigh,
+			Source:    "windows_security",
+			enabled:   false,
+		},
+		{
 			Key:       "webshell_upload",
 			LogType:   "apache_access",
 			Match: regexp.MustCompile(`(?i)(upload|tmp|files?|images?|shell|cmd|backdoor)[^\s"]*\.(php|jsp|ashx|phtml)\b`),
