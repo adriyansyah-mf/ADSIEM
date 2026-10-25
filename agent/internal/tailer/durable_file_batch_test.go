@@ -22,7 +22,10 @@ func burst(n int) string {
 // order, and the cursor ends just past the last line.
 func TestDurableTailAdmitsABurstInGroupCommits(t *testing.T) {
 	env := newTailEnv(t)
-	env.opts.MaxBytes = 4 << 20
+	// One segment holds the burst: this test is about grouping lines. Batches
+	// that cross segments are journal_batch_test's; seven rotations of 64 KiB
+	// segments took most of 7.6 s on a Windows runner.
+	env.opts.MaxBytes, env.opts.SegmentBytes = 4<<20, 1<<20
 	env.restart()
 	path := filepath.Join(t.TempDir(), "app.log")
 	writeFile(t, path, "")

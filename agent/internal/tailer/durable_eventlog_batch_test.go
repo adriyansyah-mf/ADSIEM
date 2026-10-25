@@ -3,6 +3,7 @@ package tailer
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 // An EvtNext batch is admitted in one group commit (a busy Security log is
@@ -18,8 +19,15 @@ func TestDurableEventLogAdmitsABatchInGroupCommits(t *testing.T) {
 	for i := range records {
 		records[i] = i + 1
 	}
+	began := time.Now()
 	ch.write(records...)
-	waitFor(t, "49 renderable events", func() bool { return len(r.cap.lines()) == 49 })
+	for len(r.cap.lines()) < 49 { // Windows runners are slow: allow time, report progress
+		if time.Since(began) > time.Minute {
+			t.Fatalf("after %s: %d of 49 events", time.Since(began), len(r.cap.lines()))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Logf("49 events admitted in %s", time.Since(began))
 	r.stop(t)
 
 	got := r.cap.lines()
