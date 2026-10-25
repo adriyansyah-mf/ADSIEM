@@ -5,6 +5,7 @@ package etw
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -37,15 +38,26 @@ func (r *recorder) find(match func(*Event) bool) *Event {
 	return nil
 }
 
+// dump logs one line per property: the Windows job only shows lines that
+// carry the test file prefix.
 func dump(t *testing.T, label string, e *Event) {
 	t.Helper()
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s: provider=%s %q id=%d opcode=%d version=%d pid=%d truncated=%v\n",
+	t.Logf("%s: provider=%s %q id=%d opcode=%d version=%d pid=%d truncated=%v",
 		label, e.Provider, e.ProviderName, e.ID, e.Opcode, e.Version, e.PID, e.Truncated)
 	for _, p := range e.Props {
-		fmt.Fprintf(&b, "    %s = %s\n", p.Name, p.Value)
+		t.Logf("%s:   %s = %s", label, p.Name, p.Value)
 	}
-	t.Log(b.String())
+}
+
+// numeric reports whether property name of e holds n (TDH formats MOF ids
+// in hex, manifest ones in decimal).
+func numeric(e *Event, name string, n uint32) bool {
+	v, ok := e.Get(name)
+	if !ok {
+		return false
+	}
+	got, err := strconv.ParseUint(v, 0, 32)
+	return err == nil && uint32(got) == n
 }
 
 // TestProcessStartSources starts both candidate sources, runs a process with
@@ -77,11 +89,25 @@ func TestProcessStartSources(t *testing.T) {
 	var fromKernel, fromProvider *Event
 	for time.Now().Before(deadline) && (fromKernel == nil || fromProvider == nil) {
 		time.Sleep(500 * time.Millisecond)
-		fromKernel = kernelProc.find(func(e *Event) bool { v, _ := e.Get("ProcessId"); return e.Opcode == 1 && v == fmt.Sprint(pid) })
-		fromProvider = user.find(func(e *Event) bool { v, _ := e.Get("ProcessID"); return e.ID == 1 && v == fmt.Sprint(pid) })
+		fromKernel = kernelProc.find(func(e *Event) bool { return e.Opcode == 1 && numeric(e, "ProcessId", pid) })
+		fromProvider = user.find(func(e *Event) bool { return e.ID == 1 && numeric(e, "ProcessID", pid) })
 	}
 	t.Logf("kernel session: %d events, %d decode errors; provider session: %d events, %d decode errors",
 		len(kernelProc.events), ks.DecodeErrors(), len(user.events), us.DecodeErrors())
+	kernelProc.mu.Lock()
+	opcodes := map[uint8]int{}
+	for _, e := range kernelProc.events {
+		opcodes[e.Opcode]++
+	}
+	var sample *Event
+	if len(kernelProc.events) > 0 {
+		sample = kernelProc.events[len(kernelProc.events)-1]
+	}
+	kernelProc.mu.Unlock()
+	t.Logf("kernel session events by opcode: %v", opcodes)
+	if fromKernel == nil && sample != nil {
+		dump(t, "kernel logger sample (no start matched)", sample)
+	}
 	if fromKernel != nil {
 		dump(t, "kernel logger process start", fromKernel)
 	}
