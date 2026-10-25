@@ -47,6 +47,7 @@ agent/
 | Legacy task collectors | `internal/task/collectors.go`, `runner.go` | fixed task types via heartbeat (isolate/block-IP still use this path) |
 | Windows isolate/block-IP | `internal/task/isolation_windows.go` | `netsh advfirewall` (`SIEM-*` rules); the nft engine has no Windows backend |
 | YARA scans | `internal/task/yara.go` | |
+| Self-update | `internal/update`, `cmd/agent/update.go`, `cmd/siem-update-sign` | installs the heartbeat's offer only if a trusted ed25519 key (`-X main.UpdateKeys` + `update.trusted_keys`) signed its manifest and the download matches it; deb/rpm in a `systemd-run` transient unit, MSI detached; outcome in `update/state.json` across the restart. Operator guide: `docs/operations/agent-self-update.md` |
 
 ## CONVENTIONS
 
@@ -61,10 +62,13 @@ agent/
 - **Local rules must group by a regex, not a kv field, for syslog sources.** `auth.log` and Apache `access.log` are free text — `GroupBy: "host"` silently never matches and the rule looks installed but dead. `GroupExpr` exists for exactly this; `internal/detect/defaults_test.go` pins the patterns against real lab lines.
 - **Local detection observes before delivery**, in `senderLoop`, so it keeps working while the server is unreachable. Moving that call onto the success path silently disables offline detection.
 - **Local blocks reuse the firewall guard**: a rule that would block the SIEM IP, gateway or loopback is refused and the detection records `block_error` instead of blocking.
+- **An installer must never be the agent's child on Linux**: the package's prerm stops `siem-agent.service`, which kills its whole cgroup, a `systemd-run --wait` client included. The transient unit is only started; its wrapper writes `install.result` and restarts the service after a failure. Never delete the downloaded package after a failed wait: dpkg may still be reading it.
+- **Self-update keeps the package manager's view right**: the deb keeps the token-bearing `config.yaml` with `--force-confold`; the MSI allows downgrades (`AllowDowngrades`) because a rollback is a downgrade.
 - **Undelivered entries are spilled to disk** and replayed both at boot and when a send succeeds after a failure; without the reconnect replay they stay stranded until restart.
 - **Config mutation is write-back**: after successful enrollment the agent rewrites `config.yaml`; log sources/FIM paths are then server-driven, not config-driven.
 - **Buffer contract**: `Pop()` returns `(entry, ok)`; sender must re-`Push` on 5xx.
 - Module path is `github.com/siem-platform/agent`; deps are deliberately minimal (`cilium/ebpf`, `fsnotify`, `yaml.v3`). Firewall shells out to `nft`, no netlink library.
+- **Do not trust an update key from the server**: keys come only from the build (`UPDATE_KEYS`) or the local config, never from enrollment or a heartbeat — otherwise the server could sign its own binaries.
 
 ## ANTI-PATTERNS
 

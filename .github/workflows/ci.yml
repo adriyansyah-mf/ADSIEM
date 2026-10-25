@@ -122,7 +122,7 @@ jobs:
 
       - name: Upgrade and roll back through the service
         run: |
-          sudo python3 tests/linux/update_deb.py --old agent/dist/packages/siem-agent_9.0.0_amd64.deb \
+          sudo python3 -u tests/linux/update_deb.py --old agent/dist/packages/siem-agent_9.0.0_amd64.deb \
             --new agent/dist/packages/siem-agent_9.0.1_amd64.deb --signer agent/siem-update-sign
 
   # End-to-end durable evidence under faults (tests/evidence/run.py): a

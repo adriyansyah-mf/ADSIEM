@@ -26,13 +26,21 @@ $port = 18090
 $oldVersion = ([IO.Path]::GetFileName($Old) -replace '^siem-agent-(.+)-x64\.msi$', '$1')
 $newVersion = ([IO.Path]::GetFileName($New) -replace '^siem-agent-(.+)-x64\.msi$', '$1')
 
+# Out-Host: Fail runs inside functions whose output is assigned, which would
+# swallow anything written to the pipeline.
 function Show-Diagnostics {
-    Write-Host "---- agent.log"; Get-Content (Join-Path $dataDir "agent.log") -Tail 80 -ErrorAction SilentlyContinue
-    Write-Host "---- update state"; Get-Content (Join-Path $dataDir "update\state.json") -ErrorAction SilentlyContinue
-    Write-Host "---- last heartbeats"; Get-Content (Join-Path $mockOut "heartbeats.jsonl") -Tail 5 -ErrorAction SilentlyContinue
-    Write-Host "---- update install.log (errors)"
-    Select-String -Path (Join-Path $dataDir "update\install.log") -Pattern "error|failed|return value 3" -ErrorAction SilentlyContinue |
-        Select-Object -Last 30 | ForEach-Object { $_.Line }
+    & {
+        "---- agent.log"; Get-Content (Join-Path $dataDir "agent.log") -Tail 80 -ErrorAction SilentlyContinue
+        "---- update state"; Get-Content (Join-Path $dataDir "update\state.json") -ErrorAction SilentlyContinue
+        "---- update dir"; Get-ChildItem -Recurse (Join-Path $dataDir "update") -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName) $($_.Length)" }
+        "---- last heartbeats"; Get-Content (Join-Path $mockOut "heartbeats.jsonl") -Tail 5 -ErrorAction SilentlyContinue
+        "---- downloads"; Get-Content (Join-Path $mockOut "downloads.jsonl") -ErrorAction SilentlyContinue
+        "---- msiexec processes"; Get-Process msiexec -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Id) $($_.StartTime)" }
+        "---- service"; Get-Service SIEMAgent -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Status)" }
+        "---- update install.log (errors)"
+        Select-String -Path (Join-Path $dataDir "update\install.log") -Pattern "error|failed|return value 3" -ErrorAction SilentlyContinue |
+            Select-Object -Last 30 | ForEach-Object { $_.Line }
+    } | Out-Host
 }
 
 function Fail([string]$msg) { Show-Diagnostics; throw "UPDATE TEST FAILED: $msg" }
@@ -75,6 +83,8 @@ New-Item -ItemType Directory -Force -Path $pkgDir, $mockOut | Out-Null
 Copy-Item $Old, "$Old.sig", $New, "$New.sig" $pkgDir
 $env:MOCK_UPDATE_DIR = $pkgDir
 $env:MOCK_FLOW = ""
+# one quiet source: event log shipping would bury the update in the mock's request log
+$env:MOCK_SOURCES = '[{"path": "C:\\siem-update-test-none.log", "log_type": "test", "is_enabled": true}]'
 $mock = Start-Process python -PassThru -NoNewWindow -ArgumentList @("tests\windows\mock_siem.py", $port, "`"$mockOut`"")
 try {
     Start-Sleep 2

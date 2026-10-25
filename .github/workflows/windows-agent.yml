@@ -132,6 +132,18 @@ jobs:
           ./tests/windows/update-msi.ps1 -Old agent/dist/packages/siem-agent-9.0.0-x64.msi `
             -New agent/dist/packages/siem-agent-9.0.1-x64.msi -Signer agent/siem-update-sign.exe
 
+      - name: Keep the agent's update files
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-update-diagnostics
+          path: |
+            C:\ProgramData\SIEMAgent\update
+            C:\ProgramData\SIEMAgent\agent.log
+            ${{ runner.temp }}\siem-update\*.log
+            ${{ runner.temp }}\siem-update\mock\heartbeats.jsonl
+          if-no-files-found: warn
+
   # Durable journal capture on each native OS (agent/internal/evidence/soak_test.go),
   # only when dispatched with soak_duration: it takes that long.
   soak:
