@@ -163,6 +163,13 @@ def _windows_sources() -> list[Source]:
                           raw_kv=True, aliases=_WIN_ALIASES))
         out.append(Source("windows", None, category, log_types=(log_type,),
                           when=(("EventID", "eq", ids), *extra), raw_kv=True, aliases=_WIN_ALIASES))
+    # The agent's own ETW sensor (agent/internal/winsensor), when Sysmon is
+    # absent: Sysmon's event IDs and field names, its own log types.
+    for category, log_type, event_id in (("process_creation", "windows_etw_process", "1"),
+                                         ("network_connection", "windows_etw_network", "3"),
+                                         ("dns_query", "windows_etw_dns", "22")):
+        out.append(Source("windows", None, category, log_types=(log_type,),
+                          when=(("EventID", "eq", (event_id,)),), raw_kv=True, aliases=_WIN_ALIASES))
     return out
 
 
