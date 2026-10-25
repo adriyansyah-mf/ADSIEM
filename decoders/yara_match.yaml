@@ -1,0 +1,23 @@
+# On-access YARA match from the agent (agent/internal/yarascan): a new or
+# changed file in a risky directory matched one of the server's YARA
+# rules. severity comes from the rule's meta (severity, or score 0-100).
+name: yara_match
+log_type: yara_match
+type: kv
+priority: 3
+enabled: true
+match: 'event=yara_match '
+fields:
+  yara.rule: rule
+  yara.namespace: namespace
+  yara.severity: severity
+  yara.tags: tags
+  yara.strings: strings
+  yara.trigger: trigger
+  yara.description: description
+  file.path: file
+  file.hash.sha256: sha256
+  file.size: size
+static_fields:
+  event.category: malware
+  event.action: yara_match

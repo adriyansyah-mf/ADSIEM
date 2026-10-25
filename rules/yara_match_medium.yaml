@@ -1,0 +1,15 @@
+title: YARA Rule Matched On Endpoint (Medium)
+id: rule-yara-match-medium
+description: A file the agent saw being created or changed in a temp, download or web directory matched a medium-severity YARA rule (yara.rule names it, file.path and file.hash.sha256 identify the file).
+logsource:
+  product: yara
+  service: match
+detection:
+  selection:
+    event.action: yara_match
+    yara.severity: medium
+  condition: selection
+level: medium
+tags:
+  - attack.execution
+  - attack.t1204

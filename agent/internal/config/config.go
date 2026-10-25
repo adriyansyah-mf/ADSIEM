@@ -61,6 +61,20 @@ type DetectConfig struct {
 	MaxBlocksPerMin int      `yaml:"max_blocks_per_minute"`
 }
 
+// YaraConfig controls on-access YARA scanning: new and changed files in
+// risky directories are scanned with the rules the server distributes.
+// With no rules on the server nothing is scanned.
+type YaraConfig struct {
+	// Disabled turns on-access scanning off; on-demand scans (tasks and
+	// live response) still run.
+	Disabled bool `yaml:"disabled"`
+	// WatchPaths replaces the default directories; globs such as
+	// C:\Users\*\Downloads are expanded every few minutes.
+	WatchPaths []string `yaml:"watch_paths"`
+	// MaxFileSizeMB skips larger files (default 32).
+	MaxFileSizeMB int64 `yaml:"max_file_size_mb"`
+}
+
 type BufferConfig struct {
 	SpillPath string `yaml:"spill_path"`
 }
@@ -87,6 +101,7 @@ type Config struct {
 	Netwatch     NetwatchConfig     `yaml:"netwatch"`
 	ETW          ETWConfig          `yaml:"etw"`
 	Detect       DetectConfig       `yaml:"detect"`
+	Yara         YaraConfig         `yaml:"yara"`
 	Buffer       BufferConfig       `yaml:"buffer"`
 	Evidence     EvidenceConfig     `yaml:"evidence"`
 	LiveResponse LiveResponseConfig `yaml:"live_response"`
