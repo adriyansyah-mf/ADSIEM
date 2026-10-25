@@ -78,6 +78,10 @@ func TestStepBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The default budget is seconds of work, much more under -race; a
+	// smaller one shows the same thing quickly.
+	defer func(b int64) { stepBudget = b }(stepBudget)
+	stepBudget = 5_000_000
 	data := make([]byte, 4<<20)
 	for i := range data {
 		data[i] = 'a'
@@ -90,7 +94,7 @@ func TestStepBudget(t *testing.T) {
 	if len(res.Warnings) == 0 {
 		t.Fatal("expected a budget warning")
 	}
-	if d := time.Since(start); d > 30*time.Second {
+	if d := time.Since(start); d > 10*time.Second {
 		t.Fatalf("budget not enforced: scan took %v", d)
 	}
 }
