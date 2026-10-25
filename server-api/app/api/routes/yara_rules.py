@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
 from app.models.models import Agent, AgentTask, YaraRule
 from app.schemas.schemas import YaraRuleCreate, YaraRuleOut, YaraScanRequest, AgentTaskOut
+from app.services import yara_ruleset
 
 router = APIRouter(prefix="/api/yara-rules", tags=["yara"])
 
@@ -69,6 +70,7 @@ async def create_rule(
     r = YaraRule(**body.model_dump())
     db.add(r)
     await db.commit()
+    yara_ruleset.invalidate()
     await db.refresh(r)
     return r
 
@@ -86,6 +88,7 @@ async def update_rule(
     for k, v in body.model_dump().items():
         setattr(r, k, v)
     await db.commit()
+    yara_ruleset.invalidate()
     await db.refresh(r)
     return r
 
@@ -101,6 +104,7 @@ async def toggle_rule(
         raise HTTPException(404, "Rule not found")
     await db.execute(update(YaraRule).where(YaraRule.id == rule_id).values(is_enabled=not r.is_enabled))
     await db.commit()
+    yara_ruleset.invalidate()
     await db.refresh(r)
     return r
 
@@ -116,6 +120,7 @@ async def delete_rule(
         raise HTTPException(404, "Rule not found")
     await db.delete(r)
     await db.commit()
+    yara_ruleset.invalidate()
 
 
 @router.post("/scan", response_model=AgentTaskOut, status_code=201)
@@ -147,6 +152,7 @@ async def trigger_scan(
     task = AgentTask(agent_id=body.agent_id, task_type="yara_scan", params=params, created_by=user.id)
     db.add(task)
     await db.commit()
+    yara_ruleset.invalidate()
     await db.refresh(task)
     return task
 
@@ -168,4 +174,5 @@ async def seed_builtins(
             db.add(YaraRule(**r))
             added += 1
     await db.commit()
+    yara_ruleset.invalidate()
     return {"added": added}

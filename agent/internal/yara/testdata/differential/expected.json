@@ -1,0 +1,7242 @@
+{
+ "cases": {
+  "comments": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        1
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "cond-arith": {
+   "results": [
+    [
+     {
+      "rule": "a1",
+      "strings": []
+     },
+     {
+      "rule": "a2",
+      "strings": []
+     },
+     {
+      "rule": "a3",
+      "strings": []
+     },
+     {
+      "rule": "a4",
+      "strings": []
+     },
+     {
+      "rule": "a5",
+      "strings": []
+     },
+     {
+      "rule": "a6",
+      "strings": []
+     },
+     {
+      "rule": "a7",
+      "strings": []
+     },
+     {
+      "rule": "a8",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "a1",
+      "strings": []
+     },
+     {
+      "rule": "a2",
+      "strings": []
+     },
+     {
+      "rule": "a3",
+      "strings": []
+     },
+     {
+      "rule": "a4",
+      "strings": []
+     },
+     {
+      "rule": "a5",
+      "strings": []
+     },
+     {
+      "rule": "a6",
+      "strings": []
+     },
+     {
+      "rule": "a7",
+      "strings": []
+     },
+     {
+      "rule": "a8",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "cond-at-in": {
+   "results": [
+    [
+     {
+      "rule": "at3",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "in2",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "in1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        7,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "in2",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        7,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "cnt",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        2,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "in1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        2,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "in2",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        2,
+        2
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "cond-bool-compare-error": {
+   "error": "line 1: syntax error, unexpected ==, expecting '}'"
+  },
+  "cond-booleans": {
+   "results": [
+    [
+     {
+      "rule": "b1",
+      "strings": []
+     },
+     {
+      "rule": "b2",
+      "strings": []
+     },
+     {
+      "rule": "b3",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "b1",
+      "strings": []
+     },
+     {
+      "rule": "b3",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "cond-count-offset-length": {
+   "results": [
+    [
+     {
+      "rule": "c",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "u",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "u",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "cond-divzero-const": {
+   "error": "line 1: division by zero"
+  },
+  "cond-divzero-runtime": {
+   "results": [
+    [
+     {
+      "rule": "f",
+      "strings": []
+     }
+    ],
+    []
+   ]
+  },
+  "cond-for-in": {
+   "results": [
+    [
+     {
+      "rule": "r1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "r2",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "r4",
+      "strings": []
+     },
+     {
+      "rule": "r5",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "r1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "r2",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "r4",
+      "strings": []
+     },
+     {
+      "rule": "r5",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "r3",
+      "strings": []
+     },
+     {
+      "rule": "r4",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "r3",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "r1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "r3",
+      "strings": []
+     },
+     {
+      "rule": "r4",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "cond-for-in-empty-runtime": {
+   "results": [
+    []
+   ]
+  },
+  "cond-for-of": {
+   "results": [
+    [
+     {
+      "rule": "f1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ],
+       [
+        "$b",
+        9,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "f2",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ],
+       [
+        "$b",
+        9,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "f3",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        6,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ],
+       [
+        "$b",
+        9,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "f1",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$b",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "f3",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$b",
+        0,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "f3",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "f1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "f3",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "f4",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "cond-int-read": {
+   "results": [
+    [
+     {
+      "rule": "be",
+      "strings": []
+     },
+     {
+      "rule": "mz",
+      "strings": []
+     },
+     {
+      "rule": "oob",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "oob",
+      "strings": []
+     },
+     {
+      "rule": "u32",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "oob",
+      "strings": []
+     },
+     {
+      "rule": "s16",
+      "strings": []
+     },
+     {
+      "rule": "s32be",
+      "strings": []
+     },
+     {
+      "rule": "s8",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "oob",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "cond-nested-loops": {
+   "results": [
+    [
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        0,
+        1
+       ],
+       [
+        "$b",
+        1,
+        1
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        1,
+        1
+       ],
+       [
+        "$a",
+        3,
+        1
+       ],
+       [
+        "$a",
+        7,
+        1
+       ],
+       [
+        "$b",
+        0,
+        1
+       ],
+       [
+        "$b",
+        5,
+        1
+       ],
+       [
+        "$b",
+        8,
+        1
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "cond-of": {
+   "results": [
+    [
+     {
+      "rule": "any1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "any1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "pct",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "all1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ],
+       [
+        "$c",
+        6,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "any1",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ],
+       [
+        "$c",
+        6,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "pct",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ],
+       [
+        "$c",
+        6,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "two",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$c",
+        6,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "any1",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$c",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "pct",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$c",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "two",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$c",
+        0,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "none1",
+      "strings": []
+     },
+     {
+      "rule": "wild",
+      "strings": [
+       [
+        "$x1",
+        0,
+        2
+       ],
+       [
+        "$x2",
+        3,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "none1",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "none1",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "cond-of-at-in": {
+   "results": [
+    [
+     {
+      "rule": "at0",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "in5",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$b",
+        3,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "at0",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$b",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "in5",
+      "strings": [
+       [
+        "$a",
+        3,
+        2
+       ],
+       [
+        "$b",
+        0,
+        2
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "cond-range-const-error": {
+   "error": "line 1: invalid value in condition: \"range lower bound must be less than upper bound\""
+  },
+  "cond-strings-ops": {
+   "results": [
+    [
+     {
+      "rule": "s1",
+      "strings": []
+     },
+     {
+      "rule": "s2",
+      "strings": []
+     },
+     {
+      "rule": "s3",
+      "strings": []
+     },
+     {
+      "rule": "s4",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "cond-undefined": {
+   "results": [
+    [
+     {
+      "rule": "u2",
+      "strings": []
+     },
+     {
+      "rule": "u3",
+      "strings": []
+     },
+     {
+      "rule": "u4",
+      "strings": []
+     },
+     {
+      "rule": "u7",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "elf-functions": {
+   "results": [
+    [
+     {
+      "rule": "counts",
+      "strings": []
+     },
+     {
+      "rule": "ep",
+      "strings": []
+     },
+     {
+      "rule": "exec",
+      "strings": []
+     },
+     {
+      "rule": "load",
+      "strings": []
+     },
+     {
+      "rule": "text",
+      "strings": []
+     },
+     {
+      "rule": "x64",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "counts",
+      "strings": []
+     },
+     {
+      "rule": "dyn",
+      "strings": []
+     },
+     {
+      "rule": "ep",
+      "strings": []
+     },
+     {
+      "rule": "load",
+      "strings": []
+     },
+     {
+      "rule": "text",
+      "strings": []
+     },
+     {
+      "rule": "x64",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "counts",
+      "strings": []
+     },
+     {
+      "rule": "dyn",
+      "strings": []
+     },
+     {
+      "rule": "dynsym",
+      "strings": []
+     },
+     {
+      "rule": "ep",
+      "strings": []
+     },
+     {
+      "rule": "load",
+      "strings": []
+     },
+     {
+      "rule": "needed",
+      "strings": []
+     },
+     {
+      "rule": "sym",
+      "strings": []
+     },
+     {
+      "rule": "text",
+      "strings": []
+     },
+     {
+      "rule": "x64",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "counts",
+      "strings": []
+     },
+     {
+      "rule": "rel",
+      "strings": []
+     },
+     {
+      "rule": "text",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "not_elf",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "not_elf",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "hash-functions": {
+   "results": [
+    [
+     {
+      "rule": "crc",
+      "strings": []
+     },
+     {
+      "rule": "empty",
+      "strings": []
+     },
+     {
+      "rule": "md5",
+      "strings": []
+     },
+     {
+      "rule": "md5s",
+      "strings": []
+     },
+     {
+      "rule": "oob",
+      "strings": []
+     },
+     {
+      "rule": "part",
+      "strings": []
+     },
+     {
+      "rule": "sha1",
+      "strings": []
+     },
+     {
+      "rule": "sha256",
+      "strings": []
+     },
+     {
+      "rule": "sum",
+      "strings": []
+     },
+     {
+      "rule": "trunc",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "empty",
+      "strings": []
+     },
+     {
+      "rule": "md5s",
+      "strings": []
+     },
+     {
+      "rule": "oob",
+      "strings": []
+     },
+     {
+      "rule": "part",
+      "strings": []
+     },
+     {
+      "rule": "trunc",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "md5s",
+      "strings": []
+     },
+     {
+      "rule": "oob",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "hex-alternation": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        5,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ],
+       [
+        "$a",
+        5,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "hex-comments": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "hex-errors-leading-jump": {
+   "error": "line 1: invalid hex string \"$a\": syntax error"
+  },
+  "hex-errors-trailing-jump": {
+   "error": "line 1: invalid hex string \"$a\": syntax error"
+  },
+  "hex-jumps": {
+   "results": [
+    [
+     {
+      "rule": "j1",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "rule": "j2",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "rule": "j3",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "rule": "j4",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "rule": "j5",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "j2",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "j4",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "j5",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "j4",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "j5",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "j3",
+      "strings": [
+       [
+        "$a",
+        0,
+        8
+       ]
+      ]
+     },
+     {
+      "rule": "j4",
+      "strings": [
+       [
+        "$a",
+        0,
+        8
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "j2",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ],
+       [
+        "$a",
+        6,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "j3",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     },
+     {
+      "rule": "j4",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ],
+       [
+        "$a",
+        6,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "j5",
+      "strings": [
+       [
+        "$a",
+        6,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "j2",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "j3",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     },
+     {
+      "rule": "j4",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "j5",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "hex-large-jump": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        54
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "hex-not": {
+   "results": [
+    [],
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "m",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "m",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "hex-plain": {
+   "results": [
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [],
+    []
+   ]
+  },
+  "hex-wildcards": {
+   "results": [
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "m",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "m",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        3,
+        2
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "math-functions": {
+   "results": [
+    [
+     {
+      "rule": "ab",
+      "strings": []
+     },
+     {
+      "rule": "c1",
+      "strings": []
+     },
+     {
+      "rule": "c2",
+      "strings": []
+     },
+     {
+      "rule": "d2",
+      "strings": []
+     },
+     {
+      "rule": "e2",
+      "strings": []
+     },
+     {
+      "rule": "e3",
+      "strings": []
+     },
+     {
+      "rule": "m2",
+      "strings": []
+     },
+     {
+      "rule": "mm",
+      "strings": []
+     },
+     {
+      "rule": "p2",
+      "strings": []
+     },
+     {
+      "rule": "s2",
+      "strings": []
+     },
+     {
+      "rule": "ts",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "ab",
+      "strings": []
+     },
+     {
+      "rule": "c1",
+      "strings": []
+     },
+     {
+      "rule": "c2",
+      "strings": []
+     },
+     {
+      "rule": "c3",
+      "strings": []
+     },
+     {
+      "rule": "d2",
+      "strings": []
+     },
+     {
+      "rule": "e2",
+      "strings": []
+     },
+     {
+      "rule": "e3",
+      "strings": []
+     },
+     {
+      "rule": "ir",
+      "strings": []
+     },
+     {
+      "rule": "m2",
+      "strings": []
+     },
+     {
+      "rule": "mm",
+      "strings": []
+     },
+     {
+      "rule": "p2",
+      "strings": []
+     },
+     {
+      "rule": "s2",
+      "strings": []
+     },
+     {
+      "rule": "ts",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "ab",
+      "strings": []
+     },
+     {
+      "rule": "c1",
+      "strings": []
+     },
+     {
+      "rule": "d1",
+      "strings": []
+     },
+     {
+      "rule": "d2",
+      "strings": []
+     },
+     {
+      "rule": "e2",
+      "strings": []
+     },
+     {
+      "rule": "e3",
+      "strings": []
+     },
+     {
+      "rule": "ir",
+      "strings": []
+     },
+     {
+      "rule": "m2",
+      "strings": []
+     },
+     {
+      "rule": "mm",
+      "strings": []
+     },
+     {
+      "rule": "p2",
+      "strings": []
+     },
+     {
+      "rule": "s2",
+      "strings": []
+     },
+     {
+      "rule": "ts",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "ab",
+      "strings": []
+     },
+     {
+      "rule": "c1",
+      "strings": []
+     },
+     {
+      "rule": "d1",
+      "strings": []
+     },
+     {
+      "rule": "d2",
+      "strings": []
+     },
+     {
+      "rule": "e2",
+      "strings": []
+     },
+     {
+      "rule": "e3",
+      "strings": []
+     },
+     {
+      "rule": "ir",
+      "strings": []
+     },
+     {
+      "rule": "m2",
+      "strings": []
+     },
+     {
+      "rule": "mm",
+      "strings": []
+     },
+     {
+      "rule": "p2",
+      "strings": []
+     },
+     {
+      "rule": "s2",
+      "strings": []
+     },
+     {
+      "rule": "ts",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "math-uniform": {
+   "results": [
+    [
+     {
+      "rule": "d",
+      "strings": []
+     },
+     {
+      "rule": "e",
+      "strings": []
+     },
+     {
+      "rule": "m",
+      "strings": []
+     },
+     {
+      "rule": "p",
+      "strings": []
+     },
+     {
+      "rule": "s",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "modifier-errors": {
+   "error": "line 1: invalid modifier combination: xor nocase"
+  },
+  "modifier-errors-base64": {
+   "error": "line 1: invalid modifier combination: base64 fullword"
+  },
+  "module-errors": {
+   "error": "line 2: invalid field name \"number_of_sectons\""
+  },
+  "module-not-imported": {
+   "error": "line 1: undefined identifier \"pe\""
+  },
+  "pe-functions": {
+   "results": [
+    [
+     {
+      "rule": "b64",
+      "strings": []
+     },
+     {
+      "rule": "dirs",
+      "strings": []
+     },
+     {
+      "rule": "ep_kw",
+      "strings": []
+     },
+     {
+      "rule": "imp2",
+      "strings": []
+     },
+     {
+      "rule": "imp_case",
+      "strings": []
+     },
+     {
+      "rule": "imp_dll",
+      "strings": []
+     },
+     {
+      "rule": "imp_user32",
+      "strings": []
+     },
+     {
+      "rule": "is_pe",
+      "strings": []
+     },
+     {
+      "rule": "loop_imports",
+      "strings": []
+     },
+     {
+      "rule": "machine",
+      "strings": []
+     },
+     {
+      "rule": "rva",
+      "strings": []
+     },
+     {
+      "rule": "sect",
+      "strings": []
+     },
+     {
+      "rule": "sect_off",
+      "strings": []
+     },
+     {
+      "rule": "ver",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "b32",
+      "strings": []
+     },
+     {
+      "rule": "dirs",
+      "strings": []
+     },
+     {
+      "rule": "dll",
+      "strings": []
+     },
+     {
+      "rule": "ep_kw",
+      "strings": []
+     },
+     {
+      "rule": "exp",
+      "strings": []
+     },
+     {
+      "rule": "exp_case",
+      "strings": []
+     },
+     {
+      "rule": "exp_index",
+      "strings": []
+     },
+     {
+      "rule": "exp_ord",
+      "strings": []
+     },
+     {
+      "rule": "is_pe",
+      "strings": []
+     },
+     {
+      "rule": "machine",
+      "strings": []
+     },
+     {
+      "rule": "rva",
+      "strings": []
+     },
+     {
+      "rule": "sect",
+      "strings": []
+     },
+     {
+      "rule": "sect_off",
+      "strings": []
+     },
+     {
+      "rule": "ver",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "not_pe_undef",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "not_pe_undef",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "not_pe_undef",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "not_pe_undef",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "pe-imphash": {
+   "results": [
+    [
+     {
+      "rule": "d",
+      "strings": []
+     },
+     {
+      "rule": "h64",
+      "strings": []
+     },
+     {
+      "rule": "l",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "d",
+      "strings": []
+     },
+     {
+      "rule": "h32",
+      "strings": []
+     },
+     {
+      "rule": "l",
+      "strings": []
+     }
+    ],
+    []
+   ]
+  },
+  "pe-malformed": {
+   "results": [
+    [],
+    [],
+    []
+   ]
+  },
+  "pe-unsupported-signatures": {
+   "results": [
+    [
+     {
+      "rule": "s",
+      "strings": []
+     }
+    ]
+   ]
+  },
+  "regex-alternation": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        7
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        14
+       ]
+      ]
+     }
+    ],
+    [],
+    []
+   ]
+  },
+  "regex-basic": {
+   "results": [
+    [
+     {
+      "rule": "r",
+      "strings": [
+       [
+        "$a",
+        0,
+        37
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "s",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ],
+       [
+        "$a",
+        8,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "regex-bytes": {
+   "results": [
+    [
+     {
+      "rule": "x",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ],
+       [
+        "$a",
+        1,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "y",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ],
+       [
+        "$a",
+        1,
+        3
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "y",
+      "strings": [
+       [
+        "$a",
+        3,
+        3
+       ],
+       [
+        "$a",
+        4,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "regex-classes": {
+   "results": [
+    [
+     {
+      "rule": "d",
+      "strings": [
+       [
+        "$a",
+        0,
+        8
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "w",
+      "strings": [
+       [
+        "$a",
+        0,
+        14
+       ],
+       [
+        "$a",
+        1,
+        13
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "s",
+      "strings": [
+       [
+        "$a",
+        0,
+        7
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "s",
+      "strings": [
+       [
+        "$a",
+        0,
+        7
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ],
+       [
+        "$a",
+        11,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "regex-empty-match": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        0
+       ],
+       [
+        "$a",
+        1,
+        0
+       ],
+       [
+        "$a",
+        2,
+        0
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        1,
+        1
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "regex-escaped-slash": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        7
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "regex-flags": {
+   "results": [
+    [
+     {
+      "rule": "i",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     },
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "s",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "n",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "s",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "regex-fullword": {
+   "results": [
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ],
+       [
+        "$a",
+        5,
+        4
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "regex-greedy-lengths": {
+   "results": [
+    [
+     {
+      "rule": "g",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "rule": "l",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "m",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "m",
+      "strings": [
+       [
+        "$a",
+        0,
+        7
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "g",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "l",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     },
+     {
+      "rule": "m",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "regex-scan-limit": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     },
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        4095
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        4096
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "h",
+      "strings": [
+       [
+        "$a",
+        0,
+        4202
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "regex-wide": {
+   "results": [
+    [
+     {
+      "rule": "aw",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     },
+     {
+      "rule": "w",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "aw",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "aw",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ],
+       [
+        "$a",
+        4,
+        6
+       ]
+      ]
+     },
+     {
+      "rule": "w",
+      "strings": [
+       [
+        "$a",
+        4,
+        6
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "rule-duplicate-error": {
+   "error": "line 2: duplicated identifier \"a\""
+  },
+  "rule-global": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "rule": "small",
+      "strings": []
+     }
+    ],
+    []
+   ]
+  },
+  "rule-refs": {
+   "results": [
+    [
+     {
+      "rule": "any_rule",
+      "strings": []
+     },
+     {
+      "rule": "both",
+      "strings": []
+     },
+     {
+      "rule": "has_x",
+      "strings": [
+       [
+        "$x",
+        2,
+        1
+       ]
+      ]
+     },
+     {
+      "rule": "wild_rules",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "any_rule",
+      "strings": []
+     }
+    ],
+    [
+     {
+      "rule": "any_rule",
+      "strings": []
+     },
+     {
+      "rule": "has_x",
+      "strings": [
+       [
+        "$x",
+        0,
+        1
+       ]
+      ]
+     },
+     {
+      "rule": "wild_rules",
+      "strings": []
+     }
+    ],
+    []
+   ]
+  },
+  "rule-tags-meta": {
+   "results": [
+    [
+     {
+      "rule": "t",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "rule-undefined-string-error": {
+   "error": "line 1: undefined string \"$b\""
+  },
+  "rule-unreferenced-string-error": {
+   "error": "line 1: unreferenced string \"$b\""
+  },
+  "text-anonymous": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$",
+        0,
+        3
+       ],
+       [
+        "$",
+        4,
+        3
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-base64": {
+   "results": [
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        25
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        2,
+        24
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        3,
+        25
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-base64-alignments": {
+   "results": [
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        2,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        3,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        2,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "c",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "c",
+      "strings": [
+       [
+        "$a",
+        2,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "c",
+      "strings": [
+       [
+        "$a",
+        3,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "text-base64-custom": {
+   "results": [
+    [],
+    []
+   ]
+  },
+  "text-base64wide": {
+   "results": [
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        12
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-basic": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ],
+       [
+        "$a",
+        12,
+        5
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        4,
+        5
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-escapes": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        8
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$b",
+        0,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$c",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$d",
+        0,
+        10
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-fullword": {
+   "results": [
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        4,
+        3
+       ]
+      ]
+     }
+    ],
+    [],
+    [],
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        1,
+        3
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "text-fullword-wide": {
+   "results": [
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        2,
+        6
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "f",
+      "strings": [
+       [
+        "$a",
+        1,
+        6
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "text-nocase": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     },
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        5
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        1,
+        5
+       ]
+      ]
+     },
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        1,
+        5
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "text-nocase-latin1": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [],
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "text-overlapping": {
+   "results": [
+    [
+     {
+      "rule": "a",
+      "strings": [
+       [
+        "$a",
+        0,
+        2
+       ],
+       [
+        "$a",
+        1,
+        2
+       ],
+       [
+        "$a",
+        2,
+        2
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "b",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ],
+       [
+        "$a",
+        2,
+        3
+       ],
+       [
+        "$a",
+        4,
+        3
+       ],
+       [
+        "$a",
+        6,
+        3
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-private": {
+   "results": [
+    [
+     {
+      "rule": "p",
+      "strings": [
+       [
+        "$b",
+        7,
+        6
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-wide": {
+   "results": [
+    [
+     {
+      "rule": "aw",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     },
+     {
+      "rule": "w",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "aw",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "aw",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ],
+       [
+        "$a",
+        4,
+        6
+       ]
+      ]
+     },
+     {
+      "rule": "w",
+      "strings": [
+       [
+        "$a",
+        4,
+        6
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-wide-nocase": {
+   "results": [
+    [
+     {
+      "rule": "w",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "w",
+      "strings": [
+       [
+        "$a",
+        0,
+        6
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  },
+  "text-xor": {
+   "results": [
+    [
+     {
+      "rule": "x",
+      "strings": [
+       [
+        "$a",
+        0,
+        12
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "x",
+      "strings": [
+       [
+        "$a",
+        0,
+        12
+       ]
+      ]
+     }
+    ],
+    [],
+    []
+   ]
+  },
+  "text-xor-range": {
+   "results": [
+    [],
+    [
+     {
+      "rule": "x",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ],
+    [],
+    [],
+    [
+     {
+      "rule": "x",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     },
+     {
+      "rule": "y",
+      "strings": [
+       [
+        "$a",
+        0,
+        3
+       ]
+      ]
+     }
+    ]
+   ]
+  },
+  "text-xor-wide": {
+   "results": [
+    [
+     {
+      "rule": "x",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    [
+     {
+      "rule": "x",
+      "strings": [
+       [
+        "$a",
+        0,
+        4
+       ]
+      ]
+     }
+    ],
+    []
+   ]
+  }
+ },
+ "libyara": "4.5.4",
+ "modules": {
+  "dll32.dll": {
+   "elf": {
+    "DT_BIND_NOW": 24,
+    "DT_DEBUG": 21,
+    "DT_ENCODING": 32,
+    "DT_FINI": 13,
+    "DT_FINI_ARRAY": 26,
+    "DT_FINI_ARRAYSZ": 28,
+    "DT_FLAGS": 30,
+    "DT_HASH": 4,
+    "DT_INIT": 12,
+    "DT_INIT_ARRAY": 25,
+    "DT_INIT_ARRAYSZ": 27,
+    "DT_JMPREL": 23,
+    "DT_NEEDED": 1,
+    "DT_NULL": 0,
+    "DT_PLTGOT": 3,
+    "DT_PLTREL": 20,
+    "DT_PLTRELSZ": 2,
+    "DT_REL": 17,
+    "DT_RELA": 7,
+    "DT_RELAENT": 9,
+    "DT_RELASZ": 8,
+    "DT_RELENT": 19,
+    "DT_RELSZ": 18,
+    "DT_RPATH": 15,
+    "DT_RUNPATH": 29,
+    "DT_SONAME": 14,
+    "DT_STRSZ": 10,
+    "DT_STRTAB": 5,
+    "DT_SYMBOLIC": 16,
+    "DT_SYMENT": 11,
+    "DT_SYMTAB": 6,
+    "DT_TEXTREL": 22,
+    "EM_386": 3,
+    "EM_68K": 4,
+    "EM_860": 7,
+    "EM_88K": 5,
+    "EM_AARCH64": 183,
+    "EM_ARM": 40,
+    "EM_M32": 1,
+    "EM_MIPS": 8,
+    "EM_MIPS_RS3_LE": 10,
+    "EM_NONE": 0,
+    "EM_PPC": 20,
+    "EM_PPC64": 21,
+    "EM_SPARC": 2,
+    "EM_X86_64": 62,
+    "ET_CORE": 4,
+    "ET_DYN": 3,
+    "ET_EXEC": 2,
+    "ET_NONE": 0,
+    "ET_REL": 1,
+    "PF_R": 4,
+    "PF_W": 2,
+    "PF_X": 1,
+    "PT_DYNAMIC": 2,
+    "PT_GNU_EH_FRAME": 1685382480,
+    "PT_GNU_STACK": 1685382481,
+    "PT_INTERP": 3,
+    "PT_LOAD": 1,
+    "PT_NOTE": 4,
+    "PT_NULL": 0,
+    "PT_PHDR": 6,
+    "PT_SHLIB": 5,
+    "PT_TLS": 7,
+    "SHF_ALLOC": 2,
+    "SHF_EXECINSTR": 4,
+    "SHF_WRITE": 1,
+    "SHT_DYNAMIC": 6,
+    "SHT_DYNSYM": 11,
+    "SHT_HASH": 5,
+    "SHT_NOBITS": 8,
+    "SHT_NOTE": 7,
+    "SHT_NULL": 0,
+    "SHT_PROGBITS": 1,
+    "SHT_REL": 9,
+    "SHT_RELA": 4,
+    "SHT_SHLIB": 10,
+    "SHT_STRTAB": 3,
+    "SHT_SYMTAB": 2,
+    "STB_GLOBAL": 1,
+    "STB_LOCAL": 0,
+    "STB_WEAK": 2,
+    "STT_COMMON": 5,
+    "STT_FILE": 4,
+    "STT_FUNC": 2,
+    "STT_NOTYPE": 0,
+    "STT_OBJECT": 1,
+    "STT_SECTION": 3,
+    "STT_TLS": 6,
+    "dynamic": [],
+    "dynsym": [],
+    "sections": [],
+    "segments": [],
+    "symtab": []
+   },
+   "pe": {
+    "AGGRESIVE_WS_TRIM": 16,
+    "APPCONTAINER": 4096,
+    "BYTES_REVERSED_HI": 32768,
+    "BYTES_REVERSED_LO": 128,
+    "DEBUG_STRIPPED": 512,
+    "DLL": 8192,
+    "DYNAMIC_BASE": 64,
+    "EXECUTABLE_IMAGE": 2,
+    "FORCE_INTEGRITY": 128,
+    "GUARD_CF": 16384,
+    "HIGH_ENTROPY_VA": 32,
+    "IMAGE_DEBUG_TYPE_BORLAND": 9,
+    "IMAGE_DEBUG_TYPE_CLSID": 11,
+    "IMAGE_DEBUG_TYPE_CODEVIEW": 2,
+    "IMAGE_DEBUG_TYPE_COFF": 1,
+    "IMAGE_DEBUG_TYPE_EXCEPTION": 5,
+    "IMAGE_DEBUG_TYPE_FIXUP": 6,
+    "IMAGE_DEBUG_TYPE_FPO": 3,
+    "IMAGE_DEBUG_TYPE_ILTCG": 14,
+    "IMAGE_DEBUG_TYPE_MISC": 4,
+    "IMAGE_DEBUG_TYPE_MPX": 15,
+    "IMAGE_DEBUG_TYPE_OMAP_FROM_SRC": 8,
+    "IMAGE_DEBUG_TYPE_OMAP_TO_SRC": 7,
+    "IMAGE_DEBUG_TYPE_POGO": 13,
+    "IMAGE_DEBUG_TYPE_REPRO": 16,
+    "IMAGE_DEBUG_TYPE_RESERVED10": 10,
+    "IMAGE_DEBUG_TYPE_UNKNOWN": 0,
+    "IMAGE_DEBUG_TYPE_VC_FEATURE": 12,
+    "IMAGE_DIRECTORY_ENTRY_ARCHITECTURE": 7,
+    "IMAGE_DIRECTORY_ENTRY_BASERELOC": 5,
+    "IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT": 11,
+    "IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR": 14,
+    "IMAGE_DIRECTORY_ENTRY_COPYRIGHT": 7,
+    "IMAGE_DIRECTORY_ENTRY_DEBUG": 6,
+    "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT": 13,
+    "IMAGE_DIRECTORY_ENTRY_EXCEPTION": 3,
+    "IMAGE_DIRECTORY_ENTRY_EXPORT": 0,
+    "IMAGE_DIRECTORY_ENTRY_GLOBALPTR": 8,
+    "IMAGE_DIRECTORY_ENTRY_IAT": 12,
+    "IMAGE_DIRECTORY_ENTRY_IMPORT": 1,
+    "IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG": 10,
+    "IMAGE_DIRECTORY_ENTRY_RESOURCE": 2,
+    "IMAGE_DIRECTORY_ENTRY_SECURITY": 4,
+    "IMAGE_DIRECTORY_ENTRY_TLS": 9,
+    "IMAGE_NT_OPTIONAL_HDR32_MAGIC": 267,
+    "IMAGE_NT_OPTIONAL_HDR64_MAGIC": 523,
+    "IMAGE_ROM_OPTIONAL_HDR_MAGIC": 263,
+    "IMPORT_ANY": -1,
+    "IMPORT_DELAYED": 2,
+    "IMPORT_STANDARD": 1,
+    "LARGE_ADDRESS_AWARE": 32,
+    "LINE_NUMS_STRIPPED": 4,
+    "LOCAL_SYMS_STRIPPED": 8,
+    "MACHINE_32BIT": 256,
+    "MACHINE_ALPHA": 388,
+    "MACHINE_ALPHA64": 644,
+    "MACHINE_AM33": 467,
+    "MACHINE_AMD64": 34404,
+    "MACHINE_ARM": 448,
+    "MACHINE_ARM64": 43620,
+    "MACHINE_ARMNT": 452,
+    "MACHINE_AXP64": 644,
+    "MACHINE_CEE": 49390,
+    "MACHINE_CEF": 3311,
+    "MACHINE_EBC": 3772,
+    "MACHINE_I386": 332,
+    "MACHINE_IA64": 512,
+    "MACHINE_M32R": 36929,
+    "MACHINE_MIPS16": 614,
+    "MACHINE_MIPSFPU": 870,
+    "MACHINE_MIPSFPU16": 1126,
+    "MACHINE_POWERPC": 496,
+    "MACHINE_POWERPCFP": 497,
+    "MACHINE_R10000": 360,
+    "MACHINE_R3000": 354,
+    "MACHINE_R4000": 358,
+    "MACHINE_SH3": 418,
+    "MACHINE_SH3DSP": 419,
+    "MACHINE_SH3E": 420,
+    "MACHINE_SH4": 422,
+    "MACHINE_SH5": 424,
+    "MACHINE_TARGET_HOST": 1,
+    "MACHINE_THUMB": 450,
+    "MACHINE_TRICORE": 1312,
+    "MACHINE_UNKNOWN": 0,
+    "MACHINE_WCEMIPSV2": 361,
+    "NET_RUN_FROM_SWAP": 2048,
+    "NO_BIND": 2048,
+    "NO_ISOLATION": 512,
+    "NO_SEH": 1024,
+    "NX_COMPAT": 256,
+    "RELOCS_STRIPPED": 1,
+    "REMOVABLE_RUN_FROM_SWAP": 1024,
+    "RESOURCE_TYPE_ACCELERATOR": 9,
+    "RESOURCE_TYPE_ANICURSOR": 21,
+    "RESOURCE_TYPE_ANIICON": 22,
+    "RESOURCE_TYPE_BITMAP": 2,
+    "RESOURCE_TYPE_CURSOR": 1,
+    "RESOURCE_TYPE_DIALOG": 5,
+    "RESOURCE_TYPE_DLGINCLUDE": 17,
+    "RESOURCE_TYPE_FONT": 8,
+    "RESOURCE_TYPE_FONTDIR": 7,
+    "RESOURCE_TYPE_GROUP_CURSOR": 12,
+    "RESOURCE_TYPE_GROUP_ICON": 14,
+    "RESOURCE_TYPE_HTML": 23,
+    "RESOURCE_TYPE_ICON": 3,
+    "RESOURCE_TYPE_MANIFEST": 24,
+    "RESOURCE_TYPE_MENU": 4,
+    "RESOURCE_TYPE_MESSAGETABLE": 11,
+    "RESOURCE_TYPE_PLUGPLAY": 19,
+    "RESOURCE_TYPE_RCDATA": 10,
+    "RESOURCE_TYPE_STRING": 6,
+    "RESOURCE_TYPE_VERSION": 16,
+    "RESOURCE_TYPE_VXD": 20,
+    "SECTION_ALIGN_1024BYTES": 11534336,
+    "SECTION_ALIGN_128BYTES": 8388608,
+    "SECTION_ALIGN_16BYTES": 5242880,
+    "SECTION_ALIGN_1BYTES": 1048576,
+    "SECTION_ALIGN_2048BYTES": 12582912,
+    "SECTION_ALIGN_256BYTES": 9437184,
+    "SECTION_ALIGN_2BYTES": 2097152,
+    "SECTION_ALIGN_32BYTES": 6291456,
+    "SECTION_ALIGN_4096BYTES": 13631488,
+    "SECTION_ALIGN_4BYTES": 3145728,
+    "SECTION_ALIGN_512BYTES": 10485760,
+    "SECTION_ALIGN_64BYTES": 7340032,
+    "SECTION_ALIGN_8192BYTES": 14680064,
+    "SECTION_ALIGN_8BYTES": 4194304,
+    "SECTION_ALIGN_MASK": 15728640,
+    "SECTION_CNT_CODE": 32,
+    "SECTION_CNT_INITIALIZED_DATA": 64,
+    "SECTION_CNT_UNINITIALIZED_DATA": 128,
+    "SECTION_GPREL": 32768,
+    "SECTION_LNK_COMDAT": 4096,
+    "SECTION_LNK_INFO": 512,
+    "SECTION_LNK_NRELOC_OVFL": 16777216,
+    "SECTION_LNK_OTHER": 256,
+    "SECTION_LNK_REMOVE": 2048,
+    "SECTION_MEM_16BIT": 131072,
+    "SECTION_MEM_DISCARDABLE": 33554432,
+    "SECTION_MEM_EXECUTE": 536870912,
+    "SECTION_MEM_FARDATA": 32768,
+    "SECTION_MEM_LOCKED": 262144,
+    "SECTION_MEM_NOT_CACHED": 67108864,
+    "SECTION_MEM_NOT_PAGED": 134217728,
+    "SECTION_MEM_PRELOAD": 524288,
+    "SECTION_MEM_PURGEABLE": 131072,
+    "SECTION_MEM_READ": 1073741824,
+    "SECTION_MEM_SHARED": 268435456,
+    "SECTION_MEM_WRITE": 2147483648,
+    "SECTION_NO_DEFER_SPEC_EXC": 16384,
+    "SECTION_NO_PAD": 8,
+    "SECTION_SCALE_INDEX": 1,
+    "SUBSYSTEM_EFI_APPLICATION": 10,
+    "SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER": 11,
+    "SUBSYSTEM_EFI_ROM_IMAGE": 13,
+    "SUBSYSTEM_EFI_RUNTIME_DRIVER": 12,
+    "SUBSYSTEM_NATIVE": 1,
+    "SUBSYSTEM_NATIVE_WINDOWS": 8,
+    "SUBSYSTEM_OS2_CUI": 5,
+    "SUBSYSTEM_POSIX_CUI": 7,
+    "SUBSYSTEM_UNKNOWN": 0,
+    "SUBSYSTEM_WINDOWS_BOOT_APPLICATION": 16,
+    "SUBSYSTEM_WINDOWS_CE_GUI": 9,
+    "SUBSYSTEM_WINDOWS_CUI": 3,
+    "SUBSYSTEM_WINDOWS_GUI": 2,
+    "SUBSYSTEM_XBOX": 14,
+    "SYSTEM": 4096,
+    "TERMINAL_SERVER_AWARE": 32768,
+    "UP_SYSTEM_ONLY": 16384,
+    "WDM_DRIVER": 8192,
+    "base_of_code": 4096,
+    "base_of_data": 0,
+    "characteristics": 8974,
+    "checksum": 67034,
+    "data_directories": [
+     {
+      "size": 114,
+      "virtual_address": 16384
+     },
+     {
+      "size": 132,
+      "virtual_address": 20480
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 12,
+      "virtual_address": 24576
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 12,
+      "virtual_address": 20532
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     }
+    ],
+    "delayed_import_details": [],
+    "dll_characteristics": 320,
+    "dll_name": "dll32.dll",
+    "entry_point": 1053,
+    "entry_point_raw": 4125,
+    "export_details": [
+     {
+      "name": "FixtureAdd",
+      "offset": 1024,
+      "ordinal": 1,
+      "rva": 4096
+     },
+     {
+      "name": "FixtureMul",
+      "offset": 1035,
+      "ordinal": 2,
+      "rva": 4107
+     },
+     {
+      "name": "FixtureTick",
+      "offset": 1047,
+      "ordinal": 3,
+      "rva": 4119
+     }
+    ],
+    "export_timestamp": 1792951076,
+    "file_alignment": 512,
+    "image_base": 1758461952,
+    "image_version": {
+     "major": 1,
+     "minor": 0
+    },
+    "import_details": [
+     {
+      "functions": [
+       {
+        "name": "DisableThreadLibraryCalls",
+        "rva": 20532
+       },
+       {
+        "name": "GetTickCount",
+        "rva": 20536
+       }
+      ],
+      "library_name": "KERNEL32.dll",
+      "number_of_functions": 2
+     }
+    ],
+    "is_pe": 1,
+    "is_signed": 0,
+    "linker_version": {
+     "major": 2,
+     "minor": 45
+    },
+    "loader_flags": 0,
+    "machine": 332,
+    "number_of_delayed_imported_functions": 0,
+    "number_of_delayed_imports": 0,
+    "number_of_exports": 3,
+    "number_of_imported_functions": 2,
+    "number_of_imports": 1,
+    "number_of_resources": 0,
+    "number_of_rva_and_sizes": 16,
+    "number_of_sections": 6,
+    "number_of_signatures": 0,
+    "number_of_symbols": 0,
+    "number_of_version_infos": 0,
+    "opthdr_magic": 267,
+    "os_version": {
+     "major": 4,
+     "minor": 0
+    },
+    "overlay": {
+     "offset": 0,
+     "size": 0
+    },
+    "pointer_to_symbol_table": 0,
+    "resource_version": {},
+    "resources": [],
+    "rich_signature": {},
+    "section_alignment": 4096,
+    "sections": [
+     {
+      "characteristics": 1610612768,
+      "full_name": ".text",
+      "name": ".text",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 1024,
+      "raw_data_size": 512,
+      "virtual_address": 4096,
+      "virtual_size": 64
+     },
+     {
+      "characteristics": 1073741888,
+      "full_name": ".rdata",
+      "name": ".rdata",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 1536,
+      "raw_data_size": 512,
+      "virtual_address": 8192,
+      "virtual_size": 36
+     },
+     {
+      "characteristics": 1073741888,
+      "full_name": ".eh_fram",
+      "name": ".eh_fram",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 2048,
+      "raw_data_size": 512,
+      "virtual_address": 12288,
+      "virtual_size": 140
+     },
+     {
+      "characteristics": 1073741888,
+      "full_name": ".edata",
+      "name": ".edata",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 2560,
+      "raw_data_size": 512,
+      "virtual_address": 16384,
+      "virtual_size": 114
+     },
+     {
+      "characteristics": 1073741888,
+      "full_name": ".idata",
+      "name": ".idata",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 3072,
+      "raw_data_size": 512,
+      "virtual_address": 20480,
+      "virtual_size": 132
+     },
+     {
+      "characteristics": 1107296320,
+      "full_name": ".reloc",
+      "name": ".reloc",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 3584,
+      "raw_data_size": 512,
+      "virtual_address": 24576,
+      "virtual_size": 12
+     }
+    ],
+    "signatures": [],
+    "size_of_code": 512,
+    "size_of_headers": 1024,
+    "size_of_heap_commit": 4096,
+    "size_of_heap_reserve": 1048576,
+    "size_of_image": 28672,
+    "size_of_initialized_data": 2560,
+    "size_of_optional_header": 224,
+    "size_of_stack_commit": 4096,
+    "size_of_stack_reserve": 2097152,
+    "size_of_uninitialized_data": 0,
+    "subsystem": 3,
+    "subsystem_version": {
+     "major": 4,
+     "minor": 0
+    },
+    "timestamp": 1792951076,
+    "version_info": {},
+    "version_info_list": [],
+    "win32_version_value": 0
+   }
+  },
+  "elf_aarch64.o": {
+   "elf": {
+    "DT_BIND_NOW": 24,
+    "DT_DEBUG": 21,
+    "DT_ENCODING": 32,
+    "DT_FINI": 13,
+    "DT_FINI_ARRAY": 26,
+    "DT_FINI_ARRAYSZ": 28,
+    "DT_FLAGS": 30,
+    "DT_HASH": 4,
+    "DT_INIT": 12,
+    "DT_INIT_ARRAY": 25,
+    "DT_INIT_ARRAYSZ": 27,
+    "DT_JMPREL": 23,
+    "DT_NEEDED": 1,
+    "DT_NULL": 0,
+    "DT_PLTGOT": 3,
+    "DT_PLTREL": 20,
+    "DT_PLTRELSZ": 2,
+    "DT_REL": 17,
+    "DT_RELA": 7,
+    "DT_RELAENT": 9,
+    "DT_RELASZ": 8,
+    "DT_RELENT": 19,
+    "DT_RELSZ": 18,
+    "DT_RPATH": 15,
+    "DT_RUNPATH": 29,
+    "DT_SONAME": 14,
+    "DT_STRSZ": 10,
+    "DT_STRTAB": 5,
+    "DT_SYMBOLIC": 16,
+    "DT_SYMENT": 11,
+    "DT_SYMTAB": 6,
+    "DT_TEXTREL": 22,
+    "EM_386": 3,
+    "EM_68K": 4,
+    "EM_860": 7,
+    "EM_88K": 5,
+    "EM_AARCH64": 183,
+    "EM_ARM": 40,
+    "EM_M32": 1,
+    "EM_MIPS": 8,
+    "EM_MIPS_RS3_LE": 10,
+    "EM_NONE": 0,
+    "EM_PPC": 20,
+    "EM_PPC64": 21,
+    "EM_SPARC": 2,
+    "EM_X86_64": 62,
+    "ET_CORE": 4,
+    "ET_DYN": 3,
+    "ET_EXEC": 2,
+    "ET_NONE": 0,
+    "ET_REL": 1,
+    "PF_R": 4,
+    "PF_W": 2,
+    "PF_X": 1,
+    "PT_DYNAMIC": 2,
+    "PT_GNU_EH_FRAME": 1685382480,
+    "PT_GNU_STACK": 1685382481,
+    "PT_INTERP": 3,
+    "PT_LOAD": 1,
+    "PT_NOTE": 4,
+    "PT_NULL": 0,
+    "PT_PHDR": 6,
+    "PT_SHLIB": 5,
+    "PT_TLS": 7,
+    "SHF_ALLOC": 2,
+    "SHF_EXECINSTR": 4,
+    "SHF_WRITE": 1,
+    "SHT_DYNAMIC": 6,
+    "SHT_DYNSYM": 11,
+    "SHT_HASH": 5,
+    "SHT_NOBITS": 8,
+    "SHT_NOTE": 7,
+    "SHT_NULL": 0,
+    "SHT_PROGBITS": 1,
+    "SHT_REL": 9,
+    "SHT_RELA": 4,
+    "SHT_SHLIB": 10,
+    "SHT_STRTAB": 3,
+    "SHT_SYMTAB": 2,
+    "STB_GLOBAL": 1,
+    "STB_LOCAL": 0,
+    "STB_WEAK": 2,
+    "STT_COMMON": 5,
+    "STT_FILE": 4,
+    "STT_FUNC": 2,
+    "STT_NOTYPE": 0,
+    "STT_OBJECT": 1,
+    "STT_SECTION": 3,
+    "STT_TLS": 6,
+    "dynamic": [],
+    "dynsym": [],
+    "machine": 183,
+    "number_of_sections": 9,
+    "number_of_segments": 0,
+    "ph_entry_size": 0,
+    "ph_offset": 0,
+    "sections": [
+     {
+      "address": 0,
+      "flags": 0,
+      "name": "",
+      "offset": 0,
+      "size": 0,
+      "type": 0
+     },
+     {
+      "address": 0,
+      "flags": 0,
+      "name": ".strtab",
+      "offset": 336,
+      "size": 117,
+      "type": 3
+     },
+     {
+      "address": 0,
+      "flags": 6,
+      "name": ".text",
+      "offset": 64,
+      "size": 16,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 64,
+      "name": ".rela.text",
+      "offset": 288,
+      "size": 48,
+      "type": 4
+     },
+     {
+      "address": 0,
+      "flags": 3,
+      "name": ".data",
+      "offset": 80,
+      "size": 4,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 48,
+      "name": ".comment",
+      "offset": 84,
+      "size": 34,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 0,
+      "name": ".note.GNU-stack",
+      "offset": 118,
+      "size": 0,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 2147483648,
+      "name": ".llvm_addrsig",
+      "offset": 336,
+      "size": 0,
+      "type": 1879002115
+     },
+     {
+      "address": 0,
+      "flags": 0,
+      "name": ".symtab",
+      "offset": 120,
+      "size": 168,
+      "type": 2
+     }
+    ],
+    "segments": [],
+    "sh_entry_size": 64,
+    "sh_offset": 456,
+    "symtab": [
+     {
+      "bind": 0,
+      "name": "",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "aarch64.c",
+      "shndx": 65521,
+      "size": 0,
+      "type": 4,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "$x",
+      "shndx": 2,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "$d",
+      "shndx": 4,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "$d",
+      "shndx": 5,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 1,
+      "name": "fixture_twice",
+      "shndx": 2,
+      "size": 16,
+      "type": 2,
+      "value": 0
+     },
+     {
+      "bind": 1,
+      "name": "fixture_value",
+      "shndx": 4,
+      "size": 4,
+      "type": 1,
+      "value": 0
+     }
+    ],
+    "symtab_entries": 7,
+    "type": 1
+   },
+   "pe": {
+    "AGGRESIVE_WS_TRIM": 16,
+    "APPCONTAINER": 4096,
+    "BYTES_REVERSED_HI": 32768,
+    "BYTES_REVERSED_LO": 128,
+    "DEBUG_STRIPPED": 512,
+    "DLL": 8192,
+    "DYNAMIC_BASE": 64,
+    "EXECUTABLE_IMAGE": 2,
+    "FORCE_INTEGRITY": 128,
+    "GUARD_CF": 16384,
+    "HIGH_ENTROPY_VA": 32,
+    "IMAGE_DEBUG_TYPE_BORLAND": 9,
+    "IMAGE_DEBUG_TYPE_CLSID": 11,
+    "IMAGE_DEBUG_TYPE_CODEVIEW": 2,
+    "IMAGE_DEBUG_TYPE_COFF": 1,
+    "IMAGE_DEBUG_TYPE_EXCEPTION": 5,
+    "IMAGE_DEBUG_TYPE_FIXUP": 6,
+    "IMAGE_DEBUG_TYPE_FPO": 3,
+    "IMAGE_DEBUG_TYPE_ILTCG": 14,
+    "IMAGE_DEBUG_TYPE_MISC": 4,
+    "IMAGE_DEBUG_TYPE_MPX": 15,
+    "IMAGE_DEBUG_TYPE_OMAP_FROM_SRC": 8,
+    "IMAGE_DEBUG_TYPE_OMAP_TO_SRC": 7,
+    "IMAGE_DEBUG_TYPE_POGO": 13,
+    "IMAGE_DEBUG_TYPE_REPRO": 16,
+    "IMAGE_DEBUG_TYPE_RESERVED10": 10,
+    "IMAGE_DEBUG_TYPE_UNKNOWN": 0,
+    "IMAGE_DEBUG_TYPE_VC_FEATURE": 12,
+    "IMAGE_DIRECTORY_ENTRY_ARCHITECTURE": 7,
+    "IMAGE_DIRECTORY_ENTRY_BASERELOC": 5,
+    "IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT": 11,
+    "IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR": 14,
+    "IMAGE_DIRECTORY_ENTRY_COPYRIGHT": 7,
+    "IMAGE_DIRECTORY_ENTRY_DEBUG": 6,
+    "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT": 13,
+    "IMAGE_DIRECTORY_ENTRY_EXCEPTION": 3,
+    "IMAGE_DIRECTORY_ENTRY_EXPORT": 0,
+    "IMAGE_DIRECTORY_ENTRY_GLOBALPTR": 8,
+    "IMAGE_DIRECTORY_ENTRY_IAT": 12,
+    "IMAGE_DIRECTORY_ENTRY_IMPORT": 1,
+    "IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG": 10,
+    "IMAGE_DIRECTORY_ENTRY_RESOURCE": 2,
+    "IMAGE_DIRECTORY_ENTRY_SECURITY": 4,
+    "IMAGE_DIRECTORY_ENTRY_TLS": 9,
+    "IMAGE_NT_OPTIONAL_HDR32_MAGIC": 267,
+    "IMAGE_NT_OPTIONAL_HDR64_MAGIC": 523,
+    "IMAGE_ROM_OPTIONAL_HDR_MAGIC": 263,
+    "IMPORT_ANY": -1,
+    "IMPORT_DELAYED": 2,
+    "IMPORT_STANDARD": 1,
+    "LARGE_ADDRESS_AWARE": 32,
+    "LINE_NUMS_STRIPPED": 4,
+    "LOCAL_SYMS_STRIPPED": 8,
+    "MACHINE_32BIT": 256,
+    "MACHINE_ALPHA": 388,
+    "MACHINE_ALPHA64": 644,
+    "MACHINE_AM33": 467,
+    "MACHINE_AMD64": 34404,
+    "MACHINE_ARM": 448,
+    "MACHINE_ARM64": 43620,
+    "MACHINE_ARMNT": 452,
+    "MACHINE_AXP64": 644,
+    "MACHINE_CEE": 49390,
+    "MACHINE_CEF": 3311,
+    "MACHINE_EBC": 3772,
+    "MACHINE_I386": 332,
+    "MACHINE_IA64": 512,
+    "MACHINE_M32R": 36929,
+    "MACHINE_MIPS16": 614,
+    "MACHINE_MIPSFPU": 870,
+    "MACHINE_MIPSFPU16": 1126,
+    "MACHINE_POWERPC": 496,
+    "MACHINE_POWERPCFP": 497,
+    "MACHINE_R10000": 360,
+    "MACHINE_R3000": 354,
+    "MACHINE_R4000": 358,
+    "MACHINE_SH3": 418,
+    "MACHINE_SH3DSP": 419,
+    "MACHINE_SH3E": 420,
+    "MACHINE_SH4": 422,
+    "MACHINE_SH5": 424,
+    "MACHINE_TARGET_HOST": 1,
+    "MACHINE_THUMB": 450,
+    "MACHINE_TRICORE": 1312,
+    "MACHINE_UNKNOWN": 0,
+    "MACHINE_WCEMIPSV2": 361,
+    "NET_RUN_FROM_SWAP": 2048,
+    "NO_BIND": 2048,
+    "NO_ISOLATION": 512,
+    "NO_SEH": 1024,
+    "NX_COMPAT": 256,
+    "RELOCS_STRIPPED": 1,
+    "REMOVABLE_RUN_FROM_SWAP": 1024,
+    "RESOURCE_TYPE_ACCELERATOR": 9,
+    "RESOURCE_TYPE_ANICURSOR": 21,
+    "RESOURCE_TYPE_ANIICON": 22,
+    "RESOURCE_TYPE_BITMAP": 2,
+    "RESOURCE_TYPE_CURSOR": 1,
+    "RESOURCE_TYPE_DIALOG": 5,
+    "RESOURCE_TYPE_DLGINCLUDE": 17,
+    "RESOURCE_TYPE_FONT": 8,
+    "RESOURCE_TYPE_FONTDIR": 7,
+    "RESOURCE_TYPE_GROUP_CURSOR": 12,
+    "RESOURCE_TYPE_GROUP_ICON": 14,
+    "RESOURCE_TYPE_HTML": 23,
+    "RESOURCE_TYPE_ICON": 3,
+    "RESOURCE_TYPE_MANIFEST": 24,
+    "RESOURCE_TYPE_MENU": 4,
+    "RESOURCE_TYPE_MESSAGETABLE": 11,
+    "RESOURCE_TYPE_PLUGPLAY": 19,
+    "RESOURCE_TYPE_RCDATA": 10,
+    "RESOURCE_TYPE_STRING": 6,
+    "RESOURCE_TYPE_VERSION": 16,
+    "RESOURCE_TYPE_VXD": 20,
+    "SECTION_ALIGN_1024BYTES": 11534336,
+    "SECTION_ALIGN_128BYTES": 8388608,
+    "SECTION_ALIGN_16BYTES": 5242880,
+    "SECTION_ALIGN_1BYTES": 1048576,
+    "SECTION_ALIGN_2048BYTES": 12582912,
+    "SECTION_ALIGN_256BYTES": 9437184,
+    "SECTION_ALIGN_2BYTES": 2097152,
+    "SECTION_ALIGN_32BYTES": 6291456,
+    "SECTION_ALIGN_4096BYTES": 13631488,
+    "SECTION_ALIGN_4BYTES": 3145728,
+    "SECTION_ALIGN_512BYTES": 10485760,
+    "SECTION_ALIGN_64BYTES": 7340032,
+    "SECTION_ALIGN_8192BYTES": 14680064,
+    "SECTION_ALIGN_8BYTES": 4194304,
+    "SECTION_ALIGN_MASK": 15728640,
+    "SECTION_CNT_CODE": 32,
+    "SECTION_CNT_INITIALIZED_DATA": 64,
+    "SECTION_CNT_UNINITIALIZED_DATA": 128,
+    "SECTION_GPREL": 32768,
+    "SECTION_LNK_COMDAT": 4096,
+    "SECTION_LNK_INFO": 512,
+    "SECTION_LNK_NRELOC_OVFL": 16777216,
+    "SECTION_LNK_OTHER": 256,
+    "SECTION_LNK_REMOVE": 2048,
+    "SECTION_MEM_16BIT": 131072,
+    "SECTION_MEM_DISCARDABLE": 33554432,
+    "SECTION_MEM_EXECUTE": 536870912,
+    "SECTION_MEM_FARDATA": 32768,
+    "SECTION_MEM_LOCKED": 262144,
+    "SECTION_MEM_NOT_CACHED": 67108864,
+    "SECTION_MEM_NOT_PAGED": 134217728,
+    "SECTION_MEM_PRELOAD": 524288,
+    "SECTION_MEM_PURGEABLE": 131072,
+    "SECTION_MEM_READ": 1073741824,
+    "SECTION_MEM_SHARED": 268435456,
+    "SECTION_MEM_WRITE": 2147483648,
+    "SECTION_NO_DEFER_SPEC_EXC": 16384,
+    "SECTION_NO_PAD": 8,
+    "SECTION_SCALE_INDEX": 1,
+    "SUBSYSTEM_EFI_APPLICATION": 10,
+    "SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER": 11,
+    "SUBSYSTEM_EFI_ROM_IMAGE": 13,
+    "SUBSYSTEM_EFI_RUNTIME_DRIVER": 12,
+    "SUBSYSTEM_NATIVE": 1,
+    "SUBSYSTEM_NATIVE_WINDOWS": 8,
+    "SUBSYSTEM_OS2_CUI": 5,
+    "SUBSYSTEM_POSIX_CUI": 7,
+    "SUBSYSTEM_UNKNOWN": 0,
+    "SUBSYSTEM_WINDOWS_BOOT_APPLICATION": 16,
+    "SUBSYSTEM_WINDOWS_CE_GUI": 9,
+    "SUBSYSTEM_WINDOWS_CUI": 3,
+    "SUBSYSTEM_WINDOWS_GUI": 2,
+    "SUBSYSTEM_XBOX": 14,
+    "SYSTEM": 4096,
+    "TERMINAL_SERVER_AWARE": 32768,
+    "UP_SYSTEM_ONLY": 16384,
+    "WDM_DRIVER": 8192,
+    "data_directories": [],
+    "delayed_import_details": [],
+    "export_details": [],
+    "image_version": {},
+    "import_details": [],
+    "is_pe": 0,
+    "linker_version": {},
+    "os_version": {},
+    "overlay": {},
+    "resource_version": {},
+    "resources": [],
+    "rich_signature": {},
+    "sections": [],
+    "signatures": [],
+    "subsystem_version": {},
+    "version_info": {},
+    "version_info_list": []
+   }
+  },
+  "elf_dyn": {
+   "elf": {
+    "DT_BIND_NOW": 24,
+    "DT_DEBUG": 21,
+    "DT_ENCODING": 32,
+    "DT_FINI": 13,
+    "DT_FINI_ARRAY": 26,
+    "DT_FINI_ARRAYSZ": 28,
+    "DT_FLAGS": 30,
+    "DT_HASH": 4,
+    "DT_INIT": 12,
+    "DT_INIT_ARRAY": 25,
+    "DT_INIT_ARRAYSZ": 27,
+    "DT_JMPREL": 23,
+    "DT_NEEDED": 1,
+    "DT_NULL": 0,
+    "DT_PLTGOT": 3,
+    "DT_PLTREL": 20,
+    "DT_PLTRELSZ": 2,
+    "DT_REL": 17,
+    "DT_RELA": 7,
+    "DT_RELAENT": 9,
+    "DT_RELASZ": 8,
+    "DT_RELENT": 19,
+    "DT_RELSZ": 18,
+    "DT_RPATH": 15,
+    "DT_RUNPATH": 29,
+    "DT_SONAME": 14,
+    "DT_STRSZ": 10,
+    "DT_STRTAB": 5,
+    "DT_SYMBOLIC": 16,
+    "DT_SYMENT": 11,
+    "DT_SYMTAB": 6,
+    "DT_TEXTREL": 22,
+    "EM_386": 3,
+    "EM_68K": 4,
+    "EM_860": 7,
+    "EM_88K": 5,
+    "EM_AARCH64": 183,
+    "EM_ARM": 40,
+    "EM_M32": 1,
+    "EM_MIPS": 8,
+    "EM_MIPS_RS3_LE": 10,
+    "EM_NONE": 0,
+    "EM_PPC": 20,
+    "EM_PPC64": 21,
+    "EM_SPARC": 2,
+    "EM_X86_64": 62,
+    "ET_CORE": 4,
+    "ET_DYN": 3,
+    "ET_EXEC": 2,
+    "ET_NONE": 0,
+    "ET_REL": 1,
+    "PF_R": 4,
+    "PF_W": 2,
+    "PF_X": 1,
+    "PT_DYNAMIC": 2,
+    "PT_GNU_EH_FRAME": 1685382480,
+    "PT_GNU_STACK": 1685382481,
+    "PT_INTERP": 3,
+    "PT_LOAD": 1,
+    "PT_NOTE": 4,
+    "PT_NULL": 0,
+    "PT_PHDR": 6,
+    "PT_SHLIB": 5,
+    "PT_TLS": 7,
+    "SHF_ALLOC": 2,
+    "SHF_EXECINSTR": 4,
+    "SHF_WRITE": 1,
+    "SHT_DYNAMIC": 6,
+    "SHT_DYNSYM": 11,
+    "SHT_HASH": 5,
+    "SHT_NOBITS": 8,
+    "SHT_NOTE": 7,
+    "SHT_NULL": 0,
+    "SHT_PROGBITS": 1,
+    "SHT_REL": 9,
+    "SHT_RELA": 4,
+    "SHT_SHLIB": 10,
+    "SHT_STRTAB": 3,
+    "SHT_SYMTAB": 2,
+    "STB_GLOBAL": 1,
+    "STB_LOCAL": 0,
+    "STB_WEAK": 2,
+    "STT_COMMON": 5,
+    "STT_FILE": 4,
+    "STT_FUNC": 2,
+    "STT_NOTYPE": 0,
+    "STT_OBJECT": 1,
+    "STT_SECTION": 3,
+    "STT_TLS": 6,
+    "dynamic": [
+     {
+      "type": 1879047925,
+      "val": 608
+     },
+     {
+      "type": 5,
+      "val": 664
+     },
+     {
+      "type": 6,
+      "val": 640
+     },
+     {
+      "type": 10,
+      "val": 1
+     },
+     {
+      "type": 11,
+      "val": 24
+     },
+     {
+      "type": 21,
+      "val": 0
+     },
+     {
+      "type": 1879048187,
+      "val": 134217728
+     },
+     {
+      "type": 0,
+      "val": 0
+     }
+    ],
+    "dynamic_section_entries": 8,
+    "dynsym": [
+     {
+      "bind": 0,
+      "name": "",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     }
+    ],
+    "dynsym_entries": 1,
+    "entry_point": 4096,
+    "machine": 62,
+    "number_of_sections": 12,
+    "number_of_segments": 9,
+    "ph_entry_size": 56,
+    "ph_offset": 64,
+    "sections": [
+     {
+      "address": 0,
+      "flags": 0,
+      "name": "",
+      "offset": 0,
+      "size": 0,
+      "type": 0
+     },
+     {
+      "address": 568,
+      "flags": 2,
+      "name": ".note.gnu.build-id",
+      "offset": 568,
+      "size": 36,
+      "type": 7
+     },
+     {
+      "address": 608,
+      "flags": 2,
+      "name": ".gnu.hash",
+      "offset": 608,
+      "size": 28,
+      "type": 1879048182
+     },
+     {
+      "address": 640,
+      "flags": 2,
+      "name": ".dynsym",
+      "offset": 640,
+      "size": 24,
+      "type": 11
+     },
+     {
+      "address": 664,
+      "flags": 2,
+      "name": ".dynstr",
+      "offset": 664,
+      "size": 1,
+      "type": 3
+     },
+     {
+      "address": 4096,
+      "flags": 6,
+      "name": ".text",
+      "offset": 4096,
+      "size": 17,
+      "type": 1
+     },
+     {
+      "address": 8192,
+      "flags": 2,
+      "name": ".eh_frame_hdr",
+      "offset": 8192,
+      "size": 20,
+      "type": 1
+     },
+     {
+      "address": 8216,
+      "flags": 2,
+      "name": ".eh_frame",
+      "offset": 8216,
+      "size": 44,
+      "type": 1
+     },
+     {
+      "address": 16152,
+      "flags": 3,
+      "name": ".dynamic",
+      "offset": 12056,
+      "size": 208,
+      "type": 6
+     },
+     {
+      "address": 16360,
+      "flags": 3,
+      "name": ".got.plt",
+      "offset": 12264,
+      "size": 24,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 48,
+      "name": ".comment",
+      "offset": 12288,
+      "size": 30,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 0,
+      "name": ".shstrtab",
+      "offset": 12318,
+      "size": 113,
+      "type": 3
+     }
+    ],
+    "segments": [
+     {
+      "alignment": 4096,
+      "file_size": 665,
+      "flags": 4,
+      "memory_size": 665,
+      "offset": 0,
+      "physical_address": 0,
+      "type": 1,
+      "virtual_address": 0
+     },
+     {
+      "alignment": 4096,
+      "file_size": 17,
+      "flags": 5,
+      "memory_size": 17,
+      "offset": 4096,
+      "physical_address": 4096,
+      "type": 1,
+      "virtual_address": 4096
+     },
+     {
+      "alignment": 4096,
+      "file_size": 68,
+      "flags": 4,
+      "memory_size": 68,
+      "offset": 8192,
+      "physical_address": 8192,
+      "type": 1,
+      "virtual_address": 8192
+     },
+     {
+      "alignment": 4096,
+      "file_size": 232,
+      "flags": 6,
+      "memory_size": 232,
+      "offset": 12056,
+      "physical_address": 16152,
+      "type": 1,
+      "virtual_address": 16152
+     },
+     {
+      "alignment": 8,
+      "file_size": 208,
+      "flags": 6,
+      "memory_size": 208,
+      "offset": 12056,
+      "physical_address": 16152,
+      "type": 2,
+      "virtual_address": 16152
+     },
+     {
+      "alignment": 4,
+      "file_size": 36,
+      "flags": 4,
+      "memory_size": 36,
+      "offset": 568,
+      "physical_address": 568,
+      "type": 4,
+      "virtual_address": 568
+     },
+     {
+      "alignment": 4,
+      "file_size": 20,
+      "flags": 4,
+      "memory_size": 20,
+      "offset": 8192,
+      "physical_address": 8192,
+      "type": 1685382480,
+      "virtual_address": 8192
+     },
+     {
+      "alignment": 16,
+      "file_size": 0,
+      "flags": 6,
+      "memory_size": 0,
+      "offset": 0,
+      "physical_address": 0,
+      "type": 1685382481,
+      "virtual_address": 0
+     },
+     {
+      "alignment": 1,
+      "file_size": 232,
+      "flags": 4,
+      "memory_size": 232,
+      "offset": 12056,
+      "physical_address": 16152,
+      "type": 1685382482,
+      "virtual_address": 16152
+     }
+    ],
+    "sh_entry_size": 64,
+    "sh_offset": 12432,
+    "symtab": [],
+    "type": 3
+   },
+   "pe": {
+    "AGGRESIVE_WS_TRIM": 16,
+    "APPCONTAINER": 4096,
+    "BYTES_REVERSED_HI": 32768,
+    "BYTES_REVERSED_LO": 128,
+    "DEBUG_STRIPPED": 512,
+    "DLL": 8192,
+    "DYNAMIC_BASE": 64,
+    "EXECUTABLE_IMAGE": 2,
+    "FORCE_INTEGRITY": 128,
+    "GUARD_CF": 16384,
+    "HIGH_ENTROPY_VA": 32,
+    "IMAGE_DEBUG_TYPE_BORLAND": 9,
+    "IMAGE_DEBUG_TYPE_CLSID": 11,
+    "IMAGE_DEBUG_TYPE_CODEVIEW": 2,
+    "IMAGE_DEBUG_TYPE_COFF": 1,
+    "IMAGE_DEBUG_TYPE_EXCEPTION": 5,
+    "IMAGE_DEBUG_TYPE_FIXUP": 6,
+    "IMAGE_DEBUG_TYPE_FPO": 3,
+    "IMAGE_DEBUG_TYPE_ILTCG": 14,
+    "IMAGE_DEBUG_TYPE_MISC": 4,
+    "IMAGE_DEBUG_TYPE_MPX": 15,
+    "IMAGE_DEBUG_TYPE_OMAP_FROM_SRC": 8,
+    "IMAGE_DEBUG_TYPE_OMAP_TO_SRC": 7,
+    "IMAGE_DEBUG_TYPE_POGO": 13,
+    "IMAGE_DEBUG_TYPE_REPRO": 16,
+    "IMAGE_DEBUG_TYPE_RESERVED10": 10,
+    "IMAGE_DEBUG_TYPE_UNKNOWN": 0,
+    "IMAGE_DEBUG_TYPE_VC_FEATURE": 12,
+    "IMAGE_DIRECTORY_ENTRY_ARCHITECTURE": 7,
+    "IMAGE_DIRECTORY_ENTRY_BASERELOC": 5,
+    "IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT": 11,
+    "IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR": 14,
+    "IMAGE_DIRECTORY_ENTRY_COPYRIGHT": 7,
+    "IMAGE_DIRECTORY_ENTRY_DEBUG": 6,
+    "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT": 13,
+    "IMAGE_DIRECTORY_ENTRY_EXCEPTION": 3,
+    "IMAGE_DIRECTORY_ENTRY_EXPORT": 0,
+    "IMAGE_DIRECTORY_ENTRY_GLOBALPTR": 8,
+    "IMAGE_DIRECTORY_ENTRY_IAT": 12,
+    "IMAGE_DIRECTORY_ENTRY_IMPORT": 1,
+    "IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG": 10,
+    "IMAGE_DIRECTORY_ENTRY_RESOURCE": 2,
+    "IMAGE_DIRECTORY_ENTRY_SECURITY": 4,
+    "IMAGE_DIRECTORY_ENTRY_TLS": 9,
+    "IMAGE_NT_OPTIONAL_HDR32_MAGIC": 267,
+    "IMAGE_NT_OPTIONAL_HDR64_MAGIC": 523,
+    "IMAGE_ROM_OPTIONAL_HDR_MAGIC": 263,
+    "IMPORT_ANY": -1,
+    "IMPORT_DELAYED": 2,
+    "IMPORT_STANDARD": 1,
+    "LARGE_ADDRESS_AWARE": 32,
+    "LINE_NUMS_STRIPPED": 4,
+    "LOCAL_SYMS_STRIPPED": 8,
+    "MACHINE_32BIT": 256,
+    "MACHINE_ALPHA": 388,
+    "MACHINE_ALPHA64": 644,
+    "MACHINE_AM33": 467,
+    "MACHINE_AMD64": 34404,
+    "MACHINE_ARM": 448,
+    "MACHINE_ARM64": 43620,
+    "MACHINE_ARMNT": 452,
+    "MACHINE_AXP64": 644,
+    "MACHINE_CEE": 49390,
+    "MACHINE_CEF": 3311,
+    "MACHINE_EBC": 3772,
+    "MACHINE_I386": 332,
+    "MACHINE_IA64": 512,
+    "MACHINE_M32R": 36929,
+    "MACHINE_MIPS16": 614,
+    "MACHINE_MIPSFPU": 870,
+    "MACHINE_MIPSFPU16": 1126,
+    "MACHINE_POWERPC": 496,
+    "MACHINE_POWERPCFP": 497,
+    "MACHINE_R10000": 360,
+    "MACHINE_R3000": 354,
+    "MACHINE_R4000": 358,
+    "MACHINE_SH3": 418,
+    "MACHINE_SH3DSP": 419,
+    "MACHINE_SH3E": 420,
+    "MACHINE_SH4": 422,
+    "MACHINE_SH5": 424,
+    "MACHINE_TARGET_HOST": 1,
+    "MACHINE_THUMB": 450,
+    "MACHINE_TRICORE": 1312,
+    "MACHINE_UNKNOWN": 0,
+    "MACHINE_WCEMIPSV2": 361,
+    "NET_RUN_FROM_SWAP": 2048,
+    "NO_BIND": 2048,
+    "NO_ISOLATION": 512,
+    "NO_SEH": 1024,
+    "NX_COMPAT": 256,
+    "RELOCS_STRIPPED": 1,
+    "REMOVABLE_RUN_FROM_SWAP": 1024,
+    "RESOURCE_TYPE_ACCELERATOR": 9,
+    "RESOURCE_TYPE_ANICURSOR": 21,
+    "RESOURCE_TYPE_ANIICON": 22,
+    "RESOURCE_TYPE_BITMAP": 2,
+    "RESOURCE_TYPE_CURSOR": 1,
+    "RESOURCE_TYPE_DIALOG": 5,
+    "RESOURCE_TYPE_DLGINCLUDE": 17,
+    "RESOURCE_TYPE_FONT": 8,
+    "RESOURCE_TYPE_FONTDIR": 7,
+    "RESOURCE_TYPE_GROUP_CURSOR": 12,
+    "RESOURCE_TYPE_GROUP_ICON": 14,
+    "RESOURCE_TYPE_HTML": 23,
+    "RESOURCE_TYPE_ICON": 3,
+    "RESOURCE_TYPE_MANIFEST": 24,
+    "RESOURCE_TYPE_MENU": 4,
+    "RESOURCE_TYPE_MESSAGETABLE": 11,
+    "RESOURCE_TYPE_PLUGPLAY": 19,
+    "RESOURCE_TYPE_RCDATA": 10,
+    "RESOURCE_TYPE_STRING": 6,
+    "RESOURCE_TYPE_VERSION": 16,
+    "RESOURCE_TYPE_VXD": 20,
+    "SECTION_ALIGN_1024BYTES": 11534336,
+    "SECTION_ALIGN_128BYTES": 8388608,
+    "SECTION_ALIGN_16BYTES": 5242880,
+    "SECTION_ALIGN_1BYTES": 1048576,
+    "SECTION_ALIGN_2048BYTES": 12582912,
+    "SECTION_ALIGN_256BYTES": 9437184,
+    "SECTION_ALIGN_2BYTES": 2097152,
+    "SECTION_ALIGN_32BYTES": 6291456,
+    "SECTION_ALIGN_4096BYTES": 13631488,
+    "SECTION_ALIGN_4BYTES": 3145728,
+    "SECTION_ALIGN_512BYTES": 10485760,
+    "SECTION_ALIGN_64BYTES": 7340032,
+    "SECTION_ALIGN_8192BYTES": 14680064,
+    "SECTION_ALIGN_8BYTES": 4194304,
+    "SECTION_ALIGN_MASK": 15728640,
+    "SECTION_CNT_CODE": 32,
+    "SECTION_CNT_INITIALIZED_DATA": 64,
+    "SECTION_CNT_UNINITIALIZED_DATA": 128,
+    "SECTION_GPREL": 32768,
+    "SECTION_LNK_COMDAT": 4096,
+    "SECTION_LNK_INFO": 512,
+    "SECTION_LNK_NRELOC_OVFL": 16777216,
+    "SECTION_LNK_OTHER": 256,
+    "SECTION_LNK_REMOVE": 2048,
+    "SECTION_MEM_16BIT": 131072,
+    "SECTION_MEM_DISCARDABLE": 33554432,
+    "SECTION_MEM_EXECUTE": 536870912,
+    "SECTION_MEM_FARDATA": 32768,
+    "SECTION_MEM_LOCKED": 262144,
+    "SECTION_MEM_NOT_CACHED": 67108864,
+    "SECTION_MEM_NOT_PAGED": 134217728,
+    "SECTION_MEM_PRELOAD": 524288,
+    "SECTION_MEM_PURGEABLE": 131072,
+    "SECTION_MEM_READ": 1073741824,
+    "SECTION_MEM_SHARED": 268435456,
+    "SECTION_MEM_WRITE": 2147483648,
+    "SECTION_NO_DEFER_SPEC_EXC": 16384,
+    "SECTION_NO_PAD": 8,
+    "SECTION_SCALE_INDEX": 1,
+    "SUBSYSTEM_EFI_APPLICATION": 10,
+    "SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER": 11,
+    "SUBSYSTEM_EFI_ROM_IMAGE": 13,
+    "SUBSYSTEM_EFI_RUNTIME_DRIVER": 12,
+    "SUBSYSTEM_NATIVE": 1,
+    "SUBSYSTEM_NATIVE_WINDOWS": 8,
+    "SUBSYSTEM_OS2_CUI": 5,
+    "SUBSYSTEM_POSIX_CUI": 7,
+    "SUBSYSTEM_UNKNOWN": 0,
+    "SUBSYSTEM_WINDOWS_BOOT_APPLICATION": 16,
+    "SUBSYSTEM_WINDOWS_CE_GUI": 9,
+    "SUBSYSTEM_WINDOWS_CUI": 3,
+    "SUBSYSTEM_WINDOWS_GUI": 2,
+    "SUBSYSTEM_XBOX": 14,
+    "SYSTEM": 4096,
+    "TERMINAL_SERVER_AWARE": 32768,
+    "UP_SYSTEM_ONLY": 16384,
+    "WDM_DRIVER": 8192,
+    "data_directories": [],
+    "delayed_import_details": [],
+    "export_details": [],
+    "image_version": {},
+    "import_details": [],
+    "is_pe": 0,
+    "linker_version": {},
+    "os_version": {},
+    "overlay": {},
+    "resource_version": {},
+    "resources": [],
+    "rich_signature": {},
+    "sections": [],
+    "signatures": [],
+    "subsystem_version": {},
+    "version_info": {},
+    "version_info_list": []
+   }
+  },
+  "elf_exec": {
+   "elf": {
+    "DT_BIND_NOW": 24,
+    "DT_DEBUG": 21,
+    "DT_ENCODING": 32,
+    "DT_FINI": 13,
+    "DT_FINI_ARRAY": 26,
+    "DT_FINI_ARRAYSZ": 28,
+    "DT_FLAGS": 30,
+    "DT_HASH": 4,
+    "DT_INIT": 12,
+    "DT_INIT_ARRAY": 25,
+    "DT_INIT_ARRAYSZ": 27,
+    "DT_JMPREL": 23,
+    "DT_NEEDED": 1,
+    "DT_NULL": 0,
+    "DT_PLTGOT": 3,
+    "DT_PLTREL": 20,
+    "DT_PLTRELSZ": 2,
+    "DT_REL": 17,
+    "DT_RELA": 7,
+    "DT_RELAENT": 9,
+    "DT_RELASZ": 8,
+    "DT_RELENT": 19,
+    "DT_RELSZ": 18,
+    "DT_RPATH": 15,
+    "DT_RUNPATH": 29,
+    "DT_SONAME": 14,
+    "DT_STRSZ": 10,
+    "DT_STRTAB": 5,
+    "DT_SYMBOLIC": 16,
+    "DT_SYMENT": 11,
+    "DT_SYMTAB": 6,
+    "DT_TEXTREL": 22,
+    "EM_386": 3,
+    "EM_68K": 4,
+    "EM_860": 7,
+    "EM_88K": 5,
+    "EM_AARCH64": 183,
+    "EM_ARM": 40,
+    "EM_M32": 1,
+    "EM_MIPS": 8,
+    "EM_MIPS_RS3_LE": 10,
+    "EM_NONE": 0,
+    "EM_PPC": 20,
+    "EM_PPC64": 21,
+    "EM_SPARC": 2,
+    "EM_X86_64": 62,
+    "ET_CORE": 4,
+    "ET_DYN": 3,
+    "ET_EXEC": 2,
+    "ET_NONE": 0,
+    "ET_REL": 1,
+    "PF_R": 4,
+    "PF_W": 2,
+    "PF_X": 1,
+    "PT_DYNAMIC": 2,
+    "PT_GNU_EH_FRAME": 1685382480,
+    "PT_GNU_STACK": 1685382481,
+    "PT_INTERP": 3,
+    "PT_LOAD": 1,
+    "PT_NOTE": 4,
+    "PT_NULL": 0,
+    "PT_PHDR": 6,
+    "PT_SHLIB": 5,
+    "PT_TLS": 7,
+    "SHF_ALLOC": 2,
+    "SHF_EXECINSTR": 4,
+    "SHF_WRITE": 1,
+    "SHT_DYNAMIC": 6,
+    "SHT_DYNSYM": 11,
+    "SHT_HASH": 5,
+    "SHT_NOBITS": 8,
+    "SHT_NOTE": 7,
+    "SHT_NULL": 0,
+    "SHT_PROGBITS": 1,
+    "SHT_REL": 9,
+    "SHT_RELA": 4,
+    "SHT_SHLIB": 10,
+    "SHT_STRTAB": 3,
+    "SHT_SYMTAB": 2,
+    "STB_GLOBAL": 1,
+    "STB_LOCAL": 0,
+    "STB_WEAK": 2,
+    "STT_COMMON": 5,
+    "STT_FILE": 4,
+    "STT_FUNC": 2,
+    "STT_NOTYPE": 0,
+    "STT_OBJECT": 1,
+    "STT_SECTION": 3,
+    "STT_TLS": 6,
+    "dynamic": [],
+    "dynsym": [],
+    "entry_point": 4096,
+    "machine": 62,
+    "number_of_sections": 6,
+    "number_of_segments": 5,
+    "ph_entry_size": 56,
+    "ph_offset": 64,
+    "sections": [
+     {
+      "address": 0,
+      "flags": 0,
+      "name": "",
+      "offset": 0,
+      "size": 0,
+      "type": 0
+     },
+     {
+      "address": 4194648,
+      "flags": 2,
+      "name": ".note.gnu.build-id",
+      "offset": 344,
+      "size": 36,
+      "type": 7
+     },
+     {
+      "address": 4198400,
+      "flags": 6,
+      "name": ".text",
+      "offset": 4096,
+      "size": 17,
+      "type": 1
+     },
+     {
+      "address": 4202496,
+      "flags": 2,
+      "name": ".eh_frame",
+      "offset": 8192,
+      "size": 44,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 48,
+      "name": ".comment",
+      "offset": 8236,
+      "size": 30,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 0,
+      "name": ".shstrtab",
+      "offset": 8266,
+      "size": 55,
+      "type": 3
+     }
+    ],
+    "segments": [
+     {
+      "alignment": 4096,
+      "file_size": 380,
+      "flags": 4,
+      "memory_size": 380,
+      "offset": 0,
+      "physical_address": 4194304,
+      "type": 1,
+      "virtual_address": 4194304
+     },
+     {
+      "alignment": 4096,
+      "file_size": 17,
+      "flags": 5,
+      "memory_size": 17,
+      "offset": 4096,
+      "physical_address": 4198400,
+      "type": 1,
+      "virtual_address": 4198400
+     },
+     {
+      "alignment": 4096,
+      "file_size": 44,
+      "flags": 4,
+      "memory_size": 44,
+      "offset": 8192,
+      "physical_address": 4202496,
+      "type": 1,
+      "virtual_address": 4202496
+     },
+     {
+      "alignment": 4,
+      "file_size": 36,
+      "flags": 4,
+      "memory_size": 36,
+      "offset": 344,
+      "physical_address": 4194648,
+      "type": 4,
+      "virtual_address": 4194648
+     },
+     {
+      "alignment": 16,
+      "file_size": 0,
+      "flags": 6,
+      "memory_size": 0,
+      "offset": 0,
+      "physical_address": 0,
+      "type": 1685382481,
+      "virtual_address": 0
+     }
+    ],
+    "sh_entry_size": 64,
+    "sh_offset": 8328,
+    "symtab": [],
+    "type": 2
+   },
+   "pe": {
+    "AGGRESIVE_WS_TRIM": 16,
+    "APPCONTAINER": 4096,
+    "BYTES_REVERSED_HI": 32768,
+    "BYTES_REVERSED_LO": 128,
+    "DEBUG_STRIPPED": 512,
+    "DLL": 8192,
+    "DYNAMIC_BASE": 64,
+    "EXECUTABLE_IMAGE": 2,
+    "FORCE_INTEGRITY": 128,
+    "GUARD_CF": 16384,
+    "HIGH_ENTROPY_VA": 32,
+    "IMAGE_DEBUG_TYPE_BORLAND": 9,
+    "IMAGE_DEBUG_TYPE_CLSID": 11,
+    "IMAGE_DEBUG_TYPE_CODEVIEW": 2,
+    "IMAGE_DEBUG_TYPE_COFF": 1,
+    "IMAGE_DEBUG_TYPE_EXCEPTION": 5,
+    "IMAGE_DEBUG_TYPE_FIXUP": 6,
+    "IMAGE_DEBUG_TYPE_FPO": 3,
+    "IMAGE_DEBUG_TYPE_ILTCG": 14,
+    "IMAGE_DEBUG_TYPE_MISC": 4,
+    "IMAGE_DEBUG_TYPE_MPX": 15,
+    "IMAGE_DEBUG_TYPE_OMAP_FROM_SRC": 8,
+    "IMAGE_DEBUG_TYPE_OMAP_TO_SRC": 7,
+    "IMAGE_DEBUG_TYPE_POGO": 13,
+    "IMAGE_DEBUG_TYPE_REPRO": 16,
+    "IMAGE_DEBUG_TYPE_RESERVED10": 10,
+    "IMAGE_DEBUG_TYPE_UNKNOWN": 0,
+    "IMAGE_DEBUG_TYPE_VC_FEATURE": 12,
+    "IMAGE_DIRECTORY_ENTRY_ARCHITECTURE": 7,
+    "IMAGE_DIRECTORY_ENTRY_BASERELOC": 5,
+    "IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT": 11,
+    "IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR": 14,
+    "IMAGE_DIRECTORY_ENTRY_COPYRIGHT": 7,
+    "IMAGE_DIRECTORY_ENTRY_DEBUG": 6,
+    "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT": 13,
+    "IMAGE_DIRECTORY_ENTRY_EXCEPTION": 3,
+    "IMAGE_DIRECTORY_ENTRY_EXPORT": 0,
+    "IMAGE_DIRECTORY_ENTRY_GLOBALPTR": 8,
+    "IMAGE_DIRECTORY_ENTRY_IAT": 12,
+    "IMAGE_DIRECTORY_ENTRY_IMPORT": 1,
+    "IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG": 10,
+    "IMAGE_DIRECTORY_ENTRY_RESOURCE": 2,
+    "IMAGE_DIRECTORY_ENTRY_SECURITY": 4,
+    "IMAGE_DIRECTORY_ENTRY_TLS": 9,
+    "IMAGE_NT_OPTIONAL_HDR32_MAGIC": 267,
+    "IMAGE_NT_OPTIONAL_HDR64_MAGIC": 523,
+    "IMAGE_ROM_OPTIONAL_HDR_MAGIC": 263,
+    "IMPORT_ANY": -1,
+    "IMPORT_DELAYED": 2,
+    "IMPORT_STANDARD": 1,
+    "LARGE_ADDRESS_AWARE": 32,
+    "LINE_NUMS_STRIPPED": 4,
+    "LOCAL_SYMS_STRIPPED": 8,
+    "MACHINE_32BIT": 256,
+    "MACHINE_ALPHA": 388,
+    "MACHINE_ALPHA64": 644,
+    "MACHINE_AM33": 467,
+    "MACHINE_AMD64": 34404,
+    "MACHINE_ARM": 448,
+    "MACHINE_ARM64": 43620,
+    "MACHINE_ARMNT": 452,
+    "MACHINE_AXP64": 644,
+    "MACHINE_CEE": 49390,
+    "MACHINE_CEF": 3311,
+    "MACHINE_EBC": 3772,
+    "MACHINE_I386": 332,
+    "MACHINE_IA64": 512,
+    "MACHINE_M32R": 36929,
+    "MACHINE_MIPS16": 614,
+    "MACHINE_MIPSFPU": 870,
+    "MACHINE_MIPSFPU16": 1126,
+    "MACHINE_POWERPC": 496,
+    "MACHINE_POWERPCFP": 497,
+    "MACHINE_R10000": 360,
+    "MACHINE_R3000": 354,
+    "MACHINE_R4000": 358,
+    "MACHINE_SH3": 418,
+    "MACHINE_SH3DSP": 419,
+    "MACHINE_SH3E": 420,
+    "MACHINE_SH4": 422,
+    "MACHINE_SH5": 424,
+    "MACHINE_TARGET_HOST": 1,
+    "MACHINE_THUMB": 450,
+    "MACHINE_TRICORE": 1312,
+    "MACHINE_UNKNOWN": 0,
+    "MACHINE_WCEMIPSV2": 361,
+    "NET_RUN_FROM_SWAP": 2048,
+    "NO_BIND": 2048,
+    "NO_ISOLATION": 512,
+    "NO_SEH": 1024,
+    "NX_COMPAT": 256,
+    "RELOCS_STRIPPED": 1,
+    "REMOVABLE_RUN_FROM_SWAP": 1024,
+    "RESOURCE_TYPE_ACCELERATOR": 9,
+    "RESOURCE_TYPE_ANICURSOR": 21,
+    "RESOURCE_TYPE_ANIICON": 22,
+    "RESOURCE_TYPE_BITMAP": 2,
+    "RESOURCE_TYPE_CURSOR": 1,
+    "RESOURCE_TYPE_DIALOG": 5,
+    "RESOURCE_TYPE_DLGINCLUDE": 17,
+    "RESOURCE_TYPE_FONT": 8,
+    "RESOURCE_TYPE_FONTDIR": 7,
+    "RESOURCE_TYPE_GROUP_CURSOR": 12,
+    "RESOURCE_TYPE_GROUP_ICON": 14,
+    "RESOURCE_TYPE_HTML": 23,
+    "RESOURCE_TYPE_ICON": 3,
+    "RESOURCE_TYPE_MANIFEST": 24,
+    "RESOURCE_TYPE_MENU": 4,
+    "RESOURCE_TYPE_MESSAGETABLE": 11,
+    "RESOURCE_TYPE_PLUGPLAY": 19,
+    "RESOURCE_TYPE_RCDATA": 10,
+    "RESOURCE_TYPE_STRING": 6,
+    "RESOURCE_TYPE_VERSION": 16,
+    "RESOURCE_TYPE_VXD": 20,
+    "SECTION_ALIGN_1024BYTES": 11534336,
+    "SECTION_ALIGN_128BYTES": 8388608,
+    "SECTION_ALIGN_16BYTES": 5242880,
+    "SECTION_ALIGN_1BYTES": 1048576,
+    "SECTION_ALIGN_2048BYTES": 12582912,
+    "SECTION_ALIGN_256BYTES": 9437184,
+    "SECTION_ALIGN_2BYTES": 2097152,
+    "SECTION_ALIGN_32BYTES": 6291456,
+    "SECTION_ALIGN_4096BYTES": 13631488,
+    "SECTION_ALIGN_4BYTES": 3145728,
+    "SECTION_ALIGN_512BYTES": 10485760,
+    "SECTION_ALIGN_64BYTES": 7340032,
+    "SECTION_ALIGN_8192BYTES": 14680064,
+    "SECTION_ALIGN_8BYTES": 4194304,
+    "SECTION_ALIGN_MASK": 15728640,
+    "SECTION_CNT_CODE": 32,
+    "SECTION_CNT_INITIALIZED_DATA": 64,
+    "SECTION_CNT_UNINITIALIZED_DATA": 128,
+    "SECTION_GPREL": 32768,
+    "SECTION_LNK_COMDAT": 4096,
+    "SECTION_LNK_INFO": 512,
+    "SECTION_LNK_NRELOC_OVFL": 16777216,
+    "SECTION_LNK_OTHER": 256,
+    "SECTION_LNK_REMOVE": 2048,
+    "SECTION_MEM_16BIT": 131072,
+    "SECTION_MEM_DISCARDABLE": 33554432,
+    "SECTION_MEM_EXECUTE": 536870912,
+    "SECTION_MEM_FARDATA": 32768,
+    "SECTION_MEM_LOCKED": 262144,
+    "SECTION_MEM_NOT_CACHED": 67108864,
+    "SECTION_MEM_NOT_PAGED": 134217728,
+    "SECTION_MEM_PRELOAD": 524288,
+    "SECTION_MEM_PURGEABLE": 131072,
+    "SECTION_MEM_READ": 1073741824,
+    "SECTION_MEM_SHARED": 268435456,
+    "SECTION_MEM_WRITE": 2147483648,
+    "SECTION_NO_DEFER_SPEC_EXC": 16384,
+    "SECTION_NO_PAD": 8,
+    "SECTION_SCALE_INDEX": 1,
+    "SUBSYSTEM_EFI_APPLICATION": 10,
+    "SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER": 11,
+    "SUBSYSTEM_EFI_ROM_IMAGE": 13,
+    "SUBSYSTEM_EFI_RUNTIME_DRIVER": 12,
+    "SUBSYSTEM_NATIVE": 1,
+    "SUBSYSTEM_NATIVE_WINDOWS": 8,
+    "SUBSYSTEM_OS2_CUI": 5,
+    "SUBSYSTEM_POSIX_CUI": 7,
+    "SUBSYSTEM_UNKNOWN": 0,
+    "SUBSYSTEM_WINDOWS_BOOT_APPLICATION": 16,
+    "SUBSYSTEM_WINDOWS_CE_GUI": 9,
+    "SUBSYSTEM_WINDOWS_CUI": 3,
+    "SUBSYSTEM_WINDOWS_GUI": 2,
+    "SUBSYSTEM_XBOX": 14,
+    "SYSTEM": 4096,
+    "TERMINAL_SERVER_AWARE": 32768,
+    "UP_SYSTEM_ONLY": 16384,
+    "WDM_DRIVER": 8192,
+    "data_directories": [],
+    "delayed_import_details": [],
+    "export_details": [],
+    "image_version": {},
+    "import_details": [],
+    "is_pe": 0,
+    "linker_version": {},
+    "os_version": {},
+    "overlay": {},
+    "resource_version": {},
+    "resources": [],
+    "rich_signature": {},
+    "sections": [],
+    "signatures": [],
+    "subsystem_version": {},
+    "version_info": {},
+    "version_info_list": []
+   }
+  },
+  "elf_hello": {
+   "elf": {
+    "DT_BIND_NOW": 24,
+    "DT_DEBUG": 21,
+    "DT_ENCODING": 32,
+    "DT_FINI": 13,
+    "DT_FINI_ARRAY": 26,
+    "DT_FINI_ARRAYSZ": 28,
+    "DT_FLAGS": 30,
+    "DT_HASH": 4,
+    "DT_INIT": 12,
+    "DT_INIT_ARRAY": 25,
+    "DT_INIT_ARRAYSZ": 27,
+    "DT_JMPREL": 23,
+    "DT_NEEDED": 1,
+    "DT_NULL": 0,
+    "DT_PLTGOT": 3,
+    "DT_PLTREL": 20,
+    "DT_PLTRELSZ": 2,
+    "DT_REL": 17,
+    "DT_RELA": 7,
+    "DT_RELAENT": 9,
+    "DT_RELASZ": 8,
+    "DT_RELENT": 19,
+    "DT_RELSZ": 18,
+    "DT_RPATH": 15,
+    "DT_RUNPATH": 29,
+    "DT_SONAME": 14,
+    "DT_STRSZ": 10,
+    "DT_STRTAB": 5,
+    "DT_SYMBOLIC": 16,
+    "DT_SYMENT": 11,
+    "DT_SYMTAB": 6,
+    "DT_TEXTREL": 22,
+    "EM_386": 3,
+    "EM_68K": 4,
+    "EM_860": 7,
+    "EM_88K": 5,
+    "EM_AARCH64": 183,
+    "EM_ARM": 40,
+    "EM_M32": 1,
+    "EM_MIPS": 8,
+    "EM_MIPS_RS3_LE": 10,
+    "EM_NONE": 0,
+    "EM_PPC": 20,
+    "EM_PPC64": 21,
+    "EM_SPARC": 2,
+    "EM_X86_64": 62,
+    "ET_CORE": 4,
+    "ET_DYN": 3,
+    "ET_EXEC": 2,
+    "ET_NONE": 0,
+    "ET_REL": 1,
+    "PF_R": 4,
+    "PF_W": 2,
+    "PF_X": 1,
+    "PT_DYNAMIC": 2,
+    "PT_GNU_EH_FRAME": 1685382480,
+    "PT_GNU_STACK": 1685382481,
+    "PT_INTERP": 3,
+    "PT_LOAD": 1,
+    "PT_NOTE": 4,
+    "PT_NULL": 0,
+    "PT_PHDR": 6,
+    "PT_SHLIB": 5,
+    "PT_TLS": 7,
+    "SHF_ALLOC": 2,
+    "SHF_EXECINSTR": 4,
+    "SHF_WRITE": 1,
+    "SHT_DYNAMIC": 6,
+    "SHT_DYNSYM": 11,
+    "SHT_HASH": 5,
+    "SHT_NOBITS": 8,
+    "SHT_NOTE": 7,
+    "SHT_NULL": 0,
+    "SHT_PROGBITS": 1,
+    "SHT_REL": 9,
+    "SHT_RELA": 4,
+    "SHT_SHLIB": 10,
+    "SHT_STRTAB": 3,
+    "SHT_SYMTAB": 2,
+    "STB_GLOBAL": 1,
+    "STB_LOCAL": 0,
+    "STB_WEAK": 2,
+    "STT_COMMON": 5,
+    "STT_FILE": 4,
+    "STT_FUNC": 2,
+    "STT_NOTYPE": 0,
+    "STT_OBJECT": 1,
+    "STT_SECTION": 3,
+    "STT_TLS": 6,
+    "dynamic": [
+     {
+      "type": 1,
+      "val": 41
+     },
+     {
+      "type": 12,
+      "val": 4096
+     },
+     {
+      "type": 13,
+      "val": 4460
+     },
+     {
+      "type": 25,
+      "val": 15824
+     },
+     {
+      "type": 27,
+      "val": 8
+     },
+     {
+      "type": 26,
+      "val": 15832
+     },
+     {
+      "type": 28,
+      "val": 8
+     },
+     {
+      "type": 1879047925,
+      "val": 912
+     },
+     {
+      "type": 5,
+      "val": 1120
+     },
+     {
+      "type": 6,
+      "val": 952
+     },
+     {
+      "type": 10,
+      "val": 143
+     },
+     {
+      "type": 11,
+      "val": 24
+     },
+     {
+      "type": 21,
+      "val": 0
+     },
+     {
+      "type": 3,
+      "val": 16360
+     },
+     {
+      "type": 2,
+      "val": 24
+     },
+     {
+      "type": 20,
+      "val": 7
+     },
+     {
+      "type": 23,
+      "val": 1520
+     },
+     {
+      "type": 7,
+      "val": 1328
+     },
+     {
+      "type": 8,
+      "val": 192
+     },
+     {
+      "type": 9,
+      "val": 24
+     },
+     {
+      "type": 1879048187,
+      "val": 134217728
+     },
+     {
+      "type": 1879048190,
+      "val": 1280
+     },
+     {
+      "type": 1879048191,
+      "val": 1
+     },
+     {
+      "type": 1879048176,
+      "val": 1264
+     },
+     {
+      "type": 1879048185,
+      "val": 3
+     },
+     {
+      "type": 0,
+      "val": 0
+     }
+    ],
+    "dynamic_section_entries": 26,
+    "dynsym": [
+     {
+      "bind": 0,
+      "name": "",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 1,
+      "name": "__libc_start_main",
+      "shndx": 0,
+      "size": 0,
+      "type": 2,
+      "value": 0
+     },
+     {
+      "bind": 2,
+      "name": "_ITM_deregisterTMCloneTable",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 1,
+      "name": "printf",
+      "shndx": 0,
+      "size": 0,
+      "type": 2,
+      "value": 0
+     },
+     {
+      "bind": 2,
+      "name": "__gmon_start__",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 2,
+      "name": "_ITM_registerTMCloneTable",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 2,
+      "name": "__cxa_finalize",
+      "shndx": 0,
+      "size": 0,
+      "type": 2,
+      "value": 0
+     }
+    ],
+    "dynsym_entries": 7,
+    "entry_point": 4176,
+    "machine": 62,
+    "number_of_sections": 31,
+    "number_of_segments": 14,
+    "ph_entry_size": 56,
+    "ph_offset": 64,
+    "sections": [
+     {
+      "address": 0,
+      "flags": 0,
+      "name": "",
+      "offset": 0,
+      "size": 0,
+      "type": 0
+     },
+     {
+      "address": 848,
+      "flags": 2,
+      "name": ".note.gnu.build-id",
+      "offset": 848,
+      "size": 36,
+      "type": 7
+     },
+     {
+      "address": 884,
+      "flags": 2,
+      "name": ".interp",
+      "offset": 884,
+      "size": 28,
+      "type": 1
+     },
+     {
+      "address": 912,
+      "flags": 2,
+      "name": ".gnu.hash",
+      "offset": 912,
+      "size": 36,
+      "type": 1879048182
+     },
+     {
+      "address": 952,
+      "flags": 2,
+      "name": ".dynsym",
+      "offset": 952,
+      "size": 168,
+      "type": 11
+     },
+     {
+      "address": 1120,
+      "flags": 2,
+      "name": ".dynstr",
+      "offset": 1120,
+      "size": 143,
+      "type": 3
+     },
+     {
+      "address": 1264,
+      "flags": 2,
+      "name": ".gnu.version",
+      "offset": 1264,
+      "size": 14,
+      "type": 1879048191
+     },
+     {
+      "address": 1280,
+      "flags": 2,
+      "name": ".gnu.version_r",
+      "offset": 1280,
+      "size": 48,
+      "type": 1879048190
+     },
+     {
+      "address": 1328,
+      "flags": 2,
+      "name": ".rela.dyn",
+      "offset": 1328,
+      "size": 192,
+      "type": 4
+     },
+     {
+      "address": 1520,
+      "flags": 66,
+      "name": ".rela.plt",
+      "offset": 1520,
+      "size": 24,
+      "type": 4
+     },
+     {
+      "address": 4096,
+      "flags": 6,
+      "name": ".init",
+      "offset": 4096,
+      "size": 23,
+      "type": 1
+     },
+     {
+      "address": 4128,
+      "flags": 6,
+      "name": ".plt",
+      "offset": 4128,
+      "size": 32,
+      "type": 1
+     },
+     {
+      "address": 4160,
+      "flags": 6,
+      "name": ".plt.got",
+      "offset": 4160,
+      "size": 8,
+      "type": 1
+     },
+     {
+      "address": 4176,
+      "flags": 6,
+      "name": ".text",
+      "offset": 4176,
+      "size": 283,
+      "type": 1
+     },
+     {
+      "address": 4460,
+      "flags": 6,
+      "name": ".fini",
+      "offset": 4460,
+      "size": 9,
+      "type": 1
+     },
+     {
+      "address": 8192,
+      "flags": 2,
+      "name": ".rodata",
+      "offset": 8192,
+      "size": 14,
+      "type": 1
+     },
+     {
+      "address": 8208,
+      "flags": 2,
+      "name": ".eh_frame_hdr",
+      "offset": 8208,
+      "size": 52,
+      "type": 1
+     },
+     {
+      "address": 8264,
+      "flags": 2,
+      "name": ".eh_frame",
+      "offset": 8264,
+      "size": 184,
+      "type": 1
+     },
+     {
+      "address": 8448,
+      "flags": 2,
+      "name": ".note.gnu.property",
+      "offset": 8448,
+      "size": 32,
+      "type": 7
+     },
+     {
+      "address": 8480,
+      "flags": 2,
+      "name": ".note.ABI-tag",
+      "offset": 8480,
+      "size": 32,
+      "type": 7
+     },
+     {
+      "address": 15824,
+      "flags": 3,
+      "name": ".init_array",
+      "offset": 11728,
+      "size": 8,
+      "type": 14
+     },
+     {
+      "address": 15832,
+      "flags": 3,
+      "name": ".fini_array",
+      "offset": 11736,
+      "size": 8,
+      "type": 15
+     },
+     {
+      "address": 15840,
+      "flags": 3,
+      "name": ".dynamic",
+      "offset": 11744,
+      "size": 480,
+      "type": 6
+     },
+     {
+      "address": 16320,
+      "flags": 3,
+      "name": ".got",
+      "offset": 12224,
+      "size": 40,
+      "type": 1
+     },
+     {
+      "address": 16360,
+      "flags": 3,
+      "name": ".got.plt",
+      "offset": 12264,
+      "size": 32,
+      "type": 1
+     },
+     {
+      "address": 16392,
+      "flags": 3,
+      "name": ".data",
+      "offset": 12296,
+      "size": 20,
+      "type": 1
+     },
+     {
+      "address": 16412,
+      "flags": 3,
+      "name": ".bss",
+      "offset": 12316,
+      "size": 4,
+      "type": 8
+     },
+     {
+      "address": 0,
+      "flags": 48,
+      "name": ".comment",
+      "offset": 12316,
+      "size": 30,
+      "type": 1
+     },
+     {
+      "address": 0,
+      "flags": 0,
+      "name": ".symtab",
+      "offset": 12352,
+      "size": 912,
+      "type": 2
+     },
+     {
+      "address": 0,
+      "flags": 0,
+      "name": ".strtab",
+      "offset": 13264,
+      "size": 509,
+      "type": 3
+     },
+     {
+      "address": 0,
+      "flags": 0,
+      "name": ".shstrtab",
+      "offset": 13773,
+      "size": 282,
+      "type": 3
+     }
+    ],
+    "segments": [
+     {
+      "alignment": 8,
+      "file_size": 784,
+      "flags": 4,
+      "memory_size": 784,
+      "offset": 64,
+      "physical_address": 64,
+      "type": 6,
+      "virtual_address": 64
+     },
+     {
+      "alignment": 1,
+      "file_size": 28,
+      "flags": 4,
+      "memory_size": 28,
+      "offset": 884,
+      "physical_address": 884,
+      "type": 3,
+      "virtual_address": 884
+     },
+     {
+      "alignment": 4096,
+      "file_size": 1544,
+      "flags": 4,
+      "memory_size": 1544,
+      "offset": 0,
+      "physical_address": 0,
+      "type": 1,
+      "virtual_address": 0
+     },
+     {
+      "alignment": 4096,
+      "file_size": 373,
+      "flags": 5,
+      "memory_size": 373,
+      "offset": 4096,
+      "physical_address": 4096,
+      "type": 1,
+      "virtual_address": 4096
+     },
+     {
+      "alignment": 4096,
+      "file_size": 320,
+      "flags": 4,
+      "memory_size": 320,
+      "offset": 8192,
+      "physical_address": 8192,
+      "type": 1,
+      "virtual_address": 8192
+     },
+     {
+      "alignment": 4096,
+      "file_size": 588,
+      "flags": 6,
+      "memory_size": 592,
+      "offset": 11728,
+      "physical_address": 15824,
+      "type": 1,
+      "virtual_address": 15824
+     },
+     {
+      "alignment": 8,
+      "file_size": 480,
+      "flags": 6,
+      "memory_size": 480,
+      "offset": 11744,
+      "physical_address": 15840,
+      "type": 2,
+      "virtual_address": 15840
+     },
+     {
+      "alignment": 4,
+      "file_size": 36,
+      "flags": 4,
+      "memory_size": 36,
+      "offset": 848,
+      "physical_address": 848,
+      "type": 4,
+      "virtual_address": 848
+     },
+     {
+      "alignment": 8,
+      "file_size": 32,
+      "flags": 4,
+      "memory_size": 32,
+      "offset": 8448,
+      "physical_address": 8448,
+      "type": 4,
+      "virtual_address": 8448
+     },
+     {
+      "alignment": 4,
+      "file_size": 32,
+      "flags": 4,
+      "memory_size": 32,
+      "offset": 8480,
+      "physical_address": 8480,
+      "type": 4,
+      "virtual_address": 8480
+     },
+     {
+      "alignment": 8,
+      "file_size": 32,
+      "flags": 4,
+      "memory_size": 32,
+      "offset": 8448,
+      "physical_address": 8448,
+      "type": 1685382483,
+      "virtual_address": 8448
+     },
+     {
+      "alignment": 4,
+      "file_size": 52,
+      "flags": 4,
+      "memory_size": 52,
+      "offset": 8208,
+      "physical_address": 8208,
+      "type": 1685382480,
+      "virtual_address": 8208
+     },
+     {
+      "alignment": 16,
+      "file_size": 0,
+      "flags": 6,
+      "memory_size": 0,
+      "offset": 0,
+      "physical_address": 0,
+      "type": 1685382481,
+      "virtual_address": 0
+     },
+     {
+      "alignment": 1,
+      "file_size": 560,
+      "flags": 4,
+      "memory_size": 560,
+      "offset": 11728,
+      "physical_address": 15824,
+      "type": 1685382482,
+      "virtual_address": 15824
+     }
+    ],
+    "sh_entry_size": 64,
+    "sh_offset": 14056,
+    "symtab": [
+     {
+      "bind": 0,
+      "name": "",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "Scrt1.o",
+      "shndx": 65521,
+      "size": 0,
+      "type": 4,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "__abi_tag",
+      "shndx": 19,
+      "size": 32,
+      "type": 1,
+      "value": 8480
+     },
+     {
+      "bind": 0,
+      "name": "crtstuff.c",
+      "shndx": 65521,
+      "size": 0,
+      "type": 4,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "deregister_tm_clones",
+      "shndx": 13,
+      "size": 0,
+      "type": 2,
+      "value": 4224
+     },
+     {
+      "bind": 0,
+      "name": "register_tm_clones",
+      "shndx": 13,
+      "size": 0,
+      "type": 2,
+      "value": 4272
+     },
+     {
+      "bind": 0,
+      "name": "__do_global_dtors_aux",
+      "shndx": 13,
+      "size": 0,
+      "type": 2,
+      "value": 4336
+     },
+     {
+      "bind": 0,
+      "name": "completed.0",
+      "shndx": 26,
+      "size": 1,
+      "type": 1,
+      "value": 16412
+     },
+     {
+      "bind": 0,
+      "name": "__do_global_dtors_aux_fini_array_entry",
+      "shndx": 21,
+      "size": 0,
+      "type": 1,
+      "value": 15832
+     },
+     {
+      "bind": 0,
+      "name": "frame_dummy",
+      "shndx": 13,
+      "size": 0,
+      "type": 2,
+      "value": 4400
+     },
+     {
+      "bind": 0,
+      "name": "__frame_dummy_init_array_entry",
+      "shndx": 20,
+      "size": 0,
+      "type": 1,
+      "value": 15824
+     },
+     {
+      "bind": 0,
+      "name": "hello.c",
+      "shndx": 65521,
+      "size": 0,
+      "type": 4,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "crtstuff.c",
+      "shndx": 65521,
+      "size": 0,
+      "type": 4,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "__FRAME_END__",
+      "shndx": 17,
+      "size": 0,
+      "type": 1,
+      "value": 8444
+     },
+     {
+      "bind": 0,
+      "name": "",
+      "shndx": 65521,
+      "size": 0,
+      "type": 4,
+      "value": 0
+     },
+     {
+      "bind": 0,
+      "name": "_DYNAMIC",
+      "shndx": 22,
+      "size": 0,
+      "type": 1,
+      "value": 15840
+     },
+     {
+      "bind": 0,
+      "name": "__GNU_EH_FRAME_HDR",
+      "shndx": 16,
+      "size": 0,
+      "type": 0,
+      "value": 8208
+     },
+     {
+      "bind": 0,
+      "name": "_GLOBAL_OFFSET_TABLE_",
+      "shndx": 24,
+      "size": 0,
+      "type": 1,
+      "value": 16360
+     },
+     {
+      "bind": 1,
+      "name": "__libc_start_main@GLIBC_2.34",
+      "shndx": 0,
+      "size": 0,
+      "type": 2,
+      "value": 0
+     },
+     {
+      "bind": 2,
+      "name": "_ITM_deregisterTMCloneTable",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 2,
+      "name": "data_start",
+      "shndx": 25,
+      "size": 0,
+      "type": 0,
+      "value": 16392
+     },
+     {
+      "bind": 1,
+      "name": "_edata",
+      "shndx": 25,
+      "size": 0,
+      "type": 0,
+      "value": 16412
+     },
+     {
+      "bind": 1,
+      "name": "_fini",
+      "shndx": 14,
+      "size": 0,
+      "type": 2,
+      "value": 4460
+     },
+     {
+      "bind": 1,
+      "name": "printf@GLIBC_2.2.5",
+      "shndx": 0,
+      "size": 0,
+      "type": 2,
+      "value": 0
+     },
+     {
+      "bind": 1,
+      "name": "__data_start",
+      "shndx": 25,
+      "size": 0,
+      "type": 0,
+      "value": 16392
+     },
+     {
+      "bind": 2,
+      "name": "__gmon_start__",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 1,
+      "name": "__dso_handle",
+      "shndx": 25,
+      "size": 0,
+      "type": 1,
+      "value": 16400
+     },
+     {
+      "bind": 1,
+      "name": "_IO_stdin_used",
+      "shndx": 15,
+      "size": 4,
+      "type": 1,
+      "value": 8192
+     },
+     {
+      "bind": 1,
+      "name": "_end",
+      "shndx": 26,
+      "size": 0,
+      "type": 0,
+      "value": 16416
+     },
+     {
+      "bind": 1,
+      "name": "_start",
+      "shndx": 13,
+      "size": 34,
+      "type": 2,
+      "value": 4176
+     },
+     {
+      "bind": 1,
+      "name": "__bss_start",
+      "shndx": 26,
+      "size": 0,
+      "type": 0,
+      "value": 16412
+     },
+     {
+      "bind": 1,
+      "name": "main",
+      "shndx": 13,
+      "size": 40,
+      "type": 2,
+      "value": 4419
+     },
+     {
+      "bind": 1,
+      "name": "fixture_global",
+      "shndx": 25,
+      "size": 4,
+      "type": 1,
+      "value": 16408
+     },
+     {
+      "bind": 1,
+      "name": "__TMC_END__",
+      "shndx": 25,
+      "size": 0,
+      "type": 1,
+      "value": 16416
+     },
+     {
+      "bind": 2,
+      "name": "_ITM_registerTMCloneTable",
+      "shndx": 0,
+      "size": 0,
+      "type": 0,
+      "value": 0
+     },
+     {
+      "bind": 1,
+      "name": "fixture_function",
+      "shndx": 13,
+      "size": 10,
+      "type": 2,
+      "value": 4409
+     },
+     {
+      "bind": 2,
+      "name": "__cxa_finalize@GLIBC_2.2.5",
+      "shndx": 0,
+      "size": 0,
+      "type": 2,
+      "value": 0
+     },
+     {
+      "bind": 1,
+      "name": "_init",
+      "shndx": 10,
+      "size": 0,
+      "type": 2,
+      "value": 4096
+     }
+    ],
+    "symtab_entries": 38,
+    "type": 3
+   },
+   "pe": {
+    "AGGRESIVE_WS_TRIM": 16,
+    "APPCONTAINER": 4096,
+    "BYTES_REVERSED_HI": 32768,
+    "BYTES_REVERSED_LO": 128,
+    "DEBUG_STRIPPED": 512,
+    "DLL": 8192,
+    "DYNAMIC_BASE": 64,
+    "EXECUTABLE_IMAGE": 2,
+    "FORCE_INTEGRITY": 128,
+    "GUARD_CF": 16384,
+    "HIGH_ENTROPY_VA": 32,
+    "IMAGE_DEBUG_TYPE_BORLAND": 9,
+    "IMAGE_DEBUG_TYPE_CLSID": 11,
+    "IMAGE_DEBUG_TYPE_CODEVIEW": 2,
+    "IMAGE_DEBUG_TYPE_COFF": 1,
+    "IMAGE_DEBUG_TYPE_EXCEPTION": 5,
+    "IMAGE_DEBUG_TYPE_FIXUP": 6,
+    "IMAGE_DEBUG_TYPE_FPO": 3,
+    "IMAGE_DEBUG_TYPE_ILTCG": 14,
+    "IMAGE_DEBUG_TYPE_MISC": 4,
+    "IMAGE_DEBUG_TYPE_MPX": 15,
+    "IMAGE_DEBUG_TYPE_OMAP_FROM_SRC": 8,
+    "IMAGE_DEBUG_TYPE_OMAP_TO_SRC": 7,
+    "IMAGE_DEBUG_TYPE_POGO": 13,
+    "IMAGE_DEBUG_TYPE_REPRO": 16,
+    "IMAGE_DEBUG_TYPE_RESERVED10": 10,
+    "IMAGE_DEBUG_TYPE_UNKNOWN": 0,
+    "IMAGE_DEBUG_TYPE_VC_FEATURE": 12,
+    "IMAGE_DIRECTORY_ENTRY_ARCHITECTURE": 7,
+    "IMAGE_DIRECTORY_ENTRY_BASERELOC": 5,
+    "IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT": 11,
+    "IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR": 14,
+    "IMAGE_DIRECTORY_ENTRY_COPYRIGHT": 7,
+    "IMAGE_DIRECTORY_ENTRY_DEBUG": 6,
+    "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT": 13,
+    "IMAGE_DIRECTORY_ENTRY_EXCEPTION": 3,
+    "IMAGE_DIRECTORY_ENTRY_EXPORT": 0,
+    "IMAGE_DIRECTORY_ENTRY_GLOBALPTR": 8,
+    "IMAGE_DIRECTORY_ENTRY_IAT": 12,
+    "IMAGE_DIRECTORY_ENTRY_IMPORT": 1,
+    "IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG": 10,
+    "IMAGE_DIRECTORY_ENTRY_RESOURCE": 2,
+    "IMAGE_DIRECTORY_ENTRY_SECURITY": 4,
+    "IMAGE_DIRECTORY_ENTRY_TLS": 9,
+    "IMAGE_NT_OPTIONAL_HDR32_MAGIC": 267,
+    "IMAGE_NT_OPTIONAL_HDR64_MAGIC": 523,
+    "IMAGE_ROM_OPTIONAL_HDR_MAGIC": 263,
+    "IMPORT_ANY": -1,
+    "IMPORT_DELAYED": 2,
+    "IMPORT_STANDARD": 1,
+    "LARGE_ADDRESS_AWARE": 32,
+    "LINE_NUMS_STRIPPED": 4,
+    "LOCAL_SYMS_STRIPPED": 8,
+    "MACHINE_32BIT": 256,
+    "MACHINE_ALPHA": 388,
+    "MACHINE_ALPHA64": 644,
+    "MACHINE_AM33": 467,
+    "MACHINE_AMD64": 34404,
+    "MACHINE_ARM": 448,
+    "MACHINE_ARM64": 43620,
+    "MACHINE_ARMNT": 452,
+    "MACHINE_AXP64": 644,
+    "MACHINE_CEE": 49390,
+    "MACHINE_CEF": 3311,
+    "MACHINE_EBC": 3772,
+    "MACHINE_I386": 332,
+    "MACHINE_IA64": 512,
+    "MACHINE_M32R": 36929,
+    "MACHINE_MIPS16": 614,
+    "MACHINE_MIPSFPU": 870,
+    "MACHINE_MIPSFPU16": 1126,
+    "MACHINE_POWERPC": 496,
+    "MACHINE_POWERPCFP": 497,
+    "MACHINE_R10000": 360,
+    "MACHINE_R3000": 354,
+    "MACHINE_R4000": 358,
+    "MACHINE_SH3": 418,
+    "MACHINE_SH3DSP": 419,
+    "MACHINE_SH3E": 420,
+    "MACHINE_SH4": 422,
+    "MACHINE_SH5": 424,
+    "MACHINE_TARGET_HOST": 1,
+    "MACHINE_THUMB": 450,
+    "MACHINE_TRICORE": 1312,
+    "MACHINE_UNKNOWN": 0,
+    "MACHINE_WCEMIPSV2": 361,
+    "NET_RUN_FROM_SWAP": 2048,
+    "NO_BIND": 2048,
+    "NO_ISOLATION": 512,
+    "NO_SEH": 1024,
+    "NX_COMPAT": 256,
+    "RELOCS_STRIPPED": 1,
+    "REMOVABLE_RUN_FROM_SWAP": 1024,
+    "RESOURCE_TYPE_ACCELERATOR": 9,
+    "RESOURCE_TYPE_ANICURSOR": 21,
+    "RESOURCE_TYPE_ANIICON": 22,
+    "RESOURCE_TYPE_BITMAP": 2,
+    "RESOURCE_TYPE_CURSOR": 1,
+    "RESOURCE_TYPE_DIALOG": 5,
+    "RESOURCE_TYPE_DLGINCLUDE": 17,
+    "RESOURCE_TYPE_FONT": 8,
+    "RESOURCE_TYPE_FONTDIR": 7,
+    "RESOURCE_TYPE_GROUP_CURSOR": 12,
+    "RESOURCE_TYPE_GROUP_ICON": 14,
+    "RESOURCE_TYPE_HTML": 23,
+    "RESOURCE_TYPE_ICON": 3,
+    "RESOURCE_TYPE_MANIFEST": 24,
+    "RESOURCE_TYPE_MENU": 4,
+    "RESOURCE_TYPE_MESSAGETABLE": 11,
+    "RESOURCE_TYPE_PLUGPLAY": 19,
+    "RESOURCE_TYPE_RCDATA": 10,
+    "RESOURCE_TYPE_STRING": 6,
+    "RESOURCE_TYPE_VERSION": 16,
+    "RESOURCE_TYPE_VXD": 20,
+    "SECTION_ALIGN_1024BYTES": 11534336,
+    "SECTION_ALIGN_128BYTES": 8388608,
+    "SECTION_ALIGN_16BYTES": 5242880,
+    "SECTION_ALIGN_1BYTES": 1048576,
+    "SECTION_ALIGN_2048BYTES": 12582912,
+    "SECTION_ALIGN_256BYTES": 9437184,
+    "SECTION_ALIGN_2BYTES": 2097152,
+    "SECTION_ALIGN_32BYTES": 6291456,
+    "SECTION_ALIGN_4096BYTES": 13631488,
+    "SECTION_ALIGN_4BYTES": 3145728,
+    "SECTION_ALIGN_512BYTES": 10485760,
+    "SECTION_ALIGN_64BYTES": 7340032,
+    "SECTION_ALIGN_8192BYTES": 14680064,
+    "SECTION_ALIGN_8BYTES": 4194304,
+    "SECTION_ALIGN_MASK": 15728640,
+    "SECTION_CNT_CODE": 32,
+    "SECTION_CNT_INITIALIZED_DATA": 64,
+    "SECTION_CNT_UNINITIALIZED_DATA": 128,
+    "SECTION_GPREL": 32768,
+    "SECTION_LNK_COMDAT": 4096,
+    "SECTION_LNK_INFO": 512,
+    "SECTION_LNK_NRELOC_OVFL": 16777216,
+    "SECTION_LNK_OTHER": 256,
+    "SECTION_LNK_REMOVE": 2048,
+    "SECTION_MEM_16BIT": 131072,
+    "SECTION_MEM_DISCARDABLE": 33554432,
+    "SECTION_MEM_EXECUTE": 536870912,
+    "SECTION_MEM_FARDATA": 32768,
+    "SECTION_MEM_LOCKED": 262144,
+    "SECTION_MEM_NOT_CACHED": 67108864,
+    "SECTION_MEM_NOT_PAGED": 134217728,
+    "SECTION_MEM_PRELOAD": 524288,
+    "SECTION_MEM_PURGEABLE": 131072,
+    "SECTION_MEM_READ": 1073741824,
+    "SECTION_MEM_SHARED": 268435456,
+    "SECTION_MEM_WRITE": 2147483648,
+    "SECTION_NO_DEFER_SPEC_EXC": 16384,
+    "SECTION_NO_PAD": 8,
+    "SECTION_SCALE_INDEX": 1,
+    "SUBSYSTEM_EFI_APPLICATION": 10,
+    "SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER": 11,
+    "SUBSYSTEM_EFI_ROM_IMAGE": 13,
+    "SUBSYSTEM_EFI_RUNTIME_DRIVER": 12,
+    "SUBSYSTEM_NATIVE": 1,
+    "SUBSYSTEM_NATIVE_WINDOWS": 8,
+    "SUBSYSTEM_OS2_CUI": 5,
+    "SUBSYSTEM_POSIX_CUI": 7,
+    "SUBSYSTEM_UNKNOWN": 0,
+    "SUBSYSTEM_WINDOWS_BOOT_APPLICATION": 16,
+    "SUBSYSTEM_WINDOWS_CE_GUI": 9,
+    "SUBSYSTEM_WINDOWS_CUI": 3,
+    "SUBSYSTEM_WINDOWS_GUI": 2,
+    "SUBSYSTEM_XBOX": 14,
+    "SYSTEM": 4096,
+    "TERMINAL_SERVER_AWARE": 32768,
+    "UP_SYSTEM_ONLY": 16384,
+    "WDM_DRIVER": 8192,
+    "data_directories": [],
+    "delayed_import_details": [],
+    "export_details": [],
+    "image_version": {},
+    "import_details": [],
+    "is_pe": 0,
+    "linker_version": {},
+    "os_version": {},
+    "overlay": {},
+    "resource_version": {},
+    "resources": [],
+    "rich_signature": {},
+    "sections": [],
+    "signatures": [],
+    "subsystem_version": {},
+    "version_info": {},
+    "version_info_list": []
+   }
+  },
+  "pe64.exe": {
+   "elf": {
+    "DT_BIND_NOW": 24,
+    "DT_DEBUG": 21,
+    "DT_ENCODING": 32,
+    "DT_FINI": 13,
+    "DT_FINI_ARRAY": 26,
+    "DT_FINI_ARRAYSZ": 28,
+    "DT_FLAGS": 30,
+    "DT_HASH": 4,
+    "DT_INIT": 12,
+    "DT_INIT_ARRAY": 25,
+    "DT_INIT_ARRAYSZ": 27,
+    "DT_JMPREL": 23,
+    "DT_NEEDED": 1,
+    "DT_NULL": 0,
+    "DT_PLTGOT": 3,
+    "DT_PLTREL": 20,
+    "DT_PLTRELSZ": 2,
+    "DT_REL": 17,
+    "DT_RELA": 7,
+    "DT_RELAENT": 9,
+    "DT_RELASZ": 8,
+    "DT_RELENT": 19,
+    "DT_RELSZ": 18,
+    "DT_RPATH": 15,
+    "DT_RUNPATH": 29,
+    "DT_SONAME": 14,
+    "DT_STRSZ": 10,
+    "DT_STRTAB": 5,
+    "DT_SYMBOLIC": 16,
+    "DT_SYMENT": 11,
+    "DT_SYMTAB": 6,
+    "DT_TEXTREL": 22,
+    "EM_386": 3,
+    "EM_68K": 4,
+    "EM_860": 7,
+    "EM_88K": 5,
+    "EM_AARCH64": 183,
+    "EM_ARM": 40,
+    "EM_M32": 1,
+    "EM_MIPS": 8,
+    "EM_MIPS_RS3_LE": 10,
+    "EM_NONE": 0,
+    "EM_PPC": 20,
+    "EM_PPC64": 21,
+    "EM_SPARC": 2,
+    "EM_X86_64": 62,
+    "ET_CORE": 4,
+    "ET_DYN": 3,
+    "ET_EXEC": 2,
+    "ET_NONE": 0,
+    "ET_REL": 1,
+    "PF_R": 4,
+    "PF_W": 2,
+    "PF_X": 1,
+    "PT_DYNAMIC": 2,
+    "PT_GNU_EH_FRAME": 1685382480,
+    "PT_GNU_STACK": 1685382481,
+    "PT_INTERP": 3,
+    "PT_LOAD": 1,
+    "PT_NOTE": 4,
+    "PT_NULL": 0,
+    "PT_PHDR": 6,
+    "PT_SHLIB": 5,
+    "PT_TLS": 7,
+    "SHF_ALLOC": 2,
+    "SHF_EXECINSTR": 4,
+    "SHF_WRITE": 1,
+    "SHT_DYNAMIC": 6,
+    "SHT_DYNSYM": 11,
+    "SHT_HASH": 5,
+    "SHT_NOBITS": 8,
+    "SHT_NOTE": 7,
+    "SHT_NULL": 0,
+    "SHT_PROGBITS": 1,
+    "SHT_REL": 9,
+    "SHT_RELA": 4,
+    "SHT_SHLIB": 10,
+    "SHT_STRTAB": 3,
+    "SHT_SYMTAB": 2,
+    "STB_GLOBAL": 1,
+    "STB_LOCAL": 0,
+    "STB_WEAK": 2,
+    "STT_COMMON": 5,
+    "STT_FILE": 4,
+    "STT_FUNC": 2,
+    "STT_NOTYPE": 0,
+    "STT_OBJECT": 1,
+    "STT_SECTION": 3,
+    "STT_TLS": 6,
+    "dynamic": [],
+    "dynsym": [],
+    "sections": [],
+    "segments": [],
+    "symtab": []
+   },
+   "pe": {
+    "AGGRESIVE_WS_TRIM": 16,
+    "APPCONTAINER": 4096,
+    "BYTES_REVERSED_HI": 32768,
+    "BYTES_REVERSED_LO": 128,
+    "DEBUG_STRIPPED": 512,
+    "DLL": 8192,
+    "DYNAMIC_BASE": 64,
+    "EXECUTABLE_IMAGE": 2,
+    "FORCE_INTEGRITY": 128,
+    "GUARD_CF": 16384,
+    "HIGH_ENTROPY_VA": 32,
+    "IMAGE_DEBUG_TYPE_BORLAND": 9,
+    "IMAGE_DEBUG_TYPE_CLSID": 11,
+    "IMAGE_DEBUG_TYPE_CODEVIEW": 2,
+    "IMAGE_DEBUG_TYPE_COFF": 1,
+    "IMAGE_DEBUG_TYPE_EXCEPTION": 5,
+    "IMAGE_DEBUG_TYPE_FIXUP": 6,
+    "IMAGE_DEBUG_TYPE_FPO": 3,
+    "IMAGE_DEBUG_TYPE_ILTCG": 14,
+    "IMAGE_DEBUG_TYPE_MISC": 4,
+    "IMAGE_DEBUG_TYPE_MPX": 15,
+    "IMAGE_DEBUG_TYPE_OMAP_FROM_SRC": 8,
+    "IMAGE_DEBUG_TYPE_OMAP_TO_SRC": 7,
+    "IMAGE_DEBUG_TYPE_POGO": 13,
+    "IMAGE_DEBUG_TYPE_REPRO": 16,
+    "IMAGE_DEBUG_TYPE_RESERVED10": 10,
+    "IMAGE_DEBUG_TYPE_UNKNOWN": 0,
+    "IMAGE_DEBUG_TYPE_VC_FEATURE": 12,
+    "IMAGE_DIRECTORY_ENTRY_ARCHITECTURE": 7,
+    "IMAGE_DIRECTORY_ENTRY_BASERELOC": 5,
+    "IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT": 11,
+    "IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR": 14,
+    "IMAGE_DIRECTORY_ENTRY_COPYRIGHT": 7,
+    "IMAGE_DIRECTORY_ENTRY_DEBUG": 6,
+    "IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT": 13,
+    "IMAGE_DIRECTORY_ENTRY_EXCEPTION": 3,
+    "IMAGE_DIRECTORY_ENTRY_EXPORT": 0,
+    "IMAGE_DIRECTORY_ENTRY_GLOBALPTR": 8,
+    "IMAGE_DIRECTORY_ENTRY_IAT": 12,
+    "IMAGE_DIRECTORY_ENTRY_IMPORT": 1,
+    "IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG": 10,
+    "IMAGE_DIRECTORY_ENTRY_RESOURCE": 2,
+    "IMAGE_DIRECTORY_ENTRY_SECURITY": 4,
+    "IMAGE_DIRECTORY_ENTRY_TLS": 9,
+    "IMAGE_NT_OPTIONAL_HDR32_MAGIC": 267,
+    "IMAGE_NT_OPTIONAL_HDR64_MAGIC": 523,
+    "IMAGE_ROM_OPTIONAL_HDR_MAGIC": 263,
+    "IMPORT_ANY": -1,
+    "IMPORT_DELAYED": 2,
+    "IMPORT_STANDARD": 1,
+    "LARGE_ADDRESS_AWARE": 32,
+    "LINE_NUMS_STRIPPED": 4,
+    "LOCAL_SYMS_STRIPPED": 8,
+    "MACHINE_32BIT": 256,
+    "MACHINE_ALPHA": 388,
+    "MACHINE_ALPHA64": 644,
+    "MACHINE_AM33": 467,
+    "MACHINE_AMD64": 34404,
+    "MACHINE_ARM": 448,
+    "MACHINE_ARM64": 43620,
+    "MACHINE_ARMNT": 452,
+    "MACHINE_AXP64": 644,
+    "MACHINE_CEE": 49390,
+    "MACHINE_CEF": 3311,
+    "MACHINE_EBC": 3772,
+    "MACHINE_I386": 332,
+    "MACHINE_IA64": 512,
+    "MACHINE_M32R": 36929,
+    "MACHINE_MIPS16": 614,
+    "MACHINE_MIPSFPU": 870,
+    "MACHINE_MIPSFPU16": 1126,
+    "MACHINE_POWERPC": 496,
+    "MACHINE_POWERPCFP": 497,
+    "MACHINE_R10000": 360,
+    "MACHINE_R3000": 354,
+    "MACHINE_R4000": 358,
+    "MACHINE_SH3": 418,
+    "MACHINE_SH3DSP": 419,
+    "MACHINE_SH3E": 420,
+    "MACHINE_SH4": 422,
+    "MACHINE_SH5": 424,
+    "MACHINE_TARGET_HOST": 1,
+    "MACHINE_THUMB": 450,
+    "MACHINE_TRICORE": 1312,
+    "MACHINE_UNKNOWN": 0,
+    "MACHINE_WCEMIPSV2": 361,
+    "NET_RUN_FROM_SWAP": 2048,
+    "NO_BIND": 2048,
+    "NO_ISOLATION": 512,
+    "NO_SEH": 1024,
+    "NX_COMPAT": 256,
+    "RELOCS_STRIPPED": 1,
+    "REMOVABLE_RUN_FROM_SWAP": 1024,
+    "RESOURCE_TYPE_ACCELERATOR": 9,
+    "RESOURCE_TYPE_ANICURSOR": 21,
+    "RESOURCE_TYPE_ANIICON": 22,
+    "RESOURCE_TYPE_BITMAP": 2,
+    "RESOURCE_TYPE_CURSOR": 1,
+    "RESOURCE_TYPE_DIALOG": 5,
+    "RESOURCE_TYPE_DLGINCLUDE": 17,
+    "RESOURCE_TYPE_FONT": 8,
+    "RESOURCE_TYPE_FONTDIR": 7,
+    "RESOURCE_TYPE_GROUP_CURSOR": 12,
+    "RESOURCE_TYPE_GROUP_ICON": 14,
+    "RESOURCE_TYPE_HTML": 23,
+    "RESOURCE_TYPE_ICON": 3,
+    "RESOURCE_TYPE_MANIFEST": 24,
+    "RESOURCE_TYPE_MENU": 4,
+    "RESOURCE_TYPE_MESSAGETABLE": 11,
+    "RESOURCE_TYPE_PLUGPLAY": 19,
+    "RESOURCE_TYPE_RCDATA": 10,
+    "RESOURCE_TYPE_STRING": 6,
+    "RESOURCE_TYPE_VERSION": 16,
+    "RESOURCE_TYPE_VXD": 20,
+    "SECTION_ALIGN_1024BYTES": 11534336,
+    "SECTION_ALIGN_128BYTES": 8388608,
+    "SECTION_ALIGN_16BYTES": 5242880,
+    "SECTION_ALIGN_1BYTES": 1048576,
+    "SECTION_ALIGN_2048BYTES": 12582912,
+    "SECTION_ALIGN_256BYTES": 9437184,
+    "SECTION_ALIGN_2BYTES": 2097152,
+    "SECTION_ALIGN_32BYTES": 6291456,
+    "SECTION_ALIGN_4096BYTES": 13631488,
+    "SECTION_ALIGN_4BYTES": 3145728,
+    "SECTION_ALIGN_512BYTES": 10485760,
+    "SECTION_ALIGN_64BYTES": 7340032,
+    "SECTION_ALIGN_8192BYTES": 14680064,
+    "SECTION_ALIGN_8BYTES": 4194304,
+    "SECTION_ALIGN_MASK": 15728640,
+    "SECTION_CNT_CODE": 32,
+    "SECTION_CNT_INITIALIZED_DATA": 64,
+    "SECTION_CNT_UNINITIALIZED_DATA": 128,
+    "SECTION_GPREL": 32768,
+    "SECTION_LNK_COMDAT": 4096,
+    "SECTION_LNK_INFO": 512,
+    "SECTION_LNK_NRELOC_OVFL": 16777216,
+    "SECTION_LNK_OTHER": 256,
+    "SECTION_LNK_REMOVE": 2048,
+    "SECTION_MEM_16BIT": 131072,
+    "SECTION_MEM_DISCARDABLE": 33554432,
+    "SECTION_MEM_EXECUTE": 536870912,
+    "SECTION_MEM_FARDATA": 32768,
+    "SECTION_MEM_LOCKED": 262144,
+    "SECTION_MEM_NOT_CACHED": 67108864,
+    "SECTION_MEM_NOT_PAGED": 134217728,
+    "SECTION_MEM_PRELOAD": 524288,
+    "SECTION_MEM_PURGEABLE": 131072,
+    "SECTION_MEM_READ": 1073741824,
+    "SECTION_MEM_SHARED": 268435456,
+    "SECTION_MEM_WRITE": 2147483648,
+    "SECTION_NO_DEFER_SPEC_EXC": 16384,
+    "SECTION_NO_PAD": 8,
+    "SECTION_SCALE_INDEX": 1,
+    "SUBSYSTEM_EFI_APPLICATION": 10,
+    "SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER": 11,
+    "SUBSYSTEM_EFI_ROM_IMAGE": 13,
+    "SUBSYSTEM_EFI_RUNTIME_DRIVER": 12,
+    "SUBSYSTEM_NATIVE": 1,
+    "SUBSYSTEM_NATIVE_WINDOWS": 8,
+    "SUBSYSTEM_OS2_CUI": 5,
+    "SUBSYSTEM_POSIX_CUI": 7,
+    "SUBSYSTEM_UNKNOWN": 0,
+    "SUBSYSTEM_WINDOWS_BOOT_APPLICATION": 16,
+    "SUBSYSTEM_WINDOWS_CE_GUI": 9,
+    "SUBSYSTEM_WINDOWS_CUI": 3,
+    "SUBSYSTEM_WINDOWS_GUI": 2,
+    "SUBSYSTEM_XBOX": 14,
+    "SYSTEM": 4096,
+    "TERMINAL_SERVER_AWARE": 32768,
+    "UP_SYSTEM_ONLY": 16384,
+    "WDM_DRIVER": 8192,
+    "base_of_code": 4096,
+    "characteristics": 558,
+    "checksum": 19302,
+    "data_directories": [
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 288,
+      "virtual_address": 20480
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 12,
+      "virtual_address": 12288
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 56,
+      "virtual_address": 20600
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     },
+     {
+      "size": 0,
+      "virtual_address": 0
+     }
+    ],
+    "delayed_import_details": [],
+    "dll_characteristics": 352,
+    "entry_point": 1024,
+    "entry_point_raw": 4096,
+    "export_details": [],
+    "file_alignment": 512,
+    "image_base": 5368709120,
+    "image_version": {
+     "major": 0,
+     "minor": 0
+    },
+    "import_details": [
+     {
+      "functions": [
+       {
+        "name": "ExitProcess",
+        "rva": 20600
+       },
+       {
+        "name": "GetTickCount",
+        "rva": 20608
+       },
+       {
+        "name": "Sleep",
+        "rva": 20616
+       }
+      ],
+      "library_name": "KERNEL32.dll",
+      "number_of_functions": 3
+     },
+     {
+      "functions": [
+       {
+        "name": "MessageBoxA",
+        "rva": 20632
+       },
+       {
+        "name": "wsprintfA",
+        "rva": 20640
+       }
+      ],
+      "library_name": "USER32.dll",
+      "number_of_functions": 2
+     }
+    ],
+    "is_pe": 1,
+    "is_signed": 0,
+    "linker_version": {
+     "major": 2,
+     "minor": 45
+    },
+    "loader_flags": 0,
+    "machine": 34404,
+    "number_of_delayed_imported_functions": 0,
+    "number_of_delayed_imports": 0,
+    "number_of_exports": 0,
+    "number_of_imported_functions": 5,
+    "number_of_imports": 2,
+    "number_of_resources": 0,
+    "number_of_rva_and_sizes": 16,
+    "number_of_sections": 5,
+    "number_of_signatures": 0,
+    "number_of_symbols": 0,
+    "number_of_version_infos": 0,
+    "opthdr_magic": 523,
+    "os_version": {
+     "major": 4,
+     "minor": 0
+    },
+    "overlay": {
+     "offset": 0,
+     "size": 0
+    },
+    "pointer_to_symbol_table": 0,
+    "resource_version": {},
+    "resources": [],
+    "rich_signature": {},
+    "section_alignment": 4096,
+    "sections": [
+     {
+      "characteristics": 1610612768,
+      "full_name": ".text",
+      "name": ".text",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 1024,
+      "raw_data_size": 512,
+      "virtual_address": 4096,
+      "virtual_size": 144
+     },
+     {
+      "characteristics": 1073741888,
+      "full_name": ".rdata",
+      "name": ".rdata",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 1536,
+      "raw_data_size": 512,
+      "virtual_address": 8192,
+      "virtual_size": 96
+     },
+     {
+      "characteristics": 1073741888,
+      "full_name": ".pdata",
+      "name": ".pdata",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 2048,
+      "raw_data_size": 512,
+      "virtual_address": 12288,
+      "virtual_size": 12
+     },
+     {
+      "characteristics": 1073741888,
+      "full_name": ".xdata",
+      "name": ".xdata",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 2560,
+      "raw_data_size": 512,
+      "virtual_address": 16384,
+      "virtual_size": 12
+     },
+     {
+      "characteristics": 1073741888,
+      "full_name": ".idata",
+      "name": ".idata",
+      "number_of_line_numbers": 0,
+      "number_of_relocations": 0,
+      "pointer_to_line_numbers": 0,
+      "pointer_to_relocations": 0,
+      "raw_data_offset": 3072,
+      "raw_data_size": 512,
+      "virtual_address": 20480,
+      "virtual_size": 288
+     }
+    ],
+    "signatures": [],
+    "size_of_code": 512,
+    "size_of_headers": 1024,
+    "size_of_heap_commit": 4096,
+    "size_of_heap_reserve": 1048576,
+    "size_of_image": 24576,
+    "size_of_initialized_data": 2048,
+    "size_of_optional_header": 240,
+    "size_of_stack_commit": 4096,
+    "size_of_stack_reserve": 2097152,
+    "size_of_uninitialized_data": 0,
+    "subsystem": 3,
+    "subsystem_version": {
+     "major": 5,
+     "minor": 2
+    },
+    "timestamp": 1792951076,
+    "version_info": {},
+    "version_info_list": [],
+    "win32_version_value": 0
+   }
+  }
+ }
+}
