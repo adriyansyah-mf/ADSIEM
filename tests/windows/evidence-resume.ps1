@@ -24,7 +24,8 @@ $packages = @(
     "./agent/internal/tailer",
     "./agent/internal/task", # kill_process / quarantine_file / restore_file / agent_integrity on Windows
     "./agent/internal/etw",  # real ETW sessions: kernel logger and manifest providers
-    "./agent/internal/winsensor" # ETW process telemetry, end to end
+    "./agent/internal/winsensor", # ETW process telemetry, end to end
+    "./agent/internal/update"     # self-update: MSI detection, verification
 )
 $failed = @()
 $logs = Join-Path ($env:RUNNER_TEMP ?? $env:TEMP) "evidence-go-test"

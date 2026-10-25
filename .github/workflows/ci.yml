@@ -93,6 +93,38 @@ jobs:
           go vet ./...
           go build -o /dev/null ./cmd/agent/
 
+  # Self-update through systemd on the runner itself: two .debs trusting a
+  # throwaway update key, upgraded and rolled back by the agent.
+  deb-update:
+    name: Agent self-update (deb)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      - name: Build two signed .debs
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq clang llvm
+          make -C agent bpf
+          cd agent
+          go build -o siem-update-sign ./cmd/siem-update-sign
+          ./siem-update-sign keygen -out "$RUNNER_TEMP/update.key" | tail -1 > "$RUNNER_TEMP/update.pub"
+          export UPDATE_KEYS="$(cat "$RUNNER_TEMP/update.pub")"
+          VERSION=9.0.0 ARCH=amd64 bash packaging/build-deb.sh
+          VERSION=9.0.1 ARCH=amd64 bash packaging/build-deb.sh
+          ./siem-update-sign sign -key "$RUNNER_TEMP/update.key" dist/packages/siem-agent_9.0.0_amd64.deb dist/packages/siem-agent_9.0.1_amd64.deb
+          ./siem-update-sign verify -pub "$UPDATE_KEYS" dist/packages/siem-agent_9.0.0_amd64.deb dist/packages/siem-agent_9.0.1_amd64.deb
+
+      - name: Upgrade and roll back through the service
+        run: |
+          sudo python3 tests/linux/update_deb.py --old agent/dist/packages/siem-agent_9.0.0_amd64.deb \
+            --new agent/dist/packages/siem-agent_9.0.1_amd64.deb --signer agent/siem-update-sign
+
   # End-to-end durable evidence under faults (tests/evidence/run.py): a
   # disposable Compose project per scenario with PostgreSQL, Redis,
   # Elasticsearch, server-api, worker, a fault proxy and the Linux agent.

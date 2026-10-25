@@ -95,7 +95,13 @@ class Handler(BaseHTTPRequestHandler):
             if queued.exists():
                 tasks = json.loads(queued.read_text())
                 queued.replace(OUT / "tasks.sent.json")
+            # Self-update: the test writes the offer to <out>/update_offer.json
+            # (services/agent_update.offer_for's shape) and the packages to
+            # MOCK_UPDATE_DIR, served below.
+            offer_file = OUT / "update_offer.json"
+            offer = json.loads(offer_file.read_text()) if offer_file.exists() else None
             return self._reply(200, {"config_hash": "mock", "log_sources": SOURCES, "fim_paths": [], "tasks": tasks,
+                                     "update": offer,
                                      "uninstall_token_sha256": hashlib.sha256(UNINSTALL_TOKEN.encode()).hexdigest(),
                                      "evidence_protocols": [2] if EVIDENCE else [],
                                      "evidence_batch_max": 500 if EVIDENCE else 0})
@@ -136,6 +142,23 @@ class Handler(BaseHTTPRequestHandler):
         return self._reply(404, {"detail": "not found"})
 
     def do_GET(self):  # noqa: N802 — lets the smoke test check TLS trust with Invoke-WebRequest
+        prefix = "/api/agent/update/package/"
+        if self.path.startswith(prefix) and os.environ.get("MOCK_UPDATE_DIR"):
+            if self.headers.get("X-Agent-Token") != "mock-agent-token":
+                return self._reply(401, {"detail": "Invalid agent token"})
+            name = self.path[len(prefix):]
+            pkg = Path(os.environ["MOCK_UPDATE_DIR"]) / name
+            if "/" in name or "\\" in name or not pkg.is_file():
+                return self._reply(404, {"detail": "Package not found"})
+            data = pkg.read_bytes()
+            with open(OUT / "downloads.jsonl", "a") as fh:
+                fh.write(json.dumps({"file": name, "bytes": len(data)}) + "\n")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         return self._reply(200, {"status": "ok"}) if self.path == "/health" else self._reply(404, {})
 
     def log_message(self, fmt, *args):

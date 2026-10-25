@@ -98,6 +98,40 @@ jobs:
           name: siem-agent-msi
           path: agent/dist/packages/*.msi
 
+  # Self-update through the installed service: two MSIs trusting a throwaway
+  # update key, upgraded and rolled back by the agent (tests/windows/update-msi.ps1).
+  msi-update:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: agent/go.sum
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build two signed MSIs, upgrade and roll back through the service
+        shell: pwsh
+        run: |
+          Push-Location agent
+          go build -o siem-update-sign.exe ./cmd/siem-update-sign
+          if ($LASTEXITCODE -ne 0) { throw "building siem-update-sign failed" }
+          $keygen = ./siem-update-sign.exe keygen -out "$env:RUNNER_TEMP\update.key"
+          $env:UPDATE_KEYS = $keygen[-1]
+          ./packaging/build-msi.ps1 -Version 9.0.0
+          ./packaging/build-msi.ps1 -Version 9.0.1
+          ./siem-update-sign.exe sign -key "$env:RUNNER_TEMP\update.key" dist/packages/siem-agent-9.0.0-x64.msi dist/packages/siem-agent-9.0.1-x64.msi
+          if ($LASTEXITCODE -ne 0) { throw "signing failed" }
+          ./siem-update-sign.exe verify -pub $env:UPDATE_KEYS dist/packages/siem-agent-9.0.0-x64.msi dist/packages/siem-agent-9.0.1-x64.msi
+          if ($LASTEXITCODE -ne 0) { throw "verify failed" }
+          Pop-Location
+          ./tests/windows/update-msi.ps1 -Old agent/dist/packages/siem-agent-9.0.0-x64.msi `
+            -New agent/dist/packages/siem-agent-9.0.1-x64.msi -Signer agent/siem-update-sign.exe
+
   # Durable journal capture on each native OS (agent/internal/evidence/soak_test.go),
   # only when dispatched with soak_duration: it takes that long.
   soak:
