@@ -138,6 +138,26 @@ try {
     }
     Write-Host "ok: event shipped: $($line.raw_message)"
 
+    # 4a'. ETW telemetry without Sysmon (etw.mode auto; the runner has no Sysmon):
+    #      a marked command line arrives as a windows_etw_process line from the service.
+    $etwMarker = "siem-etw-smoke-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $deadline = (Get-Date).AddSeconds(120)
+    $etwLine = $null
+    while (-not $etwLine) {
+        if ((Get-Date) -gt $deadline) { Fail "no ETW process line for '$etwMarker'" }
+        cmd.exe /c "echo $etwMarker" | Out-Null
+        Start-Sleep 5
+        if (Test-Path (Join-Path $mockOut $received)) {
+            $etwLine = Get-Content (Join-Path $mockOut $received) | ConvertFrom-Json |
+                Where-Object { $_.log_type -eq "windows_etw_process" -and $_.raw_message -like "*$etwMarker*" } |
+                Select-Object -First 1
+        }
+    }
+    if ($etwLine.raw_message -notmatch 'Image="C:\\Windows\\System32\\cmd\.exe"' -or $etwLine.raw_message -notmatch 'User="') {
+        Fail "ETW process line lacks the joined image path or user: $($etwLine.raw_message)"
+    }
+    Write-Host "ok: ETW process telemetry from the service: $($etwLine.raw_message)"
+
     # 4b. The hygiene report (first one ~30 s after start) describes this host.
     $hygPath = Join-Path $mockOut "hygiene.json"
     $deadline = (Get-Date).AddSeconds(120)
