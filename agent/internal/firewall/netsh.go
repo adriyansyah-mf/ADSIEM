@@ -142,10 +142,12 @@ func (b *NetshBackend) names() ([]string, error) {
 // findRulesScript pipes the firewall rules whose display name matches
 // pattern into then. No match is not an error (Get-NetFirewallRule fails
 // with ObjectNotFound, even under SilentlyContinue, and its message is
-// translated: the category is not); anything else still fails the script.
+// translated: the category is not); anything else is rethrown and fails the
+// script. The explicit exit 0: powershell -Command otherwise exits 1 after a
+// caught error, because the exit code follows $? of the last statement.
 func findRulesScript(pattern, then string) string {
 	return "$ErrorActionPreference = 'Stop'; try { Get-NetFirewallRule -DisplayName '" + pattern + "' | " + then +
-		" } catch { if ($_.CategoryInfo.Category -ne 'ObjectNotFound') { throw } }"
+		" } catch { if ($_.CategoryInfo.Category -ne 'ObjectNotFound') { throw } }; exit 0"
 }
 
 func (b *NetshBackend) netsh(args ...string) error {
