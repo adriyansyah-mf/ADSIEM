@@ -371,10 +371,14 @@ def quota(h: Harness) -> None:
 
 
 def corruption(h: Harness) -> None:
-    """Undelivered journal records are damaged while the agent is down: what is
-    lost must be reported, nothing may be duplicated or invented."""
+    """Undelivered journal records are damaged while the agent is down. The
+    agent refuses the journal and keeps it unchanged; -evidence-salvage then
+    restores collection: everything readable is delivered, lines written while
+    blocked and afterwards are not skipped, and what was destroyed is reported
+    as a gap. Nothing may be duplicated or invented."""
+    extra = max(h.count // 10, 10)
     h.proxy("down")
-    h.produce()
+    h.produce()                      # batch A: in the journal when it is damaged
     h.wait_written(h.count)
     time.sleep(10)  # let the tailer admit everything
     h.kill("agent")
@@ -389,32 +393,62 @@ def corruption(h: Harness) -> None:
 
     damaged = in_state_volume(script)
     h.mark("corrupted", segment=damaged)
+    path, size = damaged.split()[1], damaged.split()[2]
+    digest = damaged.split()[0]
+
+    # 1. The agent refuses the damaged journal and changes nothing.
     h.start("agent")
     h.proxy("pass")
+    blocked = h.next_health()
+    h.facts["health_while_blocked"] = blocked
+    if (blocked or {}).get("reason") != "journal_unavailable":
+        raise AssertionError(f"a damaged journal was not reported: {blocked}")
+    h.produce(extra, start=h.count)  # batch B: written while collection is blocked
+    h.wait_written(extra)
+    time.sleep(5)
+    if h.ours(h.documents()):
+        raise AssertionError("evidence was delivered from a journal that does not open")
+    h.compose("stop", "agent")
+    after = in_state_volume(f"sha256sum '{path}'; stat -c %s '{path}'")
+    if after.split() != [digest, path, size]:
+        raise AssertionError(f"the damaged segment changed while blocked: {damaged!r} -> {after!r}")
+
+    # 2. Salvage, then the agent runs again.
+    out = h.compose("run", "--rm", "--no-deps", "--entrypoint", "/usr/local/bin/siem-agent", "agent",
+                    "-config", "/etc/siem-agent/config.yaml", "-evidence-salvage",
+                    "-reason", "acceptance: corruption scenario", capture=True).stdout
+    h.mark("salvaged", output=out.strip().splitlines()[0] if out.strip() else "")
+    h.facts["salvage_output"] = out
+    name = path.rsplit("/", 1)[1]
+    kept = in_state_volume(f"sha256sum /var/lib/siem-agent/evidence.corrupt-*/{name}").split()
+    if not kept or kept[0] != digest:
+        raise AssertionError(f"the damaged journal was not kept unchanged by salvage: {kept}")
+    h.start("agent")
+    h.produce(extra, start=h.count + extra)  # batch C: after salvage
+    h.wait_written(extra)
     docs, inbox = h.settle(None)
     health = h.next_health()
-    h.compose("stop", "agent")
-    path = damaged.split()[1]
-    after = in_state_volume(f"sha256sum '{path}'; stat -c %s '{path}'")
-    h.facts["corrupt_segment"] = {"before": damaged, "after_recovery": after}
-    if after != damaged:
-        raise AssertionError(f"the corrupted segment was not preserved for inspection: {damaged!r} -> {after!r}")
-    produced = h.markers(0, h.count)
+
+    produced = h.markers(0, h.count + 2 * extra)
     got_docs = [d["marker"] for d in docs]
     got_receipts = [r["marker"] for r in inbox]
     for what, got in (("documents", got_docs), ("receipts", got_receipts)):
         if len(got) != len(set(got)):
-            raise AssertionError(f"duplicate {what} after corruption")
+            raise AssertionError(f"duplicate {what} after salvage")
         if set(got) - produced:
             raise AssertionError(f"{what} for lines that were never written")
     h.check_identity(docs, inbox)
-    missing = len(produced - set(got_docs))
-    h.facts.update(missing_after_corruption=missing, health_after_corruption=health)
-    if missing:
-        gaps = (health or {}).get("unknown_gaps", 0)
-        lost = sum(((health or {}).get("known_loss") or {}).values())
-        if not gaps and not lost and (health or {}).get("state") == "healthy":
-            raise AssertionError(f"{missing} lines lost to corruption but health reports nothing: {health}")
+    missing = produced - set(got_docs)
+    later = h.markers(h.count, 2 * extra)
+    h.facts.update(missing_after_salvage=len(missing), health_after_salvage=health)
+    if missing & later:
+        raise AssertionError(f"{len(missing & later)} lines written while blocked or after salvage were skipped")
+    if len(missing) > 5:  # 21 damaged bytes destroy at most a couple of records
+        raise AssertionError(f"{len(missing)} lines lost: salvage kept less than the readable evidence")
+    if (health or {}).get("reason") == "journal_unavailable":
+        raise AssertionError(f"still blocked after salvage: {health}")
+    if missing and not (health or {}).get("unknown_gaps"):
+        raise AssertionError(f"{len(missing)} lines destroyed but no gap reported: {health}")
 
 
 def retention(h: Harness) -> None:
