@@ -2,6 +2,7 @@
 from typing import Annotated
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -153,6 +154,38 @@ async def trigger_scan(
     db.add(task)
     await db.commit()
     yara_ruleset.invalidate()
+    await db.refresh(task)
+    return task
+
+
+class YaraMemoryScanRequest(BaseModel):
+    agent_id: UUID
+    pid: int = Field(0, ge=0)  # 0 = every process
+    rule_ids: list[UUID] | None = None  # None = all enabled rules
+
+
+@router.post("/scan-memory", response_model=AgentTaskOut, status_code=201)
+async def trigger_memory_scan(
+    body: YaraMemoryScanRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user=Depends(require_permission("agents:manage")),
+    group_filter: str | None = Depends(get_scoped_group),
+):
+    """Scan one process's memory (or every process's) with the YARA rules
+    (agent task memory_scan, agent/internal/task/memory.go)."""
+    agent = await db.get(Agent, body.agent_id)
+    if not agent or (group_filter and agent.group_id != group_filter):
+        raise HTTPException(404, "Agent not found")
+    q = select(YaraRule).where(YaraRule.is_enabled == True)  # noqa: E712
+    if body.rule_ids:
+        q = q.where(YaraRule.id.in_(body.rule_ids))
+    rules = (await db.execute(q)).scalars().all()
+    if not rules:
+        raise HTTPException(400, "No enabled YARA rules found")
+    params = {"pid": body.pid, "rules": [{"id": str(r.id), "name": r.name, "content": r.content} for r in rules]}
+    task = AgentTask(agent_id=body.agent_id, task_type="memory_scan", params=params, created_by=user.id)
+    db.add(task)
+    await db.commit()
     await db.refresh(task)
     return task
 

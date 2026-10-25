@@ -75,6 +75,13 @@ type YaraConfig struct {
 	MaxFileSizeMB int64 `yaml:"max_file_size_mb"`
 }
 
+// MemorySweepConfig controls the periodic search for writable and
+// executable private memory in every process (internal/memscan).
+type MemorySweepConfig struct {
+	Disabled        bool `yaml:"disabled"`
+	IntervalMinutes int  `yaml:"interval_minutes"` // default 5
+}
+
 type BufferConfig struct {
 	SpillPath string `yaml:"spill_path"`
 }
@@ -102,6 +109,7 @@ type Config struct {
 	ETW          ETWConfig          `yaml:"etw"`
 	Detect       DetectConfig       `yaml:"detect"`
 	Yara         YaraConfig         `yaml:"yara"`
+	MemorySweep  MemorySweepConfig  `yaml:"memory_sweep"`
 	Buffer       BufferConfig       `yaml:"buffer"`
 	Evidence     EvidenceConfig     `yaml:"evidence"`
 	LiveResponse LiveResponseConfig `yaml:"live_response"`

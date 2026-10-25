@@ -1,0 +1,15 @@
+name: Windows.Memory.Yara
+description: Scan the memory of one process (or every process with Pid 0) with every enabled YARA rule (managed on the YARA page). Addresses are virtual; each region is scanned on its own, large heaps in 16 MiB chunks, at most 1 GiB per process. Protected processes (PPL) cannot be read.
+parameters:
+  - name: Pid
+    type: int
+    default: 0
+  - name: AnonOnly
+    type: bool
+    default: false
+sources:
+  - name: Matches
+    plugin: memyara
+    args:
+      pid: "{{Pid}}"
+      anon_only: "{{AnonOnly}}"

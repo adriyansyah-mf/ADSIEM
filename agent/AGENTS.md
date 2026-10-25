@@ -22,6 +22,7 @@ agent/
 │   ├── firewall/            # nftables gate: rule model, anti-lockout guard, engine
 │   ├── yara/                # pure-Go YARA engine (language, pe/elf/math/hash/time modules)
 │   ├── yarascan/            # on-access YARA scan of temp/download/web dirs with the server's rules
+│   ├── memscan/             # process memory: YARA per region (chunked), RWX private memory sweep (Linux + Windows)
 │   └── task/                # live response: collectors, yara, firewall tasks
 └── packaging/               # build-deb.sh, build-rpm.sh, siem-agent.service, .spec
 ```
@@ -51,6 +52,7 @@ agent/
 | YARA scans (on demand) | `internal/task/yara.go` | `yara_scan` task + `yara` flow plugin; each rule source compiles in its own namespace, a broken one is reported in `rule_errors`, the rest still scan |
 | YARA engine | `internal/yara/` | checked against libyara 4.5 by `testdata/differential` (`gen_expected.py` regenerates `expected.json`); unsupported features are compile errors |
 | On-access YARA | `internal/yarascan/` | heartbeat `yara_rules_hash` → `POST /api/ingest/yara-rules`; matches are `yara_match` lines (`decoders/yara_match.yaml`, `rules/yara_match_*.yaml`) |
+| Process memory | `internal/memscan/`, `internal/task/memory.go` | plugins `memyara`/`memrwx` (keep `PLUGINS` in flow_artifacts.py in sync), task `memory_scan`, periodic `process_memory_rwx` sweep — see `docs/operations/memory-scan.md` |
 
 ## CONVENTIONS
 

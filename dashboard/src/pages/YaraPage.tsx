@@ -3,7 +3,7 @@ import { format } from 'date-fns'
 import { Shield, Plus, Trash2, Edit2, Play, CheckCircle, XCircle, Loader2, ToggleLeft, ToggleRight, Download } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { useYaraRules, useCreateYaraRule, useUpdateYaraRule, useToggleYaraRule, useDeleteYaraRule, useYaraScan, useSeedBuiltinRules } from '@/hooks/useYara'
+import { useYaraRules, useCreateYaraRule, useUpdateYaraRule, useToggleYaraRule, useDeleteYaraRule, useYaraScan, useYaraMemoryScan, useSeedBuiltinRules } from '@/hooks/useYara'
 import { useTask } from '@/hooks/useTasks'
 import type { Agent, YaraRule } from '@/types'
 
@@ -26,10 +26,17 @@ function ScanResultView({ taskId }: { taskId: string }) {
       <Loader2 size={12} className="animate-spin" /> Scanning…
     </div>
   )
+  const memory = task.task_type === 'memory_scan'
   const result = task.result as {
-    scanned_files: number
+    scanned_files?: number
     skipped_files?: number
-    matches: Array<{ rule_name: string; file: string; matched_strings: string[] }>
+    processes_scanned?: number
+    processes_skipped?: number
+    bytes_scanned?: number
+    matches: Array<{
+      rule_name: string; file?: string; matched_strings: string[]
+      pid?: number; process?: string; address?: string; region?: string; region_path?: string
+    }>
     rule_errors?: Array<{ rule: string; error: string }>
     warnings?: string[]
   } | null
@@ -37,7 +44,10 @@ function ScanResultView({ taskId }: { taskId: string }) {
   return (
     <div className="space-y-2 mt-2">
       <p className="text-xs text-muted-foreground">
-        Scanned {result.scanned_files} files{result.skipped_files ? ` (${result.skipped_files} skipped)` : ''} · {result.matches?.length ?? 0} matches
+        {memory
+          ? <>Scanned {result.processes_scanned} processes ({Math.round((result.bytes_scanned ?? 0) / 1048576)} MiB){result.processes_skipped ? `, ${result.processes_skipped} not readable` : ''}</>
+          : <>Scanned {result.scanned_files} files{result.skipped_files ? ` (${result.skipped_files} skipped)` : ''}</>}
+        {' '}· {result.matches?.length ?? 0} matches
       </p>
       {(result.rule_errors ?? []).map((e, i) => (
         <p key={`e${i}`} className="text-xs text-amber-400 font-mono">Rule {e.rule} not loaded: {e.error}</p>
@@ -50,7 +60,9 @@ function ScanResultView({ taskId }: { taskId: string }) {
         : (result.matches ?? []).map((m, i) => (
             <div key={i} className="rounded border border-red-700 bg-red-900/20 p-2 text-xs font-mono">
               <div className="font-bold text-red-400">{m.rule_name}</div>
-              <div className="text-muted-foreground">{m.file}</div>
+              {memory
+                ? <div className="text-muted-foreground">pid {m.pid} {m.process} · {m.address} in {m.region}{m.region_path ? ` ${m.region_path}` : ''}</div>
+                : <div className="text-muted-foreground">{m.file}</div>}
               {m.matched_strings?.map((s, j) => <div key={j} className="text-yellow-400">{s}</div>)}
             </div>
           ))}
@@ -69,6 +81,7 @@ export default function YaraPage() {
   const toggleRule = useToggleYaraRule()
   const deleteRule = useDeleteYaraRule()
   const scan = useYaraScan()
+  const memScan = useYaraMemoryScan()
   const seedBuiltins = useSeedBuiltinRules()
 
   const [showForm, setShowForm] = useState(false)
@@ -79,6 +92,8 @@ export default function YaraPage() {
   const [scanAgent, setScanAgent] = useState('')
   const [scanPath, setScanPath] = useState('/tmp')
   const [scanRecursive, setScanRecursive] = useState(true)
+  const [scanTarget, setScanTarget] = useState<'files' | 'memory'>('files')
+  const [scanPid, setScanPid] = useState('0')
   const [lastTaskId, setLastTaskId] = useState<string | null>(null)
 
   const openForm = (rule?: YaraRule) => {
@@ -102,7 +117,9 @@ export default function YaraPage() {
 
   const handleScan = async () => {
     if (!scanAgent) return
-    const t = await scan.mutateAsync({ agent_id: scanAgent, path: scanPath, recursive: scanRecursive })
+    const t = scanTarget === 'memory'
+      ? await memScan.mutateAsync({ agent_id: scanAgent, pid: Math.max(0, parseInt(scanPid, 10) || 0) })
+      : await scan.mutateAsync({ agent_id: scanAgent, path: scanPath, recursive: scanRecursive })
     setLastTaskId(t.id)
   }
 
@@ -143,17 +160,33 @@ export default function YaraPage() {
             </select>
           </div>
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">Path</p>
-            <input value={scanPath} onChange={e => setScanPath(e.target.value)}
-              className="bg-muted border border-border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary w-40" />
+            <p className="text-xs text-muted-foreground">Target</p>
+            <select value={scanTarget} onChange={e => setScanTarget(e.target.value as 'files' | 'memory')}
+              className="bg-muted border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+              <option value="files">Files</option>
+              <option value="memory">Process memory</option>
+            </select>
           </div>
-          <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-            <input type="checkbox" checked={scanRecursive} onChange={e => setScanRecursive(e.target.checked)} className="rounded" />
-            Recursive
-          </label>
-          <button onClick={handleScan} disabled={!scanAgent || scan.isPending}
+          {scanTarget === 'files' ? <>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Path</p>
+              <input value={scanPath} onChange={e => setScanPath(e.target.value)}
+                className="bg-muted border border-border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary w-40" />
+            </div>
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+              <input type="checkbox" checked={scanRecursive} onChange={e => setScanRecursive(e.target.checked)} className="rounded" />
+              Recursive
+            </label>
+          </> : (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">PID (0 = every process)</p>
+              <input value={scanPid} onChange={e => setScanPid(e.target.value.replace(/[^0-9]/g, ''))} inputMode="numeric"
+                className="bg-muted border border-border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary w-32" />
+            </div>
+          )}
+          <button onClick={handleScan} disabled={!scanAgent || scan.isPending || memScan.isPending}
             className="flex items-center gap-1.5 px-4 py-2 rounded bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50">
-            {scan.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+            {scan.isPending || memScan.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             Scan
           </button>
         </div>
