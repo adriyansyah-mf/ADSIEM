@@ -61,6 +61,15 @@ type DetectConfig struct {
 	MaxBlocksPerMin int      `yaml:"max_blocks_per_minute"`
 }
 
+// LinuxSensorConfig controls the eBPF file, kernel-module, ptrace,
+// privilege, memfd and process-exit telemetry (internal/linsensor).
+type LinuxSensorConfig struct {
+	Disabled bool `yaml:"disabled"`
+	// DisabledEvents switches off groups: file, module, ptrace,
+	// privilege, memfd, exit. Fileless exec is always reported.
+	DisabledEvents []string `yaml:"disabled_events"`
+}
+
 // YaraConfig controls on-access YARA scanning: new and changed files in
 // risky directories are scanned with the rules the server distributes.
 // With no rules on the server nothing is scanned.
@@ -101,6 +110,7 @@ type Config struct {
 	Netwatch     NetwatchConfig     `yaml:"netwatch"`
 	ETW          ETWConfig          `yaml:"etw"`
 	Detect       DetectConfig       `yaml:"detect"`
+	LinuxSensor  LinuxSensorConfig  `yaml:"linux_sensor"`
 	Yara         YaraConfig         `yaml:"yara"`
 	Buffer       BufferConfig       `yaml:"buffer"`
 	Evidence     EvidenceConfig     `yaml:"evidence"`

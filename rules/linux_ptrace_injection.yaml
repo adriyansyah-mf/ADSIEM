@@ -1,0 +1,37 @@
+title: Process Injection Via Ptrace On Linux
+id: rule-linux-ptrace-injection
+description: A process wrote into another process's memory or registers with ptrace, or attached to it without being a debugger. Used to inject code or read secrets from sshd, browsers and agents.
+logsource:
+  product: linux
+  service: ptrace
+detection:
+  write:
+    event.action: ptrace
+    ptrace.request:
+      - poketext
+      - pokedata
+      - pokeuser
+      - setregs
+  attach:
+    event.action: ptrace
+    ptrace.request:
+      - attach
+      - seize
+  debugger:
+    process.executable|endswith:
+      - /gdb
+      - /lldb
+      - /strace
+      - /ltrace
+      - /valgrind
+      - /perf
+      - /criu
+      - /rr
+      - /dlv
+      - /py-spy
+  condition: (write or attach) and not debugger
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.privilege_escalation
+  - attack.t1055.008

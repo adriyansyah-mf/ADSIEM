@@ -1,3 +1,4 @@
 dist/packages/
 internal/procexec/bpf/*.bpf.o
 internal/netwatch/bpf/*.bpf.o
+internal/linsensor/bpf/*.bpf.o

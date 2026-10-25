@@ -1,0 +1,23 @@
+# A non-root caller (User is its real uid before the call) set a uid/gid
+# to 0 or gained capabilities, from agent/internal/linsensor.
+name: linux_privilege_change
+log_type: linux_privilege_change
+type: kv
+priority: 10
+enabled: true
+fields:
+  privilege.call: action
+  privilege.ids: IDs
+  privilege.effective_caps: Effective
+  Image: Image
+  ParentImage: ParentImage
+  process.executable: Image
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  process.parent.executable: ParentImage
+  user.id: User
+  user.effective.id: EUID
+static_fields:
+  event.category: iam
+  event.action: privilege_change

@@ -1,0 +1,30 @@
+# File writes, renames and deletes from the agent's eBPF sensor
+# (agent/internal/linsensor). Sigma-native names, so SigmaHQ linux
+# file_event / file_delete / file_rename rules apply (worker/worker/
+# sigma_logsource.py routes by action). action=summary lines count what a
+# busy process did over its per-minute budget.
+name: linux_file_event
+log_type: linux_file_event
+type: kv
+priority: 10
+enabled: true
+fields:
+  TargetFilename: TargetFilename
+  SourceFilename: SourceFilename
+  Image: Image
+  User: User
+  ProcessId: PID
+  ParentProcessId: PPID
+  file.path: TargetFilename
+  file.action: action
+  process.executable: Image
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  user.id: User
+  file.summary.writes: Writes
+  file.summary.renames: Renames
+  file.summary.deletes: Deletes
+static_fields:
+  event.category: file
+  event.action: file_activity

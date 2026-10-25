@@ -1,0 +1,14 @@
+title: Fileless Process Execution On Linux
+id: rule-linux-fileless-exec
+description: A process was started from a memfd or from a file already deleted from disk (Image is /memfd:<name> or the deleted path), the usual way loaders run payloads without leaving an executable behind.
+logsource:
+  product: linux
+  service: fileless_exec
+detection:
+  selection:
+    event.action: fileless_exec
+  condition: selection
+level: critical
+tags:
+  - attack.defense_evasion
+  - attack.t1620

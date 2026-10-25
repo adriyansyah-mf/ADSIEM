@@ -1,0 +1,17 @@
+# memfd_create (anonymous in-memory file), from agent/internal/linsensor;
+# deduplicated per image and name for 10 minutes.
+name: linux_memfd_create
+log_type: linux_memfd_create
+type: kv
+priority: 10
+enabled: true
+fields:
+  memfd.name: MemfdName
+  Image: Image
+  process.executable: Image
+  process.name: Comm
+  process.pid: PID
+  user.id: User
+static_fields:
+  event.category: process
+  event.action: memfd_create

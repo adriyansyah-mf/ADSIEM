@@ -22,6 +22,7 @@ import (
 	"github.com/siem-platform/agent/internal/firewall"
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
+	"github.com/siem-platform/agent/internal/linsensor"
 	"github.com/siem-platform/agent/internal/netwatch"
 	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/tailer"
@@ -255,6 +256,19 @@ func run(configPath string, stop <-chan struct{}) {
 		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
 	} else {
 		stopProducers = append(stopProducers, procMon.Stop)
+	}
+
+	// File, kernel module, ptrace, privilege, memfd/fileless and exit
+	// telemetry (Linux eBPF; best-effort like procexec)
+	if runtime.GOOS == "linux" && !cfg.LinuxSensor.Disabled {
+		if sensor, err := linsensor.Start(linsensor.Options{
+			Push:     func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			Disabled: cfg.LinuxSensor.DisabledEvents,
+		}); err != nil {
+			slog.Warn("linux sensor unavailable, continuing without it", "err", err)
+		} else {
+			stopProducers = append(stopProducers, sensor.Stop)
+		}
 	}
 
 	// Network syscall telemetry (connect/accept/bind/DNS) with an `ss` snapshot
