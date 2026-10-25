@@ -16,7 +16,12 @@ func TestABILayout(t *testing.T) {
 	var lf eventTraceLogfile
 	var p eventTraceProperties
 	var r eventRecord
+	var etp enableTraceParameters
 	for name, c := range map[string]struct{ got, want uintptr }{
+		"ENABLE_TRACE_PARAMETERS":                  {unsafe.Sizeof(etp), 48},
+		"ENABLE_TRACE_PARAMETERS.EnableFilterDesc": {unsafe.Offsetof(etp.EnableFilterDesc), 32},
+		"ENABLE_TRACE_PARAMETERS.FilterDescCount":  {unsafe.Offsetof(etp.FilterDescCount), 40},
+		"EVENT_FILTER_DESCRIPTOR":                  {unsafe.Sizeof(eventFilterDescriptor{}), 16},
 		"WNODE_HEADER":                             {unsafe.Sizeof(wnodeHeader{}), 48},
 		"EVENT_TRACE_PROPERTIES":                   {unsafe.Sizeof(p), 120},
 		"EVENT_TRACE_PROPERTIES.LoggerThreadId":    {unsafe.Offsetof(p.LoggerThreadID), 104},

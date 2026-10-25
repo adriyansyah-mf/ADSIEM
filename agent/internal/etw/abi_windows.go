@@ -136,6 +136,30 @@ type eventPropertyInfo struct {
 	Reserved      uint32
 }
 
+// enableTraceParameters is ENABLE_TRACE_PARAMETERS (version 2).
+type enableTraceParameters struct {
+	Version          uint32
+	EnableProperty   uint32
+	ControlFlags     uint32
+	SourceID         windows.GUID
+	EnableFilterDesc *eventFilterDescriptor
+	FilterDescCount  uint32
+}
+
+// eventFilterDescriptor is EVENT_FILTER_DESCRIPTOR.
+type eventFilterDescriptor struct {
+	Ptr  uint64
+	Size uint32
+	Type uint32
+}
+
+const (
+	enableTraceParametersVersion2 = 2
+	// EVENT_FILTER_TYPE_EVENT_ID: the kernel drops other event IDs before
+	// they reach the session (Windows 8.1+).
+	eventFilterTypeEventID = 0x80000200
+)
+
 const (
 	wnodeFlagTracedGUID = 0x00020000
 

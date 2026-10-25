@@ -18,6 +18,10 @@ type Provider struct {
 	GUID     string // {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
 	Level    uint8  // 0 means all levels (5, verbose)
 	Keywords uint64 // MatchAnyKeyword; 0 means all
+	// EventIDs, when set, are the only events the kernel delivers from this
+	// provider (an EVENT_FILTER_TYPE_EVENT_ID filter): Kernel-Network's per
+	// packet send/receive events never reach the agent.
+	EventIDs []uint16
 }
 
 // Config is one real-time session. A session with KernelFlags is a private

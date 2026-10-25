@@ -5,6 +5,7 @@ package etw
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -129,8 +130,20 @@ func (s *Session) enable(p Provider) error {
 	if keywords == 0 {
 		keywords = ^uint64(0)
 	}
+	var params *enableTraceParameters
+	if len(p.EventIDs) > 0 {
+		// EVENT_FILTER_EVENT_ID: FilterIn (1 byte), Reserved, Count (2), then the IDs.
+		filter := make([]uint16, 2+len(p.EventIDs))
+		filter[0] = 1 // FilterIn = TRUE, Reserved = 0
+		filter[1] = uint16(len(p.EventIDs))
+		copy(filter[2:], p.EventIDs)
+		desc := &eventFilterDescriptor{Ptr: uint64(uintptr(unsafe.Pointer(&filter[0]))),
+			Size: uint32(len(filter) * 2), Type: eventFilterTypeEventID}
+		params = &enableTraceParameters{Version: enableTraceParametersVersion2, EnableFilterDesc: desc, FilterDescCount: 1}
+		defer runtime.KeepAlive(filter)
+	}
 	r, _, _ := procEnableTraceEx2.Call(uintptr(s.handle), uintptr(unsafe.Pointer(&guid)), eventControlCodeEnableProvider,
-		uintptr(level), uintptr(keywords), 0, 0, 0)
+		uintptr(level), uintptr(keywords), 0, 0, uintptr(unsafe.Pointer(params)))
 	if r != 0 {
 		return fmt.Errorf("etw: enable %s in %s: %w", p.GUID, s.name, syscall.Errno(r))
 	}

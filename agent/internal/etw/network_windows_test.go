@@ -21,12 +21,13 @@ const (
 // to decide the field mapping from evidence.
 func TestNetworkAndDNSSources(t *testing.T) {
 	netRec, dnsRec := &recorder{}, &recorder{}
-	ns, err := Start(Config{Name: "SIEMAgent-Test-Network", Providers: []Provider{{GUID: kernelNetworkProvider, Keywords: 0x10 | 0x20}}}, netRec.add)
+	ns, err := Start(Config{Name: "SIEMAgent-Test-Network", Providers: []Provider{{GUID: kernelNetworkProvider,
+		Keywords: 0x10 | 0x20, EventIDs: []uint16{12, 15, 28, 31}}}}, netRec.add)
 	if err != nil {
 		t.Fatalf("network session: %v", err)
 	}
 	defer ns.Close()
-	ds, err := Start(Config{Name: "SIEMAgent-Test-DNS", Providers: []Provider{{GUID: dnsClientProvider}}}, dnsRec.add)
+	ds, err := Start(Config{Name: "SIEMAgent-Test-DNS", Providers: []Provider{{GUID: dnsClientProvider, EventIDs: []uint16{3008}}}}, dnsRec.add)
 	if err != nil {
 		t.Fatalf("dns session: %v", err)
 	}
@@ -72,20 +73,30 @@ func TestNetworkAndDNSSources(t *testing.T) {
 	}
 	t.Logf("network session: %d events, %d decode errors; dns session: %d events, %d decode errors (test pid %d)",
 		len(netRec.events), ns.DecodeErrors(), len(dnsRec.events), ds.DecodeErrors(), pid)
-	if conn != nil {
-		dump(t, "kernel-network", conn)
-	} else if len(netRec.events) > 0 {
-		dump(t, "kernel-network sample", netRec.events[0])
-	}
-	if query != nil {
-		dump(t, "dns-client", query)
-		for _, e := range dnsRec.events { // every event about the name: query, completion
-			if v, _ := e.Get("QueryName"); strings.EqualFold(v, name) && e != query {
-				dump(t, fmt.Sprintf("dns-client id %d", e.ID), e)
+	netRec.mu.Lock()
+	for _, e := range netRec.events { // connect and accept for the test port, both directions
+		for _, p := range e.Props {
+			if (p.Name == "dport" || p.Name == "sport") && p.Value == fmt.Sprint(port) {
+				dump(t, fmt.Sprintf("kernel-network id %d", e.ID), e)
+				break
 			}
 		}
-	} else if len(dnsRec.events) > 0 {
-		dump(t, "dns-client sample", dnsRec.events[0])
+	}
+	for _, e := range netRec.events {
+		if e.ID != 12 && e.ID != 15 && e.ID != 28 && e.ID != 31 {
+			t.Errorf("the event ID filter let event %d through", e.ID)
+		}
+	}
+	netRec.mu.Unlock()
+	dnsRec.mu.Lock()
+	for _, e := range dnsRec.events {
+		if e.ID != 3008 {
+			t.Errorf("the event ID filter let DNS event %d through", e.ID)
+		}
+	}
+	dnsRec.mu.Unlock()
+	if query != nil {
+		dump(t, "dns-client", query)
 	}
 	if conn == nil || query == nil {
 		t.Fatalf("connection seen %v, query seen %v", conn != nil, query != nil)
