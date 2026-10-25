@@ -47,6 +47,7 @@ func main() {
 	flag.BoolVar(&ev.list, "evidence-list", false, "list held and quarantined durable evidence (agent stopped, as root/Administrator)")
 	flag.StringVar(&ev.release, "evidence-release", "", "event ID: deliver held or quarantined evidence again (needs -reason)")
 	flag.StringVar(&ev.discard, "evidence-discard", "", "event ID: drop held or quarantined evidence (needs -reason)")
+	flag.BoolVar(&ev.salvage, "evidence-salvage", false, "replace a journal that no longer opens (corrupt) with its readable undelivered evidence and cursors; keeps the old one (needs -reason)")
 	flag.StringVar(&ev.reason, "reason", "", "with -evidence-release/-evidence-discard: why, kept in the journal audit")
 	flag.BoolVar(&ev.yes, "yes", false, "with -evidence-release: release held evidence despite the duplicate risk")
 	flag.Parse()

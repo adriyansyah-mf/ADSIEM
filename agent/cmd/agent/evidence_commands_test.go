@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +159,83 @@ func TestEvidenceCommandDoesNotCreateAJournal(t *testing.T) {
 	}
 	if _, err := os.Stat(cfg.Evidence.Dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("list created a journal directory")
+	}
+}
+
+// damage breaks the last record of the journal's (only) segment.
+func damage(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	matches, _ := filepath.Glob(filepath.Join(cfg.Evidence.Dir, "segment-*.evj"))
+	if len(matches) != 1 {
+		t.Fatalf("segments %v", matches)
+	}
+	f, err := os.OpenFile(matches[0], os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, _ := f.Stat()
+	if _, err := f.WriteAt([]byte("CORRUPT"), info.Size()-30); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEvidenceSalvageReplacesACorruptJournalAndKeepsIt(t *testing.T) {
+	asOperator(t)
+	cfg, held, quarantined := parkedJournal(t)
+	damage(t, cfg)
+	if _, err := evidence.Open(options(cfg)); !errors.Is(err, evidence.ErrCorrupt) {
+		t.Fatalf("journal not corrupt: %v", err)
+	}
+	if err := runEvidenceCommand(cfg, evidenceCommand{salvage: true}, &bytes.Buffer{}); err == nil {
+		t.Fatal("salvage without -reason")
+	}
+
+	var out bytes.Buffer
+	if err := runEvidenceCommand(cfg, evidenceCommand{salvage: true, reason: "INC-42 disk fault"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), secretPayload) || !strings.Contains(out.String(), "1 unreadable") {
+		t.Fatalf("output %q", out.String())
+	}
+	j, err := evidence.Open(options(cfg)) // the agent can start again
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, _, err := j.Records(context.Background())
+	h := j.Snapshot()
+	j.Close()
+	if err != nil || len(records) != 2 || records[0].EventID != held && records[1].EventID != held {
+		t.Fatalf("parked evidence after salvage %+v %v (held %s, quarantined %s)", records, err, held, quarantined)
+	}
+	if h.UnknownGaps != 1 {
+		t.Fatalf("the destroyed record is not a gap: %+v", h)
+	}
+
+	kept, _ := filepath.Glob(cfg.Evidence.Dir + ".corrupt-*")
+	reports, _ := filepath.Glob(filepath.Join(filepath.Dir(cfg.Evidence.Dir), "evidence-salvage-*.json"))
+	if len(kept) != 1 || len(reports) != 1 {
+		t.Fatalf("kept %v reports %v", kept, reports)
+	}
+	if segs, _ := filepath.Glob(filepath.Join(kept[0], "segment-*.evj")); len(segs) != 1 {
+		t.Fatal("the damaged journal was not kept for inspection")
+	}
+	report, _ := os.ReadFile(reports[0])
+	if !strings.Contains(string(report), "INC-42 disk fault") || strings.Contains(string(report), secretPayload) {
+		t.Fatalf("report %s", report)
+	}
+}
+
+func TestEvidenceSalvageRefusesAHealthyJournal(t *testing.T) {
+	asOperator(t)
+	cfg, _, _ := parkedJournal(t)
+	err := runEvidenceCommand(cfg, evidenceCommand{salvage: true, reason: "just because"}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "opens normally") {
+		t.Fatalf("salvaged a healthy journal: %v", err)
+	}
+	if kept, _ := filepath.Glob(cfg.Evidence.Dir + ".*"); len(kept) != 0 {
+		t.Fatalf("left %v behind", kept)
 	}
 }

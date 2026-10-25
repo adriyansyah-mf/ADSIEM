@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -21,11 +23,14 @@ import (
 type evidenceCommand struct {
 	list             bool
 	release, discard string
+	salvage          bool
 	reason           string
 	yes              bool
 }
 
-func (c evidenceCommand) requested() bool { return c.list || c.release != "" || c.discard != "" }
+func (c evidenceCommand) requested() bool {
+	return c.list || c.release != "" || c.discard != "" || c.salvage
+}
 
 // checkOperator refuses anyone but the service identity's peers (root,
 // elevated Administrator / SYSTEM); tests replace it.
@@ -42,7 +47,10 @@ func runEvidenceCommand(cfg *config.Config, c evidenceCommand, out io.Writer) er
 	case c.discard != "":
 		action, eventID = "discard", c.discard
 	}
-	if action != "" && strings.TrimSpace(c.reason) == "" {
+	if c.salvage && (action != "" || c.list) {
+		return errors.New("-evidence-salvage runs on its own")
+	}
+	if (action != "" || c.salvage) && strings.TrimSpace(c.reason) == "" {
 		return errors.New("-reason is required: it is kept in the journal's audit trail")
 	}
 	if err := checkOperator(); err != nil {
@@ -52,10 +60,18 @@ func runEvidenceCommand(cfg *config.Config, c evidenceCommand, out io.Writer) er
 	if _, err := os.Stat(e.Dir); errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("no evidence journal at %s (evidence.enabled has never run here)", e.Dir)
 	}
-	j, err := evidence.Open(evidence.Options{Dir: e.Dir, AgentID: cfg.Agent.ID, MaxBytes: e.MaxBytes,
-		SegmentBytes: e.SegmentBytes, ReservedBytes: e.ReservedBytes, MaxEventBytes: e.MaxEventBytes})
+	opts := evidence.Options{Dir: e.Dir, AgentID: cfg.Agent.ID, MaxBytes: e.MaxBytes,
+		SegmentBytes: e.SegmentBytes, ReservedBytes: e.ReservedBytes, MaxEventBytes: e.MaxEventBytes}
+	j, err := evidence.Open(opts)
 	if errors.Is(err, evidence.ErrLocked) {
 		return errors.New("the agent is running: stop the service first, operator actions need the journal offline")
+	}
+	if c.salvage {
+		if err == nil {
+			j.Close()
+			return fmt.Errorf("the journal at %s opens normally: nothing to salvage", e.Dir)
+		}
+		return salvageJournal(opts, strings.TrimSpace(c.reason), err, out)
 	}
 	if err != nil {
 		return fmt.Errorf("open evidence journal: %w", err)
@@ -116,5 +132,55 @@ func listEvidence(ctx context.Context, j *evidence.Journal, out io.Writer) error
 			fmt.Fprintf(out, "  %s  %s %s (was %s): %s\n", a.At.Format(time.RFC3339), a.Action, a.EventID, a.PriorState, a.Reason)
 		}
 	}
+	return nil
+}
+
+// salvageJournal replaces a journal that does not open with a new one holding
+// its readable undelivered evidence and cursors (evidence.Salvage). The old
+// directory is kept beside it as <dir>.corrupt-<time>, untouched, and a JSON
+// report with the operator's reason goes to the state directory.
+func salvageJournal(opts evidence.Options, reason string, openErr error, out io.Writer) error {
+	stamp := time.Now().UTC().Format("20060102T150405Z")
+	target, kept := opts.Dir+".salvage-"+stamp, opts.Dir+".corrupt-"+stamp
+	report, err := evidence.Salvage(context.Background(), opts, target)
+	if err != nil {
+		_ = os.RemoveAll(target) // only the directory this run created
+		return fmt.Errorf("salvage %s: %w", opts.Dir, err)
+	}
+	if err := os.Rename(opts.Dir, kept); err != nil {
+		_ = os.RemoveAll(target)
+		return fmt.Errorf("keep the damaged journal as %s: %w", kept, err)
+	}
+	if err := os.Rename(target, opts.Dir); err != nil {
+		if back := os.Rename(kept, opts.Dir); back != nil {
+			return fmt.Errorf("install the salvaged journal: %w (and restoring %s failed: %v)", err, kept, back)
+		}
+		return fmt.Errorf("install the salvaged journal: %w (the damaged journal is back in place)", err)
+	}
+	record := struct {
+		At        time.Time `json:"at"`
+		Reason    string    `json:"reason"`
+		OpenError string    `json:"open_error"`
+		Kept      string    `json:"kept"`
+		evidence.SalvageReport
+	}{time.Now().UTC(), reason, openErr.Error(), kept, report}
+	b, _ := json.MarshalIndent(record, "", "  ")
+	reportPath := filepath.Join(filepath.Dir(opts.Dir), "evidence-salvage-"+stamp+".json")
+	if err := os.WriteFile(reportPath, b, 0o600); err != nil {
+		fmt.Fprintf(out, "warning: could not write %s: %v\n", reportPath, err)
+	}
+
+	fmt.Fprintf(out, "salvaged %s: %d event(s) kept for delivery, %d already delivered, %d unreadable region(s) (%d bytes), %d cursor(s) carried\n",
+		opts.Dir, report.Imported, report.Delivered, report.UnreadableRegions, report.UnreadableBytes, report.Cursors)
+	if !report.CheckpointUsable {
+		fmt.Fprintln(out, "the delivery state was unreadable: delivered events will be sent again and answered as duplicates")
+	}
+	if report.UnreadableRegions > 0 {
+		fmt.Fprintln(out, "evidence in the unreadable regions is lost; it is counted as unknown gaps in the agent's health")
+	}
+	for _, p := range report.Problems {
+		fmt.Fprintf(out, "  %s\n", p)
+	}
+	fmt.Fprintf(out, "the damaged journal is kept unchanged at %s; report: %s\nstart the agent again\n", kept, reportPath)
 	return nil
 }
