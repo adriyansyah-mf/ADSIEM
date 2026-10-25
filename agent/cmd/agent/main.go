@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
+	"github.com/siem-platform/agent/internal/winsensor"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=x.y.z"
@@ -266,6 +268,19 @@ func run(configPath string, stop <-chan struct{}) {
 			}
 		} else {
 			stopProducers = append(stopProducers, netMon.Stop)
+		}
+	}
+
+	// Windows process / network / DNS telemetry from ETW, without Sysmon
+	// (etw.mode: auto runs it unless Sysmon is installed).
+	if runtime.GOOS == "windows" && cfg.ETW.Mode != "off" {
+		if cfg.ETW.Mode == "auto" && winsensor.SysmonInstalled() {
+			slog.Info("ETW sensor off: Sysmon is installed (set etw.mode: on to run both)")
+		} else if sensor, err := winsensor.Start(buf); err != nil {
+			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
+		} else {
+			stopProducers = append(stopProducers, sensor.Stop)
+			slog.Info("ETW sensor running", "telemetry", "process, network, dns")
 		}
 	}
 

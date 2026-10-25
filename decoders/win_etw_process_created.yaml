@@ -1,0 +1,33 @@
+# ETW process creation (agent/internal/winsensor, no Sysmon needed): the
+# kernel logger's process start joined with Microsoft-Windows-Kernel-Process.
+# Same field names as Sysmon 1, so windows/process_creation rules apply
+# (worker/worker/sigma_logsource.py maps windows_etw_process to that category).
+name: win_etw_process_created
+log_type: windows_etw_process
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=1 '
+fields:
+  EventID: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  Image: Image
+  CommandLine: CommandLine
+  ParentImage: ParentImage
+  ParentCommandLine: ParentCommandLine
+  User: User
+  IntegrityLevel: IntegrityLevel
+  ProcessId: ProcessId
+  ParentProcessId: ParentProcessId
+  process.name: Image
+  process.executable: Image
+  process.command_line: CommandLine
+  process.pid: ProcessId
+  process.parent.name: ParentImage
+  process.parent.command_line: ParentCommandLine
+  process.parent.pid: ParentProcessId
+  user.name: User
+static_fields:
+  event.category: process
+  event.action: process_created

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -46,6 +47,13 @@ type NetwatchConfig struct {
 	SnapshotFallback bool `yaml:"snapshot_fallback"`
 }
 
+// ETWConfig controls the Windows ETW sensor (process, network and DNS
+// telemetry without Sysmon). Mode: "auto" (default) runs it unless Sysmon is
+// installed, so the same activity is not reported twice; "on" and "off".
+type ETWConfig struct {
+	Mode string `yaml:"mode"`
+}
+
 type DetectConfig struct {
 	Enabled         bool     `yaml:"enabled"`
 	Rules           []string `yaml:"rules"`
@@ -77,6 +85,7 @@ type Config struct {
 	FIM          FimConfig          `yaml:"fim"`
 	Firewall     FirewallConfig     `yaml:"firewall"`
 	Netwatch     NetwatchConfig     `yaml:"netwatch"`
+	ETW          ETWConfig          `yaml:"etw"`
 	Detect       DetectConfig       `yaml:"detect"`
 	Buffer       BufferConfig       `yaml:"buffer"`
 	Evidence     EvidenceConfig     `yaml:"evidence"`
@@ -101,6 +110,13 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Firewall.Backend == "" {
 		cfg.Firewall.Backend = "auto"
+	}
+	switch cfg.ETW.Mode {
+	case "":
+		cfg.ETW.Mode = "auto"
+	case "auto", "on", "off":
+	default:
+		return nil, fmt.Errorf("etw.mode %q: use auto, on or off", cfg.ETW.Mode)
 	}
 	if err := cfg.defaultEvidence(); err != nil {
 		return nil, err

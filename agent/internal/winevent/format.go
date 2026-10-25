@@ -207,6 +207,9 @@ func safeKey(k string) string {
 	return b.String()
 }
 
+// Quote is quote for other producers of key=value event lines (the ETW sensor).
+func Quote(v string) string { return quote(v) }
+
 // quote wraps a value for the kv parser (`key="..."`). A double quote is
 // written \" and a backslash is doubled only where it would be ambiguous —
 // before another backslash or a quote, or at the end — so Windows paths stay

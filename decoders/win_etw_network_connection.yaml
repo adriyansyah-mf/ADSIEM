@@ -1,0 +1,33 @@
+# ETW TCP connect/accept (agent/internal/winsensor, Microsoft-Windows-Kernel-
+# Network). Same field names as Sysmon 3 (windows/network_connection).
+name: win_etw_network_connection
+log_type: windows_etw_network
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=3 '
+fields:
+  EventID: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  Image: Image
+  ProcessId: ProcessId
+  User: User
+  Protocol: Protocol
+  Initiated: Initiated
+  SourceIp: SourceIp
+  SourcePort: SourcePort
+  DestinationIp: DestinationIp
+  DestinationPort: DestinationPort
+  DestinationIsIpv6: DestinationIsIpv6
+  process.name: Image
+  process.pid: ProcessId
+  source.ip: SourceIp
+  source.port: SourcePort
+  destination.ip: DestinationIp
+  destination.port: DestinationPort
+  network.transport: Protocol
+  user.name: User
+static_fields:
+  event.category: network
+  event.action: network_connection

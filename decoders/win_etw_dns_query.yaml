@@ -1,0 +1,29 @@
+# ETW DNS query (agent/internal/winsensor, Microsoft-Windows-DNS-Client 3008,
+# logged in the querying process). Same field names as Sysmon 22
+# (windows/dns_query).
+name: win_etw_dns_query
+log_type: windows_etw_dns
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=22 '
+fields:
+  EventID: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  Image: Image
+  ProcessId: ProcessId
+  User: User
+  QueryName: QueryName
+  QueryType: QueryType
+  QueryStatus: QueryStatus
+  QueryResults: QueryResults
+  process.name: Image
+  process.pid: ProcessId
+  dns.question.name: QueryName
+  dns.question.type: QueryType
+  dns.answers: QueryResults
+  user.name: User
+static_fields:
+  event.category: network
+  event.action: dns_query
