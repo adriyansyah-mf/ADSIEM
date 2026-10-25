@@ -1,0 +1,19 @@
+# Process exit (thread-group leader) with its exit code or killing
+# signal, from agent/internal/linsensor; completes the process tree.
+name: linux_process_exit
+log_type: linux_process_exit
+type: kv
+priority: 10
+enabled: true
+fields:
+  process.exit_code: ExitCode
+  process.exit_signal: Signal
+  Image: Image
+  process.executable: Image
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  user.id: User
+static_fields:
+  event.category: process
+  event.action: process_exit

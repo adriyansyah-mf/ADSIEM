@@ -1,0 +1,15 @@
+title: Kernel Module Loaded On Linux
+id: rule-linux-kernel-module-load
+description: A kernel module was loaded at runtime (module.name is the file it came from). Rootkits load this way; legitimate loads after boot are rare enough on servers to review.
+logsource:
+  product: linux
+  service: kernel_module
+detection:
+  selection:
+    event.action: kernel_module
+    module.action: load
+  condition: selection
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1547.006

@@ -201,6 +201,13 @@ SOURCES: list[Source] = [
     Source("linux", "cron", log_types=_AUTH, when=(("raw_message", "contains", ("CRON[", "crond[")),)),
     Source("linux", "auditd", log_types=("linux_audit",), raw_kv=True),
     Source("linux", None, "process_creation", log_types=("linux_process_exec",), raw_kv=True),
+    # agent/internal/linsensor: Sigma-native TargetFilename/SourceFilename/Image
+    Source("linux", None, "file_event", log_types=("linux_file_event",),
+           when=(("action", "eq", ("create", "write")),), raw_kv=True),
+    Source("linux", None, "file_delete", log_types=("linux_file_event",),
+           when=(("action", "eq", ("delete",)),), raw_kv=True),
+    Source("linux", None, "file_rename", log_types=("linux_file_event",),
+           when=(("action", "eq", ("rename",)),), raw_kv=True),
     Source("nginx", None, "webserver", log_types=("nginx_access*",), aliases=_WEB_ALIASES),
     Source("apache", None, "webserver", log_types=("apache_access*",), aliases=_WEB_ALIASES),
     Source(None, None, "firewall", log_types=_FW),

@@ -61,6 +61,15 @@ type DetectConfig struct {
 	MaxBlocksPerMin int      `yaml:"max_blocks_per_minute"`
 }
 
+// LinuxSensorConfig controls the eBPF file, kernel-module, ptrace,
+// privilege, memfd and process-exit telemetry (internal/linsensor).
+type LinuxSensorConfig struct {
+	Disabled bool `yaml:"disabled"`
+	// DisabledEvents switches off groups: file, module, ptrace,
+	// privilege, memfd, exit. Fileless exec is always reported.
+	DisabledEvents []string `yaml:"disabled_events"`
+}
+
 type BufferConfig struct {
 	SpillPath string `yaml:"spill_path"`
 }
@@ -87,6 +96,7 @@ type Config struct {
 	Netwatch     NetwatchConfig     `yaml:"netwatch"`
 	ETW          ETWConfig          `yaml:"etw"`
 	Detect       DetectConfig       `yaml:"detect"`
+	LinuxSensor  LinuxSensorConfig  `yaml:"linux_sensor"`
 	Buffer       BufferConfig       `yaml:"buffer"`
 	Evidence     EvidenceConfig     `yaml:"evidence"`
 	LiveResponse LiveResponseConfig `yaml:"live_response"`

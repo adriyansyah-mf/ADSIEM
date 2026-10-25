@@ -1,0 +1,15 @@
+title: Linux LD Preload Hijack File Written
+id: rule-linux-ld-preload-file
+description: /etc/ld.so.preload was created or changed. Every dynamically linked program then loads the libraries it names, a common userland rootkit and persistence trick.
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename: /etc/ld.so.preload
+  condition: selection
+level: high
+tags:
+  - attack.persistence
+  - attack.defense_evasion
+  - attack.t1574.006

@@ -1,0 +1,46 @@
+title: Unexpected Privilege Change To Root On Linux
+id: rule-linux-privilege-change-root
+description: A process whose real user is not root set its uid or gid to 0 and the call succeeded, outside the setuid tools that do this by design. Typical of a kernel or SUID exploit finishing its job.
+logsource:
+  product: linux
+  service: privilege_change
+detection:
+  selection:
+    event.action: privilege_change
+    privilege.call|startswith: set
+  expected:
+    process.executable|endswith:
+      - /sudo
+      - /sudoedit
+      - /su
+      - /doas
+      - /pkexec
+      - /polkit-agent-helper-1
+      - /passwd
+      - /chsh
+      - /chfn
+      - /chage
+      - /expiry
+      - /gpasswd
+      - /newgrp
+      - /sg
+      - /newuidmap
+      - /newgidmap
+      - /mount
+      - /umount
+      - /fusermount
+      - /fusermount3
+      - /unix_chkpwd
+      - /dbus-daemon-launch-helper
+      - /ssh-keysign
+      - /Xorg
+      - /Xorg.wrap
+      - /crontab
+      - /at
+      - /snap-confine
+      - /ntfs-3g
+  condition: selection and not expected
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1068
