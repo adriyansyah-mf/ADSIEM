@@ -10,6 +10,9 @@ const COLORS: Readonly<Record<string, string>> = {
   pending: 'var(--text-muted)', running: 'var(--accent-cyan)', done: 'var(--accent-green)',
   failed: 'var(--accent-red)', enabled: 'var(--accent-green)', paused: 'var(--text-muted)',
   ready: 'var(--accent-green)', collecting_data: 'var(--accent-yellow)', monitor: 'var(--accent-yellow)', create_case: 'var(--accent-orange)', escalate: 'var(--accent-red)',
+  // evidence delivery
+  healthy: 'var(--accent-green)', backlogged: 'var(--accent-yellow)', blocked: 'var(--accent-orange)',
+  degraded: 'var(--accent-red)', not_reported: 'var(--text-muted)', stale: 'var(--text-muted)',
 }
 
 export default function StatusBadge({ status }: { readonly status: string }) {

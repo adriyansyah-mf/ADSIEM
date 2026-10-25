@@ -14,6 +14,7 @@ import app.models.models  # noqa: F401 — ensure all models are registered befo
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
 from app.api.routes.cases import router as cases_router
 from app.api.routes.investigations import router as investigations_router
+from app.api.routes.evidence import router as evidence_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.hygiene import router as hygiene_router
 from app.api.routes.ueba import router as ueba_router
@@ -329,6 +330,12 @@ async def _migrate_agent_flow_poll() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS flow_poll_at TIMESTAMPTZ"))
 
+async def _migrate_agent_evidence_health() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health JSONB"))
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health_at TIMESTAMPTZ"))
+
 async def _migrate_agent_integrity() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -432,10 +439,13 @@ async def lifespan(app: FastAPI):
         await _migrate_alerts_columns()
         from app.services.soar_schema import migrate_soar
         await migrate_soar()
+        from app.services.evidence_schema import migrate_evidence
+        await migrate_evidence()
         await _migrate_webhook_payload_format()
         await _migrate_mfa_columns()
         await _migrate_agent_flow_poll()
         await _migrate_agent_integrity()
+        await _migrate_agent_evidence_health()
         await _migrate_audit_log_group()
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()
@@ -476,6 +486,6 @@ for router in [
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
-    investigations_router, knowledge_router,
+    investigations_router, knowledge_router, evidence_router,
 ]:
     app.include_router(router)

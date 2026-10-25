@@ -1,7 +1,10 @@
 # worker/worker/models.py
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Float, Integer, String, Text, ARRAY
+from sqlalchemy import (
+    BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Float, Index, Integer, String, Text,
+    UniqueConstraint, ARRAY, text,
+)
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase
 from pgvector.sqlalchemy import Vector
@@ -345,3 +348,40 @@ class SoarAction(Base):
     order_index = Column(Integer, nullable=False, default=0)
     params      = Column(JSONB, nullable=False, default=dict)
     created_at  = Column(DateTime(timezone=True), default=now_utc)
+
+class EvidenceInbox(Base):
+    """Mirror of server-api's durable inbox (app/models/models.py). The API owns
+    the schema and acceptance; the worker owns dispatch, processing and retention.
+    payload is a JSONB scalar string holding the envelope JSON: json.loads it."""
+    __tablename__ = "evidence_inbox"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "event_id", name="uq_evidence_inbox_agent_event"),
+        CheckConstraint("status IN ('pending', 'completed', 'dead_letter')", name="ck_evidence_status"),
+        CheckConstraint("payload_bytes >= 0", name="ck_evidence_payload_bytes"),
+        Index("idx_evidence_dispatch", "next_dispatch_at", postgresql_where=text("status = 'pending'")),
+        Index("idx_evidence_attempt", "next_attempt_at", postgresql_where=text("status = 'pending'")),
+        Index("idx_evidence_retention", "completed_at", postgresql_where=text("status = 'completed'")),
+    )
+    receipt_id       = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id         = Column(UUID(as_uuid=True), nullable=False)
+    event_id         = Column(UUID(as_uuid=True), nullable=False)
+    group_id         = Column(String(100), nullable=False)
+    hostname         = Column(String(255), nullable=False)
+    payload_digest   = Column(String(64), nullable=False)
+    payload          = Column(JSONB(none_as_null=True), nullable=True)  # None is SQL NULL: released by retention
+    payload_bytes    = Column(BigInteger, nullable=False)
+    collected_at     = Column(DateTime(timezone=True), nullable=False)
+    received_at      = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    status           = Column(String(20), nullable=False, default="pending", server_default="pending")
+    failure_count    = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error       = Column(Text, nullable=True)
+    next_attempt_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    next_dispatch_at = Column(DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()"))
+    dispatch_count   = Column(Integer, nullable=False, default=0, server_default="0")
+    completed_at     = Column(DateTime(timezone=True), nullable=True)
+
+class EvidenceGroupUsage(Base):
+    __tablename__ = "evidence_group_usage"
+    __table_args__ = (CheckConstraint("payload_bytes >= 0", name="ck_evidence_usage_bytes"),)
+    group_id      = Column(String(100), primary_key=True)
+    payload_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")

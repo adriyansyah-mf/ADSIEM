@@ -1,6 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import type { Agent, FirewallRule, LogSource, PaginatedResponse } from '@/types'
+import type { Agent, AgentEvidence, FirewallRule, LogSource, PaginatedResponse } from '@/types'
+
+export function useAgentEvidence(agentId: string) {
+  return useQuery<AgentEvidence>({
+    queryKey: ['agent-evidence', agentId],
+    queryFn: () => api.get(`/api/agents/${agentId}/evidence`).then(r => r.data),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useRetryEvidence(agentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (receiptId: string) => api.post(`/api/agents/${agentId}/evidence/${receiptId}/retry`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-evidence', agentId] }),
+  })
+}
 
 export function useAgents(page = 1, pageSize = 25, search = '', status = '') {
   return useQuery<PaginatedResponse<Agent>>({

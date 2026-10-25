@@ -1,0 +1,284 @@
+package evidence
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+	"io"
+	"math"
+	"os"
+	"sort"
+)
+
+// The journal keeps an in-memory index from event ID to the positions of its
+// retained occurrences, so per-event operations (duplicate check, attempt,
+// acknowledgement, hold/quarantine, operator resolve) read only that event's
+// records instead of scanning the journal. Without it each of them was
+// proportional to the backlog and draining a backlog was quadratic. The index
+// costs memory proportional to retained events (16-byte key plus a 12-byte
+// position: 42-67 B per event with map overhead, BenchmarkIndexMemory); it is
+// rebuilt at open and pruned when compaction deletes segments.
+
+type eventKey [16]byte
+
+// indexedPosition is a retained occurrence plus its collection time in Unix
+// seconds, so health can be computed without reading the journal.
+type indexedPosition struct {
+	eventPosition
+	collected int64
+}
+
+// packedPosition is an indexedPosition in 16 bytes: what nearly every
+// retained event needs, since sequences, segment offsets and Unix seconds
+// stay below 2^32 (until 2106).
+type packedPosition struct{ sequence, offset, end, collected uint32 }
+
+func pack(p indexedPosition) (packedPosition, bool) {
+	if p.Sequence > math.MaxUint32 || p.Offset < 0 || p.End > math.MaxUint32 || p.Offset > p.End ||
+		p.collected < 0 || p.collected > math.MaxUint32 {
+		return packedPosition{}, false
+	}
+	return packedPosition{uint32(p.Sequence), uint32(p.Offset), uint32(p.End), uint32(p.collected)}, true
+}
+
+func (p packedPosition) unpack() indexedPosition {
+	return indexedPosition{eventPosition{Sequence: uint64(p.sequence), Offset: int64(p.offset), End: int64(p.end)},
+		int64(p.collected)}
+}
+
+// eventIndex maps event IDs to retained occurrences: the oldest one packed
+// when it fits, every other one (duplicates, which are rare, or a value
+// beyond 32 bits) in wide. A key's packed occurrence is always older than its
+// wide ones, because packing is tried only while the key has none.
+type eventIndex struct {
+	packed map[eventKey]packedPosition
+	wide   map[eventKey][]indexedPosition
+}
+
+func newEventIndex() eventIndex {
+	return eventIndex{packed: map[eventKey]packedPosition{}, wide: map[eventKey][]indexedPosition{}}
+}
+
+// each visits every indexed occurrence, in no particular order.
+func (x eventIndex) each(visit func(indexedPosition)) {
+	for _, pp := range x.packed {
+		visit(pp.unpack())
+	}
+	for _, ps := range x.wide {
+		for _, p := range ps {
+			visit(p)
+		}
+	}
+}
+
+// Len is the number of indexed event IDs.
+func (x eventIndex) Len() int {
+	n := len(x.packed)
+	for k := range x.wide {
+		if _, ok := x.packed[k]; !ok {
+			n++
+		}
+	}
+	return n
+}
+
+func keyOf(eventID string) (eventKey, bool) {
+	var k eventKey
+	if ValidateAgentID(eventID) != nil { // the same UUID rules as event IDs
+		return k, false
+	}
+	compact := eventID[:8] + eventID[9:13] + eventID[14:18] + eventID[19:23] + eventID[24:]
+	if _, err := hex.Decode(k[:], []byte(compact)); err != nil {
+		return k, false
+	}
+	return k, true
+}
+
+func (j *Journal) indexAdd(e Envelope, p eventPosition) {
+	k, ok := keyOf(e.EventID)
+	if !ok {
+		return
+	}
+	j.index.add(k, indexedPosition{p, e.CollectedAt.Unix()})
+}
+
+func (x eventIndex) add(k eventKey, p indexedPosition) {
+	_, hasPacked := x.packed[k]
+	_, hasWide := x.wide[k]
+	if !hasPacked && !hasWide {
+		if pp, fits := pack(p); fits {
+			x.packed[k] = pp
+			return
+		}
+	}
+	x.wide[k] = append(x.wide[k], p)
+}
+
+func (x eventIndex) get(k eventKey) []eventPosition {
+	var ps []eventPosition
+	if pp, ok := x.packed[k]; ok {
+		ps = append(ps, pp.unpack().eventPosition)
+	}
+	for _, p := range x.wide[k] {
+		ps = append(ps, p.eventPosition)
+	}
+	return ps
+}
+
+// positions returns every retained occurrence of eventID, oldest first.
+func (j *Journal) positions(eventID string) []eventPosition {
+	k, ok := keyOf(eventID)
+	if !ok {
+		return nil
+	}
+	return j.index.get(k)
+}
+
+// rebuildIndex indexes every retained event (open, after recovery).
+func (j *Journal) rebuildIndex(ctx context.Context) error {
+	j.index = newEventIndex()
+	return j.walkEvents(ctx, func(e Envelope, p eventPosition) (bool, error) {
+		j.indexAdd(e, p)
+		return false, nil
+	})
+}
+
+// pruneIndex drops positions in segments that are no longer retained.
+func (j *Journal) pruneIndex() {
+	retained := make(map[uint64]bool, len(j.segments))
+	for _, s := range j.segments {
+		retained[s.sequence] = true
+	}
+	for k, pp := range j.index.packed {
+		if !retained[uint64(pp.sequence)] {
+			delete(j.index.packed, k)
+		}
+	}
+	for k, ps := range j.index.wide {
+		var kept []indexedPosition
+		for _, p := range ps {
+			if retained[p.Sequence] {
+				kept = append(kept, p)
+			}
+		}
+		if len(kept) == 0 {
+			delete(j.index.wide, k)
+			continue
+		}
+		// Keep the invariant: the oldest occurrence packed if the key has none.
+		if _, ok := j.index.packed[k]; !ok {
+			if pp, fits := pack(kept[0]); fits {
+				j.index.packed[k], kept = pp, kept[1:]
+			}
+		}
+		if len(kept) == 0 {
+			delete(j.index.wide, k)
+		} else {
+			j.index.wide[k] = kept
+		}
+	}
+}
+
+// readAt decodes the event record at p.
+func (j *Journal) readAt(p eventPosition) (Envelope, error) {
+	var e Envelope
+	err := j.readEach([]eventPosition{p}, func(v Envelope) { e = v })
+	return e, err
+}
+
+// readEach decodes the event records at ps in journal order, opening each
+// segment once. ps is sorted in place.
+func (j *Journal) readEach(ps []eventPosition, visit func(Envelope)) error {
+	sort.Slice(ps, func(a, b int) bool {
+		return ps[a].Sequence < ps[b].Sequence || ps[a].Sequence == ps[b].Sequence && ps[a].Offset < ps[b].Offset
+	})
+	si := 0
+	for i := 0; i < len(ps); {
+		for si < len(j.segments) && j.segments[si].sequence < ps[i].Sequence {
+			si++
+		}
+		if si == len(j.segments) || j.segments[si].sequence != ps[i].Sequence {
+			return ErrCorrupt // indexed position in a segment that is gone
+		}
+		s := j.segments[si]
+		f, err := j.dir.open(s.name, os.O_RDONLY)
+		if err != nil {
+			return err
+		}
+		r := io.NewSectionReader(f, 0, s.size)
+		var readErr error
+		for ; i < len(ps) && ps[i].Sequence == s.sequence; i++ {
+			v, err := readRecord(r, ps[i].Offset, j.options.MaxEventBytes)
+			if err == nil && (v.kind != frameEvent || v.next != ps[i].End) {
+				err = ErrCorrupt
+			}
+			if err != nil {
+				readErr = err
+				break
+			}
+			visit(v.event)
+		}
+		if err := errors.Join(readErr, f.Close()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// occurrences reads every retained occurrence of eventID. Like the scans it
+// replaces, it observes cancellation before each read and once at the end,
+// so a canceled caller stops before publishing anything.
+func (j *Journal) occurrences(ctx context.Context, eventID string) ([]Envelope, []eventPosition, error) {
+	ps := j.positions(eventID)
+	events := make([]Envelope, 0, len(ps))
+	for _, p := range ps {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		e, err := j.readAt(p)
+		if err != nil {
+			return nil, nil, err
+		}
+		events = append(events, e)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	return events, ps, nil
+}
+
+// walkEventsFrom is walkEvents starting at from (a record boundary in a
+// retained segment, or past the end of the last one).
+func (j *Journal) walkEventsFrom(ctx context.Context, from eventPosition, visit func(Envelope, eventPosition) (bool, error)) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if j.closed {
+		return os.ErrClosed
+	}
+	for _, s := range j.segments {
+		if s.sequence < from.Sequence {
+			continue
+		}
+		start := int64(segmentHeaderSize)
+		if s.sequence == from.Sequence && from.Offset > start {
+			start = from.Offset
+		}
+		if start >= s.size {
+			continue
+		}
+		f, err := j.dir.open(s.name, os.O_RDONLY)
+		if err != nil {
+			return err
+		}
+		scanner := segmentScanner{file: f, segment: s, maxEventBytes: j.options.MaxEventBytes, start: start}
+		stop, readErr := scanner.walk(ctx, visit)
+		if err := errors.Join(readErr, f.Close()); err != nil {
+			return err
+		}
+		if stop {
+			return nil
+		}
+	}
+	return nil
+}

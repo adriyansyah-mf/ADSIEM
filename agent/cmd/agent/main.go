@@ -43,7 +43,26 @@ func main() {
 	verifyUninstall := flag.Bool("verify-uninstall", false,
 		"exit 0 only if -token (or $SIEM_UNINSTALL_TOKEN) is this agent's uninstall token; used by the MSI and .deb/.rpm removal")
 	uninstallToken := flag.String("token", "", "with -verify-uninstall: the uninstall token")
+	var ev evidenceCommand
+	flag.BoolVar(&ev.list, "evidence-list", false, "list held and quarantined durable evidence (agent stopped, as root/Administrator)")
+	flag.StringVar(&ev.release, "evidence-release", "", "event ID: deliver held or quarantined evidence again (needs -reason)")
+	flag.StringVar(&ev.discard, "evidence-discard", "", "event ID: drop held or quarantined evidence (needs -reason)")
+	flag.BoolVar(&ev.salvage, "evidence-salvage", false, "replace a journal that no longer opens (corrupt) with its readable undelivered evidence and cursors; keeps the old one (needs -reason)")
+	flag.StringVar(&ev.reason, "reason", "", "with -evidence-release/-evidence-discard: why, kept in the journal audit")
+	flag.BoolVar(&ev.yes, "yes", false, "with -evidence-release: release held evidence despite the duplicate risk")
 	flag.Parse()
+
+	if ev.requested() {
+		cfg, err := config.Load(*configPath)
+		if err == nil {
+			err = runEvidenceCommand(cfg, ev, os.Stdout)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "siem-agent:", err)
+			os.Exit(2)
+		}
+		return
+	}
 
 	if *verifyUninstall {
 		token := *uninstallToken
@@ -135,16 +154,29 @@ func run(configPath string, stop <-chan struct{}) {
 		slog.Warn("could not set the service's tamper protection", "err", err)
 	}
 
-	buf := buffer.New(cfg.Agent.BufferSize)
 	c := client.New(cfg.Server.URL, cfg.Agent.Token)
-	mgr := tailer.NewManager(buf)
-
-	spill, err := buffer.OpenSpill(cfg.Buffer.SpillPath)
-	if err != nil {
-		slog.Warn("disk spill unavailable; undelivered events will be lost on restart", "err", err)
-		spill = nil
+	// evidence.enabled: durable journal + receipt-aware sender. Otherwise the
+	// legacy memory queue, sender and disk spill. The two never mix.
+	var durable *durableRuntime
+	var buf *buffer.Buffer
+	var spill *buffer.Spill
+	if cfg.Evidence.Enabled {
+		durable = openDurable(cfg, mustHostname())
+		buf = durable.buf
+		heartbeat.EvidenceHealth = durable.report                                // before the heartbeat loop starts
+		durable.importLegacy(cfg.Buffer.SpillPath, cfg.Agent.ID, mustHostname()) // before any producer starts
 	} else {
-		defer spill.Close()
+		buf = buffer.New(cfg.Agent.BufferSize)
+		if spill, err = buffer.OpenSpill(cfg.Buffer.SpillPath); err != nil {
+			slog.Warn("disk spill unavailable; undelivered events will be lost on restart", "err", err)
+			spill = nil
+		} else {
+			defer spill.Close()
+		}
+	}
+	mgr := tailer.NewManager(buf)
+	if durable != nil && durable.journal != nil {
+		mgr = tailer.NewDurableManager(durable.journal, durable.publisher) // files resume from durable cursors
 	}
 
 	// seed initial sources from config
@@ -198,6 +230,9 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Info("local detection enabled", "rules", detector.EnabledRules())
 		}
 	}
+	if durable != nil {
+		durable.setDetector(detector) // observes admissions instead of sends
+	}
 
 	// Live-response flows: long-polls the server and runs artifact plugins
 	flowCtx, stopFlows := context.WithCancel(context.Background())
@@ -211,10 +246,12 @@ func run(configPath string, stop <-chan struct{}) {
 
 	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
+	// Producers are stopped explicitly at shutdown, before the durable journal closes.
+	var stopProducers []func()
 	if procMon, err := procexec.Start(buf); err != nil {
 		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
 	} else {
-		defer procMon.Stop()
+		stopProducers = append(stopProducers, procMon.Stop)
 	}
 
 	// Network syscall telemetry (connect/accept/bind/DNS) with an `ss` snapshot
@@ -224,11 +261,11 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Warn("netwatch eBPF unavailable, continuing", "err", err)
 			if cfg.Netwatch.SnapshotFallback {
 				snap := netwatch.StartSnapshotter(buf, cfg.Server.URL)
-				defer snap.Stop()
+				stopProducers = append(stopProducers, snap.Stop)
 				slog.Info("netwatch running in snapshot mode (new connections only)", "interval", "10s")
 			}
 		} else {
-			defer netMon.Stop()
+			stopProducers = append(stopProducers, netMon.Stop)
 		}
 	}
 
@@ -270,8 +307,11 @@ func run(configPath string, stop <-chan struct{}) {
 		},
 	)
 
-	// sender loop
-	go senderLoop(buf, c, cfg, spill, detector)
+	if durable != nil {
+		durable.startSender(c, heartbeat.SupportsEvidenceV2, heartbeat.EvidenceBatchMax)
+	} else {
+		go senderLoop(buf, c, cfg, spill, detector)
+	}
 
 	// periodic buffer diagnostics
 	go func() {
@@ -287,7 +327,14 @@ func run(configPath string, stop <-chan struct{}) {
 	heartbeat.SendStopping(cfg, c, getStopReason())
 	stopFlows()
 	mgr.StopAll()
-	flushBuffer(buf, c, cfg)
+	for i := len(stopProducers) - 1; i >= 0; i-- {
+		stopProducers[i]()
+	}
+	if durable != nil {
+		durable.shutdown() // the journal keeps what was not acknowledged
+	} else {
+		flushBuffer(buf, c, cfg)
+	}
 }
 
 func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill *buffer.Spill, detector *detect.Engine) {

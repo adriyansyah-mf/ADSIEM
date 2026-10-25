@@ -45,6 +45,9 @@ type HeartbeatRequest struct {
 	// a replayed heartbeat (a sequence number going back).
 	Session string `json:"session,omitempty"`
 	Seq     int64  `json:"seq,omitempty"`
+	// Durable evidence mode only; legacy agents omit it and the server shows
+	// their evidence delivery as not reported.
+	EvidenceHealth any `json:"evidence_health,omitempty"`
 }
 
 // Session identifies this agent process in its heartbeats.
@@ -166,6 +169,46 @@ type HeartbeatResponse struct {
 	// SHA-256 of this agent's uninstall token (server-side secret); kept
 	// locally so package removal can be refused without it.
 	UninstallTokenSHA256 string `json:"uninstall_token_sha256"`
+	// Durable ingest protocols the server accepts right now; [2] only while its
+	// inbox is enabled and healthy (server-api check_evidence_durability).
+	EvidenceProtocols []int `json:"evidence_protocols"`
+	// >0: the server takes this many events per POST /api/ingest/v2/logs.
+	EvidenceBatchMax int `json:"evidence_batch_max"`
+}
+
+var (
+	evidenceV2       atomic.Bool
+	evidenceBatchMax atomic.Int64
+)
+
+// EvidenceHealth, when set (durable evidence mode), returns the journal's
+// cumulative health for the heartbeat. Counters live in the journal, so a
+// failed heartbeat loses nothing: the next one reports the same totals.
+var EvidenceHealth func() any
+
+// SupportsEvidenceV2 reports whether the last successful heartbeat advertised
+// durable ingest protocol 2. The evidence sender sends nothing until it does.
+func SupportsEvidenceV2() bool { return evidenceV2.Load() }
+
+// EvidenceBatchMax is the batch size the last successful heartbeat advertised
+// for durable ingest; 0 (older server, or protocol 2 unavailable) means one
+// event per request.
+func EvidenceBatchMax() int {
+	if !evidenceV2.Load() {
+		return 0
+	}
+	return int(evidenceBatchMax.Load())
+}
+
+func storeEvidenceProtocols(protocols []int, batchMax int) {
+	supported := false
+	for _, p := range protocols {
+		supported = supported || p == 2
+	}
+	evidenceBatchMax.Store(int64(max(batchMax, 0)))
+	if evidenceV2.Swap(supported) != supported {
+		slog.Info("durable evidence protocol", "supported", supported)
+	}
 }
 
 // Loop sends heartbeats every interval.
@@ -196,6 +239,9 @@ func Loop(
 			Session:       Session,
 			Seq:           seq.Add(1),
 		}
+		if EvidenceHealth != nil {
+			payload.EvidenceHealth = EvidenceHealth()
+		}
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
 		if err != nil {
 			slog.Error("heartbeat failed", "err", err)
@@ -209,6 +255,7 @@ func Loop(
 			var hbResp HeartbeatResponse
 			if err := json.Unmarshal(body, &hbResp); err == nil {
 				storeUninstallHash(hbResp.UninstallTokenSHA256)
+				storeEvidenceProtocols(hbResp.EvidenceProtocols, hbResp.EvidenceBatchMax)
 				if hbResp.ConfigHash != lastHash {
 					slog.Info("config updated", "hash", hbResp.ConfigHash)
 					lastHash = hbResp.ConfigHash

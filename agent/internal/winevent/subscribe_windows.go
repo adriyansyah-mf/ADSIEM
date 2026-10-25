@@ -90,11 +90,14 @@ func Subscribe(channel string, emit func(line string), stop <-chan struct{}) err
 }
 
 // render returns the event as XML, growing buf when the event is larger.
-func render(h uintptr, buf *[]uint16) (string, error) {
+func render(h uintptr, buf *[]uint16) (string, error) { return renderAs(h, evtRenderEventXML, buf) }
+
+// renderAs renders an event (evtRenderEventXML) or a bookmark (evtRenderBookmark).
+func renderAs(h uintptr, flags uintptr, buf *[]uint16) (string, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		b := *buf
 		var used, props uint32
-		ok, _, err := procEvtRender.Call(0, h, evtRenderEventXML, uintptr(len(b)*2),
+		ok, _, err := procEvtRender.Call(0, h, flags, uintptr(len(b)*2),
 			uintptr(unsafe.Pointer(&b[0])), uintptr(unsafe.Pointer(&used)), uintptr(unsafe.Pointer(&props)))
 		if ok != 0 {
 			return windows.UTF16ToString(b[:used/2]), nil

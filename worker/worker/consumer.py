@@ -17,6 +17,7 @@ from worker.sigma_engine import SigmaEngine
 from worker.alert_manager import create_alert
 from worker.ueba.scorer import score_event as ueba_score_event
 from worker.es_client import index_log
+from worker import evidence_inbox
 
 log = structlog.get_logger()
 CONSUMER_NAME = f"worker-{socket.gethostname()}"
@@ -74,7 +75,10 @@ async def process_message(
     dec_engine: DecoderEngine,
     sig_engine: SigmaEngine,
     predecoded: tuple[dict, str | None] | None = None,
+    event_id: uuid.UUID | None = None,
 ) -> None:
+    """Index, evaluate and score one log line. Durable evidence passes its
+    stable event_id (evidence_inbox.evidence_event_id); legacy lines get a new one."""
     agent_id_str = data.get("agent_id")
     log_type = data.get("log_type", "").strip()
     raw_message = data.get("raw_message", "").strip()
@@ -102,7 +106,7 @@ async def process_message(
     else:
         events_decoded.inc()
 
-    event_id = uuid.uuid4()
+    event_id = event_id or uuid.uuid4()
     await index_log(str(event_id), {
         "agent_id": str(agent_id) if agent_id else None,
         "group_id": group_id,
@@ -176,6 +180,29 @@ async def _process_group(redis, group: list, dec_engine, sig_engine, limit: asyn
                 await redis.xadd(f"{REDIS_STREAM_KEY}:failed", data)
 
 
+async def _process_references(redis, group: list, state: dict, limit: asyncio.Semaphore) -> None:
+    """Durable inbox references for one host, in order. Every outcome is acked and
+    nothing goes to the DLQ: the inbox row, not this stream entry, is the evidence,
+    and evidence_inbox's dispatcher resends anything not completed."""
+    async with limit:
+        for msg_id, data in group:
+            try:
+                outcome = await evidence_inbox.process_reference(uuid.UUID(data["receipt_id"]), state)
+                if outcome not in ("completed", "duplicate"):
+                    log.info("evidence_reference_not_completed", receipt_id=data["receipt_id"], outcome=outcome)
+            except Exception as exc:
+                log.error("evidence_reference_failed", msg_id=msg_id, receipt_id=data.get("receipt_id"),
+                          error=str(exc))
+            await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
+
+
+def group_references(entries: list) -> list[list]:
+    groups: dict[str, list] = {}
+    for msg_id, data in entries:
+        groups.setdefault(data.get("hostname") or "", []).append((msg_id, data))
+    return list(groups.values())
+
+
 async def consume_loop(state: dict) -> None:
     redis = await get_redis()
     await ensure_stream_group(redis)
@@ -194,13 +221,26 @@ async def consume_loop(state: dict) -> None:
                 continue
             dec_engine, sig_engine = state["dec_engine"], state["sig_engine"]
             entries = [entry for _stream, stream_entries in messages for entry in stream_entries]
-            await asyncio.gather(*(
-                _process_group(redis, group, dec_engine, sig_engine, limit)
-                for group in group_by_source(entries, dec_engine)
-            ))
+            # durable inbox references carry no log line: route them before legacy decoding
+            references = [e for e in entries if e[1].get("kind") == evidence_inbox.EVIDENCE_KIND]
+            legacy = [e for e in entries if e[1].get("kind") != evidence_inbox.EVIDENCE_KIND]
+            await asyncio.gather(
+                *(_process_group(redis, group, dec_engine, sig_engine, limit)
+                  for group in group_by_source(legacy, dec_engine)),
+                *(_process_references(redis, group, state, limit) for group in group_references(references)),
+            )
         except asyncio.CancelledError:
             break
         except Exception as exc:
+            if "NOGROUP" in str(exc):
+                # Redis restarted without its data: the stream and group are gone.
+                # Recreate them; the evidence dispatcher re-sends its references.
+                log.warning("consumer_group_recreated", error=str(exc))
+                try:
+                    await ensure_stream_group(redis)
+                    continue
+                except Exception as group_exc:  # noqa: BLE001 - Redis still down: retry below
+                    exc = group_exc
             log.error("consume_loop_error", error=str(exc))
             await asyncio.sleep(5)
 

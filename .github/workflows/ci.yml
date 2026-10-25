@@ -23,6 +23,12 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U soc" --health-interval 5s --health-timeout 5s --health-retries 10
+      # for the tests that need a real stream (stream maintenance, evidence dispatch)
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -43,10 +49,16 @@ jobs:
           # at import time, with a strong-value validator.
           JWT_SECRET: "ci-test-secret-0123456789abcdef0123456789abcdef"
           TEST_DATABASE_URL: "postgresql+asyncpg://soc:soc@localhost:5432/test"
+          TEST_REDIS_URL: "redis://localhost:6379/0"
           # the investigator test drives the app's own engine, bound from DATABASE_URL
           DATABASE_URL: "postgresql+asyncpg://soc:soc@localhost:5432/test"
         run: |
-          pytest tests/server-api tests/worker worker/tests \
+          # Separate processes mirror the deployed services: each owns its
+          # Prometheus registry and registers the same siem_llm_* metric names.
+          # Collecting both gateways in one interpreter causes duplicate metrics.
+          pytest tests/server-api
+          pytest tests/evidence  # acceptance assertions; the Docker harness runs in evidence-acceptance
+          pytest tests/worker worker/tests \
             --ignore=tests/worker/test_pipeline.int.test.py \
             --deselect worker/tests/test_rag.py::test_embed_text_returns_384_dimensions \
             --deselect worker/tests/test_rag.py::test_embed_text_different_inputs_differ
@@ -62,8 +74,15 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: agent/go.sum
 
-      - name: go test
-        run: go test ./tests/agent/...
+      # procexec and netwatch go:embed eBPF objects: build them so every
+      # package (cmd/agent included) is compiled and tested.
+      - name: Build eBPF objects
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq clang llvm
+          make -C agent bpf
+
+      - name: go test (all agent packages)
+        run: go test -race ./agent/... ./tests/agent/...
 
       - name: Windows vet + build
         working-directory: agent
@@ -73,6 +92,38 @@ jobs:
         run: |
           go vet ./...
           go build -o /dev/null ./cmd/agent/
+
+  # End-to-end durable evidence under faults (tests/evidence/run.py): a
+  # disposable Compose project per scenario with PostgreSQL, Redis,
+  # Elasticsearch, server-api, worker, a fault proxy and the Linux agent.
+  evidence-acceptance:
+    name: Evidence acceptance (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [offline-restart, lost-response, redis-loss, worker-crash, quota, corruption, retention]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run scenario
+        run: |
+          python tests/evidence/run.py --build --scenario "${{ matrix.scenario }}" \
+            --count 10000 --output "evidence-artifacts/${{ matrix.scenario }}"
+
+      - name: Upload evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ matrix.scenario }}
+          path: evidence-artifacts/${{ matrix.scenario }}
+          retention-days: 14
+          if-no-files-found: warn
 
   dashboard-build:
     name: Dashboard build (tsc + vite)
