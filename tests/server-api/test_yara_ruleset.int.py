@@ -1,10 +1,22 @@
 # tests/server-api/test_yara_ruleset.int.py
 """Agents learn the enabled YARA rule set's hash from the heartbeat and
 fetch the rules from POST /api/ingest/yara-rules when it changes."""
+import asyncio
+
+import pytest
+
 from app.models import models
 from app.services import yara_ruleset
 
 BLUE = {"X-Agent-Token": "blue-token"}
+
+
+@pytest.fixture(autouse=True)
+def _current_event_loop(event_loop):
+    # pytest-asyncio 0.24 runs the test on the *current* loop; modules run
+    # earlier in the session (asyncio.run, private loops) can leave none.
+    asyncio.set_event_loop(event_loop)
+    yield
 
 
 async def heartbeat(env):
