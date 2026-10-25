@@ -1,0 +1,32 @@
+# Ransomware detections from agent/internal/ransomguard:
+#   detection=canary          a process touched a canary file (Linux sensor)
+#   detection=canary_changed  a canary changed, found by the periodic check (no process)
+#   detection=extension_change / mass_modify  bulk file heuristics; confirmed=true when
+#                             the files the process wrote have encrypted-looking entropy
+# response: killed, kill_refused, kill_failed, none (report only / not confirmed).
+name: ransomware_activity
+log_type: ransomware_activity
+type: kv
+priority: 10
+enabled: true
+fields:
+  ransomware.detection: detection
+  ransomware.confirmed: confirmed
+  ransomware.response: response
+  ransomware.canary: Canary
+  ransomware.files: Files
+  ransomware.extension: Extension
+  ransomware.entropy: Entropy
+  ransomware.killed: Killed
+  ransomware.isolated: Isolated
+  file.path: TargetFilename
+  file.action: FileAction
+  Image: Image
+  process.executable: Image
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  user.id: User
+static_fields:
+  event.category: malware
+  event.action: ransomware

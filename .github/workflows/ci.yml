@@ -91,6 +91,12 @@ jobs:
         working-directory: agent
         run: sudo -E env "PATH=$PATH" LINSENSOR_E2E=1 go test -count=1 -run TestSensorEndToEnd -v ./internal/linsensor/
 
+      # A child process encrypts-and-renames files and writes a canary; the
+      # guard must kill it both times.
+      - name: anti-ransomware end-to-end (eBPF, root)
+        working-directory: agent
+        run: sudo -E env "PATH=$PATH" RANSOM_E2E=1 go test -count=1 -run TestRansomwareEndToEnd -v ./internal/ransomguard/
+
       - name: Windows vet + build
         working-directory: agent
         env:

@@ -70,6 +70,22 @@ type LinuxSensorConfig struct {
 	DisabledEvents []string `yaml:"disabled_events"`
 }
 
+// RansomwareConfig controls canary files and the bulk-encryption
+// heuristics (internal/ransomguard).
+type RansomwareConfig struct {
+	Disabled bool `yaml:"disabled"`
+	// ReportOnly reports detections without stopping the process.
+	ReportOnly bool `yaml:"report_only"`
+	// Isolate also cuts the host off the network (firewall isolation) on
+	// a canary hit or a confirmed detection.
+	Isolate bool `yaml:"isolate"`
+	// CanaryDirs (globs) and CanaryNames replace the defaults.
+	CanaryDirs  []string `yaml:"canary_dirs"`
+	CanaryNames []string `yaml:"canary_names"`
+	// AllowImages are extra executable basenames the heuristics ignore.
+	AllowImages []string `yaml:"allow_images"`
+}
+
 type BufferConfig struct {
 	SpillPath string `yaml:"spill_path"`
 }
@@ -97,6 +113,7 @@ type Config struct {
 	ETW          ETWConfig          `yaml:"etw"`
 	Detect       DetectConfig       `yaml:"detect"`
 	LinuxSensor  LinuxSensorConfig  `yaml:"linux_sensor"`
+	Ransomware   RansomwareConfig   `yaml:"ransomware"`
 	Buffer       BufferConfig       `yaml:"buffer"`
 	Evidence     EvidenceConfig     `yaml:"evidence"`
 	LiveResponse LiveResponseConfig `yaml:"live_response"`

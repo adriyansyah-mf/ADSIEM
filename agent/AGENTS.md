@@ -19,6 +19,7 @@ agent/
 │   ├── procexec/            # eBPF execve monitor (bpf/ has .c + vendored headers)
 │   ├── netwatch/            # eBPF connect/accept/bind/DNS + `ss` snapshot fallback
 │   ├── linsensor/           # eBPF file write/rename/delete, kernel modules, ptrace, privilege gain, memfd/fileless exec, exit
+│   ├── ransomguard/         # canary files + bulk-encryption heuristics (fed by linsensor) → kill tree / isolate
 │   ├── detect/              # local threshold engine: keeps blocking when the server is down
 │   ├── firewall/            # nftables gate: rule model, anti-lockout guard, engine
 │   └── task/                # live response: collectors, yara, firewall tasks
@@ -35,6 +36,7 @@ agent/
 | Glob rotation logic | `internal/tailer/tailer.go` `tailGlob` | first sight → seek EOF; new rotated file → read from start |
 | Rebuild BPF object | `internal/procexec/bpf/execve.bpf.c`, `internal/netwatch/bpf/netwatch.bpf.c` | clang target bpf; objects are `go:embed`'d, **build fails without them** |
 | Network telemetry | `internal/netwatch/netwatch.go` | connect/accept/bind/DNS → `linux_network_*`; needs tracefs + CAP_SYS_ADMIN |
+| Anti-ransomware | `internal/ransomguard/` | canaries planted and re-checked every 30 s; heuristics only kill when entropy confirms encryption; never kills PID 1/self/systemd/sshd — see `docs/operations/anti-ransomware.md` |
 | Linux sensor | `internal/linsensor/` | one object, tracepoints only, sys_enter stashes / sys_exit reports successes; relative paths and the exe path are resolved in the kernel (`build_path`); `make bpf` builds it; e2e needs root (`LINSENSOR_E2E=1`, CI runs it under sudo) — see `docs/operations/linux-sensor.md` |
 | Netwatch fallback | `internal/netwatch/fallback.go` | `ss -tunapH` every 10s when eBPF cannot attach |
 | Local detection engine | `internal/detect/detect.go` | sliding window + cooldown + block caps; emits `local_detection` |
