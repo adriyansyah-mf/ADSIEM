@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+import httpx
 
 DB_URL = os.environ.get("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB_URL or os.environ.get("DATABASE_URL") != DB_URL,
@@ -89,7 +90,7 @@ def env():
     _run(engine.dispose())
 
 
-def _seed():
+def _seed(hostname="web01"):
     from app.core.database import AsyncSessionLocal
     from app.models.models import Agent, Alert, Case, PlatformSetting, Role, User
 
@@ -100,13 +101,13 @@ def _seed():
             await db.flush()
             user = User(username=f"ana-{uuid.uuid4().hex[:6]}", email=f"{uuid.uuid4().hex}@x", password_hash="x",
                         role_id=role.id, group_id="blue")
-            agent = Agent(name="web01", hostname="web01", group_id="blue", token_hash=uuid.uuid4().hex,
+            agent = Agent(name=hostname, hostname=hostname, group_id="blue", token_hash=uuid.uuid4().hex,
                           status="online", last_seen_at=datetime.now(timezone.utc),
                           flow_poll_at=datetime.now(timezone.utc))
             db.add_all([user, agent])
             await db.flush()
             alert = Alert(title="Reverse shell from /tmp", severity="high", group_id="blue",
-                          hostname="web01", agent_id=agent.id, source_ip="203.0.113.9")
+                          hostname=hostname, agent_id=agent.id, source_ip="203.0.113.9")
             db.add(alert)
             await db.flush()
             case = Case(title="web01 compromise?", severity="high", group_id="blue", alert_id=alert.id)
@@ -116,6 +117,135 @@ def _seed():
             await db.commit()
             return user.id, agent.id, case.id
     return _run(go())
+
+
+def test_malwarebazaar_defaults_require_opt_in_and_mask_the_key(env):
+    from app.api.routes.settings import _mask, SECRET_MASK
+    from app.core.database import AsyncSessionLocal
+    from app.main import _seed_settings
+    from app.models.models import PlatformSetting
+
+    # Given the fresh schema, when normal API startup seeds settings.
+    _run(_seed_settings())
+
+    async def check():
+        async with AsyncSessionLocal() as db:
+            enabled = await db.get(PlatformSetting, "malwarebazaar_enabled")
+            key = await db.get(PlatformSetting, "malwarebazaar_api_key")
+            # Then external queries need explicit opt-in, and a saved key is masked.
+            assert enabled.value == "false"
+            assert key.is_secret is True
+            key.value = "dummy-key-never-contact-provider"
+            assert _mask(key).value == SECRET_MASK
+    _run(check())
+
+
+@pytest.mark.parametrize("provider_status, expected, collect_first", [
+    (200, "found", False), (200, "found", True),
+    (503, "unavailable", False), (0, "unobserved_hash", False), (-1, "unobserved_hash", False),
+])
+def test_ai_selects_hash_lookup_and_records_evidence(env, monkeypatch, provider_status, expected, collect_first):
+    """Real investigator loop, scoped case context and persisted evidence; fake SaaS wire."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Alert, Case, PlatformSetting
+
+    # Given a hash already in this case's alert and enabled metadata-only lookup.
+    hostname = f"mb-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(hostname)
+    h = ("c" if collect_first else "a") * 64
+    artifact = f"AI.Test.Hash{uuid.uuid4().hex[:8]}"
+
+    async def setup():
+        async with AsyncSessionLocal() as db:
+            case = await db.get(Case, case_id)
+            alert = await db.get(Alert, case.alert_id)
+            alert.context = {} if collect_first else {"file": {"hash": {"sha256": h}}}
+            for key, value in [("malwarebazaar_enabled", "true"), ("malwarebazaar_api_key", "test-key")]:
+                await db.merge(PlatformSetting(key=key, value=value, is_secret=key.endswith("api_key")))
+            await db.commit()
+    _run(setup())
+    requests = []
+
+    async def respond(request):
+        requests.append(request)
+        return httpx.Response(provider_status, json={"query_status": "ok", "data": [{
+            "sha256_hash": h, "signature": "ExampleFamily", "tags": ["trojan"],
+        }]})
+    transport = httpx.MockTransport(respond)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request",
+                        lambda self, request: transport.handle_async_request(request))
+
+    def script(turn, results):
+        if provider_status == -1:
+            if turn == 1:
+                return ("pivot_ioc", {"ioc": "b" * 64})
+            if turn == 2:
+                return ("lookup_malwarebazaar", {"hash_value": "b" * 64,
+                                                 "reason": "An echoed query is not evidence"})
+            assert results[-1]["status"] == expected
+            return f"## Evidence\nMalwareBazaar: {expected}\nVERDICT: inconclusive"
+        if collect_first:
+            if turn == 1:
+                assert requests == []
+                return ("create_artifact", {"yaml_text": f"name: {artifact}\nsources:\n"
+                        "  - name: Hashes\n    plugin: hash\n    args:\n      globs: [/tmp/suspect]\n"})
+            if turn == 2:
+                return ("run_artifact", {"artifact": artifact, "host": hostname, "reason": "Hash suspicious file"})
+            if turn == 3:
+                assert results[-1]["sources"][0]["rows"][0]["SHA256"] == h
+                return ("lookup_malwarebazaar", {"hash_value": h, "reason": "Validate collected hash"})
+            assert results[-1]["status"] == expected
+            return f"## Evidence\nMalwareBazaar: {expected} for {h}\nVERDICT: inconclusive"
+        if turn == 1:
+            assert requests == []  # Context loading never queries the external provider.
+            return ("lookup_malwarebazaar", {"hash_value": "b" * 64 if provider_status == 0 else h,
+                                             "reason": "Validate suspicious file"})
+        assert results[-1]["status"] == expected
+        return f"## Evidence\nMalwareBazaar: {expected} for {h}\nVERDICT: inconclusive"
+
+    # When the AI elects to call the new tool (no automatic lookup in context loading).
+    inv, model = _investigate(script, monkeypatch, user_id, case_id)
+    # Then the provider result reaches both the model and the persisted case evidence.
+    assert "lookup_malwarebazaar" in model.tool_names
+    assert inv.status == "finished"
+    assert expected in inv.report
+    evidence = [s for s in inv.steps if s["kind"] == "enrichment"]
+    assert evidence[0]["result"]["status"] == expected
+    assert evidence[0]["result"]["queried_hash"] == ("b" * 64 if provider_status <= 0 else h)
+    assert "test-key" not in json.dumps(evidence)
+    assert len(requests) == (0 if provider_status <= 0 else 1)
+
+
+def test_disabled_enrichment_does_not_contact_the_provider(env, monkeypatch):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import PlatformSetting
+
+    # Given enrichment is disabled by the administrator.
+    user_id, _, case_id = _seed(f"mb-{uuid.uuid4().hex[:8]}")
+
+    async def setup():
+        async with AsyncSessionLocal() as db:
+            await db.merge(PlatformSetting(key="malwarebazaar_enabled", value="false"))
+            await db.commit()
+    _run(setup())
+
+    async def reject_request(request):
+        pytest.fail("disabled enrichment must not contact an external provider")
+    transport = httpx.MockTransport(reject_request)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request",
+                        lambda self, request: transport.handle_async_request(request))
+
+    def script(turn, results):
+        if turn == 1:
+            return ("lookup_malwarebazaar", {"hash_value": "a" * 64, "reason": "Check suspicious file"})
+        assert results[-1]["status"] == "disabled"
+        return "## Gaps\nProvider disabled.\nVERDICT: inconclusive"
+
+    # When a model nevertheless asks for a lookup.
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id)
+    # Then the investigation completes without changing that policy.
+    assert inv.status == "finished"
+    assert any(s["kind"] == "enrichment" and s["result"]["status"] == "disabled" for s in inv.steps)
 
 
 async def _fake_agent(stop: asyncio.Event):
@@ -129,6 +259,10 @@ async def _fake_agent(stop: asyncio.Event):
         async with AsyncSessionLocal() as db:
             for flow in (await db.execute(select(Flow).where(Flow.status == "scheduled"))).scalars().all():
                 for src in flow.request["sources"]:
+                    if src["plugin"] == "hash":
+                        db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[
+                            {"Path": "/tmp/suspect", "Size": 123, "SHA256": "c" * 64},
+                        ]))
                     if src["plugin"] == "exec":
                         line = " ".join([src["args"]["command"], *src["args"]["args"]])
                         db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[

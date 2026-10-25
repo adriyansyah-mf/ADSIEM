@@ -72,6 +72,8 @@ _DEFAULT_SETTINGS = [
     ("bruteforce_digest_enabled", "true",               False, "Collect failed-only brute force from public IPs into one AI case per day instead of a case per attacker IP (true/false)"),
     ("searxng_url",        "http://searxng:8080",        False, "Internal URL of SearXNG instance used for threat intel search"),
     ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),
+    ("malwarebazaar_enabled", "false",                  False, "Allow AI case investigations to send observed file hashes to MalwareBazaar (true/false). Metadata only: no file uploads or sample downloads"),
+    ("malwarebazaar_api_key", "",                       True,  "MalwareBazaar Auth-Key from auth.abuse.ch; requires malwarebazaar_enabled=true. Check abuse.ch fair-use/commercial terms before enabling"),
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
     ("otx_api_key",        "",                          True,  "AlienVault OTX API key — free (otx.alienvault.com)"),
     ("greynoise_api_key",  "",                          True,  "GreyNoise API key — optional, community endpoint used if empty"),
