@@ -29,9 +29,11 @@ Windows: `./tests/windows/evidence-resume.ps1` (elevated) and
 ## Acceptance rows
 
 Harness numbers are from CI run 40131345114 (`a34c6e2`, 5,000 lines per
-scenario; CI now runs 10,000). "Harness" checks by full set equality that each
-source line has exactly one inbox receipt and one Elasticsearch document whose
-id is `uuid5(agent_id, event_id)` of that receipt.
+scenario); all seven scenarios also passed at 10,000 lines in 40132159095
+(`8e7ca2a`) and, with the salvage step in `corruption`, in 40172430150
+(`4313ed6`). "Harness" checks by full set equality that each source line has
+exactly one inbox receipt and one Elasticsearch document whose id is
+`uuid5(agent_id, event_id)` of that receipt.
 
 | Spec row | Evidence | Linux | Windows |
 | --- | --- | --- | --- |
@@ -45,9 +47,9 @@ id is `uuid5(agent_id, event_id)` of that receipt.
 | Cleared/rolled-over channel, render/format failure | `TestNativeClearedChannelIsAGap`, `TestDurableEventLogClearedChannelIsAGapAndANewGeneration`, `TestRenderAndFormatFailuresAreReportedNotSkipped`, `TestDurableEventLogUnrenderableEventIsCountedNotSkippedSilently` | n/a | passed in run 40109721243; re-run pending |
 | File restart, rename rotation, globs, copytruncate, missing identity, partial/oversized lines | `agent/internal/tailer/durable_file_test.go` (+ `_windows_test.go`), inode-reuse fingerprint (`20d2de6`) | passed | pending (gate) |
 | Failed heartbeats, unapproved agent, expired token, unsupported server, wrong receipt | `sender_test.go`, `sender_batch_test.go` (unmatched, reordered, bad receipt, wrong status: nothing acknowledged), `test_evidence_batch.int.py` (403 pending approval), `cmd/agent/evidence_test.go` (waits for protocol 2) | passed | pending (gate) |
-| Interrupted spill migration, torn tail, corrupt interior, simultaneous starts | `migration_test.go` (resumes after every interruption), `journal_recovery_test.go` (torn header keeps the exact suffix), `TestJournalLockAcrossProcesses`, harness `corruption`: the damaged segment's SHA-256 is unchanged and health says `degraded/journal_unavailable` | passed, **with an open item** (below) | pending (gate) |
+| Interrupted spill migration, torn tail, corrupt interior, simultaneous starts | `migration_test.go` (resumes after every interruption), `journal_recovery_test.go` (torn header keeps the exact suffix), `TestJournalLockAcrossProcesses`, `salvage_test.go` + `evidence_commands_test.go` (salvage keeps identities, cursors, holds and first attempts; the damaged journal is byte-identical afterwards; tests mutation-checked), harness `corruption`: the agent refuses the damaged journal without changing it, then `-evidence-salvage` restores collection and every line written while blocked or afterwards is delivered, the destroyed records are reported as a gap | passed | salvage tests run in `native-evidence` |
 | Time past receipt retention / uncertainty window | `TestSenderHoldsAfterThirtyDayUncertainty` (operator hold, no blind resend); harness `retention`: payloads released after 7 days with their budget, pending rows untouched, receipts deleted after 30 days, all 5,500 documents kept | passed | sender test pending (gate) |
-| MSI install in durable mode | `smoke-msi.ps1 -Durable`: delivery only through the durable endpoints, heartbeat carries evidence health | n/a | pending: first run failed on the test's own setup (fixed in `ed68acc`) |
+| MSI install in durable mode | `smoke-msi.ps1 -Durable`: delivery only through the durable endpoints, heartbeat carries evidence health | n/a | passed in 40132026970 and 40172461041 |
 
 ## Measurements
 
@@ -66,7 +68,24 @@ Linux 7.1.5, Go 1.26.5. GitHub runners for the sustained capture.
 | Health snapshot counting, 2.6M events | 43 ms (was ~13 s projected, under the journal lock, once a minute) |
 | Index RAM per retained event | 52-84 B (power-of-two map growth): 80 MiB at 1M, 160 MiB at 2.6M (a full 1 GiB journal) |
 | CPU, 200 ev/s sustained with delivery | 8.5% of one core, peak RSS 36 MB (30 s local run) |
-| 1 h sustained capture, Linux and Windows | pending: run 40131140555 |
+
+### One-hour sustained capture (run 40131140555)
+
+`TestSustainedCapture`, one producer appending durably at a target of 200
+events/s while a batch drainer delivers and compacts every minute. GitHub
+runners, AMD EPYC 7763, 4 vCPUs; Linux ext4 root, Windows NTFS.
+
+| | Linux | Windows |
+| --- | --- | --- |
+| Achieved rate | 200.0 ev/s (720,001 appended, 719,997 delivered) | **127.4 ev/s** (458,701 appended, 458,694 delivered): the target was not reached |
+| Append p50 / p95 / p99 | 0.27 / 1.1 / 3.0 ms | 0.56 / **38.5 / 47.5** ms |
+| Process CPU | 8.0% of one core | 25.8% of one core |
+| Peak RSS | 38 MB | 29 MB |
+| Peak journal on disk | 17 MB | 20 MB |
+| Backlog during the run | 2-12 events | 1-12 events |
+
+Heap (`HeapAlloc`, garbage included) ranged 3-17 MiB on both; RSS stayed
+under 40 MB, so the hour shows no growth beyond the batch working set.
 
 ### Corrections to earlier numbers
 
@@ -82,27 +101,36 @@ Linux 7.1.5, Go 1.26.5. GitHub runners for the sustained capture.
 
 ## Open items
 
-1. **Recovery from a corrupt journal loses data silently.** The agent refuses
-   to open a journal damaged inside a segment and preserves it, as required.
-   But the only way back to collecting is to move the journal aside, and a new
-   journal has no cursors, so every file restarts at its end: undelivered lines
-   and lines written while blocked are skipped with no loss counter. While
-   blocked, non-replayable sources are dropped uncounted. Needs a decision: a
-   salvage command (import readable records and cursors into a new journal,
-   counting what could not be read), and/or a recorded gap when a journal is
-   replaced. Procedure until then: `agent-evidence-recovery.md`.
-2. Append p95 rises to ~5 ms while delivery runs: checkpoint publications for
-   attempts and receipts hold the journal lock through their fsyncs. Not a
-   correctness issue; measure in the 1 h capture before deciding.
+1. **Durable throughput on Windows.** One producer reached only 127 ev/s
+   (target 200) with p95 append 38.5 ms during the hour. Each append flushes
+   on its own (`FlushFileBuffers` is slow on NTFS), and each delivered batch
+   publishes the checkpoint twice (attempts, then receipts), each with several
+   flushes, under the lock appends need. A Windows agent is therefore limited
+   to roughly 130 durable events/s in total today: enough for a workstation,
+   not for a busy domain controller's Security log. Revising this (group
+   commit: several frames per flush, still flushed before any admission is
+   reported) is a design change for review. **Rollout on Windows is held on
+   this.**
+2. While blocked on a corrupt journal (before an operator runs the salvage),
+   non-replayable sources (process/network telemetry, local detection) are
+   dropped without a count. Files lose nothing as long as they stay on disk.
+
+Resolved: recovery from a corrupt journal used to be "move it aside", which
+restarted every file at its end and skipped data silently.
+`siem-agent -evidence-salvage -reason <why>` now replaces it with the readable
+undelivered evidence and every cursor, keeps the damaged journal unchanged and
+counts what was destroyed (`agent-evidence-recovery.md`).
+
+Fixed along the way (found by these tests): the worker never recreated its
+consumer group after Redis lost its data (`6286a99`); heartbeats reported a
+backlog up to a minute old (`b8b37b3`); a batch the checkpoint reserve could
+not hold was retried forever (`59d800e`).
 
 ## Gate status
 
-Not passed. Pending:
+Linux: every row passed. Windows: every correctness row passed in
+40132026970 (the earlier timeout was one test compacting after each of 200
+events: 143 s on NTFS; it now drains in one batch). **Not passed overall**:
 
-- Windows `native-evidence`: the evidence package exceeded the 10-minute test
-  timeout in run 40131010666 (it took 380 s in 40109721243). Diagnostics added
-  (`00f4ea8`); re-running in 40132026970.
-- Windows `msi-smoke-durable`: re-running in 40132026970.
-- 1 h sustained capture on Linux and Windows: run 40131140555.
-- Harness at 10,000 lines per scenario: next CI run.
-- Open item 1: decision on corrupt-journal salvage.
+- Open item 1, Windows durable throughput, needs a decision and a re-measure.
+- Windows `native-evidence` for `4313ed6` (salvage): run 40172461041.

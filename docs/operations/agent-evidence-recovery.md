@@ -133,19 +133,33 @@ While it is in this state:
 - non-replayable sources (process/network telemetry, local detection
   events) collected during the outage are dropped and **not counted**.
 
-Recovery today:
+Recovery:
 
-1. Stop the agent. Copy the whole evidence directory somewhere safe: it is
-   the only copy of undelivered evidence and of the cursors.
-2. Get the agent log line naming the segment and offset, and keep it with the copy.
-3. Moving the directory aside and starting the agent creates a new, empty
-   journal. **This loses data silently:** a new journal has no cursors, so
-   every configured file is treated as newly enabled and starts at its end.
-   Lines the old journal held but had not delivered, and lines written while
-   the agent was blocked, are skipped without a loss counter. Do it only after
-   recording that window (from the last receipt the dashboard shows to the
-   restart) as an evidence gap in the case or audit trail.
+1. Stop the agent (the command refuses to run while it holds the journal).
+   Keep the agent log line naming the segment and offset.
+2. As root / elevated Administrator:
 
-There is no salvage tool yet that imports the readable records and cursors
-of a damaged journal into a new one; see
-`docs/operations/agent-evidence-validation.md` (open items).
+   ```bash
+   siem-agent -config <config> -evidence-salvage -reason "INC-123 disk fault on web01"
+   ```
+
+   It reads the damaged journal without changing it, skipping each damaged
+   span up to the next intact record, and builds a new journal with every
+   readable undelivered event (same event IDs and collection times), the
+   latest cursor of every source (files resume where they were), held and
+   quarantined states, first attempts (the 30-day uncertainty window keeps
+   running) and the health counters, plus one unknown gap per unreadable span.
+   The damaged directory is kept unchanged as `<evidence dir>.corrupt-<time>`,
+   and `evidence-salvage-<time>.json` in the state directory records the reason
+   and what was read.
+3. Start the agent. Evidence in the unreadable spans is lost and shown as
+   unknown gaps; everything else, including lines written while the agent was
+   blocked, is delivered. If the report says the delivery state was
+   unreadable, already delivered events are sent again: the server answers
+   them as duplicates, with the same receipt, so nothing is indexed twice.
+4. Keep the `.corrupt-<time>` directory until the incident is closed, then
+   remove it.
+
+Never move the evidence directory aside by hand: a new, empty journal has no
+cursors, so every file is treated as newly enabled and starts at its end, and
+the undelivered lines are skipped without any loss counter.
