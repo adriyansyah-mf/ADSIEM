@@ -18,7 +18,8 @@ from app.core.deps import get_agent
 from app.core.redis_client import get_redis
 from app.core.security import hash_token
 from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
-                            FimWatchPath)
+                            AgentUpdatePolicy, FimWatchPath)
+from app.services import agent_update
 from app.schemas.schemas import EvidenceEnvelope, EvidenceReceipt, AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
 from app.services.agent_tamper import check_integrity, heartbeat_anomaly, uninstall_token_sha256
 from app.services.ingest import enqueue_log
@@ -32,6 +33,23 @@ log = structlog.get_logger()
 LAST_LOG_KEY = "siem:agent:lastlog:{}"
 HB_STATE_KEY = "siem:agent:hb:{}"
 HB_ANOMALY_KEY = "siem:agent:hb_anomaly:{}:{}"  # one event per agent and kind per 10 min
+UPDATE_CHECK_KEY = "siem:agent_update:check:{}"  # stalled-agent check, once a minute per group
+
+
+async def _update_offer(db: AsyncSession, redis: aioredis.Redis, agent: Agent, status: dict | None,
+                        newly_failed: bool) -> dict | None:
+    """After the heartbeat stored the agent's update status: pause a failing
+    rollout, then return this agent's offer, if any."""
+    policy = await db.get(AgentUpdatePolicy, agent.group_id)
+    if policy is None:
+        return None
+    await db.refresh(agent)  # the bulk UPDATE above left this instance stale (expire_on_commit=False)
+    # a new failure is checked at once; stalled agents (silent) once a minute per group
+    if newly_failed or await redis.set(UPDATE_CHECK_KEY.format(agent.group_id), "1", ex=60, nx=True):
+        if await agent_update.maybe_auto_pause(db, policy):
+            log.warning("agent update rollout paused", group=agent.group_id, target=policy.target_version)
+            await db.refresh(policy)
+    return agent_update.offer_for(agent, policy, status)
 
 
 async def _session_anomaly(redis: aioredis.Redis, agent_id, body: HeartbeatRequest) -> str | None:
@@ -167,10 +185,16 @@ async def heartbeat(
                                  evidence_batch_max=MAX_BATCH_EVENTS if protocols else 0)
 
     integrity_updates, changes = check_integrity(agent, body.version, body.integrity)
+    update_status = body.update.model_dump() if body.update is not None else None
+    previous = agent.update_status or {}
+    newly_failed = bool(update_status and update_status["state"] == "failed" and (
+        previous.get("state") != "failed" or previous.get("revision") != update_status["revision"]
+        or previous.get("attempts") != update_status["attempts"]))
+    reported_update = {"update_status": update_status, "update_status_at": now} if update_status else {}
     await db.execute(
         update(Agent).where(Agent.id == agent.id)
         .values(status="online", last_seen_at=now, version=body.version, stop_reason=None,
-                **integrity_updates, **evidence)
+                **integrity_updates, **evidence, **reported_update)
     )
     await db.commit()
     if agent.approved:
@@ -232,7 +256,9 @@ async def heartbeat(
     ).hexdigest()
 
     protocols = [2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []
+    offer = await _update_offer(db, redis, agent, update_status, newly_failed)
     return HeartbeatResponse(
+        update=offer,
         evidence_protocols=protocols,
         evidence_batch_max=MAX_BATCH_EVENTS if protocols else 0,
         config_hash=config_hash,

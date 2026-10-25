@@ -123,6 +123,23 @@ class EnrollResponse(BaseModel):
 class AgentUpdate(BaseModel):
     name: str | None = None
     group_id: str | None = None
+    update_ring: int | None = Field(default=None, ge=0, le=2)
+
+class UpdatePolicyIn(BaseModel):
+    target_version: str = Field(min_length=1, max_length=50, pattern=r"^\d+(\.\d+){1,3}$")
+    max_failures: int = Field(default=1, ge=1, le=10000)
+
+class UpdatePolicyOut(BaseModel):
+    group_id: str
+    target_version: str
+    stage: int
+    paused: bool
+    pause_reason: str | None
+    revision: int
+    max_failures: int
+    updated_at: datetime | None
+    progress: dict = {}
+    model_config = {"from_attributes": True}
 
 class LogSourceOut(BaseModel):
     id: UUID
@@ -143,6 +160,8 @@ class AgentOut(BaseModel):
     last_seen_at: datetime | None
     flow_poll_at: datetime | None = None
     enrolled_at: datetime
+    update_ring: int = 2
+    update_status: dict | None = None
     log_sources: list[LogSourceOut] = []
     # read from the agent row for the summary below; the full snapshot is
     # served by GET /api/agents/{id}/evidence
@@ -211,6 +230,18 @@ class EvidenceHealth(BaseModel):
         return {} if value is None else value  # Go encodes an empty nil map as null
 
 
+class AgentUpdateStatus(BaseModel):
+    """Self-update status (agent/internal/update Status), agents >= 1.9.0."""
+    model_config = ConfigDict(extra="ignore")
+    kind: Literal["", "deb", "rpm", "msi"] = ""
+    os: str = Field(default="", max_length=20)
+    arch: str = Field(default="", max_length=20)
+    state: Literal["idle", "unsupported", "downloading", "installing", "updated", "failed"]
+    target: str = Field(default="", max_length=50)
+    revision: int = Field(default=0, ge=0)
+    attempts: int = Field(default=0, ge=0, le=100)
+    error: str = Field(default="", max_length=1000)
+
 class HeartbeatRequest(BaseModel):
     agent_id: UUID
     status: str = "online"
@@ -221,8 +252,9 @@ class HeartbeatRequest(BaseModel):
     session: str | None = None  # one per agent process, with a rising seq (agents >= 1.8.0)
     seq: int | None = None
     evidence_health: EvidenceHealth | None = None  # durable agents only
+    update: AgentUpdateStatus | None = None
 
-    @field_validator("evidence_health", mode="wrap")
+    @field_validator("evidence_health", "update", mode="wrap")
     @classmethod
     def drop_invalid_evidence_health(cls, value, handler):
         # An invalid or unbounded health object is rejected on its own: the
@@ -246,6 +278,7 @@ class HeartbeatResponse(BaseModel):
     tasks: list[AgentTaskDef] = []
     firewall: list[dict] = []
     uninstall_token_sha256: str = ""  # agents >= 1.8.0 refuse removal without the token
+    update: dict | None = None  # services.agent_update.offer_for: version, revision, url, signed
 
 # ─── Ingest ──────────────────────────────────────────────────────
 
