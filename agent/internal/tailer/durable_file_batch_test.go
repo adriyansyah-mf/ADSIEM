@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/siem-platform/agent/internal/evidence"
 )
@@ -28,8 +29,20 @@ func TestDurableTailAdmitsABurstInGroupCommits(t *testing.T) {
 	r := env.tail(path, "syslog", nil)
 	env.baselined(t, path)
 	content := burst(1000)
+	began := time.Now()
 	appendFile(t, path, content)
-	waitFor(t, "1000 lines", func() bool { return len(r.cap.lines()) == 1000 })
+	// NTFS flushes are slow on CI runners: allow time, and on failure say
+	// whether it was slow (lines still arriving) or stuck.
+	for len(r.cap.lines()) < 1000 {
+		if time.Since(began) > time.Minute {
+			r.cap.mu.Lock()
+			commits := len(r.cap.batches)
+			r.cap.mu.Unlock()
+			t.Fatalf("after %s: %d of 1000 lines in %d commits", time.Since(began), len(r.cap.lines()), commits)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	elapsed := time.Since(began)
 	r.stop(t)
 
 	for i, line := range r.cap.lines() {
@@ -40,6 +53,7 @@ func TestDurableTailAdmitsABurstInGroupCommits(t *testing.T) {
 	r.cap.mu.Lock()
 	batches := append([]int(nil), r.cap.batches...)
 	r.cap.mu.Unlock()
+	t.Logf("1000 lines admitted in %s, %d commits %v", elapsed, len(batches), batches)
 	if len(batches) > 100 {
 		t.Fatalf("1000 lines took %d commits: not grouped", len(batches))
 	}
