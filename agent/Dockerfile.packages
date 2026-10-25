@@ -14,7 +14,10 @@ RUN clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
  && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
     -I internal \
     -c internal/netwatch/bpf/netwatch.bpf.c \
-    -o internal/netwatch/bpf/netwatch.bpf.o
+    -o internal/netwatch/bpf/netwatch.bpf.o \
+ && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
+    -c internal/prevent/bpf/prevent.bpf.c \
+    -o internal/prevent/bpf/prevent.bpf.o
 RUN export VERSION="$(cat VERSION)" \
     && bash packaging/build-deb.sh >/dev/null \
     && ARCH=x86_64 bash packaging/build-rpm.sh >/dev/null \

@@ -1,0 +1,15 @@
+title: Execution Blocked By Prevention Rule On Linux
+id: rule-linux-exec-blocked
+description: The agent refused to run a program because it matched a block rule on the Prevention page (rule.name). The attempt itself is the finding; check what tried to start it (ParentImage).
+logsource:
+  product: linux
+  service: exec_prevention
+detection:
+  selection:
+    event.action: exec_prevention
+    prevention.action: blocked
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.defense_evasion

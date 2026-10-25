@@ -63,6 +63,9 @@ jobs:
             -I internal \
             -c internal/netwatch/bpf/netwatch.bpf.c \
             -o internal/netwatch/bpf/netwatch.bpf.o
+          clang -O2 -g -target bpf -D__TARGET_ARCH_${BPF_ARCH} \
+            -c internal/prevent/bpf/prevent.bpf.c \
+            -o internal/prevent/bpf/prevent.bpf.o
 
       - name: Build .deb
         env:
