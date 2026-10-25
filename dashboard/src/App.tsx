@@ -10,6 +10,7 @@ import DashboardPage from '@/pages/DashboardPage'
 import AgentsPage from '@/pages/AgentsPage'
 import LogSourcesPage from '@/pages/LogSourcesPage'
 import FirewallPage from '@/pages/FirewallPage'
+import AgentUpdatesPage from '@/pages/AgentUpdatesPage'
 import LogsPage from '@/pages/LogsPage'
 import EventsPage from '@/pages/EventsPage'
 import LiveEventsPage from '@/pages/LiveEventsPage'
@@ -80,6 +81,7 @@ export default function App() {
             <Route path="/live-response" element={<LiveResponsePage />} />
             <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />
             <Route path="/yara" element={<YaraPage />} />
+            <Route path="/agent-updates" element={<AgentUpdatesPage />} />
             <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />
             <Route path="/soar/:id" element={<ProtectedRoute minRole="analyst"><SoarEditorPage /></ProtectedRoute>} />
             <Route path="/audit-logs" element={<ProtectedRoute minRole="admin"><AuditLogsPage /></ProtectedRoute>} />

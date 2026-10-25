@@ -58,6 +58,16 @@ UEBA_ANOMALY = {"id": "anomaly-fixture", "entity_type": "user", "entity_value": 
                              "text": "evidence-" * 90 + "END-OF-UEBA-EVIDENCE"}]}
 
 
+UPDATE_PACKAGE = {"file": "siem-agent-1.9.0-x64.msi", "version": "1.9.0", "os": "windows", "arch": "amd64",
+                  "format": "msi", "size": 9_000_000, "key_id": "a1b2c3d4e5f60718", "verified": True, "archived": False}
+UPDATE_POLICY = {"group_id": "finance", "target_version": "1.9.0", "stage": 0, "paused": True,
+                 "pause_reason": "1 agent(s) failed or stalled updating to 1.9.0; WIN-FIN-042: msiexec exit 1603",
+                 "revision": 1, "max_failures": 1, "updated_at": ALERT["created_at"],
+                 "progress": {"agents": 1, "states": {"failed": 1}, "rings": {"0": {"failed": 1}, "1": {}, "2": {}},
+                              "failures": [{"agent_id": "agent-fixture", "hostname": "WIN-FIN-042", "state": "failed",
+                                            "error": "msiexec exit 1603"}]}}
+
+
 def evidence_fixture(kind):
     """API responses for one evidence delivery state (summary, detail)."""
     health = {"state": "healthy", "reason": "", "queued_events": 0, "queued_bytes": 0, "oldest_queued_at": None,
@@ -101,6 +111,7 @@ def enterprise(page):
     state = {"mode": "normal", "requests": [], "writes": [], "agent": dict(AGENT),
              "evidence": evidence_fixture("legacy"),
              "case": dict(CASE), "role": "superadmin", "write_error": False, "investigations": [],
+             "update_packages": [dict(UPDATE_PACKAGE)], "update_policies": [],
              "hunts": [dict(HUNT)], "schedules": [dict(SCHEDULE)], "ueba_errors": [],
              "ueba_status": {"status": "ready", "trained_at": ALERT["created_at"], "user_snapshot_count": 72, "ip_snapshot_count": 48, "host_snapshot_count": 12},
              "ueba_anomalies": [dict(UEBA_ANOMALY)], "ueba_history": [{"day": "2026-10-20", "max_risk": 60, "anomaly_count": 1}, {"day": "2026-10-21", "max_risk": 84.5, "anomaly_count": 2}]}
@@ -184,6 +195,12 @@ def enterprise(page):
         elif path == "/api/agents/agent-fixture/uninstall-token":
             body = {"token": "synthetic-uninstall-token", "commands": {
                 "windows": "fixture Windows command", "debian": "fixture Debian command", "rhel": "fixture RHEL command"}}
+        elif path == "/api/agent-updates/packages":
+            body = state["update_packages"]
+        elif path == "/api/agent-updates/policies":
+            body = state["update_policies"]
+        elif path.startswith("/api/agent-updates/policies/"):
+            body = state["update_policies"][0] if state["update_policies"] else {}
         elif path.endswith("/timeline"):
             body = {"items": []}
         elif path in ("/api/cases", "/api/agents"):
@@ -477,6 +494,46 @@ def test_viewer_cannot_see_mutation_controls(page, enterprise, resource):
     expect(page.get_by_role("button", name="Deploy agent", exact=True)).not_to_be_visible()
     expect(page.get_by_role("button", name="Isolate host", exact=True)).not_to_be_visible()
     expect(page.get_by_role("button", name="Expand record", exact=True)).not_to_be_visible()
+    assert not state["writes"]
+
+
+def test_update_rollout_is_confirmed_before_it_starts(page, enterprise):
+    state, expect = enterprise
+    page.goto(BASE_URL + "/agent-updates")
+    expect(page.get_by_role("heading", name="Agent updates", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Set target", exact=True).click()
+    dialog = page.get_by_role("dialog", name="Update default to 1.9.0?")
+    expect(dialog).to_be_visible()
+    dialog.get_by_role("button", name="Cancel", exact=True).click()
+    assert not state["writes"]
+    page.get_by_role("button", name="Set target", exact=True).click()
+    page.get_by_role("dialog").get_by_role("button", name="Start rollout", exact=True).click()
+    expect(page.get_by_role("dialog")).to_have_count(0)
+    assert ("PUT", "/api/agent-updates/policies/default", {"target_version": "1.9.0", "max_failures": 1}) in state["writes"]
+
+
+def test_paused_rollout_shows_why_and_blocks_the_next_ring(page, enterprise):
+    state, expect = enterprise
+    state["update_policies"] = [dict(UPDATE_POLICY)]
+    page.goto(BASE_URL + "/agent-updates")
+    rollout = page.get_by_role("region", name="Rollout for finance")
+    expect(rollout.get_by_role("status")).to_contain_text("msiexec exit 1603")
+    expect(rollout.get_by_role("button", name="Open ring 1", exact=True)).to_be_disabled()
+    rollout.get_by_role("button", name="Retry failed", exact=True).click()
+    page.get_by_role("dialog", name="Retry 1.9.0 in finance?").get_by_role("button", name="Retry", exact=True).click()
+    expect(page.get_by_role("dialog")).to_have_count(0)
+    assert ("POST", "/api/agent-updates/policies/finance/retry", None) in state["writes"]
+
+
+def test_viewer_sees_rollouts_without_controls(page, enterprise):
+    state, expect = enterprise
+    state["role"] = "viewer"
+    state["update_policies"] = [dict(UPDATE_POLICY)]
+    page.goto(BASE_URL + "/agent-updates")
+    expect(page.get_by_role("region", name="Rollout for finance")).to_be_visible()
+    expect(page.get_by_role("button", name="Set target", exact=True)).to_have_count(0)
+    expect(page.get_by_role("button", name="Retry failed", exact=True)).to_have_count(0)
+    expect(page.get_by_role("combobox", name="Ring for WIN-FIN-042")).to_have_count(0)
     assert not state["writes"]
 
 
