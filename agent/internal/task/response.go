@@ -27,16 +27,6 @@ const (
 	maxKillGrace     = 60 * time.Second
 )
 
-type KillResult struct {
-	PID       int    `json:"pid"`
-	Comm      string `json:"comm"`
-	Signal    string `json:"signal"`
-	Forced    bool   `json:"forced"`
-	Exited    bool   `json:"exited"`
-	WaitMS    int64  `json:"wait_ms"`
-	Refused   string `json:"refused,omitempty"`
-}
-
 func killProcess(pid int, force bool, graceSeconds float64) (KillResult, error) {
 	res := KillResult{PID: pid}
 
