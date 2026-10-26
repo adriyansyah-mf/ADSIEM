@@ -22,6 +22,15 @@ Revision 2 checks the baseline against the code and closes gaps found in review:
 
 This document remains the umbrella design. The Knowledge Vault (section 9) and YARA drafting (section 10) each get their own implementation plan.
 
+### Implementation status
+
+- **Phase 1a: implemented** on `feat/investigation-ledger`.
+  - Server side: `server-api/app/services/investigation_ledger.py` plus the loop in `investigator.py`.
+  - Routes: `api/routes/investigations.py`, and artifact promotion in `api/routes/flows.py`.
+  - UI: `dashboard/src/components/InvestigationLedger.tsx`.
+  - Where the implementation settled a detail differently from revision 2, this text was updated: sections 5.3, 6.2, 6.5 and 6.6.
+- Phases 1b, 2, 3 and 4: not started.
+
 ## 1. Summary
 
 This design upgrades the existing **Investigate** action on a case into a hybrid investigation workspace:
@@ -84,8 +93,7 @@ Runtime facts that constrain this design (`server-api/app/services/investigator.
 
 - Rules can be created, edited, enabled, disabled, and selected for an endpoint scan.
 - The agent receives YARA scan tasks and reports matching files/strings.
-- On `feature/siem-implementation` the agent still uses a limited internal matcher.
-- The separate full-YARA effort lives on `feat/yara-full` (also merged into `feat/memory-scan`). It adds a pure-Go engine in `agent/internal/yara`: lexer, parser, evaluator, `pe`/`elf`/`math` modules, and differential and fuzz tests. This design must integrate with that effort rather than duplicate it.
+- The separate full-YARA effort (`feat/yara-full`, which reached `feature/siem-implementation` through `feat/memory-scan`, PR #69) replaced the earlier limited matcher with a pure-Go engine in `agent/internal/yara`: lexer, parser, evaluator, `pe`/`elf`/`math` modules, and differential and fuzz tests. This design must integrate with that effort rather than duplicate it.
 - On that branch, **enabling a rule deploys it fleet-wide**. Heartbeats carry the enabled-ruleset hash (`server-api/app/services/yara_ruleset.py`), and every agent fetches and compiles the set for on-access scanning. Agents compile each rule separately (`CompileSources`), so one broken rule is skipped rather than blocking the set.
 - The `Linux.Detection.Yara` / `Windows.Detection.Yara` artifacts scan with **every enabled rule**. There is no way to scan with a single disabled rule.
 - The server does not validate rules and does not expose an engine capability.
@@ -152,8 +160,15 @@ There is no requirement to edit the plan before it starts.
 - Running endpoint work is cancelled through the existing flow cancellation mechanism when supported; otherwise the result is allowed to finish but marked ignored.
 - Completed actions are immutable and remain in the audit timeline.
 - AI replanning may append actions but may not silently modify analyst-created actions.
-- Duplicate actions are rejected by an idempotency key based on investigation, tool, target, and normalized parameters.
-- In Phase 1a (section 6.6), analyst edits take effect at the next round boundary: an added action is passed to the model as an analyst instruction, and a skipped action is refused when the model tries to dispatch it. In Phase 1b the orchestrator applies them directly.
+- Every action has an idempotency key based on investigation, tool, target (case-insensitive), and normalized parameters. The `reason` is excluded, and so are empty values.
+  - Endpoint actions (tier 1 and above) never repeat once completed.
+  - A failed endpoint action may be tried once more.
+  - Tier 0 queries may run again under the same key, because logs keep arriving.
+  - Any action an analyst skipped or rejected is refused if the model asks for it again.
+- In Phase 1a (section 6.6), analyst edits take effect at the next round boundary:
+  - The loop itself runs an added action and shows it to the model as a tool call followed by its result.
+  - A skipped action is refused when the model tries to dispatch it.
+  - In Phase 1b the orchestrator applies both directly.
 
 ## 6. Investigation Architecture
 
@@ -241,7 +256,11 @@ An action's tier is assigned by the server policy, not by the model.
 | `run_artifact` on an `AI.*` artifact | 1 | Automatic only when the artifact was created by **this** investigation, or has been promoted by an analyst. Otherwise the action is queued `awaiting_approval`. |
 | `run_artifact` on an artifact containing a non-read-only plugin | 2 | Approval required. This case is unreachable through `create_artifact`, but the policy checks the stored content, not the author. |
 
-AI-created artifacts are tagged with the creating investigation ID. They stay out of the general artifact list until an analyst promotes them (`POST /api/artifacts/{name}/promote`, which requires artifact-management permission). Without promotion, a future investigation in the same group cannot silently reuse another run's model-written collector.
+AI-created artifacts are tagged with the creating investigation ID.
+
+- They stay out of other investigations' `list_artifacts` until an analyst promotes them. Promotion happens through `POST /api/flow-artifacts/{name}/promote` (requires `agents:manage`), or automatically when a person saves the artifact in the editor.
+- The Live Response artifact list still shows them, because a human running a collector is a human decision.
+- Without promotion, a future investigation in the same group cannot silently reuse another run's model-written collector. If it asks for one by name, the run waits for approval.
 
 ### 6.3 Planner contract
 
@@ -275,8 +294,8 @@ Removing the questionnaire and auto-running Tier 0/1 work makes budgets the main
 
 | Limit | Default | Scope | On exhaustion |
 |---|---|---|---|
-| Initial plan size | 10 actions | investigation | Extra planned actions are dropped and logged |
-| Replan batches | 6 | investigation | Move to `reporting` |
+| Initial plan size (Phase 1b) | 10 actions | investigation | Extra planned actions are dropped and logged |
+| Replan batches (Phase 1b) | 6 | investigation | Move to `reporting` |
 | Planner/replanner model calls | 18 (`MAX_ROUNDS`) | investigation | Move to `reporting` |
 | Endpoint flows (Tier 1 + 2) | 12 (`MAX_FLOWS`) | investigation | New endpoint actions refused with a visible reason |
 | Concurrent flows | 2 | host, across all investigations | Action stays `queued` |
@@ -296,8 +315,11 @@ The current investigator holds all of its state in an in-process conversation. A
 - The LangChain loop, the tools, and `spawn()` stay as they are.
 - Every tool call writes an `investigation_actions` row (`source = planner`) before dispatch and updates it on completion.
 - Tool results that carry observations are normalized into `investigation_evidence`.
-- Analyst-added actions are inserted as `queued` rows with `source = analyst`. At each round boundary the loop reads new analyst rows and passes them to the model as instructions it must execute or explicitly decline with a reason.
-- Before dispatch, the loop checks that the matching action row was not skipped. A skipped action returns a tool result telling the model the analyst skipped it.
+- Analyst-added actions are inserted as `queued` rows with `source = analyst`. At each round boundary, the loop runs every analyst row whose dependencies have finished, under the same policy and budgets as model actions. The model sees each one as a tool call followed by its result.
+  - An analyst's own action needs no further approval.
+  - A model action held by the policy waits for an analyst's decision, with the investigation clock paused, and expires after 15 minutes.
+- Before dispatch, the loop looks up the action's idempotency key. A skipped, rejected or already-completed endpoint action returns a tool result telling the model why, and does not run.
+- The phase in 1a has no separate planner: the model's own tool calls fill the queue. The initial-plan and replan-batch limits in section 6.5 start applying in Phase 1b.
 - Restart behavior is unchanged: the run becomes `interrupted`, and its persisted actions and evidence remain visible.
 - The structured report (section 8.1) ships in this phase.
 
@@ -791,7 +813,9 @@ After activation:
 - `GET /api/cases/{case_id}/investigations/{id}/hypotheses`
 - `POST /api/cases/{case_id}/investigations/{id}/hypotheses` (analyst hypothesis)
 - `POST /api/cases/{case_id}/investigations/{id}/budget` (one-time flow budget raise, section 6.5)
-- `POST /api/artifacts/{name}/promote` (AI artifact promotion, section 6.2)
+- `POST /api/flow-artifacts/{name}/promote` (AI artifact promotion, section 6.2)
+- `POST /api/investigation-actions/{id}/decision` (approve or reject an action the policy held; commands keep their own route)
+- `POST /api/investigation-hypotheses/{id}` (analyst update: state, confidence, evidence links)
 - Existing command decision endpoint remains in use.
 
 ### Knowledge

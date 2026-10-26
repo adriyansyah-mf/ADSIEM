@@ -270,10 +270,15 @@ class CaseInvestigation(Base):
     group_id         = Column(String(100), nullable=False, default="default")
     # queued → running → finished | error | cancelled | interrupted (server restarted mid-run)
     status           = Column(String(20), nullable=False, default="queued")
+    # while running: planning → collecting ⇄ analyzing → reporting
+    phase            = Column(String(20))
     started_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     model            = Column(String(100))
     steps            = Column(JSONB, nullable=False, default=list)
     report           = Column(Text)
+    # the structured report the Markdown above is rendered from (investigation_ledger.validate_report)
+    report_json      = Column(JSONB)
+    budget_overrides = Column(JSONB, nullable=False, default=dict)  # {"flows": extra runs an analyst granted}
     verdict          = Column(String(30))  # true_positive / false_positive / inconclusive
     error            = Column(Text)
     cancel_requested = Column(Boolean, nullable=False, default=False)
@@ -306,6 +311,88 @@ class InvestigationCommand(Base):
     decision_note    = Column(Text)
     flow_id          = Column(UUID(as_uuid=True))
     created_at       = Column(DateTime(timezone=True), default=now_utc)
+
+class InvestigationAction(Base):
+    """One step of an investigation's queue: a tool call the AI made or an
+    analyst added. The risk tier is the server's (investigation_ledger.py),
+    never the model's; the idempotency key keeps endpoint work from repeating."""
+    __tablename__ = "investigation_actions"
+    __table_args__ = (UniqueConstraint("investigation_id", "idempotency_key", name="uq_investigation_action_key"),)
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id  = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                               nullable=False, index=True)
+    group_id          = Column(String(100), nullable=False, default="default")
+    ordinal           = Column(Integer, nullable=False)
+    kind              = Column(String(20), nullable=False)   # siem_query / artifact / command / authoring / analysis
+    tool              = Column(String(60), nullable=False)
+    target            = Column(String(255))                  # host as given
+    agent_id          = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), index=True)
+    params            = Column(JSONB, nullable=False, default=dict)
+    reason            = Column(Text)
+    expected_evidence = Column(Text)
+    risk_tier         = Column(Integer, nullable=False, default=0)
+    approval_reason   = Column(Text)                         # why the policy wants a person
+    # queued → running → completed | failed | cancelled; queued → awaiting_approval → queued | skipped
+    status            = Column(String(20), nullable=False, default="queued", index=True)
+    source            = Column(String(20), nullable=False, default="planner")  # planner / replanner / analyst
+    dependencies      = Column(JSONB, nullable=False, default=list)
+    idempotency_key   = Column(String(64), nullable=False)
+    result_ref        = Column(JSONB, nullable=False, default=dict)  # flow_id, command_id, evidence_ids
+    error             = Column(Text)
+    attempts          = Column(Integer, nullable=False, default=0)
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    decided_by        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at        = Column(DateTime(timezone=True))
+    decision_note     = Column(Text)
+    created_at        = Column(DateTime(timezone=True), default=now_utc)
+    started_at        = Column(DateTime(timezone=True))
+    finished_at       = Column(DateTime(timezone=True))
+    updated_at        = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class InvestigationEvidence(Base):
+    """Something an investigation observed. Report claims cite these ids; the
+    canonical data (flow rows, events, command output) stays in its own store."""
+    __tablename__ = "investigation_evidence"
+    __table_args__ = (UniqueConstraint("investigation_id", "content_hash", name="uq_investigation_evidence_hash"),)
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    action_id        = Column(UUID(as_uuid=True), ForeignKey("investigation_actions.id", ondelete="SET NULL"))
+    group_id         = Column(String(100), nullable=False, default="default")
+    # event / alert / flow_row / file / hash / command_result / ti_result / knowledge_guidance
+    evidence_type    = Column(String(30), nullable=False)
+    source_type      = Column(String(30), nullable=False)
+    source_id        = Column(String(255))
+    title            = Column(String(300), nullable=False)
+    summary          = Column(Text)
+    observed_at      = Column(DateTime(timezone=True))
+    entities         = Column(JSONB, nullable=False, default=dict)
+    content_hash     = Column(String(64), nullable=False)
+    confidence       = Column(Integer)
+    sensitivity      = Column(String(20), nullable=False, default="normal")  # normal / sensitive / restricted
+    pinned           = Column(Boolean, nullable=False, default=False)
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+    updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class InvestigationHypothesis(Base):
+    """An explanation the investigation is testing, with the evidence for and against it."""
+    __tablename__ = "investigation_hypotheses"
+    id                         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id           = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                                        nullable=False, index=True)
+    group_id                   = Column(String(100), nullable=False, default="default")
+    ordinal                    = Column(Integer, nullable=False)
+    statement                  = Column(Text, nullable=False)
+    state                      = Column(String(20), nullable=False, default="open")  # open/supported/refuted/inconclusive/superseded
+    confidence                 = Column(Integer, nullable=False, default=50)
+    supporting_evidence_ids    = Column(JSONB, nullable=False, default=list)
+    contradicting_evidence_ids = Column(JSONB, nullable=False, default=list)
+    open_questions             = Column(JSONB, nullable=False, default=list)
+    superseded_by              = Column(UUID(as_uuid=True))
+    source                     = Column(String(20), nullable=False, default="planner")
+    history                    = Column(JSONB, nullable=False, default=list)
+    created_at                 = Column(DateTime(timezone=True), default=now_utc)
+    updated_at                 = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 class CaseNote(Base):
     __tablename__ = "case_notes"
@@ -635,6 +722,10 @@ class FlowArtifact(Base):
     content     = Column(Text, nullable=False)
     group_id    = Column(String(100), nullable=False, default="default")
     created_by  = Column(UUID(as_uuid=True))
+    # AI.* artifacts: the investigation that wrote it; other runs need it promoted (or approved) to reuse it
+    created_by_investigation_id = Column(UUID(as_uuid=True))
+    promoted_at = Column(DateTime(timezone=True))
+    promoted_by = Column(UUID(as_uuid=True))
     created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
     updated_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
 

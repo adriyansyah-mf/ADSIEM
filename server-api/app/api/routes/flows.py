@@ -83,7 +83,9 @@ async def list_flow_artifacts(
         q = q.where(FlowArtifact.group_id == group_filter)
     for row in (await db.execute(q)).scalars().all():
         try:
-            out.append(parse_artifact(row.content).summary())
+            out.append({**parse_artifact(row.content).summary(),
+                        "created_by_investigation_id": row.created_by_investigation_id,
+                        "promoted_at": row.promoted_at})
         except ArtifactError as exc:
             out.append({"name": row.name, "description": row.description or "", "builtin": False,
                         "parameters": [], "sources": [], "content": row.content, "error": str(exc)})
@@ -127,8 +129,35 @@ async def _save_artifact(db, body: FlowArtifactIn, user: User, group_filter: str
         row.name = art.name
     row.description = art.description
     row.content = body.content
+    if art.name.startswith("AI.") and row.promoted_at is None:
+        # a person saved this content: AI investigations may reuse it from now on
+        row.promoted_at, row.promoted_by = datetime.now(timezone.utc), user.id
     await db.commit()
     return art.summary()
+
+
+@artifact_router.post("/{name}/promote")
+async def promote_flow_artifact(
+    name: str,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("agents:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    """Let every AI investigation in the group reuse an artifact one of them wrote."""
+    q = select(FlowArtifact).where(FlowArtifact.name == name)
+    if group_filter is not None:
+        q = q.where(FlowArtifact.group_id == group_filter)
+    row = (await db.execute(q)).scalar_one_or_none()
+    if row is None or not row.name.startswith("AI."):
+        raise HTTPException(404, "AI artifact not found")
+    if row.promoted_at is None:
+        row.promoted_at, row.promoted_by = datetime.now(timezone.utc), user.id
+        await db.commit()
+        background.add_task(audit_log, db, user.id, "flow_artifact_promoted", "flow_artifact", row.name,
+                            {"investigation": str(row.created_by_investigation_id or "")})
+    return {"name": row.name, "promoted_at": row.promoted_at,
+            "created_by_investigation_id": row.created_by_investigation_id}
 
 
 @artifact_router.post("", status_code=201)

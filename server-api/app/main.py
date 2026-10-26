@@ -337,6 +337,15 @@ async def _migrate_agent_evidence_health() -> None:
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health JSONB"))
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health_at TIMESTAMPTZ"))
 
+async def _migrate_investigation_ledger_columns() -> None:
+    """Columns the investigation ledger (services/investigation_ledger.py) adds to existing tables."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        for col in ("phase VARCHAR(20)", "report_json JSONB", "budget_overrides JSONB NOT NULL DEFAULT '{}'::jsonb"):
+            await conn.execute(text(f"ALTER TABLE case_investigations ADD COLUMN IF NOT EXISTS {col}"))
+        for col in ("created_by_investigation_id UUID", "promoted_at TIMESTAMPTZ", "promoted_by UUID"):
+            await conn.execute(text(f"ALTER TABLE flow_artifacts ADD COLUMN IF NOT EXISTS {col}"))
+
 async def _migrate_agent_integrity() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -451,6 +460,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
+        await _migrate_investigation_ledger_columns()
         from app.services.knowledge_schema import migrate_knowledge
         await migrate_knowledge()
         from app.services.investigator import mark_stale_interrupted

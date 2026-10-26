@@ -10,6 +10,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 import httpx
@@ -40,7 +41,9 @@ class Scripted:
         from langchain_core.messages import AIMessage, ToolMessage
         self.seen.append(list(messages))  # a copy: the caller appends the reply to its list
         results = [json.loads(m.content) for m in messages if isinstance(m, ToolMessage)]
-        step = self.script(len(self.seen), results)
+        # scripts that take a third argument also see the conversation (context, analyst notes, repair prompts)
+        wants_messages = self.script.__code__.co_argcount == 3
+        step = self.script(len(self.seen), results, messages) if wants_messages else self.script(len(self.seen), results)
         if isinstance(step, str):
             return AIMessage(content=step)
         name, args = step
@@ -278,7 +281,9 @@ async def _fake_agent(stop: asyncio.Event):
         await asyncio.sleep(0.5)
 
 
-def _investigate(script, monkeypatch, user_id, case_id, cancel_after=None):
+def _investigate(script, monkeypatch, user_id, case_id, cancel_after=None, setup=None):
+    """Run one investigation with a scripted model; `setup(inv_id)` (async) runs
+    first, e.g. to queue analyst actions or start an approver."""
     from app.core.database import AsyncSessionLocal
     from app.models.models import CaseInvestigation
     from app.services import investigator
@@ -292,6 +297,8 @@ def _investigate(script, monkeypatch, user_id, case_id, cancel_after=None):
             db.add(inv)
             await db.commit()
             inv_id = inv.id
+        if setup:
+            await setup(inv_id)
         stop = asyncio.Event()
         agent = asyncio.create_task(_fake_agent(stop))
         run = asyncio.create_task(investigator.run_investigation(inv_id))
@@ -399,6 +406,359 @@ def test_cancel_stops_the_run(env, monkeypatch):
     assert inv.steps[-1]["kind"] == "cancelled"
 
 
+# ─── Ledger (investigation_ledger.py, spec Phase 1a) ─────────────
+
+def _analyst(user_id):
+    """A superadmin calling the routes directly."""
+    return SimpleNamespace(id=user_id, username="ana", group_id="blue",
+                           role=SimpleNamespace(name="superadmin", permissions=[]))
+
+
+def _context(messages) -> dict:
+    """The case context the model was shown in its first prompt."""
+    return json.loads(messages[1].content.split("Context:\n", 1)[1])
+
+
+def _rows(model, inv_id):
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(select(model).where(model.investigation_id == inv_id)
+                                     .order_by(model.created_at))).scalars().all()
+    return _run(go())
+
+
+def test_ledger_records_actions_evidence_and_a_cited_report(env, monkeypatch):
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseNote, InvestigationAction, InvestigationEvidence, InvestigationHypothesis
+
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+    st = {}
+
+    def report(claims):
+        return json.dumps({"verdict": "true_positive", "confidence": 90, "executive_summary": "A miner runs from /tmp.",
+                           "claims": claims, "recommended_actions": ["Isolate the host"], "gaps": []})
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return ("run_artifact", {"artifact": "Linux.Sys.Pslist", "host": host, "reason": "what runs"})
+        if turn == 2:
+            st["flow"] = results[-1]["sources"][0]["evidence_id"]
+            return ("record_hypothesis", {"statement": "A miner runs from /tmp", "state": "supported",
+                                          "confidence": 85, "supporting_evidence_ids": [st["flow"]]})
+        if turn == 3:
+            assert results[-1]["state"] == "supported"
+            # the same collection, host spelled differently: endpoint work never repeats
+            return ("run_artifact", {"artifact": "Linux.Sys.Pslist", "host": host.upper(), "reason": "again"})
+        if turn == 4:
+            assert "already ran as action #1" in results[-1]["error"]
+            st["alert"] = _context(messages)["alerts"][0]["evidence_id"]
+            return report([
+                {"id": "c1", "section": "analysis", "text": "kworkerd runs from /tmp/.x", "evidence_ids": [st["flow"]]},
+                {"id": "c2", "section": "timeline", "text": "The reverse-shell alert fired", "evidence_ids": [st["alert"]]},
+                {"id": "c3", "section": "iocs", "text": "203.0.113.9", "evidence_ids": ["made-up"]},
+            ])
+        if turn == 5:  # one repair attempt, told exactly what failed
+            assert "claim c3 (iocs): made-up is not evidence from this investigation" in messages[-1].content
+            return report([
+                {"id": "c1", "section": "analysis", "text": "kworkerd runs from /tmp/.x", "evidence_ids": [st["flow"]]},
+                {"id": "c2", "section": "timeline", "text": "The reverse-shell alert fired", "evidence_ids": [st["alert"]]},
+                {"id": "c3", "section": "iocs", "text": "203.0.113.9 (kworkerd command line)", "evidence_ids": [st["flow"]]},
+            ])
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id)
+    assert inv.status == "finished", inv.error
+    assert inv.verdict == "true_positive" and inv.phase is None
+    assert inv.report_json["unverified_claims"] == 0 and all(c["verified"] for c in inv.report_json["claims"])
+    assert "kworkerd runs from /tmp/.x [E1]" in inv.report and "Unverified" not in inv.report
+    assert any(s["kind"] == "report_check" for s in inv.steps)
+
+    actions = sorted(_rows(InvestigationAction, inv.id), key=lambda a: a.ordinal)
+    assert [(a.tool, a.status, a.risk_tier, a.source) for a in actions] == [
+        ("run_artifact", "completed", 1, "planner"), ("record_hypothesis", "completed", 0, "planner")]
+    assert actions[0].result_ref["evidence_ids"] == [st["flow"]] and actions[0].result_ref["flow_id"]
+    evidence = {str(e.id): e for e in _rows(InvestigationEvidence, inv.id)}
+    assert evidence[st["alert"]].evidence_type == "alert" and evidence[st["flow"]].evidence_type == "flow_row"
+    [hyp] = _rows(InvestigationHypothesis, inv.id)
+    assert (hyp.state, hyp.confidence, hyp.supporting_evidence_ids) == ("supported", 85, [st["flow"]])
+
+    async def note():
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(select(CaseNote.content).where(CaseNote.case_id == case_id))).scalar_one()
+    assert "[E1]" in _run(note())
+
+
+def test_a_verdict_resting_on_unverified_claims_is_downgraded(env, monkeypatch):
+    user_id, _, case_id = _seed(f"led-{uuid.uuid4().hex[:8]}")
+    bad = json.dumps({"verdict": "true_positive", "confidence": 70, "executive_summary": "Compromised.",
+                      "claims": [{"id": "c1", "section": "analysis", "text": "Ransomware encrypted /srv",
+                                  "evidence_ids": ["nothing"]}]})
+
+    def script(turn, results):
+        return bad if turn <= 2 else "unexpected"  # the repair repeats the same claim
+
+    inv, model = _investigate(script, monkeypatch, user_id, case_id)
+    assert inv.status == "finished" and len(model.seen) == 2
+    assert inv.verdict == "inconclusive" and inv.report_json["verdict_downgraded_from"] == "true_positive"
+    assert "## Unverified statements" in inv.report and "⚠ Ransomware encrypted /srv" in inv.report
+
+
+def test_analyst_actions_run_between_rounds_and_skips_hold(env, monkeypatch):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import InvestigationAction
+    from app.services import investigation_ledger as ledger
+
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+
+    async def setup(inv_id):
+        async with AsyncSessionLocal() as db:
+            for ordinal, artifact, status in ((1, "Linux.Sys.Pslist", "queued"), (2, "Linux.Network.Netstat", "skipped")):
+                params = {"artifact": artifact}
+                db.add(InvestigationAction(
+                    investigation_id=inv_id, group_id="blue", ordinal=ordinal, kind="artifact", tool="run_artifact",
+                    target=host, params=params, reason="analyst wants it", risk_tier=1, status=status,
+                    source="analyst", dependencies=[], idempotency_key=ledger.idempotency_key("run_artifact", host, params),
+                    result_ref={}, attempts=0, decision_note="not needed" if status == "skipped" else None))
+            await db.commit()
+
+    def script(turn, results, messages):
+        if turn == 1:
+            # the analyst's pslist ran before the model's first move, as its own tool call
+            assert "An analyst added action #1 (run_artifact)" in messages[-3].content
+            assert results[-1]["sources"][0]["rows"][0]["Exe"] == "/tmp/.x/kworkerd"
+            return ("run_artifact", {"artifact": "Linux.Network.Netstat", "host": host})
+        if turn == 2:
+            assert "skipped or rejected this exact action (#2) (not needed)" in results[-1]["error"]
+            return "## Summary\nThe analyst's pslist shows a miner.\nVERDICT: true_positive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id, setup=setup)
+    assert inv.status == "finished", inv.error
+    assert inv.report_json == {"citations_unchecked": True}  # a Markdown report: kept, but not citation-checked
+    rows = {a.ordinal: a for a in _rows(InvestigationAction, inv.id)}
+    assert (rows[1].status, rows[1].source) == ("completed", "analyst") and rows[1].result_ref["evidence_ids"]
+    assert rows[2].status == "skipped" and len(rows) == 2
+
+
+def _approver(inv_id, user_id, approve, seen, note=None):
+    """Decide the first action the policy holds, through the route, like an analyst in the UI."""
+    from fastapi import BackgroundTasks
+    from sqlalchemy import select
+
+    from app.api.routes import investigations as routes
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import InvestigationAction
+
+    async def go():
+        while True:
+            async with AsyncSessionLocal() as db:
+                row = (await db.execute(select(InvestigationAction).where(
+                    InvestigationAction.investigation_id == inv_id,
+                    InvestigationAction.status == "awaiting_approval"))).scalars().first()
+                if row is not None:
+                    seen.append(row.approval_reason)
+                    await routes.decide_action(row.id, routes.CommandDecision(approve=approve, note=note),
+                                               BackgroundTasks(), db=db, user=_analyst(user_id), group_filter="blue")
+                    return
+            await asyncio.sleep(0.3)
+    return asyncio.create_task(go())
+
+
+def test_another_runs_ai_artifact_waits_for_an_analyst(env, monkeypatch):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import FlowArtifact, InvestigationAction
+
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+    name = f"AI.Linux.Foreign{uuid.uuid4().hex[:6]}"
+    seen: list = []
+    tasks: list = []
+
+    async def setup(inv_id):
+        async with AsyncSessionLocal() as db:
+            db.add(FlowArtifact(name=name, content=TMP_ARTIFACT.replace("AI.Linux.TmpProcs", name), group_id="blue",
+                                created_by_investigation_id=uuid.uuid4()))
+            await db.commit()
+        tasks.append(_approver(inv_id, user_id, True, seen))
+
+    def script(turn, results):
+        if turn == 1:
+            return ("list_artifacts", {"os": "linux"})
+        if turn == 2:
+            assert name not in {a["name"] for a in results[-1]["artifacts"]}  # not offered for reuse
+            return ("run_artifact", {"artifact": name, "host": host, "reason": "reuse an earlier collector"})
+        if turn == 3:
+            assert results[-1]["status"] == "finished"
+            return "## Summary\nRan after approval.\nVERDICT: inconclusive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id, setup=setup)
+    assert inv.status == "finished", inv.error
+    assert "written by another AI investigation" in seen[0]
+    row = next(a for a in _rows(InvestigationAction, inv.id) if a.tool == "run_artifact")
+    assert row.status == "completed" and row.decided_by == user_id
+    kinds = [s["kind"] for s in inv.steps]
+    assert "approval_needed" in kinds and any(s["kind"] == "action_decision" and s["status"] == "approved" for s in inv.steps)
+
+
+def test_a_host_over_its_automatic_budget_needs_approval(env, monkeypatch):
+    from app.models.models import InvestigationAction
+    from app.services import investigation_ledger as ledger
+
+    monkeypatch.setattr(ledger, "HOST_AUTO_FLOWS", 1)
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+    seen: list = []
+
+    async def setup(inv_id):
+        _approver(inv_id, user_id, False, seen, note="enough for this host")
+
+    def script(turn, results):
+        if turn == 1:
+            return ("run_artifact", {"artifact": "Linux.Sys.Pslist", "host": host})
+        if turn == 2:
+            return ("run_artifact", {"artifact": "Linux.Network.Netstat", "host": host})
+        if turn == 3:
+            assert "did not approve this action (enough for this host)" in results[-1]["error"]
+            return ("run_artifact", {"artifact": "Linux.Network.Netstat", "host": host})
+        if turn == 4:
+            assert "skipped or rejected" in results[-1]["error"]
+            return "## Summary\nStopped at the host budget.\nVERDICT: inconclusive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id, setup=setup)
+    assert inv.status == "finished", inv.error
+    assert "automatic collections on the host" in seen[0]
+    statuses = {a.params["artifact"]: a.status for a in _rows(InvestigationAction, inv.id)}
+    assert statuses == {"Linux.Sys.Pslist": "completed", "Linux.Network.Netstat": "skipped"}
+
+
+def test_promoting_an_ai_artifact_lets_other_runs_reuse_it(env):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.api.routes import flows
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import FlowArtifact
+    from app.services import investigator
+
+    name = f"AI.Linux.Promote{uuid.uuid4().hex[:6]}"
+    user_id, _, _ = _seed(f"led-{uuid.uuid4().hex[:8]}")
+    other_run = SimpleNamespace(inv_id=uuid.uuid4())
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            row = FlowArtifact(name=name, content=TMP_ARTIFACT.replace("AI.Linux.TmpProcs", name), group_id="blue",
+                               created_by_investigation_id=uuid.uuid4())
+            db.add(row)
+            await db.commit()
+            assert not investigator._reusable(row, other_run)
+            for who, group in ((name, "red"), ("Linux.Sys.Pslist", "blue")):  # other group; not an AI artifact
+                try:
+                    await flows.promote_flow_artifact(who, BackgroundTasks(), db=db, user=_analyst(user_id),
+                                                      group_filter=group)
+                    raise AssertionError("expected 404")
+                except HTTPException as exc:
+                    assert exc.status_code == 404
+            out = await flows.promote_flow_artifact(name, BackgroundTasks(), db=db, user=_analyst(user_id),
+                                                    group_filter="blue")
+            assert out["promoted_at"] is not None
+            await db.refresh(row)
+            assert row.promoted_by == user_id and investigator._reusable(row, other_run)
+    _run(go())
+
+
+def test_queue_routes_check_scope_state_and_duplicates(env):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.api.routes import investigations as routes
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation, InvestigationAction
+    from app.services import investigation_ledger as ledger
+
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+    user = _analyst(user_id)
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            inv = CaseInvestigation(case_id=case_id, group_id="blue", started_by=user_id, status="running", steps=[])
+            db.add(inv)
+            await db.commit()
+
+            async def call(fn, *args, group="blue", **kw):
+                return await fn(*args, db=db, group_filter=group, **kw)
+
+            async def status_of(fn, *args, **kw):
+                try:
+                    await call(fn, *args, **kw)
+                except HTTPException as exc:
+                    return exc.status_code
+                return 200
+
+            add = routes.ActionIn
+            assert await status_of(routes.add_action, case_id, inv.id, add(tool="run_command"), BackgroundTasks(), user=user) == 422
+            assert await status_of(routes.add_action, case_id, inv.id, add(tool="run_artifact", params={"artifact": "X"}),
+                                   BackgroundTasks(), user=user) == 422  # no host
+            row = await call(routes.add_action, case_id, inv.id,
+                             add(tool="run_artifact", host=host, params={"artifact": "Linux.Sys.Pslist"}, reason="look"),
+                             BackgroundTasks(), user=user)
+            assert (row.status, row.source, row.risk_tier) == ("queued", "analyst", 1)
+            assert await status_of(routes.add_action, case_id, inv.id,
+                                   add(tool="run_artifact", host=host.upper(), params={"artifact": "Linux.Sys.Pslist"}),
+                                   BackgroundTasks(), user=user) == 409  # the same operation
+            assert await status_of(routes.add_action, case_id, inv.id,
+                                   add(tool="search_events", params={"query": "x"}, dependencies=[uuid.uuid4()]),
+                                   BackgroundTasks(), user=user) == 422  # unknown dependency
+            assert await status_of(routes.list_actions, case_id, inv.id, _=user, group="red") == 404
+
+            skipped = await call(routes.skip_action, row.id, BackgroundTasks(), user=user)
+            assert skipped.status == "skipped" and skipped.decided_by == user_id
+            assert await status_of(routes.skip_action, row.id, BackgroundTasks(), user=user) == 409
+
+            cmd = InvestigationAction(investigation_id=inv.id, group_id="blue", ordinal=9, kind="command",
+                                      tool="run_command", risk_tier=2, status="awaiting_approval", source="planner",
+                                      idempotency_key="k" * 64, params={}, dependencies=[], result_ref={}, attempts=1)
+            db.add(cmd)
+            await db.commit()
+            assert await status_of(routes.decide_action, cmd.id, routes.CommandDecision(approve=True),
+                                   BackgroundTasks(), user=user) == 409  # commands have their own decision route
+
+            ev_id = await ledger.record_evidence(db, investigation_id=inv.id, group_id="blue", action_id=None,
+                                                 spec=ledger.EvidenceSpec("event", "siem_query", "q", "t", "s", {"a": 1}))
+            await db.commit()
+            pinned = await call(routes.pin_evidence, ev_id, routes.PinIn(pinned=True), BackgroundTasks(), user=user)
+            assert pinned.pinned
+            assert await status_of(routes.pin_evidence, ev_id, routes.PinIn(), BackgroundTasks(), user=user, group="red") == 404
+
+            h = await call(routes.add_hypothesis, case_id, inv.id, routes.HypothesisIn(statement="Benign admin script"),
+                           BackgroundTasks(), user=user)
+            assert h.source == "analyst"
+            assert await status_of(routes.update_hypothesis, h.id, routes.HypothesisUpdate(state="supported"),
+                                   BackgroundTasks(), user=user) == 422  # no evidence
+            h = await call(routes.update_hypothesis, h.id,
+                           routes.HypothesisUpdate(state="supported", supporting_evidence_ids=[str(ev_id)]),
+                           BackgroundTasks(), user=user)
+            assert h.state == "supported"
+
+            raised = await call(routes.raise_budget, inv.id, routes.BudgetIn(flows=4), BackgroundTasks(), user=user)
+            assert raised.budget_overrides["flows"] == 4
+            assert await status_of(routes.raise_budget, inv.id, routes.BudgetIn(flows=2), BackgroundTasks(), user=user) == 409
+
+            inv.status = "finished"
+            await db.commit()
+            assert await status_of(routes.add_action, case_id, inv.id, add(tool="search_events", params={"query": "y"}),
+                                   BackgroundTasks(), user=user) == 409
+    _run(go())
+
+
 def test_text_tool_calls_run_and_garbled_output_never_reaches_the_case(env, monkeypatch):
     from sqlalchemy import select
 
@@ -456,7 +816,7 @@ def test_commands_wait_for_an_analyst(env, monkeypatch):
     from sqlalchemy import select, update
 
     from app.core.database import AsyncSessionLocal
-    from app.models.models import Flow, InvestigationCommand
+    from app.models.models import Flow, InvestigationAction, InvestigationCommand, InvestigationEvidence
 
     _set_setting("ai_command_execution", "approval")
     _set_setting("ai_command_autoapprove", "hostname, bash")
@@ -520,6 +880,16 @@ def test_commands_wait_for_an_analyst(env, monkeypatch):
             assert {f.artifact for f in flows} == {"AI.Command"}
             assert all(f.request["sources"][0]["plugin"] == "exec" for f in flows)
             assert flows and all(f.created_by == user_id for f in flows)
+            # each command is a tier-2 action in the ledger, linked to its command row
+            actions = (await db.execute(select(InvestigationAction).where(
+                InvestigationAction.investigation_id == inv.id).order_by(InvestigationAction.ordinal))).scalars().all()
+            assert [(a.params["command"], a.status, a.risk_tier, a.decision_note) for a in actions] == [
+                ("ss", "completed", 2, None), ("bash", "skipped", 2, "too broad"), ("/usr/bin/hostname", "completed", 2, None)]
+            assert [a.result_ref["command_id"] for a in actions] == [str(c.id) for c in cmds]
+            evidence = (await db.execute(select(InvestigationEvidence).where(
+                InvestigationEvidence.investigation_id == inv.id,
+                InvestigationEvidence.evidence_type == "command_result"))).scalars().all()
+            assert len(evidence) == 2 and all(e.sensitivity == "sensitive" for e in evidence)
     _run(check())
 
 
