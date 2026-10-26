@@ -12,7 +12,9 @@ RUN clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I internal/procexec/bpf/includ
  && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I internal \
         -c internal/netwatch/bpf/netwatch.bpf.c -o internal/netwatch/bpf/netwatch.bpf.o \
  && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I internal \
-        -c internal/linsensor/bpf/linsensor.bpf.c -o internal/linsensor/bpf/linsensor.bpf.o
+        -c internal/linsensor/bpf/linsensor.bpf.c -o internal/linsensor/bpf/linsensor.bpf.o \
+ && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
+        -c internal/prevent/bpf/prevent.bpf.c -o internal/prevent/bpf/prevent.bpf.o
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /agent ./cmd/agent/
 
 FROM alpine:3.20

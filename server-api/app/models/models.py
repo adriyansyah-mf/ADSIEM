@@ -717,3 +717,20 @@ class EvidenceGroupUsage(Base):
     __table_args__ = (CheckConstraint("payload_bytes >= 0", name="ck_evidence_usage_bytes"),)
     group_id = Column(String(100), primary_key=True)
     payload_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")
+
+
+class ExecPreventionRule(Base):
+    """Execution rule enforced by Linux agents (agent/internal/prevent).
+    rule_type: hash (value = SHA-256), path (value = executable), dir
+    (value = directory), parent (parent = parent basenames, value = child
+    basenames, comma separated). action: detect or block."""
+    __tablename__ = "exec_prevention_rules"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(255), unique=True, nullable=False)
+    description = Column(Text)
+    rule_type   = Column(String(20), nullable=False)
+    value       = Column(Text, nullable=False)
+    parent      = Column(Text, nullable=False, default="", server_default="")
+    action      = Column(String(10), nullable=False, default="detect", server_default="detect")
+    is_enabled  = Column(Boolean, nullable=False, default=True)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)

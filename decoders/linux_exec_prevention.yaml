@@ -1,0 +1,27 @@
+# An execution matched one of the server's prevention rules
+# (agent/internal/prevent): action=blocked (the program did not run) or
+# action=detected (a detect-only rule). engine is lsm (decided in the
+# kernel) or fanotify. ParentImage is a basename for the lsm engine.
+name: linux_exec_prevention
+log_type: linux_exec_prevention
+type: kv
+priority: 10
+enabled: true
+fields:
+  prevention.action: action
+  prevention.engine: engine
+  rule.name: rule
+  rule.id: rule_id
+  rule.category: rule_type
+  Image: Image
+  ParentImage: ParentImage
+  process.executable: Image
+  process.parent.executable: ParentImage
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  file.hash.sha256: SHA256
+  user.id: User
+static_fields:
+  event.category: intrusion_detection
+  event.action: exec_prevention

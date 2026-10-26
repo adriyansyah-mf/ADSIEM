@@ -110,6 +110,13 @@ type LiveResponseConfig struct {
 	DisableCommands bool `yaml:"disable_commands"`
 }
 
+// PreventionConfig controls execution prevention (Linux): the server's
+// execution rules, enforced by the BPF LSM or a fanotify helper.
+type PreventionConfig struct {
+	// Disabled stops enforcing and reporting execution rules on this host.
+	Disabled bool `yaml:"disabled"`
+}
+
 type AntiTamperConfig struct {
 	// Windows: the agent service is locked so only SYSTEM (the MSI, an
 	// upgrade) can stop, reconfigure or delete it. true restores the default
@@ -133,6 +140,7 @@ type Config struct {
 	Evidence     EvidenceConfig     `yaml:"evidence"`
 	LiveResponse LiveResponseConfig `yaml:"live_response"`
 	AntiTamper   AntiTamperConfig   `yaml:"anti_tamper"`
+	Prevention   PreventionConfig   `yaml:"prevention"`
 }
 
 func Load(path string) (*Config, error) {
