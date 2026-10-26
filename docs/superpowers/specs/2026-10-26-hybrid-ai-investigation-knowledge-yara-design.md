@@ -1,9 +1,26 @@
 # Hybrid AI Investigation, Knowledge Vault, and YARA Drafting Design
 
 **Date:** 2026-10-26  
-**Status:** Proposed  
+**Status:** Proposed (revision 2, 2026-10-26)  
 **Scope:** Case AI Investigation, analyst knowledge, evidence-driven YARA drafting  
 **Out of scope:** Implementation of the full YARA compiler/runtime, which is being developed separately
+
+### Revision 2 changes
+
+Revision 2 checks the baseline against the code and closes gaps found in review:
+
+- Section 2 now records the real investigator runtime (in-process loop per API replica, existing budgets, `create_artifact`) and the real YARA baseline (a pure-Go engine on `feat/yara-full`, fleet-wide distribution of enabled rules).
+- Phase 1 is split into **1a** (persist actions and evidence alongside the current loop) and **1b** (durable, replica-safe queue). See sections 6.6 and 16.
+- `create_artifact` and AI-authored artifacts are now classified in the risk-tier policy (section 6.2).
+- Per-investigation and per-host budgets are stated (section 6.5).
+- Investigation status and action status are separated (section 6.1).
+- `investigation_hypotheses` has a field-level definition (section 7.3).
+- Citation enforcement now has a mechanism: a structured report validated by the server (section 8.1).
+- The full-YARA contract names where validation runs, how disabled drafts are tested, and which side owns each piece (sections 10.5, 10.7).
+- Acceptance criteria are grouped by phase so Phase 1 can ship without the Knowledge Vault or YARA work (section 17).
+- Open questions are listed in section 18.
+
+This document remains the umbrella design. The Knowledge Vault (section 9) and YARA drafting (section 10) each get their own implementation plan.
 
 ## 1. Summary
 
@@ -42,6 +59,17 @@ The deployed platform already provides useful foundations.
 - The agent can locally refuse all custom commands.
 - Investigation progress is currently retained primarily as an append-only `steps` timeline.
 
+Runtime facts that constrain this design (`server-api/app/services/investigator.py`):
+
+- An investigation is a single LangChain tool-calling loop. The conversation (`messages`) lives only in process memory.
+- `spawn()` runs it as an `asyncio` task inside whichever API replica received the request. Production runs two `server-api` replicas (`docker-compose.prod.yml`).
+- On startup, `mark_stale_interrupted()` marks any run not updated for five minutes as `interrupted` and expires its pending commands. Nothing resumes.
+- Command approval already works across replicas, because the loop polls `InvestigationCommand` rows in the database.
+- Existing budgets: `MAX_ROUNDS = 18`, `MAX_FLOWS = 12`, `MAX_NEW_ARTIFACTS = 4`, `MAX_COMMANDS = 8`, `MAX_SECONDS = 30 min`, `FLOW_WAIT_CAP = 600 s`.
+- `create_artifact` lets the model persist a new group-scoped `FlowArtifact` (name prefixed `AI.`, built-in plugins only), which `run_artifact` can then execute.
+- The report is free-form Markdown. The verdict is extracted with a regex (`VERDICT: ...`) and stored as an AI `CaseNote`.
+- Investigation statuses in use: `queued`, `running`, `finished`, `error`, `cancelled`, `interrupted`.
+
 ### 2.2 Knowledge
 
 - `knowledge_entries` stores analyst notes and reference material.
@@ -56,8 +84,11 @@ The deployed platform already provides useful foundations.
 
 - Rules can be created, edited, enabled, disabled, and selected for an endpoint scan.
 - The agent receives YARA scan tasks and reports matching files/strings.
-- The current in-tree agent implementation uses a limited internal matcher rather than a complete YARA runtime.
-- A separate effort is implementing full-YARA validation/runtime support. This design must integrate with that effort rather than duplicate it.
+- On `feature/siem-implementation` the agent still uses a limited internal matcher.
+- The separate full-YARA effort lives on `feat/yara-full` (also merged into `feat/memory-scan`). It adds a pure-Go engine in `agent/internal/yara`: lexer, parser, evaluator, `pe`/`elf`/`math` modules, and differential and fuzz tests. This design must integrate with that effort rather than duplicate it.
+- On that branch, **enabling a rule deploys it fleet-wide**. Heartbeats carry the enabled-ruleset hash (`server-api/app/services/yara_ruleset.py`), and every agent fetches and compiles the set for on-access scanning. Agents compile each rule separately (`CompileSources`), so one broken rule is skipped rather than blocking the set.
+- The `Linux.Detection.Yara` / `Windows.Detection.Yara` artifacts scan with **every enabled rule**. There is no way to scan with a single disabled rule.
+- The server does not validate rules and does not expose an engine capability.
 
 ## 3. Goals
 
@@ -122,6 +153,7 @@ There is no requirement to edit the plan before it starts.
 - Completed actions are immutable and remain in the audit timeline.
 - AI replanning may append actions but may not silently modify analyst-created actions.
 - Duplicate actions are rejected by an idempotency key based on investigation, tool, target, and normalized parameters.
+- In Phase 1a (section 6.6), analyst edits take effect at the next round boundary: an added action is passed to the model as an analyst instruction, and a skipped action is refused when the model tries to dispatch it. In Phase 1b the orchestrator applies them directly.
 
 ## 6. Investigation Architecture
 
@@ -156,16 +188,36 @@ Case + Alerts + Entities + Prior Feedback
 
 ### 6.1 Investigation phases
 
-An investigation uses the following state machine:
+Investigation state and action state are separate.
+
+**Investigation `status`** keeps the existing coarse values for compatibility with current UI, tests, and `mark_stale_interrupted()`:
 
 ```text
-queued -> planning -> collecting -> analyzing -> reporting -> completed
-                    \         \                     \
-                     \         -> awaiting_approval  -> failed
-                      -> cancelled
+queued -> running -> finished
+             |-> error
+             |-> cancelled
+             '-> interrupted   (Phase 1a only; Phase 1b resumes instead)
 ```
 
-`awaiting_approval` is an action state, not a global blocker. Other independent read-only actions continue while a command waits for approval.
+**Investigation `phase`** is a new column, meaningful only while `status = running`:
+
+```text
+planning -> collecting <-> analyzing -> reporting
+```
+
+`collecting` and `analyzing` alternate once per replan batch.
+
+**Action `status`** is defined in section 7.1:
+
+```text
+queued -> running -> completed
+   |         |-> failed
+   |         '-> cancelled
+   |-> awaiting_approval -> queued (approved) | skipped (rejected/expired)
+   '-> skipped
+```
+
+`awaiting_approval` is only an action state. It never blocks the investigation: other independent read-only actions continue while a command waits.
 
 ### 6.2 Risk tiers
 
@@ -177,6 +229,19 @@ queued -> planning -> collecting -> analyzing -> reporting -> completed
 | 3 | Kill, quarantine, isolate, delete, block, modify configuration | Never executed by Investigate; offer a separate response action |
 
 An action's tier is assigned by the server policy, not by the model.
+
+#### AI-authored artifacts
+
+`create_artifact` is not an endpoint action, but it persists content that later runs on endpoints. Policy:
+
+| Action | Tier | Rule |
+|---|---|---|
+| `create_artifact` | 0 (authoring) | Automatic, within `MAX_NEW_ARTIFACTS`. Name must start with `AI.`, and every source must use a plugin from the server's read-only plugin allowlist. Any other plugin fails validation. |
+| `run_artifact` on a built-in artifact | 1 | Automatic. |
+| `run_artifact` on an `AI.*` artifact | 1 | Automatic only when the artifact was created by **this** investigation, or has been promoted by an analyst. Otherwise the action is queued `awaiting_approval`. |
+| `run_artifact` on an artifact containing a non-read-only plugin | 2 | Approval required. This case is unreachable through `create_artifact`, but the policy checks the stored content, not the author. |
+
+AI-created artifacts are tagged with the creating investigation ID. They stay out of the general artifact list until an analyst promotes them (`POST /api/artifacts/{name}/promote`, which requires artifact-management permission). Without promotion, a future investigation in the same group cannot silently reuse another run's model-written collector.
 
 ### 6.3 Planner contract
 
@@ -203,6 +268,54 @@ Replanning occurs after a batch of actions finishes, not after every row. The re
 - Stop early when evidence sufficiently answers the case.
 
 It must not repeat an action that already completed, failed deterministically, was rejected, or was skipped by an analyst.
+
+### 6.5 Budgets
+
+Removing the questionnaire and auto-running Tier 0/1 work makes budgets the main protection for endpoints. All values are platform settings. The defaults keep current behavior where a limit already exists.
+
+| Limit | Default | Scope | On exhaustion |
+|---|---|---|---|
+| Initial plan size | 10 actions | investigation | Extra planned actions are dropped and logged |
+| Replan batches | 6 | investigation | Move to `reporting` |
+| Planner/replanner model calls | 18 (`MAX_ROUNDS`) | investigation | Move to `reporting` |
+| Endpoint flows (Tier 1 + 2) | 12 (`MAX_FLOWS`) | investigation | New endpoint actions refused with a visible reason |
+| Concurrent flows | 2 | host, across all investigations | Action stays `queued` |
+| Auto Tier 1 flows | 6 | host, per investigation | Further flows on that host need approval |
+| Custom commands | 8 (`MAX_COMMANDS`) | investigation | Refused |
+| New AI artifacts | 4 (`MAX_NEW_ARTIFACTS`) | investigation | Refused |
+| Wall clock | 30 min (`MAX_SECONDS`) | investigation | Report with an explicit gap list |
+
+Analyst-added actions count toward the flow and command budgets. An analyst with live-response permission may raise an investigation's flow budget once, by up to 100%, and the change is audited.
+
+### 6.6 Execution model and phasing
+
+The current investigator holds all of its state in an in-process conversation. A persistent, editable, replica-safe queue is therefore an architectural change, not an incremental one. It is delivered in two steps.
+
+#### Phase 1a: persisted ledger on the existing loop
+
+- The LangChain loop, the tools, and `spawn()` stay as they are.
+- Every tool call writes an `investigation_actions` row (`source = planner`) before dispatch and updates it on completion.
+- Tool results that carry observations are normalized into `investigation_evidence`.
+- Analyst-added actions are inserted as `queued` rows with `source = analyst`. At each round boundary the loop reads new analyst rows and passes them to the model as instructions it must execute or explicitly decline with a reason.
+- Before dispatch, the loop checks that the matching action row was not skipped. A skipped action returns a tool result telling the model the analyst skipped it.
+- Restart behavior is unchanged: the run becomes `interrupted`, and its persisted actions and evidence remain visible.
+- The structured report (section 8.1) ships in this phase.
+
+Phase 1a delivers the visible queue, the evidence ledger, analyst add/skip, and cited reports without touching the concurrency model.
+
+#### Phase 1b: durable orchestrator
+
+- Investigation progress moves from the in-memory conversation to the database.
+- Each `server-api` replica runs a scheduler loop that claims work with leases:
+  - `investigations.lease_owner` and `lease_expires_at`, renewed every 30 s;
+  - action claims through `UPDATE ... WHERE status = 'queued' ... RETURNING` or `SELECT ... FOR UPDATE SKIP LOCKED`.
+- Planner and replanner calls become stateless. Each call is rebuilt from the case context, the action list with idempotency keys, compact evidence summaries, and the hypotheses. No conversation transcript is required to resume.
+- When a lease expires, another replica takes over:
+  - Tier 0 actions are re-run, because they are idempotent.
+  - Endpoint actions are reconciled against their flow or command state (`result_ref`) before any re-dispatch.
+- `mark_stale_interrupted()` is replaced by lease takeover. `interrupted` is kept only for runs whose model configuration has disappeared.
+
+Phase 1b ships only once Phase 1a's tables and UI are stable. It is required before acceptance criterion 4 (no duplicate endpoint work across restarts) can be met.
 
 ## 7. Data Model
 
@@ -241,7 +354,7 @@ Status transitions use conditional updates so multiple API replicas cannot run t
 | `id` | UUID primary key |
 | `investigation_id` / `action_id` | Provenance |
 | `group_id` | Tenant/group scope |
-| `evidence_type` | event, alert, flow row, file, hash, command result, TI result, knowledge guidance |
+| `evidence_type` | `event`, `alert`, `flow_row`, `file`, `hash`, `command_result`, `ti_result`, `knowledge_guidance` (`knowledge_guidance` never satisfies a claim, see section 8.1) |
 | `source_type` / `source_id` | Link to canonical source |
 | `title` / `summary` | Bounded display text |
 | `observed_at` | Timestamp of observed activity |
@@ -256,9 +369,45 @@ Large flow output, binaries, and raw event bodies remain in their canonical stor
 
 ### 7.3 `investigation_hypotheses`
 
-Each hypothesis stores a statement, state, confidence, supporting evidence IDs, contradicting evidence IDs, unresolved questions, and timestamps. Confidence changes are appended to the audit timeline with a reason.
+| Field | Purpose |
+|---|---|
+| `id` | UUID primary key |
+| `investigation_id` | Owning investigation |
+| `group_id` | Mandatory tenant/group scope |
+| `ordinal` | Display order |
+| `statement` | Bounded text, e.g. "PowerShell spawned by Word downloaded a second stage" |
+| `state` | `open`, `supported`, `refuted`, `inconclusive`, `superseded` |
+| `confidence` | 0-100 integer, model-proposed and server-clamped |
+| `supporting_evidence_ids` | UUID array referencing `investigation_evidence` in the same investigation |
+| `contradicting_evidence_ids` | UUID array, same constraint |
+| `open_questions` | Short list of unresolved gaps that drive replanning |
+| `superseded_by` | Hypothesis ID when merged or replaced |
+| `source` | `planner`, `replanner`, or `analyst` |
+| `history` | Append-only array of `{at, state, confidence, reason, actor}` |
+| timestamps | Created, updated |
 
-### 7.4 Existing timeline
+Rules:
+
+- Moving to `supported` or `refuted` requires at least one supporting or contradicting evidence ID respectively. The server rejects the change otherwise.
+- Evidence IDs from another investigation, and evidence of type `knowledge_guidance`, are rejected.
+- Analyst-created hypotheses cannot be closed by the model. The model may only add evidence links and propose a state, which is shown to the analyst.
+- Every confidence change is also appended to `CaseInvestigation.steps`.
+
+### 7.4 Changes to existing tables
+
+`case_investigations` gains:
+
+- `phase` (section 6.1);
+- `report_json` (section 8.1); the existing `report` keeps the rendered Markdown;
+- `budget_overrides` (JSON, section 6.5);
+- `lease_owner` and `lease_expires_at` (Phase 1b only).
+
+`flow_artifacts` gains:
+
+- `created_by_investigation_id` (nullable);
+- `promoted_at` and `promoted_by` (section 6.2).
+
+### 7.5 Existing timeline
 
 `CaseInvestigation.steps` remains an append-only audit/event timeline for compatibility and UI streaming. Queue state and evidence are normalized into the new tables.
 
@@ -280,6 +429,44 @@ Each hypothesis stores a statement, state, confidence, supporting evidence IDs, 
   - recommended response actions;
   - detection opportunities;
   - knowledge citations.
+
+### 8.1 Structured report and citation enforcement
+
+Free-form Markdown cannot be checked for citations, so the final model call returns a schema-validated object instead:
+
+```json
+{
+  "verdict": "true_positive | false_positive | inconclusive",
+  "confidence": 0,
+  "executive_summary": "...",
+  "claims": [
+    {
+      "id": "c1",
+      "section": "timeline | entities | iocs | analysis | recommendation | detection",
+      "text": "...",
+      "evidence_ids": ["<uuid>"],
+      "contradicting_evidence_ids": []
+    }
+  ],
+  "gaps": ["..."],
+  "recommended_actions": ["..."],
+  "detection_opportunities": ["..."],
+  "knowledge_citations": [{"entry_id": "<uuid>", "heading": "...", "revision": 3}]
+}
+```
+
+The server validates the object:
+
+1. The JSON matches the schema. Verdict and confidence come from fields, not from a regex.
+2. Every claim in `timeline`, `entities`, `iocs`, or `analysis` has at least one `evidence_ids` entry.
+3. Every referenced ID exists in this investigation's `investigation_evidence` and is not of type `knowledge_guidance`.
+4. Every `knowledge_citations` entry exists in `knowledge_usage` for this investigation.
+
+Recommendation and detection claims may cite knowledge instead of evidence.
+
+If validation fails, the model gets **one** repair attempt with the list of failing claims. Claims that still fail are kept but rendered under "Unverified statements" with a visible marker, and each one increments the uncited-claim metric (section 14). The verdict is downgraded to `inconclusive` if the only claims supporting it are unverified.
+
+The server renders `report_json` into the Markdown stored in `report` and in the AI `CaseNote`. Each claim gets footnote links to its evidence. Models without structured-output support fall back to the current Markdown path with regex verdict extraction. Such reports are flagged `citations_unchecked` and cannot satisfy acceptance criterion 5.
 
 ## 9. Knowledge Vault (Second Brain)
 
@@ -468,8 +655,10 @@ draft -> validating -> valid | invalid -> testing -> review -> active -> retired
 - Validation is mandatory before test scan.
 - Test scan is mandatory before review completion.
 - Activation requires a user with rule-update permission.
-- Fleet scans require live-response authorization and a separate confirmation.
-- Every edit creates a revision.
+- **Activation is fleet deployment.** On the full-YARA engine, setting `is_enabled` puts the rule into the heartbeat ruleset hash, so every agent downloads it and applies it to on-access scanning within one heartbeat. The activation dialog must state this and show the estimated match volume from testing.
+- Fleet on-demand scans require live-response authorization and a separate confirmation.
+- Every edit creates a revision. Editing an active rule creates a new draft revision. The active revision keeps running until the new one passes validation and testing and is activated.
+- Test scans never use the enabled-ruleset path (section 10.7), so a draft can be tested without being deployed.
 
 ### 10.6 Quality checks
 
@@ -488,29 +677,82 @@ Failure leaves the rule as a visible draft with actionable diagnostics.
 
 ### 10.7 Full-YARA integration contract
 
-The separate full-YARA implementation owns compiler/runtime details. This feature consumes the following stable contract:
+The separate full-YARA implementation owns compiler/runtime details. This feature consumes the contract below.
+
+#### Where validation runs
+
+The engine is Go code in `agent/internal/yara`, and `server-api` is Python. Validation must use **the same engine the agents run**, otherwise a rule could pass the server and fail on endpoints. The chosen approach:
+
+- The full-YARA effort ships a small static binary, `yaracheck`, built from `agent/internal/yara` at the same commit as the agent release. It is copied into the `server-api` image.
+- `yaracheck validate` reads rule text on stdin and writes JSON diagnostics.
+- `yaracheck capabilities` writes the engine's version, modules, and limits.
+- `yaracheck scan --rules <file> <path>` scans governed samples or corpus files available to the server.
+- `server-api` calls it through `asyncio.create_subprocess_exec` with a timeout and memory limit. No compiler library is imported into Python.
+
+Alternatives considered:
+
+- Compiling the engine to WASM adds a runtime dependency for no gain.
+- Dispatching validation to a live agent makes validation depend on endpoint availability.
+- Using a Python YARA library would break engine parity.
 
 #### Capability
 
 `GET /api/yara/capabilities`
 
-Returns engine/version, supported syntax/modules/modifiers, supported endpoint platforms, maximum file/rule sizes, and whether validation/test/deployment are available.
+Returns the output of `yaracheck capabilities` together with the agent engine versions seen in heartbeats:
+
+- engine name and version;
+- supported modules and string modifiers;
+- maximum rule size and scan size;
+- whether validation, testing, and deployment are available;
+- the share of online agents running a compatible engine.
+
+If `yaracheck` is missing, the endpoint returns `validation: false`. Section 10.8 then degrades to `draft_only`.
 
 #### Validation
 
 `POST /api/yara-rules/validate`
 
-Accepts rule text and returns normalized diagnostics with line/column, capability failures, warnings, compiled fingerprint, and engine version.
+Accepts rule text and returns:
+
+- normalized diagnostics with line and column;
+- capability failures, such as an unsupported module;
+- the warnings from section 10.6;
+- a compiled fingerprint;
+- the engine version.
 
 #### Test
 
 `POST /api/yara-rules/{id}/test`
 
-Accepts governed sample IDs and/or approved corpus selectors. Returns matches, non-matches, errors, elapsed time, engine version, and corpus revision.
+Accepts a rule **revision** plus governed sample IDs, approved corpus selectors, and/or explicit agent targets. Returns matches, non-matches, errors, elapsed time, engine version, and corpus revision.
+
+- Server-side samples and corpora are scanned with `yaracheck scan`.
+- Endpoint tests need a **rule-scoped scan**: a scan task that carries the rule text (or revision ID) explicitly instead of using the enabled ruleset. Today's `*.Detection.Yara` artifacts cannot do this. The full-YARA effort must add a `Rules` parameter (revision IDs, resolved server-side) to the `yara` plugin task. Endpoint testing is unavailable until that parameter exists.
 
 #### Scan
 
-The existing rule-scan path remains the orchestration entry point but returns structured rule revision, engine version, target scope, scanned file count, errors, and matches.
+The existing rule-scan path remains the orchestration entry point. It must return structured results:
+
+- rule revision;
+- engine version;
+- target scope;
+- scanned file count;
+- errors;
+- matches.
+
+On-access matches from enabled rules must carry the rule ID and revision so section 10.9 can link the resulting alerts.
+
+#### Ownership
+
+| Item | Owner |
+|---|---|
+| Engine, `yaracheck` binary, and its release pinning | full-YARA effort |
+| Rule-scoped scan parameter on the agent `yara` plugin | full-YARA effort |
+| Rule ID and revision in on-access match events | full-YARA effort |
+| `/api/yara/capabilities`, `/validate`, `/test` endpoints (wrappers around `yaracheck`) | this feature |
+| Rule revisions, lifecycle states, quality warnings, activation dialog | this feature |
+| Feature collector, eligibility, draft generation | this feature |
 
 The AI feature does not import compiler libraries or change the agent's YARA runtime.
 
@@ -522,7 +764,11 @@ Platform setting `yara_ai_generation` supports:
 - `draft_only`: collect features and save disabled drafts; validation/scan unavailable.
 - `full`: capability validation, test, review, activation, and scan integration.
 
-If the full-YARA dependency is unavailable, the system degrades to `draft_only` and explains the gap.
+If the full-YARA dependency is unavailable, the system degrades to `draft_only` and explains the gap. Partial availability degrades only the affected step:
+
+- No `yaracheck` binary: validation and server-side tests are disabled.
+- No rule-scoped scan on the agents: endpoint tests are disabled, and server-side corpus tests still run.
+- Fewer than a configurable share of online agents (default 90%) run a compatible engine: activation shows a blocking warning listing the incompatible agents.
 
 ### 10.9 Detection feedback loop
 
@@ -542,6 +788,10 @@ After activation:
 - `POST /api/investigation-actions/{id}/skip`
 - `GET /api/cases/{case_id}/investigations/{id}/evidence`
 - `POST /api/investigation-evidence/{id}/pin`
+- `GET /api/cases/{case_id}/investigations/{id}/hypotheses`
+- `POST /api/cases/{case_id}/investigations/{id}/hypotheses` (analyst hypothesis)
+- `POST /api/cases/{case_id}/investigations/{id}/budget` (one-time flow budget raise, section 6.5)
+- `POST /api/artifacts/{name}/promote` (AI artifact promotion, section 6.2)
 - Existing command decision endpoint remains in use.
 
 ### Knowledge
@@ -563,7 +813,8 @@ All endpoints require group scoping. Single-resource lookups verify ownership be
 
 ## 12. Concurrency, Recovery, and Failure Handling
 
-- Queue claims use atomic conditional updates and leases.
+- Phase 1a keeps the existing single-owner loop. A restart marks the run `interrupted`, and its persisted ledger remains readable.
+- Phase 1b: queue claims use atomic conditional updates and leases (section 6.6).
 - A stale running action returns to queued only if it is idempotent; endpoint commands require flow-state reconciliation first.
 - Retryable network/provider failures use bounded exponential backoff.
 - Deterministic validation or permission failures do not retry.
@@ -613,6 +864,11 @@ Structured logs include investigation, action, group, agent, flow, knowledge ent
 - Chunking, ranking, trust weighting, expiry, and group isolation.
 - Archive safety and checksum behavior.
 - YARA eligibility, feature redaction, draft quality checks, and capability negotiation.
+- Risk-tier policy for `create_artifact` and `run_artifact`: an AI artifact from another investigation needs approval, and a non-read-only plugin is Tier 2.
+- Budget enforcement for every row in section 6.5, including the per-host concurrency cap across investigations.
+- Structured report validation: missing citations, foreign evidence IDs, `knowledge_guidance` used as proof, the repair attempt, and verdict downgrade.
+- Hypothesis state rules: `supported` without evidence is rejected, and the model cannot close an analyst hypothesis.
+- `yaracheck` wrapper: timeout, oversized input, malformed JSON output, and binary missing (degrades to `draft_only`).
 
 ### Integration tests
 
@@ -627,6 +883,10 @@ Structured logs include investigation, action, group, agent, flow, knowledge ent
 - Missing full-YARA capability degrades to draft-only.
 - Validation/test failure cannot activate a rule.
 - Approved YARA match links the resulting alert to rule revision and originating case.
+- Phase 1a: an analyst add/skip during a running loop is honored at the next round, and the persisted ledger survives an `interrupted` restart.
+- Phase 1b: kill the replica holding an investigation lease mid-flow. The other replica takes over, reconciles the flow, and does not re-dispatch it.
+- Engine parity: the `differential_test.go` corpus gives identical match results through `yaracheck scan` and through the agent.
+- A rule-scoped endpoint test of a disabled draft never changes the heartbeat ruleset hash.
 
 ### Manual QA
 
@@ -640,12 +900,21 @@ Structured logs include investigation, action, group, agent, flow, knowledge ent
 
 ## 16. Rollout
 
-### Phase 1: Persistent investigation queue and evidence ledger
+### Phase 1a: Persisted ledger on the existing loop
 
-- Normalize actions/evidence/hypotheses.
-- Add editable queue UI.
+- Add `investigation_actions`, `investigation_evidence`, `investigation_hypotheses`, and the new `case_investigations` and `flow_artifacts` columns.
+- Write the ledger from the current loop, and add analyst add/skip at round boundaries.
+- Add the editable queue, evidence, and hypotheses UI.
+- Add the structured report with citation enforcement.
+- Add the risk-tier policy for AI artifacts and the budgets from section 6.5.
 - Preserve current tools, command approval, and timeline behavior.
-- Enforce cited reports.
+
+### Phase 1b: Durable, replica-safe orchestrator
+
+- Leases, stateless planner/replanner calls, action claims, and lease takeover with flow reconciliation.
+- Replace `mark_stale_interrupted()` with resume.
+
+Phase 1b depends only on Phase 1a. It may run in parallel with Phase 2.
 
 ### Phase 2: Knowledge Vault
 
@@ -663,6 +932,7 @@ Structured logs include investigation, action, group, agent, flow, knowledge ent
 
 - Integrate capability, validation, test, scan, and alert provenance contracts delivered by the separate YARA effort.
 - Enable `yara_ai_generation=full` only when capability checks pass.
+- Depends on `feat/yara-full` being merged into `feature/siem-implementation`, plus the three full-YARA items in the section 10.7 ownership table.
 
 ### Phase 5: Feedback and tuning
 
@@ -672,16 +942,41 @@ Structured logs include investigation, action, group, agent, flow, knowledge ent
 
 ## 17. Acceptance Criteria
 
-The feature is ready when:
+Criteria are numbered as before and grouped by the phase that must satisfy them. Each phase ships when its own criteria pass.
+
+**Phase 1a**
 
 1. Clicking Investigate immediately starts a useful read-only plan.
 2. Analysts can add, skip, and stop work without corrupting the investigation.
-3. Risky commands still require existing RBAC and approval controls.
-4. Restarts do not duplicate endpoint commands.
-5. Every verdict claim links to evidence.
+3. Risky commands still require existing RBAC and approval controls, and AI-authored artifacts follow the section 6.2 policy.
+5. Every verdict claim links to evidence, enforced by section 8.1 validation, not by prompt instructions.
+11. No investigation exceeds the section 6.5 budgets, and no host exceeds its concurrent-flow cap.
+
+**Phase 1b**
+
+4. Restarts and replica loss do not duplicate endpoint commands or flows, and the investigation resumes instead of becoming `interrupted`.
+
+**Phase 2**
+
 6. Published Markdown knowledge is automatically indexed, scoped, cited, and auditable.
 7. Draft/untrusted/cross-group knowledge cannot influence unauthorized investigations.
+
+**Phase 3**
+
 8. Malware evidence can produce a disabled, provenance-rich YARA draft.
-9. No YARA draft can activate without validation, test, permission, and analyst review.
 10. The feature operates in draft-only mode until the separate full-YARA capability is available.
+
+**Phase 4**
+
+9. No YARA draft can activate without validation, test, permission, and analyst review.
+12. Validation and server-side tests use the same engine build as the agents (`yaracheck`), and testing a draft never changes the deployed ruleset.
+
+## 18. Open Questions
+
+1. **Per-host concurrency across investigations (section 6.5).** This needs a shared counter that is visible to both replicas. Use the database (a count of running flows per agent) or Redis? The database is simpler and is already queried for flows. Redis is cheaper per check.
+2. **AI artifact promotion.** Should promoted `AI.*` artifacts be renamed into the normal namespace, or keep the prefix as provenance? The recommendation is to keep the prefix.
+3. **Model support for structured output.** Which configured investigation models reliably return the section 8.1 schema? The fallback path must be measured before acceptance criterion 5 is claimed for those models.
+4. **`yaracheck` distribution.** Should it be built in the `server-api` Docker image from the agent sources, or downloaded as a release artifact pinned to the agent version? Building in the image guarantees parity but couples the server build to the Go toolchain.
+5. **Staged YARA deployment.** Activation is currently all-or-nothing across the fleet. Should the full-YARA effort add a deployment scope (agent label or group) so a new AI rule can go to a canary set first? This design works without it but would use it.
+6. **Phase 1b placement.** Should the orchestrator run in `server-api` (where the tools live today) or move to `worker`? The design assumes `server-api` to avoid moving the tool implementations.
 
