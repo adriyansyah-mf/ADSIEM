@@ -68,7 +68,7 @@ export function AppSidebar({ collapsed = false, onCollapse, onNavigate, onClose 
   return (
     <aside className={`app-sidebar ${collapsed ? 'app-sidebar--collapsed' : ''}`}>
       <div className="app-brand">
-        <img src="/favicon.jpeg" width={28} height={28} alt="" />
+        <img src="/logo.png" width={28} height={28} alt="" />
         <div className="sidebar-label"><strong>AD-SIEM</strong><span>Security operations</span></div>
         {onClose && <button className="ui-icon-button" onClick={onClose} aria-label="Close navigation"><X size={18} /></button>}
       </div>
