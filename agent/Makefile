@@ -8,11 +8,12 @@ BPF_ARCH_arm64  := arm64
 BPF_ARCH := $(or $(BPF_ARCH_$(uname -m)),$(BPF_ARCH_$(ARCH)),x86)
 BPF_OBJ := internal/procexec/bpf/execve.bpf.o
 NETWATCH_OBJ := internal/netwatch/bpf/netwatch.bpf.o
+LINSENSOR_OBJ := internal/linsensor/bpf/linsensor.bpf.o
 PREVENT_OBJ := internal/prevent/bpf/prevent.bpf.o
 
 .PHONY: build bpf package-deb package-rpm package clean
 
-bpf: $(BPF_OBJ) $(NETWATCH_OBJ) $(PREVENT_OBJ)
+bpf: $(BPF_OBJ) $(NETWATCH_OBJ) $(LINSENSOR_OBJ) $(PREVENT_OBJ)
 
 $(BPF_OBJ): internal/procexec/bpf/execve.bpf.c
 	@command -v clang >/dev/null 2>&1 || { \
@@ -29,6 +30,12 @@ $(NETWATCH_OBJ): internal/netwatch/bpf/netwatch.bpf.c
 		-I internal \
 		-c internal/netwatch/bpf/netwatch.bpf.c \
 		-o $(NETWATCH_OBJ)
+
+$(LINSENSOR_OBJ): internal/linsensor/bpf/linsensor.bpf.c
+	clang -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) \
+		-I internal \
+		-c internal/linsensor/bpf/linsensor.bpf.c \
+		-o $(LINSENSOR_OBJ)
 
 $(PREVENT_OBJ): internal/prevent/bpf/prevent.bpf.c
 	clang -O2 -g -target bpf -D__TARGET_ARCH_$(BPF_ARCH) \
@@ -50,4 +57,4 @@ package-rpm: bpf
 package: package-deb package-rpm
 
 clean:
-	rm -rf dist bin $(BPF_OBJ) $(NETWATCH_OBJ) $(PREVENT_OBJ)
+	rm -rf dist bin $(BPF_OBJ) $(NETWATCH_OBJ) $(LINSENSOR_OBJ) $(PREVENT_OBJ)

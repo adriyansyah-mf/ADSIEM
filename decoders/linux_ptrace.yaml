@@ -1,0 +1,21 @@
+# ptrace attach / seize / poke / setregs that succeeded, from
+# agent/internal/linsensor (code injection and credential theft primitives).
+name: linux_ptrace
+log_type: linux_ptrace
+type: kv
+priority: 10
+enabled: true
+fields:
+  ptrace.request: action
+  ptrace.target.pid: TargetPID
+  ptrace.target.executable: TargetImage
+  TargetImage: TargetImage
+  Image: Image
+  process.executable: Image
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  user.id: User
+static_fields:
+  event.category: process
+  event.action: ptrace

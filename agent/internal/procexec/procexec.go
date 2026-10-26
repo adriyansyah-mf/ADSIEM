@@ -31,7 +31,7 @@ var execveObj []byte
 const (
 	commLen       = 16
 	filenameLen   = 256
-	argsBufLen    = 512
+	argsBufLen    = 1024 // ARGS_BUF_LEN = ARGSIZE * MAXARG in bpf/execve.bpf.c
 	recordMinSize = 8 + 4*4 + commLen + filenameLen*2 + argsBufLen + 4 + 4 + 1
 )
 

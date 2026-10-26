@@ -2,220 +2,189 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
+	"strconv"
+	"time"
+
+	"github.com/siem-platform/agent/internal/yara"
 )
 
 type YaraRuleDef struct {
-	ID      string       `json:"id"`
-	Name    string       `json:"name"`
-	Content string       `json:"content"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
 }
 
 type YaraMatch struct {
-	RuleName string   `json:"rule_name"`
-	File     string   `json:"file"`
-	Strings  []string `json:"matched_strings"`
+	RuleName  string   `json:"rule_name"`
+	Namespace string   `json:"namespace,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	File      string   `json:"file"`
+	Strings   []string `json:"matched_strings"`
+}
+
+type YaraRuleError struct {
+	Rule  string `json:"rule"`
+	Error string `json:"error"`
 }
 
 type YaraScanResult struct {
-	ScannedFiles int         `json:"scanned_files"`
-	Matches      []YaraMatch `json:"matches"`
+	ScannedFiles int             `json:"scanned_files"`
+	SkippedFiles int             `json:"skipped_files"`
+	Matches      []YaraMatch     `json:"matches"`
+	RuleErrors   []YaraRuleError `json:"rule_errors,omitempty"`
+	Warnings     []string        `json:"warnings,omitempty"`
 }
 
-func runYaraScan(path string, recursive bool, rulesRaw []any) (YaraScanResult, error) {
-	// parse rules from params
-	var rules []YaraRuleDef
+const (
+	yaraMaxFileSize = 50 << 20
+	yaraTaskTimeout = 15 * time.Minute
+)
+
+// compileYaraRules compiles each rule definition in its own namespace;
+// definitions that do not compile are reported, not fatal.
+func compileYaraRules(rulesRaw []any) (*yara.Rules, []YaraRuleError) {
+	var srcs []yara.Source
 	for _, r := range rulesRaw {
 		data, _ := json.Marshal(r)
 		var rd YaraRuleDef
 		if json.Unmarshal(data, &rd) == nil && rd.Content != "" {
-			rules = append(rules, rd)
+			name := rd.Name
+			if name == "" {
+				name = rd.ID
+			}
+			srcs = append(srcs, yara.Source{Namespace: name, Text: rd.Content})
 		}
 	}
+	rules, errs := yara.CompileSources(srcs)
+	var out []YaraRuleError
+	for _, e := range errs {
+		out = append(out, YaraRuleError{Rule: e.Namespace, Error: e.Err.Error()})
+	}
+	return rules, out
+}
 
-	// collect files
+// describeStrings renders matched strings as "$id@offset: data".
+func describeStrings(m yara.RuleMatch) []string {
+	out := make([]string, 0, len(m.Strings))
+	for _, s := range m.Strings {
+		out = append(out, s.ID+"@"+strconv.FormatInt(s.Offset, 10)+": "+printable(s.Data))
+	}
+	return out
+}
+
+func printable(b []byte) string {
+	q := strconv.QuoteToASCII(string(b))
+	return q[1 : len(q)-1]
+}
+
+func runYaraScan(path string, recursive bool, rulesRaw []any) (YaraScanResult, error) {
+	rules, ruleErrs := compileYaraRules(rulesRaw)
+	res := YaraScanResult{RuleErrors: ruleErrs}
+	if rules.Len() == 0 {
+		return res, fmt.Errorf("no YARA rule compiled")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), yaraTaskTimeout)
+	defer cancel()
+
 	var files []string
-	if recursive {
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		files = []string{path}
+	} else if recursive {
 		filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return nil
+			if err == nil && d.Type().IsRegular() {
+				files = append(files, p)
 			}
-			files = append(files, p)
 			return nil
 		})
-	} else {
-		entries, err := os.ReadDir(path)
-		if err == nil {
-			for _, e := range entries {
-				if !e.IsDir() {
-					files = append(files, filepath.Join(path, e.Name()))
-				}
-			}
-		} else {
-			// path might be a single file
-			if info, err := os.Stat(path); err == nil && !info.IsDir() {
-				files = append(files, path)
+	} else if entries, err := os.ReadDir(path); err == nil {
+		for _, e := range entries {
+			if e.Type().IsRegular() {
+				files = append(files, filepath.Join(path, e.Name()))
 			}
 		}
 	}
 
-	var matches []YaraMatch
 	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil || len(data) > 50*1024*1024 {
+		if ctx.Err() != nil {
+			res.Warnings = append(res.Warnings, "scan timed out; remaining files skipped")
+			break
+		}
+		sr, err := rules.ScanFile(ctx, file, yaraMaxFileSize)
+		if err != nil {
+			res.SkippedFiles++
 			continue
 		}
-		content := string(data)
-		for _, rule := range rules {
-			hit, matched := matchRule(rule, content)
-			if hit {
-				matches = append(matches, YaraMatch{
-					RuleName: rule.Name,
-					File:     file,
-					Strings:  matched,
-				})
-			}
+		res.ScannedFiles++
+		res.Warnings = append(res.Warnings, sr.Warnings...)
+		for _, m := range sr.Matches {
+			res.Matches = append(res.Matches, YaraMatch{
+				RuleName: m.Rule, Namespace: m.Namespace, Tags: m.Tags, File: file, Strings: describeStrings(m),
+			})
 		}
 	}
-
-	return YaraScanResult{ScannedFiles: len(files), Matches: matches}, nil
+	return res, nil
 }
 
-// matchRule implements a simplified YARA string matching engine.
-// Supports: text strings (with nocase), hex patterns, regex patterns.
-func matchRule(rule YaraRuleDef, content string) (bool, []string) {
-	strings_ := parseYaraStrings(rule.Content)
-	condition := parseYaraCondition(rule.Content)
+// ─── live response plugin ────────────────────────────────────────
 
-	var matched []string
-	results := map[string]bool{}
-	for _, s := range strings_ {
-		hit := false
-		switch s.typ {
-		case "text":
-			if s.nocase {
-				hit = strings.Contains(strings.ToLower(content), strings.ToLower(s.value))
-			} else {
-				hit = strings.Contains(content, s.value)
-			}
-		case "regex":
-			if re, err := regexp.Compile("(?i)" + s.value); err == nil {
-				hit = re.MatchString(content)
-			}
-		}
-		results[s.id] = hit
-		if hit {
-			matched = append(matched, s.id+": "+s.value)
+func pluginYara(ctx context.Context, args map[string]any, emit func(map[string]any) error) error {
+	root := argString(args, "path", os.TempDir())
+	recursive := argBool(args, "recursive", true)
+	rulesRaw, _ := args["rules"].([]any)
+	rules, ruleErrs := compileYaraRules(rulesRaw)
+	for _, e := range ruleErrs {
+		if err := emit(map[string]any{"Rule": e.Rule, "Error": e.Error}); err != nil {
+			return err
 		}
 	}
-
-	return evalCondition(condition, results), matched
-}
-
-type yaraString struct {
-	id     string
-	typ    string // text | regex
-	value  string
-	nocase bool
-}
-
-func parseYaraStrings(content string) []yaraString {
-	var result []yaraString
-	inStrings := false
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "strings:" {
-			inStrings = true
-			continue
-		}
-		if line == "condition:" {
-			inStrings = false
-			continue
-		}
-		if !inStrings || line == "" || strings.HasPrefix(line, "//") {
-			continue
-		}
-		// parse: $id = "value" [nocase]  OR  $id = /regex/  OR  $id = { hex }
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		id := strings.TrimSpace(parts[0])
-		rest := strings.TrimSpace(parts[1])
-		nocase := strings.Contains(rest, " nocase")
-		rest = strings.TrimSuffix(strings.TrimSpace(strings.Replace(rest, "nocase", "", 1)), "")
-
-		if strings.HasPrefix(rest, "\"") {
-			// text string
-			rest = strings.Trim(rest, "\"")
-			result = append(result, yaraString{id: id, typ: "text", value: rest, nocase: nocase})
-		} else if strings.HasPrefix(rest, "/") {
-			// regex
-			rest = strings.Trim(rest, "/")
-			result = append(result, yaraString{id: id, typ: "regex", value: rest})
-		}
-		// hex patterns skipped for simplicity
+	if rules.Len() == 0 {
+		return fmt.Errorf("no YARA rules supplied")
 	}
-	return result
-}
-
-func parseYaraCondition(content string) string {
-	inCondition := false
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "condition:" {
-			inCondition = true
-			continue
+	scan := func(p string) error {
+		res, err := rules.ScanFile(ctx, p, yaraMaxFileSize)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return nil
 		}
-		if inCondition && line != "" && line != "}" {
-			return line
+		for _, m := range res.Matches {
+			info, _ := os.Stat(p)
+			var size int64
+			if info != nil {
+				size = info.Size()
+			}
+			if err := emit(map[string]any{
+				"Rule": m.Rule, "Namespace": m.Namespace, "Tags": m.Tags,
+				"File": p, "Size": size, "Strings": describeStrings(m),
+			}); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
-	return "any of them"
-}
-
-func evalCondition(condition string, results map[string]bool) bool {
-	cond := strings.ToLower(strings.TrimSpace(condition))
-	switch {
-	case cond == "any of them":
-		for _, v := range results {
-			if v {
-				return true
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != root && (!recursive || skipPseudoFS(root, p)) {
+				return fs.SkipDir
 			}
+			return nil
 		}
-		return false
-	case cond == "all of them":
-		for _, v := range results {
-			if !v {
-				return false
-			}
+		if !d.Type().IsRegular() {
+			return nil
 		}
-		return len(results) > 0
-	case strings.Contains(cond, " of them"):
-		count := 0
-		for _, v := range results {
-			if v {
-				count++
-			}
-		}
-		// parse N from "2 of them", "3 of them", etc.
-		var n int
-		if _, err := fmt.Sscanf(cond, "%d of them", &n); err == nil && n > 0 {
-			return count >= n
-		}
-		return count > 0
-	default:
-		// evaluate as "any of them" fallback
-		for _, v := range results {
-			if v {
-				return true
-			}
-		}
-		return false
-	}
+		return scan(p)
+	})
 }

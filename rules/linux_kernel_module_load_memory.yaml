@@ -1,0 +1,22 @@
+title: Kernel Module Loaded From Memory On Linux
+id: rule-linux-kernel-module-load-memory
+description: A kernel module was loaded with init_module from a memory buffer rather than from a file, by something other than the module tools. Rootkit droppers do this to avoid writing a .ko to disk.
+logsource:
+  product: linux
+  service: kernel_module
+detection:
+  selection:
+    event.action: kernel_module
+    module.action: load_memory
+  tools:
+    process.executable|endswith:
+      - /insmod
+      - /modprobe
+      - /kmod
+      - /busybox
+  condition: selection and not tools
+level: high
+tags:
+  - attack.persistence
+  - attack.defense_evasion
+  - attack.t1547.006

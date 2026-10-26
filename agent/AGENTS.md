@@ -1,6 +1,6 @@
 # AGENT (Go endpoint agent)
 
-**Linux-only.** No Windows/macOS build. Cross-compiled as static binary; `.deb`/`.rpm` packaging + systemd unit live in `agent/packaging/`.
+**Linux and Windows** (no macOS). Cross-compiled as a static binary (`CGO_ENABLED=0`, so no C libraries such as libyara); `.deb`/`.rpm` packaging + systemd unit live in `agent/packaging/`, the MSI in `agent/packaging/windows/`.
 
 ## STRUCTURE
 
@@ -18,9 +18,12 @@ agent/
 │   ├── hygiene/             # OS/patch/ports/disk snapshots
 │   ├── procexec/            # eBPF execve monitor (bpf/ has .c + vendored headers)
 │   ├── netwatch/            # eBPF connect/accept/bind/DNS + `ss` snapshot fallback
+│   ├── linsensor/           # eBPF file write/rename/delete, kernel modules, ptrace, privilege gain, memfd/fileless exec, exit
 │   ├── prevent/             # execution prevention: BPF LSM (path/dir/parent) + fanotify helper process (hash, fallback)
 │   ├── detect/              # local threshold engine: keeps blocking when the server is down
 │   ├── firewall/            # nftables gate: rule model, anti-lockout guard, engine
+│   ├── yara/                # pure-Go YARA engine (language, pe/elf/math/hash/time modules)
+│   ├── yarascan/            # on-access YARA scan of temp/download/web dirs with the server's rules
 │   └── task/                # live response: collectors, yara, firewall tasks
 └── packaging/               # build-deb.sh, build-rpm.sh, siem-agent.service, .spec
 ```
@@ -35,6 +38,7 @@ agent/
 | Glob rotation logic | `internal/tailer/tailer.go` `tailGlob` | first sight → seek EOF; new rotated file → read from start |
 | Rebuild BPF object | `internal/procexec/bpf/execve.bpf.c`, `internal/netwatch/bpf/netwatch.bpf.c` | clang target bpf; objects are `go:embed`'d, **build fails without them** |
 | Network telemetry | `internal/netwatch/netwatch.go` | connect/accept/bind/DNS → `linux_network_*`; needs tracefs + CAP_SYS_ADMIN |
+| Linux sensor | `internal/linsensor/` | one object, tracepoints only, sys_enter stashes / sys_exit reports successes; relative paths and the exe path are resolved in the kernel (`build_path`); `make bpf` builds it; e2e needs root (`LINSENSOR_E2E=1`, CI runs it under sudo) — see `docs/operations/linux-sensor.md` |
 | Execution prevention | `internal/prevent/` | rules from `/api/ingest/prevention-rules`; **fanotify must stay in the helper process** (`IsHelper`/`RunHelper` at the top of `main`): in-process it deadlocks exec against the agent's own vfork + GC; guard never blocks protected binaries — see `docs/operations/exec-prevention.md` |
 | Netwatch fallback | `internal/netwatch/fallback.go` | `ss -tunapH` every 10s when eBPF cannot attach |
 | Local detection engine | `internal/detect/detect.go` | sliding window + cooldown + block caps; emits `local_detection` |
@@ -48,7 +52,9 @@ agent/
 | Flow plugins | `internal/task/plugins.go` | registry must match `PLUGINS` in `server-api/app/services/flow_artifacts.py`; plugins emit rows and must check ctx; glob/hash/yara never enter `/proc` `/sys` `/dev` unless the root is inside them (`/proc/kmsg` reads block forever) |
 | Legacy task collectors | `internal/task/collectors.go`, `runner.go` | fixed task types via heartbeat (isolate/block-IP still use this path) |
 | Windows firewall | `internal/firewall/netsh.go`, `internal/task/isolation_windows.go` | engine backend `netsh` (auto on Windows; `SIEM-FW-<id>-in/-out` rules, swept on expiry since Windows rules never time out) carries local detection blocks, server-synced rules and `block_ip` when `firewall.enabled`; isolation stays direct `netsh` (`SIEM-Isolate-*`, both directions) |
-| YARA scans | `internal/task/yara.go` | |
+| YARA scans (on demand) | `internal/task/yara.go` | `yara_scan` task + `yara` flow plugin; each rule source compiles in its own namespace, a broken one is reported in `rule_errors`, the rest still scan |
+| YARA engine | `internal/yara/` | checked against libyara 4.5 by `testdata/differential` (`gen_expected.py` regenerates `expected.json`); unsupported features are compile errors |
+| On-access YARA | `internal/yarascan/` | heartbeat `yara_rules_hash` → `POST /api/ingest/yara-rules`; matches are `yara_match` lines (`decoders/yara_match.yaml`, `rules/yara_match_*.yaml`) |
 
 ## CONVENTIONS
 
@@ -68,6 +74,7 @@ agent/
 - **Undelivered entries are spilled to disk** and replayed both at boot and when a send succeeds after a failure; without the reconnect replay they stay stranded until restart.
 - **Config mutation is write-back**: after successful enrollment the agent rewrites `config.yaml`; log sources/FIM paths are then server-driven, not config-driven.
 - **Buffer contract**: `Pop()` returns `(entry, ok)`; sender must re-`Push` on 5xx.
+- **YARA behaviour follows libyara 4.5, quirks included**: regex matches stop at 1024 bytes, an undefined operand makes `and`/`or` false, a string only used as `$a at <literal>` is only recorded at that offset. Change semantics only with a differential case that shows libyara agrees.
 - Module path is `github.com/siem-platform/agent`; deps are deliberately minimal (`cilium/ebpf`, `fsnotify`, `yaml.v3`). Firewall shells out to `nft`, no netlink library.
 
 ## ANTI-PATTERNS

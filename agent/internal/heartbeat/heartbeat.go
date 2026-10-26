@@ -174,6 +174,9 @@ type HeartbeatResponse struct {
 	EvidenceProtocols []int `json:"evidence_protocols"`
 	// >0: the server takes this many events per POST /api/ingest/v2/logs.
 	EvidenceBatchMax int `json:"evidence_batch_max"`
+	// Version of the enabled YARA rule set ("" when there is none); the
+	// rules themselves are fetched from /api/ingest/yara-rules on change.
+	YaraRulesHash string `json:"yara_rules_hash"`
 }
 
 var (

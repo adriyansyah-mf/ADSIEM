@@ -1,0 +1,23 @@
+# A process started from a memfd or a deleted file (no executable on
+# disk), from agent/internal/linsensor. Image is the kernel's name for it
+# (/memfd:<name>, or the deleted path); ExecPath is what exec was given.
+name: linux_fileless_exec
+log_type: linux_fileless_exec
+type: kv
+priority: 10
+enabled: true
+fields:
+  Image: Image
+  ExecPath: ExecPath
+  ParentImage: ParentImage
+  process.executable: Image
+  process.command_line: ExecPath
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  process.parent.executable: ParentImage
+  user.id: User
+  file.links: Links
+static_fields:
+  event.category: process
+  event.action: fileless_exec

@@ -22,12 +22,14 @@ import (
 	"github.com/siem-platform/agent/internal/firewall"
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
+	"github.com/siem-platform/agent/internal/linsensor"
 	"github.com/siem-platform/agent/internal/netwatch"
 	"github.com/siem-platform/agent/internal/prevent"
 	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/winsensor"
+	"github.com/siem-platform/agent/internal/yarascan"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=x.y.z"
@@ -275,6 +277,19 @@ func run(configPath string, stop <-chan struct{}) {
 		stopProducers = append(stopProducers, procMon.Stop)
 	}
 
+	// File, kernel module, ptrace, privilege, memfd/fileless and exit
+	// telemetry (Linux eBPF; best-effort like procexec)
+	if runtime.GOOS == "linux" && !cfg.LinuxSensor.Disabled {
+		if sensor, err := linsensor.Start(linsensor.Options{
+			Push:     func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			Disabled: cfg.LinuxSensor.DisabledEvents,
+		}); err != nil {
+			slog.Warn("linux sensor unavailable, continuing without it", "err", err)
+		} else {
+			stopProducers = append(stopProducers, sensor.Stop)
+		}
+	}
+
 	// Network syscall telemetry (connect/accept/bind/DNS) with an `ss` snapshot
 	// fallback when eBPF is unavailable.
 	if cfg.Netwatch.Enabled {
@@ -303,11 +318,27 @@ func run(configPath string, stop <-chan struct{}) {
 		}
 	}
 
+	// On-access YARA scanning of risky directories with the server's rules
+	yaraScanner := yarascan.New(yarascan.Options{
+		Roots:       cfg.Yara.WatchPaths,
+		MaxFileSize: cfg.Yara.MaxFileSizeMB << 20,
+		Push:        func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+	})
+	go yaraScanner.SyncLoop(flowCtx, c)
+	if !cfg.Yara.Disabled {
+		go func() {
+			if err := yaraScanner.Run(flowCtx); err != nil {
+				slog.Warn("yara on-access scanning unavailable", "err", err)
+			}
+		}()
+	}
+
 	// heartbeat loop — drives log source + FIM path updates + task dispatch
 	go heartbeat.Loop(cfg, buf, c,
 		func(resp heartbeat.HeartbeatResponse) {
 			mgr.Update(resp.LogSources)
 			fimWatcher.UpdatePaths(resp.FimPaths)
+			yaraScanner.Want(resp.YaraRulesHash)
 			fwEngine.RefreshGuard(cfg.Server.URL)
 
 			if len(resp.Firewall) > 0 || fwEngine.BlockedEntries() > 0 {
