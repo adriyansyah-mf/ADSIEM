@@ -1,0 +1,16 @@
+title: SSH Authorized Keys Modified On Linux
+id: rule-linux-ssh-authorized-keys-write
+description: A process wrote to or replaced an authorized_keys file, which grants SSH access to whoever holds the matching key.
+logsource:
+  product: linux
+  category: file_event
+detection:
+  selection:
+    TargetFilename|endswith:
+      - /.ssh/authorized_keys
+      - /.ssh/authorized_keys2
+  condition: selection
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1098.004

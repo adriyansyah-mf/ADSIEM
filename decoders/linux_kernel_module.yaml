@@ -1,0 +1,22 @@
+# Kernel module load (finit_module / init_module) and unload, from
+# agent/internal/linsensor; only successful calls are reported.
+name: linux_kernel_module
+log_type: linux_kernel_module
+type: kv
+priority: 10
+enabled: true
+fields:
+  module.action: action
+  module.name: Module
+  module.params: Params
+  module.size: Size
+  Image: Image
+  process.executable: Image
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  user.id: User
+  user.effective.id: EUID
+static_fields:
+  event.category: driver
+  event.action: kernel_module
