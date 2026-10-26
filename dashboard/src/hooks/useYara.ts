@@ -52,6 +52,15 @@ export function useYaraScan() {
   })
 }
 
+export function useYaraMemoryScan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: { agent_id: string; pid: number; rule_ids?: string[] }) =>
+      api.post('/api/yara-rules/scan-memory', data).then(r => r.data as AgentTask),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+  })
+}
+
 export function useSeedBuiltinRules() {
   const qc = useQueryClient()
   return useMutation({

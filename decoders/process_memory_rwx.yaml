@@ -1,0 +1,20 @@
+# Writable and executable memory that no file backs, found by the agent's
+# periodic sweep (agent/internal/memscan): injected shellcode, reflective
+# loaders, unpacked payloads, and JIT compilers. Reported once per region.
+name: process_memory_rwx
+log_type: process_memory_rwx
+type: kv
+priority: 10
+enabled: true
+fields:
+  Image: Image
+  process.executable: Image
+  process.pid: PID
+  memory.address: Address
+  memory.size: Size
+  memory.permissions: Perms
+  memory.kind: Kind
+  memory.path: Path
+static_fields:
+  event.category: process
+  event.action: memory_rwx

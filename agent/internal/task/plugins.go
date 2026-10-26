@@ -42,6 +42,8 @@ var Plugins = map[string]Plugin{
 	"dmesg":       pluginDmesg,
 	"open_files":  pluginOpenFiles,
 	"yara":        pluginYara,
+	"memyara":     pluginMemYara,
+	"memrwx":      pluginMemRWX,
 	// operator-approved commands only, never in an artifact (plugins_exec.go)
 	"exec": pluginExec,
 	// Windows-only (plugins_windows*.go); elsewhere they say so
@@ -582,4 +584,3 @@ func pluginOpenFiles(ctx context.Context, args map[string]any, emit func(map[str
 	}
 	return nil
 }
-

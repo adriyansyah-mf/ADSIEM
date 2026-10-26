@@ -1,0 +1,11 @@
+name: Windows.Memory.RWX
+description: Private memory that is writable and executable (PAGE_EXECUTE_READWRITE), in one process or every process (Pid 0). Injected shellcode and reflective loaders allocate it; JIT compilers (.NET, browsers, node) also do.
+parameters:
+  - name: Pid
+    type: int
+    default: 0
+sources:
+  - name: Regions
+    plugin: memrwx
+    args:
+      pid: "{{Pid}}"

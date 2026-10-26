@@ -37,6 +37,7 @@ ARTIFACT_DIR = Path(__file__).resolve().parent.parent / "artifacts"
 PLUGINS = {
     "info", "pslist", "netstat", "users", "glob", "hash", "read_file",
     "persistence", "dmesg", "open_files", "yara",
+    "memyara", "memrwx",  # process memory (agent/internal/task/memory.go)
     "eventlog", "services", "programs",  # Windows agents only
 }
 # Plugins no saved artifact may use: exec runs an operator-approved command
@@ -57,6 +58,9 @@ PLUGIN_COLUMNS = {
     "dmesg": ["Line"],
     "open_files": ["Pid", "Process", "Fd", "Path"],
     "yara": ["Rule", "File", "Size", "Strings"],
+    "memyara": ["Pid", "Process", "Rule", "Namespace", "Address", "RegionStart", "RegionPerms",
+                "RegionKind", "RegionPath", "Strings"],
+    "memrwx": ["Pid", "Process", "Start", "End", "Size", "Perms", "Kind", "Path"],
     # eventlog rows also carry each event's EventData fields (after these)
     "eventlog": ["TimeCreated", "EventID", "Channel", "Provider", "Computer", "RecordID", "Level"],
     "services": ["Name", "DisplayName", "State", "StartMode", "Account", "Pid", "PathName", "Description"],
@@ -278,7 +282,7 @@ def compile_request(art: ArtifactDef, flow_id: str, params: dict, timeout: int, 
     sources = []
     for src in art.sources:
         args = substitute(src.args, params)
-        if src.plugin == "yara" and "rules" not in args:
+        if src.plugin in ("yara", "memyara") and "rules" not in args:
             args["rules"] = yara_rules or []
         sources.append({"name": src.name, "plugin": src.plugin, "args": args})
     return {"id": flow_id, "artifact": art.name, "timeout": timeout, "max_rows": max_rows, "sources": sources}

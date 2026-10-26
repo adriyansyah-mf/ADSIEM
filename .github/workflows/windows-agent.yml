@@ -38,6 +38,13 @@ jobs:
         shell: pwsh
         run: ./tests/windows/evidence-resume.ps1
 
+      # VirtualQueryEx / ReadProcessMemory on a real Windows process: YARA
+      # finds a marker in the test's own memory, a PAGE_EXECUTE_READWRITE
+      # allocation is reported, the memyara plugin and memory_scan task run.
+      - name: Process memory scan
+        shell: pwsh
+        run: go test ./agent/internal/memscan ./agent/internal/task -run 'Mem|Scan|Suspicious|Sweep|Limits|Region' -count=1 -v
+
   msi-smoke:
     runs-on: windows-latest
     steps:

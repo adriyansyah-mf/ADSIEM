@@ -110,6 +110,10 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 		recursive, _ := task.Params["recursive"].(bool)
 		rulesRaw, _ := task.Params["rules"].([]any)
 		return runYaraScan(path, recursive, rulesRaw)
+	case "memory_scan":
+		pid, _ := task.Params["pid"].(float64) // 0: every process
+		rulesRaw, _ := task.Params["rules"].([]any)
+		return runMemoryScan(int(pid), rulesRaw)
 
 	case "isolate_host":
 		return r.handleIsolateHost()

@@ -104,6 +104,11 @@ jobs:
         working-directory: agent
         run: sudo -E env "PATH=$PATH" RANSOM_E2E=1 go test -count=1 -run TestRansomwareEndToEnd -v ./internal/ransomguard/
 
+      # Reading another process's memory needs ptrace access (root).
+      - name: process memory scan end-to-end (root)
+        working-directory: agent
+        run: sudo -E env "PATH=$PATH" MEMSCAN_E2E=1 go test -count=1 -run TestScanOtherProcess -v ./internal/memscan/
+
       - name: Windows vet + build
         working-directory: agent
         env:

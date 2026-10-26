@@ -1,0 +1,11 @@
+name: Linux.Memory.RWX
+description: Writable and executable memory that no file backs, in one process or every process (Pid 0). Injected shellcode and unpacked payloads live there; JIT compilers (JVM, browsers, node) also create it.
+parameters:
+  - name: Pid
+    type: int
+    default: 0
+sources:
+  - name: Regions
+    plugin: memrwx
+    args:
+      pid: "{{Pid}}"

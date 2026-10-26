@@ -1,0 +1,41 @@
+title: Writable And Executable Memory In Process
+id: rule-process-memory-rwx
+description: A process holds memory that is writable and executable and not backed by a file, the shape of injected shellcode or an in-memory payload. JIT runtimes do this legitimately and are excluded; scan the process with Linux/Windows.Memory.Yara to see what is there.
+logsource:
+  product: process
+  service: memory_rwx
+detection:
+  selection:
+    event.action: memory_rwx
+  jit:
+    process.executable|endswith:
+      - /java
+      - /node
+      - /chrome
+      - /chromium
+      - /firefox
+      - /firefox-esr
+      - /msedge
+      - /code
+      - /electron
+      - /dotnet
+      - /mono
+      - /qemu-system-x86_64
+      - /luajit
+      - \java.exe
+      - \javaw.exe
+      - \node.exe
+      - \chrome.exe
+      - \msedge.exe
+      - \msedgewebview2.exe
+      - \firefox.exe
+      - \Code.exe
+      - \dotnet.exe
+      - \Teams.exe
+      - \ms-teams.exe
+      - \slack.exe
+  condition: selection and not jit
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1055

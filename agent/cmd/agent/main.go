@@ -23,6 +23,7 @@ import (
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
 	"github.com/siem-platform/agent/internal/linsensor"
+	"github.com/siem-platform/agent/internal/memscan"
 	"github.com/siem-platform/agent/internal/netwatch"
 	"github.com/siem-platform/agent/internal/prevent"
 	"github.com/siem-platform/agent/internal/procexec"
@@ -337,6 +338,15 @@ func run(configPath string, stop <-chan struct{}) {
 			stopProducers = append(stopProducers, sensor.Stop)
 			slog.Info("ETW sensor running", "telemetry", "process, network, dns")
 		}
+	}
+
+	// Writable+executable private memory (injected code) in every process
+	if !cfg.MemorySweep.Disabled && (runtime.GOOS == "linux" || runtime.GOOS == "windows") {
+		sweeper := &memscan.Sweeper{
+			Push:     func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			Interval: time.Duration(cfg.MemorySweep.IntervalMinutes) * time.Minute,
+		}
+		go sweeper.Run(flowCtx)
 	}
 
 	// On-access YARA scanning of risky directories with the server's rules
