@@ -172,6 +172,67 @@ def content_hash(spec: EvidenceSpec) -> str:
     return hashlib.sha256(body.encode()).hexdigest()
 
 
+_SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _file_entities(rows: list) -> dict:
+    """Concrete files (hash, glob+hash, filefeatures rows) and YARA matches a flow observed."""
+    files, matches = [], []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        sha, path = str(r.get("SHA256") or ""), r.get("Path")
+        if path and _SHA256.match(sha) and not r.get("Truncated"):  # read_file hashes only what it returned
+            files.append({"path": str(path), "sha256": sha.lower(), "size": r.get("Size"),
+                          **({"type": r["Type"]} if r.get("Type") else {})})
+        if r.get("Rule") and r.get("File"):
+            matches.append({"file": str(r["File"]), "rule": str(r["Rule"])})
+    return {k: v[:20] for k, v in (("files", files), ("yara_matches", matches)) if v}
+
+
+def _same_path(a: str, b: str) -> bool:
+    a, b = a.replace("\\", "/"), b.replace("\\", "/")
+    return a.lower() == b.lower() if ":" in a[:3] else a == b  # Windows paths ignore case
+
+
+def malware_candidates(evidence: list[InvestigationEvidence], hypotheses: list[InvestigationHypothesis]) -> list[dict]:
+    """Files this investigation observed on a host (path, SHA-256, size), with
+    what supports a malware hypothesis about each (spec section 10.1). A file
+    with no support is listed but not eligible: a bare hash proves nothing."""
+    files: dict[str, dict] = {}
+    for ev in evidence:
+        hosts = (ev.entities or {}).get("hosts") or []
+        for f in (ev.entities or {}).get("files") or []:
+            if not hosts:
+                continue
+            c = files.setdefault(f["sha256"], {"sha256": f["sha256"], "path": f["path"], "host": hosts[0],
+                                               "size": f.get("size"), "type": None, "evidence_id": str(ev.id),
+                                               "evidence_ids": [], "support": []})
+            c["evidence_ids"].append(str(ev.id))
+            c["type"] = f.get("type") or c["type"]
+            c["size"] = f.get("size") if f.get("size") is not None else c["size"]
+    for c in files.values():
+        support, own = c["support"], set(c["evidence_ids"])
+        for ev in evidence:
+            ent = ev.entities or {}
+            if ev.evidence_type == "ti_result" and c["sha256"] in ent.get("hashes", []) and ent.get("status") == "found":
+                support.append({"kind": "reputation", "evidence_id": str(ev.id), "detail": ev.title})
+            for m in ent.get("yara_matches") or []:
+                if _same_path(m["file"], c["path"]):
+                    support.append({"kind": "yara", "evidence_id": str(ev.id), "detail": f"YARA rule {m['rule']}"})
+            if ev.evidence_type in ("alert", "event", "command_result") and str(ev.id) not in own:
+                text = (ev.summary or "").lower()
+                if c["sha256"] in text or c["path"].lower() in text:
+                    support.append({"kind": "mentioned", "evidence_id": str(ev.id), "detail": ev.title})
+            if str(ev.id) in own and ev.pinned:
+                support.append({"kind": "analyst", "evidence_id": str(ev.id), "detail": "pinned by an analyst"})
+        for h in hypotheses:
+            if h.state == "supported" and own & set(h.supporting_evidence_ids or []):
+                support.append({"kind": "hypothesis", "evidence_id": c["evidence_id"], "detail": h.statement[:200]})
+        c["eligible"] = bool(support) and c["size"] is not None
+    return sorted(files.values(), key=lambda c: (not c["eligible"], c["path"]))
+
+
 def is_success(result: Any) -> bool:
     """A tool result that is not an error. Flow summaries always carry an `error` key, None when it ran fine."""
     return isinstance(result, dict) and not result.get("error")
@@ -187,12 +248,14 @@ def evidence_specs(tool: str, args: dict, result: Any) -> list[EvidenceSpec]:
         out = []
         for i, src in enumerate(result.get("sources") or []):
             n = src.get("total_rows", 0)
+            entities: dict = {"hosts": [host]} if host else {}
+            entities.update(_file_entities(src.get("rows") or []))
             out.append(EvidenceSpec(
                 "flow_row", "flow", f"{flow_id}:{src.get('source')}",
                 _clip(f"{artifact} · {src.get('source')} on {host}", 300),
                 f"{n} rows (flow {result.get('status')})" + (f"; first: {_clip(src.get('rows', [])[:3], 1200)}" if n else ""),
                 {"flow": flow_id, "source": src.get("source"), "total": n, "rows": src.get("rows", [])[:20]},
-                {"hosts": [host]} if host else {}, attach=("sources", i)))
+                entities, attach=("sources", i)))
         return out
     if tool == "get_flow_rows":
         key = f"{result.get('flow_id')}:{result.get('source')}:{args.get('contains', '')}:{result.get('offset', 0)}"
@@ -212,9 +275,10 @@ def evidence_specs(tool: str, args: dict, result: Any) -> list[EvidenceSpec]:
     if tool == "lookup_malwarebazaar":
         if result.get("status") in ("disabled", "unconfigured"):
             return []
-        h = str(result.get("queried_hash") or "")
+        h = str(result.get("queried_hash") or "").lower()
         return [EvidenceSpec("ti_result", "malwarebazaar", h, _clip(f"MalwareBazaar {result.get('status')} for {h[:16]}…", 300),
-                             _clip({k: v for k, v in result.items() if k != "raw"}, 1500), result, {"hashes": [h]})]
+                             _clip({k: v for k, v in result.items() if k != "raw"}, 1500), result,
+                             {"hashes": [h], "status": result.get("status")})]
     if tool in ("search_knowledge", "search_sop"):
         notes = [n for n in result.get("notes") or [] if isinstance(n, dict) and n.get("id")]
         ids = [str(n["id"]) for n in notes]

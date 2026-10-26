@@ -541,6 +541,43 @@ class YaraRule(Base):
     content     = Column(Text, nullable=False)
     is_enabled  = Column(Boolean, nullable=False, default=True)
     created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    # "ai_draft": saved from a YARA draft (services/yara_drafting.py); stays disabled until validated and tested
+    origin      = Column(String(20), nullable=False, default="manual")
+    draft_id    = Column(UUID(as_uuid=True))
+
+class YaraDraft(Base):
+    """A YARA rule the AI drafted from one suspicious file's features (never the
+    file itself), for an analyst to review. collecting → drafting → draft,
+    or failed / dismissed. Saving it creates a disabled yara_rules row."""
+    __tablename__ = "yara_drafts"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id         = Column(String(100), nullable=False, default="default")
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    evidence_id      = Column(UUID(as_uuid=True))                       # the file observation it started from
+    host             = Column(String(255))
+    agent_id         = Column(UUID(as_uuid=True))
+    path             = Column(Text)
+    sha256           = Column(String(64), nullable=False, index=True)
+    status           = Column(String(20), nullable=False, default="collecting")
+    flow_id          = Column(UUID(as_uuid=True))
+    features         = Column(JSONB)                                   # bounded, credentials redacted
+    support          = Column(JSONB, nullable=False, default=list)      # findings that made the file eligible
+    rule_name        = Column(String(128))
+    rule_text        = Column(Text)
+    rationale        = Column(JSONB, nullable=False, default=list)      # [{id, value, why}]
+    limitations      = Column(JSONB, nullable=False, default=list)
+    false_positives  = Column(JSONB, nullable=False, default=list)
+    quality          = Column(JSONB, nullable=False, default=dict)      # {"blocking": [...], "warnings": [...]}
+    confidence       = Column(Integer)
+    mitre            = Column(JSONB, nullable=False, default=list)
+    tags             = Column(JSONB, nullable=False, default=list)
+    error            = Column(Text)
+    yara_rule_id     = Column(UUID(as_uuid=True))
+    created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+    updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 class EnrollmentToken(Base):
     __tablename__ = "enrollment_tokens"

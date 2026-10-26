@@ -14,6 +14,7 @@ import app.models.models  # noqa: F401 — ensure all models are registered befo
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
 from app.api.routes.cases import router as cases_router
 from app.api.routes.investigations import router as investigations_router
+from app.api.routes.yara_drafts import router as yara_drafts_router
 from app.api.routes.evidence import router as evidence_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.hygiene import router as hygiene_router
@@ -75,6 +76,7 @@ _DEFAULT_SETTINGS = [
     ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),
     ("malwarebazaar_enabled", "false",                  False, "Allow AI case investigations to send observed file hashes to MalwareBazaar (true/false). Metadata only: no file uploads or sample downloads"),
     ("malwarebazaar_api_key", "",                       True,  "MalwareBazaar Auth-Key from auth.abuse.ch; requires malwarebazaar_enabled=true. Check abuse.ch fair-use/commercial terms before enabling"),
+    ("yara_ai_generation", "draft_only",                False, "AI YARA drafting from investigation evidence: off, draft_only (collect file features and save disabled drafts), or full (adds validation, test scans and activation; falls back to draft_only until the full-YARA capability exists)"),
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
     ("otx_api_key",        "",                          True,  "AlienVault OTX API key — free (otx.alienvault.com)"),
     ("greynoise_api_key",  "",                          True,  "GreyNoise API key — optional, community endpoint used if empty"),
@@ -347,6 +349,8 @@ async def _migrate_investigation_ledger_columns() -> None:
             await conn.execute(text(f"ALTER TABLE case_investigations ADD COLUMN IF NOT EXISTS {col}"))
         for col in ("created_by_investigation_id UUID", "promoted_at TIMESTAMPTZ", "promoted_by UUID"):
             await conn.execute(text(f"ALTER TABLE flow_artifacts ADD COLUMN IF NOT EXISTS {col}"))
+        for col in ("origin VARCHAR(20) NOT NULL DEFAULT 'manual'", "draft_id UUID"):
+            await conn.execute(text(f"ALTER TABLE yara_rules ADD COLUMN IF NOT EXISTS {col}"))
 
 async def _migrate_agent_integrity() -> None:
     from sqlalchemy import text
@@ -502,7 +506,7 @@ for router in [
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
-    investigations_router, knowledge_router, evidence_router,
+    investigations_router, yara_drafts_router, knowledge_router, evidence_router,
     prevention_router, prevention_agent_router,
 ]:
     app.include_router(router)

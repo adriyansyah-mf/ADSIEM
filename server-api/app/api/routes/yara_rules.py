@@ -76,6 +76,16 @@ async def create_rule(
     return r
 
 
+def _refuse_unvalidated(r: YaraRule) -> None:
+    """Enabling a rule deploys it to every agent's on-access scanner. An AI-drafted
+    rule may not get there without validation and a test scan (spec section 10.5),
+    which need the full-YARA capability; until then it stays disabled."""
+    if r.origin == "ai_draft":
+        raise HTTPException(409, "This rule was drafted by AI from case evidence. It can be enabled only after "
+                                 "validation and a test scan, which are not available yet (yara_ai_generation "
+                                 "runs in draft_only mode); it stays disabled.")
+
+
 @router.put("/{rule_id}", response_model=YaraRuleOut)
 async def update_rule(
     rule_id: UUID,
@@ -86,7 +96,7 @@ async def update_rule(
     r = (await db.execute(select(YaraRule).where(YaraRule.id == rule_id))).scalar_one_or_none()
     if not r:
         raise HTTPException(404, "Rule not found")
-    for k, v in body.model_dump().items():
+    for k, v in body.model_dump().items():  # name, description, content: enabling is the toggle's job
         setattr(r, k, v)
     await db.commit()
     yara_ruleset.invalidate()
@@ -103,6 +113,8 @@ async def toggle_rule(
     r = (await db.execute(select(YaraRule).where(YaraRule.id == rule_id))).scalar_one_or_none()
     if not r:
         raise HTTPException(404, "Rule not found")
+    if not r.is_enabled:
+        _refuse_unvalidated(r)
     await db.execute(update(YaraRule).where(YaraRule.id == rule_id).values(is_enabled=not r.is_enabled))
     await db.commit()
     yara_ruleset.invalidate()

@@ -115,6 +115,7 @@ PLUGIN_REFERENCE = """Plugins (all read-only; the agent's OS decides which work)
 - hash: args globs, max_results. Path, Size, MD5, SHA1, SHA256.
 - read_file: args path, max_bytes. Path, Size, Truncated, SHA256, Encoding, Data. (Credential stores are refused.)
 - yara: args path, recursive. Scans with the platform's enabled YARA rules. Rule, File, Size, Strings.
+- filefeatures: args path, max_strings. One file described without collecting it: SHA256, Type, Entropy, Imports, Exports, Sections, PackerIndicators, PDB, Strings (credentials redacted). Use it on a suspicious file instead of read_file.
 - dmesg (Linux), open_files (Linux): kernel ring buffer; open file descriptors.
 - eventlog (Windows): args channel (e.g. Security, System, Microsoft-Windows-Sysmon/Operational), event_ids ("4624,4625"), hours (0 = all), limit. Columns TimeCreated, EventID, Channel, Provider, Computer plus the event's EventData fields (e.g. TargetUserName, IpAddress, LogonType, Image, CommandLine).
 - services (Windows): Name, DisplayName, State, StartMode, Account, Pid, PathName.
@@ -422,8 +423,8 @@ async def run_artifact(ctx: Ctx, artifact: str, host: str, params: dict | None =
             return {"error": f"bad parameters: {exc}"}
         for src in probe["sources"]:
             path = str((src.get("args") or {}).get("path", ""))
-            if src["plugin"] == "read_file" and SENSITIVE_PATH.search(path):
-                await _step(ctx.inv_id, "refused", reason=f"read_file on a credential store: {path}")
+            if src["plugin"] in ("read_file", "filefeatures") and SENSITIVE_PATH.search(path):
+                await _step(ctx.inv_id, "refused", reason=f"{src['plugin']} on a credential store: {path}")
                 return {"error": f"refused: {path} holds credentials and is never read by the AI"}
         flow_id = uuid.uuid4()
         await _link_flow(db, ctx.current_action, flow_id)  # commits with the flow: a resumed run finds it

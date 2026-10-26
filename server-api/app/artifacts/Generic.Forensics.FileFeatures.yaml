@@ -1,0 +1,17 @@
+name: Generic.Forensics.FileFeatures
+description: >-
+  Describe one file for malware triage and YARA drafting without collecting it - hashes, type,
+  entropy, PE/ELF imports, exports and sections, packer hints, PDB paths and up to MaxStrings
+  telling strings with offsets. Credential-shaped strings are redacted on the host.
+parameters:
+  - name: Path
+    default: /tmp/suspicious
+  - name: MaxStrings
+    type: int
+    default: 300
+sources:
+  - name: Features
+    plugin: filefeatures
+    args:
+      path: "{{Path}}"
+      max_strings: "{{MaxStrings}}"

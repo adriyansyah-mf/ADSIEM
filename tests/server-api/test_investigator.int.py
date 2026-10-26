@@ -274,6 +274,14 @@ async def _fake_agent(stop: asyncio.Event):
                             {"Stream": "stdout", "Line": 1, "Text": f"ran: {line}"},
                             {"Stream": "exit", "Line": 0, "Text": "exit code 0 after 3 ms", "ExitCode": 0},
                         ]))
+                    if src["plugin"] == "filefeatures":
+                        db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[{
+                            "Path": src["args"]["path"], "Size": 812, "SHA256": "c" * 64, "Type": "ELF",
+                            "Entropy": 7.4, "Imports": ["connect", "execve"], "PackerIndicators": ["UPX! marker"],
+                            "Strings": [{"Offset": 64, "Encoding": "ascii", "Value": "203.0.113.9:443"},
+                                        {"Offset": 96, "Encoding": "ascii", "Value": "ghp_" + "z" * 40},
+                                        {"Offset": 140, "Encoding": "ascii", "Value": "kworkerd -c %s"}],
+                            "Redacted": 0}]))
                     if src["plugin"] == "pslist":
                         db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[
                             {"Pid": 4242, "Name": "kworkerd", "Exe": "/tmp/.x/kworkerd", "CommandLine": "kworkerd -c 203.0.113.9:443"},
@@ -1194,3 +1202,136 @@ def test_commands_are_off_by_default(env, monkeypatch):
     assert inv.status == "finished"
     assert "run_command" not in model.tool_names
     assert "cannot run commands" in model.seen[0][0].content
+
+
+# ─── YARA drafting (spec Phase 3) ────────────────────────────────
+
+def test_a_supported_malware_file_gets_a_disabled_yara_draft(env, monkeypatch):
+    from fastapi import BackgroundTasks, HTTPException
+    from sqlalchemy import select
+
+    from app.api.routes import yara_drafts as routes
+    from app.api.routes import yara_rules
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Flow, YaraDraft, YaraRule
+    from app.services import investigation_ledger as ledger
+    from app.services import investigator
+
+    sha = "c" * 64
+    host = f"mal-{uuid.uuid4().hex[:8]}"
+    user_id, agent_id, case_id = _seed(host)
+    inv_id = _new_run(user_id, case_id, status="finished")
+    user = SimpleNamespace(**{**_analyst(user_id).__dict__,
+                              "role": SimpleNamespace(name="superadmin", permissions=[])})
+    proposal = {"label": "kworkerd miner", "confidence": 80, "mitre": ["T1496"], "strings": [
+        {"id": "$c2", "kind": "text", "value": "203.0.113.9:443", "why": "C2 endpoint"},
+        {"id": "$cmd", "kind": "text", "value": "kworkerd -c %s", "why": "argument format"}],
+        "condition": "uint32(0) == 0x464C457F and filesize < 5MB and all of them",
+        "limitations": ["recompiled builds"], "false_positives": ["none known"]}
+    seen_by_model = []
+
+    def model_reply(turn, results, messages):
+        seen_by_model.append(messages[-1].content)
+        return json.dumps(proposal)
+    monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: Scripted(model_reply))
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            files = [{"path": "/tmp/.x/kworkerd", "sha256": sha, "size": 812},
+                     {"path": "/usr/bin/ls", "sha256": "d" * 64, "size": 9}]
+            await ledger.record_evidence(db, investigation_id=inv_id, group_id="blue", action_id=None,
+                                         spec=ledger.EvidenceSpec("flow_row", "flow", "f:Hashes", "hashes", "2 rows",
+                                                                  {"f": 1}, {"hosts": [host], "files": files}))
+            await ledger.record_evidence(db, investigation_id=inv_id, group_id="blue", action_id=None,
+                                         spec=ledger.EvidenceSpec("ti_result", "malwarebazaar", sha, "MalwareBazaar found",
+                                                                  "found CoinMiner", {"h": sha},
+                                                                  {"hashes": [sha], "status": "found"}))
+            await db.commit()
+
+        async def call(fn, *args, **kw):
+            async with AsyncSessionLocal() as db:
+                return await fn(*args, db=db, **kw)
+
+        async def refused(fn, *args, **kw):
+            try:
+                await call(fn, *args, **kw)
+            except HTTPException as exc:
+                return exc
+            raise AssertionError("expected a refusal")
+
+        listing = await call(routes.malware_candidates, case_id, inv_id, _=user, group_filter="blue")
+        assert listing["mode"] == "draft_only"
+        eligible = {c["path"]: c["eligible"] for c in listing["candidates"]}
+        assert eligible == {"/tmp/.x/kworkerd": True, "/usr/bin/ls": False}
+        bare = await refused(routes.request_draft, inv_id, routes.DraftRequest(sha256="d" * 64), BackgroundTasks(),
+                             user=user, group_filter="blue")
+        assert bare.status_code == 409 and "bare hash" in bare.detail
+
+        stop = asyncio.Event()
+        agent = asyncio.create_task(_fake_agent(stop))
+        draft = await call(routes.request_draft, inv_id, routes.DraftRequest(sha256=sha.upper()), BackgroundTasks(),
+                           user=user, group_filter="blue")
+        assert draft.status == "collecting" and draft.support[0]["kind"] == "reputation"
+        again = await refused(routes.request_draft, inv_id, routes.DraftRequest(sha256=sha), BackgroundTasks(),
+                              user=user, group_filter="blue")
+        assert again.status_code == 409
+
+        async def finished():
+            d = await call(routes.get_draft, draft.id, _=user, group_filter="blue")
+            return d if d.status in ("draft", "failed") else None
+        done = await _until(finished, 30)
+        stop.set()
+        await agent
+        assert done.status == "draft", done.error
+        assert done.rule_name == "AI_kworkerd_miner_cccccccc" and done.quality["blocking"] == []
+        assert 'sample_sha256 = "' + sha + '"' in done.rule_text and "all of them" in done.rule_text
+        assert [s["value"] for s in done.features["Strings"]] == [
+            "203.0.113.9:443", "[redacted: credential]", "kworkerd -c %s"]
+        assert "ghp_" not in seen_by_model[0]  # the token never reached the model
+        async with AsyncSessionLocal() as db:
+            flow = await db.get(Flow, done.flow_id)
+        assert flow.artifact == "Generic.Forensics.FileFeatures" and flow.params["Path"] == "/tmp/.x/kworkerd"
+
+        hash_only = 'import "hash"\nrule AI_x { condition: hash.sha256(0, filesize) == "' + sha + '" }\n'
+        edited = await call(routes.edit_draft, draft.id, routes.DraftEdit(rule_text=hash_only), BackgroundTasks(),
+                            user=user, group_filter="blue")
+        assert any("hash-based" in b for b in edited.quality["blocking"])
+        blocked = await refused(routes.save_draft_as_rule, draft.id, BackgroundTasks(), user=user, group_filter="blue")
+        assert blocked.status_code == 422
+        await call(routes.edit_draft, draft.id, routes.DraftEdit(rule_text=done.rule_text), BackgroundTasks(),
+                   user=user, group_filter="blue")
+        saved = await call(routes.save_draft_as_rule, draft.id, BackgroundTasks(), user=user, group_filter="blue")
+        async with AsyncSessionLocal() as db:
+            rule = await db.get(YaraRule, saved.yara_rule_id)
+            assert (rule.is_enabled, rule.origin, rule.draft_id) == (False, "ai_draft", draft.id)
+        enable = await refused(yara_rules.toggle_rule, rule.id, _=user)
+        assert enable.status_code == 409 and "stays disabled" in enable.detail
+
+        await call(routes.dismiss_candidate, inv_id, routes.DraftRequest(sha256="d" * 64), BackgroundTasks(),
+                   user=user, group_filter="blue")
+        listing = await call(routes.malware_candidates, case_id, inv_id, _=user, group_filter="blue")
+        assert {c["path"]: c["draft_status"] for c in listing["candidates"]} == {
+            "/tmp/.x/kworkerd": "draft", "/usr/bin/ls": "dismissed"}
+        async with AsyncSessionLocal() as db:
+            drafts = (await db.execute(select(YaraDraft).where(YaraDraft.investigation_id == inv_id))).scalars().all()
+        assert len(drafts) == 2
+    _run(go())
+
+    _set_setting("yara_ai_generation", "off")
+    try:
+        from fastapi import BackgroundTasks, HTTPException
+
+        from app.api.routes import yara_drafts as routes
+        from app.core.database import AsyncSessionLocal
+
+        async def off():
+            async with AsyncSessionLocal() as db:
+                try:
+                    await routes.request_draft(inv_id, routes.DraftRequest(sha256=sha), BackgroundTasks(), db=db,
+                                               user=user, group_filter="blue")
+                except HTTPException as exc:
+                    return exc
+        exc = _run(off())
+        assert exc.status_code == 409 and "turned off" in exc.detail
+    finally:
+        _set_setting("yara_ai_generation", "draft_only")

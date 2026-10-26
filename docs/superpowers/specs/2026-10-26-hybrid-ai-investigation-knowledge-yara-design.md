@@ -31,7 +31,8 @@ This document remains the umbrella design. The Knowledge Vault (section 9) and Y
   - Where the implementation settled a detail differently from revision 2, this text was updated: sections 5.3, 6.2, 6.5 and 6.6.
 - **Phase 1b: implemented** on the same branch: leases, scheduler adoption and reconciliation (section 6.6).
 - **Phase 2: implemented** on the same branch: the Knowledge Vault (section 9.8 lists how).
-- Phases 3 and 4: not started.
+- **Phase 3: implemented** on the same branch: file-feature collection and draft-only YARA (section 10.10 lists how).
+- Phase 4: not started. It needs the full-YARA items in the section 10.7 ownership table.
 
 ## 1. Summary
 
@@ -866,6 +867,63 @@ After activation:
 - False-positive feedback updates rule quality metrics.
 - The approved rationale becomes a reviewed Knowledge Vault detection note.
 - Future Investigate runs can retrieve that note and rule provenance.
+
+### 10.10 As implemented (Phase 3)
+
+**Collector:**
+- A new read-only agent plugin, `filefeatures` (`agent/internal/task/plugins_filefeatures.go`), and the built-in artifact `Generic.Forensics.FileFeatures`.
+- It uses Go's `debug/pe` and `debug/elf` with bounds-checked export parsing. It returns:
+  - hashes over the whole file (analysis covers the first 64 MB);
+  - type, entropy, machine, sections with entropy and flags, imports, exports and libraries;
+  - PE signature presence, PDB paths and packer indicators;
+  - up to 300 printable ASCII/UTF-16LE strings with offsets, ranked toward paths, URLs, commands and injection APIs.
+- Credential-shaped strings are redacted on the host and again on the server before anything reaches the model.
+- The credential-store path refusal that applied to `read_file` now also covers `filefeatures`.
+- Not collected:
+  - Authenticode verification (only signature presence is reported);
+  - fuzzy hashes;
+  - strings shared with related samples.
+
+**Eligibility (10.1):**
+- File observations (path, SHA-256, size, type) and YARA matches are recorded on flow evidence rows. Truncated `read_file` hashes are ignored.
+- A candidate needs host, path, SHA-256 and size, plus at least one of:
+  - a MalwareBazaar `found` result;
+  - a YARA match on that path;
+  - an alert, event or command output naming the hash or path;
+  - a supported hypothesis citing it;
+  - its evidence pinned by an analyst.
+- The file type is collected by the draft step itself, so it isn't required up front.
+
+**Drafting (10.3, 10.4):**
+- `POST /api/investigations/{id}/yara-drafts` requires live-response rights. It schedules the collector, waits up to 300 s, then asks the model for a JSON proposal.
+- `server-api/app/services/yara_drafting.py` writes the rule text itself:
+  - name `AI_<label>_<sha8>`;
+  - provenance meta: case, investigation, sample SHA-256, author, date, confidence, tags, MITRE;
+  - escaped strings and whitelisted modifiers;
+  - a condition checked against a conservative token set.
+- The model sees features, the case title and why the file is suspicious. It never sees the file.
+- `agent/internal/yara/ai_draft_test.go` compiles and runs that exact rule shape with the agents' engine.
+
+**Quality (10.6, the parts that need no compiler):**
+- Blocking:
+  - hash-based conditions;
+  - no strings;
+  - strings under 4 characters or bytes;
+  - all strings short or common;
+  - undefined string references;
+  - unsupported condition syntax;
+  - no condition.
+- Warnings: short or common strings, a single string firing the rule, no file-type guard, no filesize bound, regular expressions, more than 20 strings, and a file whose hash changed since it was observed.
+- Analysts edit the draft and the checks run again on the edited text.
+
+**Lifecycle:**
+- Draft states: `collecting → drafting → draft | failed`, plus `dismissed` for a candidate the analyst waved off.
+- Saving a draft without blocking problems creates a `yara_rules` row with `is_enabled = false` and `origin = 'ai_draft'`.
+- The YARA toggle refuses to enable such a rule until Phase 4 brings validation and test scans.
+- "Scan With Existing Rules" queues a read-only `*.Detection.Yara` analyst action for that path.
+- Draft tasks run in the requesting replica. One interrupted by a restart is shown as failed after 15 minutes, and the analyst asks again.
+
+**Setting:** `yara_ai_generation` (`off`, `draft_only` default, `full`). `full` falls back to `draft_only` with an explanation until the capability exists.
 
 ## 11. API Surface
 

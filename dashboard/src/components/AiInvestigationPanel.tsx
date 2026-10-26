@@ -11,6 +11,7 @@ import { useInvestigationControls, useInvestigationLedger } from '@/hooks/useInv
 import MarkdownNote from '@/components/MarkdownNote'
 import { HashEnrichmentEvidence } from '@/components/HashEnrichmentEvidence'
 import { ActionApprovals, EvidenceView, HypothesesView, QueueView } from '@/components/InvestigationLedger'
+import MalwareDrafts from '@/components/MalwareDrafts'
 
 interface Step {
   ts: string
@@ -369,6 +370,7 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
             <PendingCommand key={c.id} cmd={c} onDecided={() => qc.invalidateQueries({ queryKey: ['investigations', caseId] })} />
           ))}
           <ActionApprovals caseId={caseId} invId={current.id} actions={ledger.actions} />
+          <MalwareDrafts caseId={caseId} invId={current.id} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px', borderBottom: '1px solid var(--border)' }}>
             {([
               ['activity', 'Activity'],
