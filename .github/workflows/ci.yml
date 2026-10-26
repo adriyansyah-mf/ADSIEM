@@ -91,6 +91,13 @@ jobs:
         working-directory: agent
         run: sudo -E env "PATH=$PATH" LINSENSOR_E2E=1 go test -count=1 -run TestSensorEndToEnd -v ./internal/linsensor/
 
+      # Execution prevention against the runner's kernel: the fanotify
+      # engine always; the BPF LSM engine when the kernel has "bpf" in its
+      # LSM list (the test skips that half otherwise).
+      - name: exec prevention end-to-end (root)
+        working-directory: agent
+        run: sudo -E env "PATH=$PATH" PREVENT_E2E=1 go test -count=1 -run 'TestPrevent' -v ./internal/prevent/
+
       # Reading another process's memory needs ptrace access (root).
       - name: process memory scan end-to-end (root)
         working-directory: agent

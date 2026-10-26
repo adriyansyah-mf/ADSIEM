@@ -67,6 +67,9 @@ jobs:
             -I internal \
             -c internal/linsensor/bpf/linsensor.bpf.c \
             -o internal/linsensor/bpf/linsensor.bpf.o
+          clang -O2 -g -target bpf -D__TARGET_ARCH_${BPF_ARCH} \
+            -c internal/prevent/bpf/prevent.bpf.c \
+            -o internal/prevent/bpf/prevent.bpf.o
 
       - name: Build .deb
         env:

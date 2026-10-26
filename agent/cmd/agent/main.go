@@ -25,6 +25,7 @@ import (
 	"github.com/siem-platform/agent/internal/linsensor"
 	"github.com/siem-platform/agent/internal/memscan"
 	"github.com/siem-platform/agent/internal/netwatch"
+	"github.com/siem-platform/agent/internal/prevent"
 	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
@@ -36,6 +37,11 @@ import (
 var Version = "dev"
 
 func main() {
+	// The execution-prevention fanotify helper is this binary started again
+	// (see internal/prevent/fanhelper_linux.go); it does nothing else.
+	if prevent.IsHelper() {
+		os.Exit(prevent.RunHelper())
+	}
 	configPath := flag.String("config", defaultConfigPath(), "path to config file")
 	install := flag.Bool("install", false, "install the agent as a Windows service (Windows only)")
 	uninstall := flag.Bool("uninstall", false, "remove the Windows service (Windows only)")
@@ -248,6 +254,19 @@ func run(configPath string, stop <-chan struct{}) {
 		slog.Info("live response: operator-approved commands disabled by config")
 	}
 	go flows.Run(flowCtx)
+
+	// Execution prevention (Linux): the server's rules, enforced by the BPF
+	// LSM and/or a fanotify helper; rules default to detect-only.
+	if runtime.GOOS == "linux" && !cfg.Prevention.Disabled {
+		if pm, err := prevent.Start(prevent.Options{
+			Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		}); err != nil {
+			slog.Warn("execution prevention unavailable", "err", err)
+		} else {
+			defer pm.Close()
+			go pm.Run(flowCtx, c)
+		}
+	}
 
 	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)

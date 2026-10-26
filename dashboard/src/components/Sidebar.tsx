@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Shield, FileText, Activity, Bell,
   BookOpen, Code, Users, Webhook, LogOut, Sun, Moon,
   ShieldAlert, GitMerge, ClipboardList, ArrowRightLeft, BookMarked,
-  FolderOpen, HeartPulse, Brain, Search, Terminal, Package, FileCode, Settings
+  FolderOpen, HeartPulse, Brain, Search, Terminal, Package, FileCode, Settings, Ban
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -24,6 +24,7 @@ const nav = [
   { to: '/correlation',   label: 'Correlation',  icon: GitMerge,        minRole: 'viewer'     },
   { to: '/decoders',      label: 'Decoders',     icon: Code,            minRole: 'viewer'     },
   { to: '/yara',          label: 'YARA',         icon: FileCode,        minRole: 'analyst'    },
+  { to: '/prevention',    label: 'Prevention',   icon: Ban,             minRole: 'analyst'    },
   { to: '/artifacts',     label: 'Artifacts',    icon: Package,         minRole: 'analyst'    },
   { to: '/sop',           label: 'SOP Docs',     icon: BookMarked,      minRole: 'analyst'    },
   { to: '/handover',      label: 'Handover',     icon: ArrowRightLeft,  minRole: 'analyst'    },
