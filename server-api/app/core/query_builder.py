@@ -19,6 +19,22 @@ _ALLOWED_FILTER_FIELDS = _KEYWORD_FIELDS | {"raw_message", "created_at", "hostna
 _MAX_QUERY_LENGTH = 512
 
 
+def text_search(q: str, default_field: str) -> dict:
+    """A free-text / Lucene search clause over the logs index.
+
+    lenient is required: `decoded_fields` is mapped dynamically, so it holds
+    long and date fields (EventID, TimeCreated, pid, ...). A bare term such as
+    "PowerShell" sent to `decoded_fields.*`, or a field:value aimed at one of
+    those fields, would otherwise fail the whole search with a 400 ("failed to
+    parse date field [PowerShell]") instead of matching the text fields."""
+    return {"query_string": {
+        "query": sanitize_query_string(q),
+        "default_field": default_field,
+        "allow_leading_wildcard": False,
+        "lenient": True,
+    }}
+
+
 def sanitize_query_string(q: str) -> str:
     """Constrain a user-supplied Lucene query_string.
 

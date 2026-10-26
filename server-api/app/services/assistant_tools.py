@@ -18,7 +18,7 @@ from app.models.models import (
     SoarAction, SoarPlaybook, SopDocument,
 )
 from app.core.es_client import aggregate as es_aggregate, search as es_search
-from app.core.query_builder import sanitize_query_string
+from app.core.query_builder import text_search
 
 
 def _now() -> datetime:
@@ -795,13 +795,7 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
         if _arg(args, "log_type"):
             filters.append({"term": {"log_type": str(_arg(args, "log_type"))}})
         if _arg(args, "search"):
-            filters.append({
-                "query_string": {
-                    "query": sanitize_query_string(str(_arg(args, "search"))),
-                    "default_field": "decoded_fields.*",
-                    "allow_leading_wildcard": False,
-                }
-            })
+            filters.append(text_search(str(_arg(args, "search")), "decoded_fields.*"))
         try:
             hits, total, _cursor = await es_search(
                 {"bool": {"filter": filters}}, size=limit, sort=[{"created_at": "desc"}]
