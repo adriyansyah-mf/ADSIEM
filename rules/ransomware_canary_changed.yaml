@@ -1,0 +1,15 @@
+title: Ransomware Canary File Changed
+id: rule-ransomware-canary-changed
+description: The agent's periodic check found one of its canary files changed or gone (ransomware.canary). No process is attached (Windows, or no eBPF sensor); look at the host's other files and processes around that time.
+logsource:
+  product: ransomware
+  service: activity
+detection:
+  selection:
+    event.action: ransomware
+    ransomware.detection: canary_changed
+  condition: selection
+level: high
+tags:
+  - attack.impact
+  - attack.t1486
