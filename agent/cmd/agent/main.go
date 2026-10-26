@@ -27,6 +27,7 @@ import (
 	"github.com/siem-platform/agent/internal/netwatch"
 	"github.com/siem-platform/agent/internal/prevent"
 	"github.com/siem-platform/agent/internal/procexec"
+	"github.com/siem-platform/agent/internal/ransomguard"
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/winsensor"
@@ -278,11 +279,31 @@ func run(configPath string, stop <-chan struct{}) {
 		stopProducers = append(stopProducers, procMon.Stop)
 	}
 
+	// Ransomware protection: canary files everywhere; on Linux also the
+	// bulk-encryption heuristics fed by the sensor below.
+	var onFile func(linsensor.FileEvent)
+	if !cfg.Ransomware.Disabled {
+		opts := ransomguard.Options{
+			Push:        func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			CanaryDirs:  cfg.Ransomware.CanaryDirs,
+			CanaryNames: cfg.Ransomware.CanaryNames,
+			AllowImages: cfg.Ransomware.AllowImages,
+			Kill:        !cfg.Ransomware.ReportOnly,
+		}
+		if cfg.Ransomware.Isolate {
+			opts.Isolate = func() error { _, err := fwEngine.Isolate(); return err }
+		}
+		guard := ransomguard.New(opts)
+		go guard.Run(flowCtx)
+		onFile = guard.Observe
+	}
+
 	// File, kernel module, ptrace, privilege, memfd/fileless and exit
 	// telemetry (Linux eBPF; best-effort like procexec)
 	if runtime.GOOS == "linux" && !cfg.LinuxSensor.Disabled {
 		if sensor, err := linsensor.Start(linsensor.Options{
 			Push:     func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			OnFile:   onFile,
 			Disabled: cfg.LinuxSensor.DisabledEvents,
 		}); err != nil {
 			slog.Warn("linux sensor unavailable, continuing without it", "err", err)
