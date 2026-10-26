@@ -32,6 +32,7 @@ import KnowledgePage from '@/pages/KnowledgePage'
 import HandoverPage from '@/pages/HandoverPage'
 import LiveResponsePage from '@/pages/LiveResponsePage'
 import YaraPage from '@/pages/YaraPage'
+import PreventionPage from '@/pages/PreventionPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
 import SoarPage from '@/pages/SoarPage'
 import SoarEditorPage from '@/pages/SoarEditorPage'
@@ -80,6 +81,7 @@ export default function App() {
             <Route path="/live-response" element={<LiveResponsePage />} />
             <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />
             <Route path="/yara" element={<YaraPage />} />
+            <Route path="/prevention" element={<PreventionPage />} />
             <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />
             <Route path="/soar/:id" element={<ProtectedRoute minRole="analyst"><SoarEditorPage /></ProtectedRoute>} />
             <Route path="/audit-logs" element={<ProtectedRoute minRole="admin"><AuditLogsPage /></ProtectedRoute>} />

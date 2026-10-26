@@ -1,0 +1,14 @@
+title: Execution Matched Detect-Only Prevention Rule On Linux
+id: rule-linux-exec-detected
+description: A program matched a detect-only rule on the Prevention page and was allowed to run. Review these before switching the rule to block.
+logsource:
+  product: linux
+  service: exec_prevention
+detection:
+  selection:
+    event.action: exec_prevention
+    prevention.action: detected
+  condition: selection
+level: medium
+tags:
+  - attack.execution

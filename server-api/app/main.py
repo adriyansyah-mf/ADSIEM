@@ -24,6 +24,7 @@ from app.api.routes.tasks import router as tasks_router, fleet_router
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.flows import router as flows_router, artifact_router as flow_artifacts_router, agent_router as agent_flows_router
 from app.api.routes.yara_rules import router as yara_router
+from app.api.routes.prevention_rules import router as prevention_router, agent_router as prevention_agent_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
 from app.api.routes.export import router as export_router
@@ -487,5 +488,6 @@ for router in [
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, knowledge_router, evidence_router,
+    prevention_router, prevention_agent_router,
 ]:
     app.include_router(router)
