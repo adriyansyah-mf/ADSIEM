@@ -32,7 +32,9 @@ from worker.settings_cache import get_setting
 log = structlog.get_logger()
 
 LOOP_INTERVAL = 60
-INDEX_BATCH = 300
+INDEX_BATCH = 25        # entries per commit: progress survives a restart
+EMBED_BATCH = 4         # chunks per model call; 64 peaks ~1.7 GB, the worker has 512 MB
+INDEX_LOCK_TTL = 300    # refreshed every batch, so a killed worker frees it quickly
 CHUNK_CHARS = 1200
 SYNC_EVERY_DAYS = 7
 MAX_ZIP_BYTES = 150 << 20
@@ -198,7 +200,7 @@ async def index_pending(limit: int = INDEX_BATCH) -> int:
     ids = [r["id"] for r in rows]
     pieces = [(r, i, heading, c) for r in rows for i, (heading, c) in enumerate(_chunks(r))]
     try:
-        vectors = await asyncio.to_thread(embed_texts, [c for *_, c in pieces])
+        vectors = await asyncio.to_thread(embed_texts, [c for *_, c in pieces], EMBED_BATCH)
     except Exception as exc:  # noqa: BLE001 — no model now; next round
         log.warning("knowledge_embed_failed", error=str(exc), entries=len(rows))
         async with AsyncSessionLocal() as db:  # shown on the article as its index status
@@ -253,10 +255,10 @@ async def knowledge_loop() -> None:
                 finally:
                     await redis.delete(SYNC_LOCK)
             # one replica indexes at a time, or both embed the same entries twice
-            if await redis.set(INDEX_LOCK, "1", nx=True, ex=1800):
+            if await redis.set(INDEX_LOCK, "1", nx=True, ex=INDEX_LOCK_TTL):
                 try:
                     while await index_pending():
-                        await asyncio.sleep(0)
+                        await redis.expire(INDEX_LOCK, INDEX_LOCK_TTL)
                 finally:
                     await redis.delete(INDEX_LOCK)
         except asyncio.CancelledError:

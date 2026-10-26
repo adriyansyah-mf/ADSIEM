@@ -89,7 +89,7 @@ def db(monkeypatch):
             for stmt in SCHEMA:
                 await conn.execute(text(stmt))
     _run(setup())
-    monkeypatch.setattr(knowledge, "embed_texts", lambda texts: [_vec(t) for t in texts])
+    monkeypatch.setattr(knowledge, "embed_texts", lambda texts, batch_size=64: [_vec(t) for t in texts])
     monkeypatch.setattr(rag, "embed_text", _vec)
 
     async def embed(t):
@@ -283,14 +283,14 @@ def test_a_failed_embedding_keeps_the_previous_version_searchable(db, monkeypatc
     _sql("UPDATE knowledge_entries SET content = 'Backups moved to 04:00.', updated_at = now() "
          "WHERE id = CAST(:i AS uuid)", i=entry)
 
-    def broken(texts):
+    def broken(texts, batch_size=64):
         raise RuntimeError("model not loaded")
     monkeypatch.setattr(knowledge, "embed_texts", broken)
     assert _run(knowledge.index_pending()) == 0
     row = _sql("SELECT index_error, (SELECT string_agg(chunk_text, ' ') FROM knowledge_chunks WHERE entry_id = e.id) "
                "AS chunks FROM knowledge_entries e WHERE id = CAST(:i AS uuid)", i=entry)[0]
     assert "model not loaded" in row["index_error"] and "02:00" in row["chunks"]
-    monkeypatch.setattr(knowledge, "embed_texts", lambda texts: [_vec(t) for t in texts])
+    monkeypatch.setattr(knowledge, "embed_texts", lambda texts, batch_size=64: [_vec(t) for t in texts])
     _index()
     row = _sql("SELECT index_error, (SELECT string_agg(chunk_text, ' ') FROM knowledge_chunks WHERE entry_id = e.id) "
                "AS chunks FROM knowledge_entries e WHERE id = CAST(:i AS uuid)", i=entry)[0]
