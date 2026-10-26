@@ -14,6 +14,9 @@ log = structlog.get_logger()
 
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"  # 384 dims, matches the vector(384) columns
 EMBED_RETRY_SECONDS = 600  # after a failed load, don't retry (a slow download) on every alert
+# ONNX otherwise starts one thread per host core; under the worker's 0.5-CPU
+# quota they throttle each other (~9 s per chunk vs ~0.45 s with one thread)
+EMBED_THREADS = int(os.environ.get("EMBED_THREADS", "1"))
 _embedder = None
 _failed_at = 0.0
 
@@ -27,7 +30,8 @@ def _get_embedder():
         # the image bakes the model into FASTEMBED_CACHE_PATH (worker/Dockerfile),
         # so RAG works without reaching HuggingFace at runtime
         try:
-            _embedder = TextEmbedding(model_name=EMBED_MODEL, cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"))
+            _embedder = TextEmbedding(model_name=EMBED_MODEL, cache_dir=os.environ.get("FASTEMBED_CACHE_PATH"),
+                                      threads=EMBED_THREADS)
         except Exception:
             _failed_at = time.monotonic()
             raise
