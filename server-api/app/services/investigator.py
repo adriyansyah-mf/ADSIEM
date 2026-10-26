@@ -36,7 +36,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
+import socket
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -48,13 +50,14 @@ from fastapi import HTTPException
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from pydantic import JsonValue
-from sqlalchemy import desc, func, select, text, update
+from sqlalchemy import and_, desc, func, or_, select, text, update
 
 from app.core.database import AsyncSessionLocal
 from app.core.redis_client import get_redis
 from app.models.models import (
     Agent, Alert, Case, CaseInvestigation, CaseNote, Flow, FlowArtifact, FlowLog, FlowRowBatch,
-    HygieneSnapshot, InvestigationAction, InvestigationCommand, InvestigationHypothesis, PlatformSetting,
+    HygieneSnapshot, InvestigationAction, InvestigationCommand, InvestigationEvidence, InvestigationHypothesis,
+    PlatformSetting,
     UebaAnomaly, User,
 )
 from app.services import investigation_ledger as ledger
@@ -74,7 +77,7 @@ FLOW_WAIT_CAP = 600          # longest a single flow is waited for
 TOOL_RESULT_CHARS = 8_000    # what one tool result may put in the model's context
 CONTEXT_CHARS = 60_000       # older tool results are shortened to keep the prompt under this
 KEEP_FULL_RESULTS = 3        # ...except the most recent ones
-STALE_AFTER = timedelta(minutes=5)  # a running investigation not updated this long is dead
+STALE_AFTER = timedelta(minutes=5)  # a lease-less run (from before leases) not updated this long is adopted
 MAX_COMMANDS = 8
 APPROVAL_WAIT = 15 * 60      # a command nobody decides on in this long expires
 COMMAND_MAX_TIMEOUT = 300    # the agent's exec cap
@@ -192,8 +195,11 @@ class Ctx:
     max_flows: int = MAX_FLOWS             # + an analyst's one-time raise (budget_overrides)
     current_action: uuid.UUID | None = None  # the ledger row of the tool call in progress
 
+    def elapsed(self) -> float:
+        return time.monotonic() - self.started
+
     def seconds_left(self) -> float:
-        return MAX_SECONDS - (time.monotonic() - self.started)
+        return MAX_SECONDS - self.elapsed()
 
 
 # ─── Persistence of progress ─────────────────────────────────────
@@ -398,7 +404,7 @@ async def _wait_flow(ctx: Ctx, flow_id: uuid.UUID, flow_timeout: int) -> str:
 
 
 async def run_artifact(ctx: Ctx, artifact: str, host: str, params: dict | None = None, reason: str = "") -> dict:
-    from app.api.routes.flows import TERMINAL, _load_artifact, schedule_flow
+    from app.api.routes.flows import _load_artifact, schedule_flow
 
     if ctx.flows >= ctx.max_flows:
         return {"error": f"live-response budget used up ({ctx.max_flows} runs); write the report"}
@@ -419,15 +425,31 @@ async def run_artifact(ctx: Ctx, artifact: str, host: str, params: dict | None =
             if src["plugin"] == "read_file" and SENSITIVE_PATH.search(path):
                 await _step(ctx.inv_id, "refused", reason=f"read_file on a credential store: {path}")
                 return {"error": f"refused: {path} holds credentials and is never read by the AI"}
+        flow_id = uuid.uuid4()
+        await _link_flow(db, ctx.current_action, flow_id)  # commits with the flow: a resumed run finds it
         flow = await schedule_flow(
             db, redis, agent_id=agent.id, artifact=artifact, params=params, group_filter=ctx.group_id,
             created_by=ctx.user_id, scheduled_by=f"AI investigation {ctx.inv_id} (started by {ctx.username})",
+            flow_id=flow_id,
         )
-        flow_id, hostname, flow_timeout = flow.id, agent.hostname, flow.timeout
+        hostname, flow_timeout = agent.hostname, flow.timeout
     ctx.flows += 1
     ctx.flow_ids.add(str(flow_id))
     await _step(ctx.inv_id, "flow", flow_id=str(flow_id), artifact=artifact, host=hostname,
                 params=params, reason=reason)
+    return await _artifact_outcome(ctx, flow_id, flow_timeout)
+
+
+async def _link_flow(db, action_id: uuid.UUID | None, flow_id: uuid.UUID) -> None:
+    """Stage the flow id on the action row, in the session that schedules the flow."""
+    if action_id is not None:
+        await db.execute(text("UPDATE investigation_actions SET result_ref = result_ref || CAST(:r AS jsonb) "
+                              "WHERE id = :id"), {"r": json.dumps({"flow_id": str(flow_id)}), "id": action_id})
+
+
+async def _artifact_outcome(ctx: Ctx, flow_id: uuid.UUID, flow_timeout: int) -> dict:
+    """Wait for an artifact flow and summarize it (also for a flow an earlier replica scheduled)."""
+    from app.api.routes.flows import TERMINAL
 
     status = await _wait_flow(ctx, flow_id, flow_timeout)
     summary = await _flow_summary(flow_id)
@@ -572,41 +594,49 @@ async def run_command(ctx: Ctx, host: str, command: str, args: list | None = Non
             await db.execute(update(InvestigationAction).where(InvestigationAction.id == ctx.current_action)
                              .values(result_ref={"command_id": str(cmd.id)}))
         await db.commit()
-        cmd_id, agent_id, hostname = cmd.id, agent.id, agent.hostname
+        cmd_id, hostname = cmd.id, agent.hostname
     ctx.commands += 1
-    line = command_line(command, args)
-    await _step(ctx.inv_id, "command", command_id=str(cmd_id), host=hostname, command=line,
+    await _step(ctx.inv_id, "command", command_id=str(cmd_id), host=hostname, command=command_line(command, args),
                 reason=reason, auto_approved=auto)
+    return await _finish_command(ctx, cmd_id)
 
-    if not auto:
+
+async def _finish_command(ctx: Ctx, cmd_id: uuid.UUID) -> dict:
+    """From a requested command to its output: wait for the decision, schedule
+    it once, wait for the flow. Picks up wherever an earlier replica stopped."""
+    async with AsyncSessionLocal() as db:
+        cmd = await db.get(InvestigationCommand, cmd_id)
+    if cmd.status == "pending":
         cmd = await _await_decision(ctx, cmd_id)
-        if cmd.status != "approved":
-            await _step(ctx.inv_id, "command_decision", command_id=str(cmd_id), status=cmd.status,
-                        note=cmd.decision_note)
-            why = f" ({cmd.decision_note})" if cmd.decision_note else ""
-            return {"error": f"the analyst did not run this command: {cmd.status}{why}. "
-                             "Don't ask for it again; adapt or write the report."}
-        await _step(ctx.inv_id, "command_decision", command_id=str(cmd_id), status="approved")
+        if cmd.status == "approved":
+            await _step(ctx.inv_id, "command_decision", command_id=str(cmd_id), status="approved")
+    if cmd.status != "approved":
+        await _step(ctx.inv_id, "command_decision", command_id=str(cmd_id), status=cmd.status,
+                    note=cmd.decision_note)
+        why = f" ({cmd.decision_note})" if cmd.decision_note else ""
+        return {"error": f"the analyst did not run this command: {cmd.status}{why}. "
+                         "Don't ask for it again; adapt or write the report."}
     await _action_running(ctx.current_action)
 
     from app.api.routes.flows import schedule_command_flow
-    redis = await get_redis()
+    line, auto, flow_id = command_line(cmd.command, cmd.args), cmd.auto_approved, cmd.flow_id
     async with AsyncSessionLocal() as db:
-        agent = await db.get(Agent, agent_id)
-        decided_by = (await db.get(InvestigationCommand, cmd_id)).decided_by
-        flow = await schedule_command_flow(
-            db, redis, agent=agent, command=command, args=args, timeout=timeout,
-            created_by=decided_by or ctx.user_id,
-            scheduled_by=f"AI investigation {ctx.inv_id} (started by {ctx.username}), command "
-                         f"{'auto-approved' if auto else 'approved by an analyst'}",
-        )
-        await db.execute(update(InvestigationCommand).where(InvestigationCommand.id == cmd_id)
-                         .values(flow_id=flow.id))
-        await db.commit()
-        flow_id, flow_timeout = flow.id, flow.timeout
+        if flow_id is None:  # approved, not yet scheduled: schedule exactly once
+            flow_id = uuid.uuid4()
+            await db.execute(update(InvestigationCommand).where(InvestigationCommand.id == cmd_id)
+                             .values(flow_id=flow_id))
+            await _link_flow(db, ctx.current_action, flow_id)
+            await schedule_command_flow(
+                db, await get_redis(), agent=await db.get(Agent, cmd.agent_id), command=cmd.command,
+                args=cmd.args, timeout=cmd.timeout, created_by=cmd.decided_by or ctx.user_id,
+                scheduled_by=f"AI investigation {ctx.inv_id} (started by {ctx.username}), command "
+                             f"{'auto-approved' if auto else 'approved by an analyst'}", flow_id=flow_id,
+            )
+            await audit_log(None, cmd.decided_by or ctx.user_id, "ai_command_run", "agent", str(cmd.agent_id),
+                            {"investigation": str(ctx.inv_id), "command": line, "auto_approved": auto})
+        flow_timeout = (await db.get(Flow, flow_id)).timeout
     ctx.flow_ids.add(str(flow_id))
-    await audit_log(None, decided_by or ctx.user_id, "ai_command_run", "agent", str(agent_id),
-                    {"investigation": str(ctx.inv_id), "command": line, "auto_approved": auto})
+    hostname = cmd.hostname
 
     status = await _wait_flow(ctx, flow_id, flow_timeout)
     async with AsyncSessionLocal() as db:
@@ -868,21 +898,22 @@ def _command_auto(ctx: Ctx, args: dict) -> bool:
 
 
 async def _run_action(ctx: Ctx, name: str, args: dict, by_name: dict,
-                      analyst_row: uuid.UUID | None = None) -> Any:
+                      existing_row: uuid.UUID | None = None) -> Any:
     """One tool call through the ledger: record it, apply the server's policy
     (no repeats, approval, host slot), run it, keep what it observed and hand
-    the model the evidence ids."""
+    the model the evidence ids. existing_row: an analyst's queued action, or one
+    still awaiting approval when this replica adopted the run."""
     tool = by_name.get(name)
     if tool is None:
         await _step(ctx.inv_id, "refused", reason=f"unknown tool {name}")
-        if analyst_row:
-            await _finish_action(analyst_row, "failed", f"{name} is not available in this investigation")
+        if existing_row:
+            await _finish_action(existing_row, "failed", f"{name} is not available in this investigation")
         return {"error": f"unknown tool {name}"}
     target, params, reason = ledger.split_args(args)
     key = ledger.idempotency_key(name, target, params)
     tier, agent_id = await _classify(ctx, name, args)
     async with AsyncSessionLocal() as db:
-        row = await db.get(InvestigationAction, analyst_row) if analyst_row else \
+        row = await db.get(InvestigationAction, existing_row) if existing_row else \
             await ledger.find_action(db, ctx.inv_id, key)
         if row is not None and row.status not in ledger.ACTION_OPEN:
             refusal = ledger.repeat_refusal(row)
@@ -898,7 +929,9 @@ async def _run_action(ctx: Ctx, name: str, args: dict, by_name: dict,
         row.kind, row.tool, row.target, row.agent_id = ledger.action_kind(name), name, target, agent_id
         row.params, row.reason = params, reason or row.reason
         row.risk_tier, row.approval_reason = tier.tier, tier.approval_reason
-        row.attempts, row.error, row.result_ref, row.finished_at = (row.attempts or 0) + 1, None, {}, None
+        if row.status != "awaiting_approval":  # an adopted wait is the same attempt
+            row.attempts = (row.attempts or 0) + 1
+        row.error, row.result_ref, row.finished_at = None, {}, None
         commands_wait = name == "run_command" and ctx.commands_enabled and not _command_auto(ctx, args)
         row.status = "awaiting_approval" if hold or commands_wait else "queued"
         await db.commit()
@@ -922,13 +955,19 @@ async def _run_action(ctx: Ctx, name: str, args: dict, by_name: dict,
     ctx.current_action = action_id
     try:
         result = await tool.ainvoke(args)
-    except BaseException as exc:
-        cancelled = isinstance(exc, (Cancelled, asyncio.CancelledError))
-        await _finish_action(action_id, "cancelled" if cancelled else "failed", str(exc) or type(exc).__name__)
+    except asyncio.CancelledError:
+        raise  # shutdown or lost lease: the row stays running for the replica that adopts the run
+    except Exception as exc:
+        await _finish_action(action_id, "cancelled" if isinstance(exc, Cancelled) else "failed",
+                             str(exc) or type(exc).__name__)
         raise
     finally:
         ctx.current_action = None
+    return await _complete_action(ctx, action_id, name, args, result)
 
+
+async def _complete_action(ctx: Ctx, action_id: uuid.UUID, name: str, args: dict, result: Any) -> Any:
+    """Keep what an action observed, close its row and give the model the evidence ids."""
     specs = ledger.evidence_specs(name, args, result)
     async with AsyncSessionLocal() as db:
         ids = [await ledger.record_evidence(db, investigation_id=ctx.inv_id, group_id=ctx.group_id,
@@ -993,7 +1032,7 @@ async def _run_analyst_actions(ctx: Ctx, by_name: dict, messages: list[BaseMessa
         messages.append(AIMessage(content="", tool_calls=[{"name": row.tool, "args": args, "id": call_id}]))
         await _step(ctx.inv_id, "tool", tool=row.tool, source="analyst",
                     args={k: _clip(v, 400) if isinstance(v, str) else v for k, v in args.items()})
-        result = await _run_action(ctx, row.tool, args, by_name, analyst_row=row.id)
+        result = await _run_action(ctx, row.tool, args, by_name, existing_row=row.id)
         _observe(ctx, row.tool, result)
         messages.append(ToolMessage(content=_json(result), tool_call_id=call_id, name=row.tool))
         done.add(str(row.id))
@@ -1197,7 +1236,10 @@ async def _ask(ctx: Ctx, model, messages: list[BaseMessage], known: set[str]):
     return "", []
 
 
-async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None) -> tuple[str, str, dict | None]:
+async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None, resumed: bool = False,
+                       rounds_done: int = 0) -> tuple[str, str, dict | None]:
+    """The loop. A run this replica adopted (resumed) gets no transcript: its
+    in-flight work is reconciled and the model reads the ledger instead."""
     tools = build_tools(ctx)
     by_name = {t.name: t for t in tools}
     chat = make_chat_model(api_key, model, effort)
@@ -1207,15 +1249,22 @@ async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None) -
     context = await case_context(ctx)
     ctx.hash_intel.observe(json.dumps(context, default=str))
     await _context_evidence(ctx, context)
-    await _step(ctx.inv_id, "context", hosts=[h["hostname"] for h in context["hosts"]],
-                alerts=[a["title"] for a in context["alerts"]])
+    if not resumed:
+        await _step(ctx.inv_id, "context", hosts=[h["hostname"] for h in context["hosts"]],
+                    alerts=[a["title"] for a in context["alerts"]])
     messages: list[BaseMessage] = [
         SystemMessage(content=SYSTEM_PROMPT + (COMMANDS_PROMPT if ctx.commands_enabled else NO_COMMANDS_PROMPT)),
         HumanMessage(content="Investigate this case. Context:\n" + _json(context, 20_000)),
     ]
-
-    for round_no in range(1, MAX_ROUNDS + 1):
+    if resumed:
+        await _restore_counts(ctx)
         await _check_cancel(ctx)
+        await _reconcile(ctx, by_name)
+        messages.append(HumanMessage(content=await _resume_brief(ctx, rounds_done)))
+
+    for round_no in range(min(rounds_done + 1, MAX_ROUNDS), MAX_ROUNDS + 1):
+        await _check_cancel(ctx)
+        await _set(ctx.inv_id, rounds_used=round_no - 1, active_seconds=ctx.elapsed())
         final = round_no == MAX_ROUNDS or ctx.seconds_left() < 120
         if not final:
             await _run_analyst_actions(ctx, by_name, messages)
@@ -1249,8 +1298,106 @@ async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None) -
     return "", "inconclusive", None  # unreachable: the last round always answers
 
 
+# ─── Adopting a run another replica started ──────────────────────
+
+async def _restore_counts(ctx: Ctx) -> None:
+    """The budgets an adopted run already spent, and the flows it may read, from its ledger."""
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(select(InvestigationAction).where(
+            InvestigationAction.investigation_id == ctx.inv_id))).scalars().all()
+        summaries = (await db.execute(select(InvestigationEvidence.summary).where(
+            InvestigationEvidence.investigation_id == ctx.inv_id,
+            InvestigationEvidence.evidence_type != ledger.KNOWLEDGE))).scalars().all()
+    for r in rows:
+        ref = r.result_ref or {}
+        if ref.get("flow_id"):
+            ctx.flow_ids.add(ref["flow_id"])
+            ctx.flows += r.kind == "artifact"
+        ctx.commands += r.kind == "command" and bool(ref.get("command_id"))
+        ctx.artifacts += r.tool == "create_artifact" and r.status == "completed"
+    ctx.hash_intel.observe(json.dumps(summaries, default=str))  # hashes it observed stay queryable
+
+
+def _action_args(row: InvestigationAction, tool: StructuredTool | None) -> dict:
+    args = dict(row.params or {})
+    if row.target:
+        args["host"] = row.target
+    if row.reason and tool is not None and "reason" in tool.args:
+        args["reason"] = row.reason
+    return args
+
+
+async def _reconcile(ctx: Ctx, by_name: dict) -> None:
+    """Finish what the previous replica left in flight without repeating
+    endpoint work: a scheduled flow is awaited, a command resumes at its
+    decision or its flow, a held action keeps waiting for its analyst. Work
+    that never reached a host is marked failed and may run again."""
+    async with AsyncSessionLocal() as db:
+        rows = (await db.execute(select(InvestigationAction).where(
+            InvestigationAction.investigation_id == ctx.inv_id,
+            InvestigationAction.status.in_(("running", "awaiting_approval")),
+        ).order_by(InvestigationAction.ordinal))).scalars().all()
+    for row in rows:
+        ref, args = row.result_ref or {}, _action_args(row, by_name.get(row.tool))
+        if row.kind == "command" and ref.get("command_id"):
+            ctx.current_action = row.id
+            try:
+                result = await _finish_command(ctx, uuid.UUID(ref["command_id"]))
+            finally:
+                ctx.current_action = None
+            await _complete_action(ctx, row.id, row.tool, args, result)
+        elif row.kind == "artifact" and ref.get("flow_id"):
+            async with AsyncSessionLocal() as db:
+                flow = await db.get(Flow, uuid.UUID(ref["flow_id"]))
+            result = await _artifact_outcome(ctx, flow.id, flow.timeout)
+            await _complete_action(ctx, row.id, row.tool, args, result)
+        elif row.status == "awaiting_approval" and row.kind != "command":
+            await _run_action(ctx, row.tool, args, by_name, existing_row=row.id)
+        else:
+            await _finish_action(row.id, "failed", "interrupted by a server restart before it reached the host"
+                                 if row.kind in ("artifact", "command") else "interrupted by a server restart")
+        await _step(ctx.inv_id, "reconciled", action_id=str(row.id), tool=row.tool, ordinal=row.ordinal)
+
+
+async def _resume_brief(ctx: Ctx, rounds_done: int) -> str:
+    """What an adopted run's model is told instead of its lost conversation."""
+    async with AsyncSessionLocal() as db:
+        actions = (await db.execute(select(InvestigationAction).where(
+            InvestigationAction.investigation_id == ctx.inv_id).order_by(InvestigationAction.ordinal))).scalars().all()
+        hypotheses = (await db.execute(select(InvestigationHypothesis).where(
+            InvestigationHypothesis.investigation_id == ctx.inv_id)
+            .order_by(InvestigationHypothesis.ordinal))).scalars().all()
+        index = await ledger.evidence_index(db, ctx.inv_id)
+    lines = [
+        "This investigation moved to another server after an interruption. Your earlier messages are gone; "
+        "below is its ledger, which is authoritative. Continue from here: don't repeat completed collections, "
+        "and cite these evidence_ids in your report.", "",
+        f"Budget used: {rounds_done} of {MAX_ROUNDS} rounds, {ctx.flows} of {ctx.max_flows} live-response runs, "
+        f"{ctx.commands} of {MAX_COMMANDS} commands, {ctx.artifacts} of {MAX_NEW_ARTIFACTS} new artifacts.", "",
+        "Actions:",
+    ]
+    for a in actions:
+        what = f"#{a.ordinal} {a.tool} {_clip(json.dumps(a.params, default=str), 200)}" + (f" on {a.target}" if a.target else "")
+        note = a.error or a.decision_note
+        lines.append(f"- {what} → {a.status}" + (f" ({_clip(note, 200)})" if note else ""))
+        for eid in (a.result_ref or {}).get("evidence_ids", []):
+            ev = index.get(eid)
+            if ev is not None:
+                lines.append(f"    evidence_id {eid}: {ev.title} — {_clip(ev.summary or '', 500)}")
+    if hypotheses:
+        lines += ["", "Hypotheses:"]
+        for h in hypotheses:
+            lines.append(f"- hypothesis_id {h.id}: {h.statement} [{h.state}, {h.confidence}%]"
+                         + (f" for: {', '.join(h.supporting_evidence_ids)}" if h.supporting_evidence_ids else "")
+                         + (f" against: {', '.join(h.contradicting_evidence_ids)}" if h.contradicting_evidence_ids else ""))
+    return _clip("\n".join(lines), 24_000)
+
+
 async def run_investigation(inv_id: uuid.UUID) -> None:
-    """Background task: run one investigation to completion and store the outcome."""
+    """Run one investigation to completion and store the outcome. A run that
+    is already `running` was started by another replica and is resumed. When
+    this task is cancelled (shutdown, lost lease) nothing is finalized: the
+    replica that adopts the run carries on."""
     from app.services.assistant import _graph_config
 
     async with AsyncSessionLocal() as db:
@@ -1261,10 +1408,21 @@ async def run_investigation(inv_id: uuid.UUID) -> None:
         api_key, model, effort = await _graph_config(db, inv.group_id)
         model = await investigation_model(db, model)
         ctx.commands_enabled, ctx.autoapprove = await command_settings(db)
-    await _set(inv_id, status="running", model=model)
-    await _step(inv_id, "started", by=ctx.username, model=model, commands=ctx.commands_enabled)
+        resumed, rounds_done = inv.status == "running", inv.rounds_used or 0
+        ctx.started = time.monotonic() - (inv.active_seconds or 0.0)
+    if resumed and not api_key:  # the AI provider went away while the run waited for a replica
+        await _set(inv_id, status="interrupted", error="no AI provider is configured to resume it",
+                   finished_at=datetime.now(timezone.utc))
+        await _expire_pending(inv_id)
+        return
+    if resumed:
+        await _step(inv_id, "resumed", replica=REPLICA_ID, after_rounds=rounds_done)
+    else:
+        await _set(inv_id, status="running", model=model)
+        await _step(inv_id, "started", by=ctx.username, model=model, commands=ctx.commands_enabled)
+    ended = False
     try:
-        report, verdict, report_json = await _investigate(ctx, api_key, model, effort)
+        report, verdict, report_json = await _investigate(ctx, api_key, model, effort, resumed, rounds_done)
         if not report:
             raise RuntimeError("the model returned an empty report")
         async with AsyncSessionLocal() as db:
@@ -1274,49 +1432,135 @@ async def run_investigation(inv_id: uuid.UUID) -> None:
                                     f"started by {ctx.username})\n\n{report}"))
             await db.execute(update(CaseInvestigation).where(CaseInvestigation.id == inv_id).values(
                 status="finished", phase=None, report=report, report_json=report_json, verdict=verdict,
-                finished_at=datetime.now(timezone.utc)))
+                active_seconds=ctx.elapsed(), finished_at=datetime.now(timezone.utc)))
             await db.commit()
+        ended = True
         await _step(inv_id, "finished", verdict=verdict, flows=ctx.flows, artifacts=ctx.artifacts,
                     commands=ctx.commands)
     except Cancelled as exc:
+        ended = True
         await _set(inv_id, status="cancelled", error=str(exc) or "cancelled by an analyst",
                    finished_at=datetime.now(timezone.utc))
         await _step(inv_id, "cancelled", reason=str(exc) or "cancelled by an analyst")
     except Exception as exc:  # noqa: BLE001
+        ended = True
         log.exception("investigation_failed", investigation=str(inv_id))
         await _set(inv_id, status="error", error=str(exc)[:2000], finished_at=datetime.now(timezone.utc))
         await _step(inv_id, "error", error=str(exc)[:500])
     finally:
-        await _expire_pending(inv_id)  # nothing may be approved after the run that asked for it ended
+        if ended:
+            await _expire_pending(inv_id)  # nothing may be approved after the run that asked for it ended
 
 
-_running: set[asyncio.Task] = set()
+# ─── Leases: one replica runs an investigation; another adopts it ─
+
+REPLICA_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
+LEASE_SECONDS = 90         # a run whose lease is this old has no replica
+LEASE_RENEW_SECONDS = 30
+SCHEDULER_SECONDS = 15     # how often each replica looks for runs to adopt
+
+_owned: dict[uuid.UUID, asyncio.Task] = {}
+
+
+def _claimable():
+    """Runs nobody holds: lease expired, or never leased (queued, or a run from
+    before leases whose replica stopped updating it)."""
+    return and_(
+        CaseInvestigation.status.in_(("queued", "running")),
+        or_(CaseInvestigation.lease_expires_at < func.now(),
+            and_(CaseInvestigation.lease_owner.is_(None),
+                 or_(CaseInvestigation.status == "queued", CaseInvestigation.updated_at < func.now() - STALE_AFTER))),
+    )
+
+
+async def _claim(inv_id: uuid.UUID) -> bool:
+    async with AsyncSessionLocal() as db:
+        got = (await db.execute(
+            update(CaseInvestigation)
+            .where(CaseInvestigation.id == inv_id,
+                   or_(_claimable(), and_(CaseInvestigation.lease_owner == REPLICA_ID,
+                                          CaseInvestigation.status.in_(("queued", "running")))))
+            .values(lease_owner=REPLICA_ID, lease_expires_at=func.now() + timedelta(seconds=LEASE_SECONDS))
+            .returning(CaseInvestigation.id)
+        )).scalar_one_or_none()
+        await db.commit()
+    return got is not None
+
+
+async def _keep_lease(inv_id: uuid.UUID, run: asyncio.Task) -> None:
+    """Renew the lease; if another replica took the run, stop this copy."""
+    while True:
+        await asyncio.sleep(LEASE_RENEW_SECONDS)
+        try:
+            async with AsyncSessionLocal() as db:
+                got = (await db.execute(
+                    update(CaseInvestigation)
+                    .where(CaseInvestigation.id == inv_id, CaseInvestigation.lease_owner == REPLICA_ID)
+                    .values(lease_expires_at=func.now() + timedelta(seconds=LEASE_SECONDS))
+                    .returning(CaseInvestigation.id)
+                )).scalar_one_or_none()
+                await db.commit()
+        except Exception:  # noqa: BLE001 — a database blip; the lease outlives a few missed renewals
+            log.warning("investigation_lease_renew_failed", investigation=str(inv_id))
+            continue
+        if got is None:
+            log.warning("investigation_lease_lost", investigation=str(inv_id))
+            run.cancel()
+            return
+
+
+async def _release(inv_id: uuid.UUID) -> None:
+    """Expire our lease now: a run we stopped without finishing is adopted at the next scheduler pass."""
+    async with AsyncSessionLocal() as db:
+        await db.execute(update(CaseInvestigation)
+                         .where(CaseInvestigation.id == inv_id, CaseInvestigation.lease_owner == REPLICA_ID)
+                         .values(lease_expires_at=func.now()))
+        await db.commit()
+
+
+async def _run_owned(inv_id: uuid.UUID) -> None:
+    if not await _claim(inv_id):
+        return  # another replica holds it
+    keeper = asyncio.create_task(_keep_lease(inv_id, asyncio.current_task()))
+    try:
+        await run_investigation(inv_id)
+    finally:
+        keeper.cancel()
+        await _release(inv_id)
 
 
 def spawn(inv_id: uuid.UUID) -> None:
-    task = asyncio.create_task(run_investigation(inv_id))
-    _running.add(task)
-    task.add_done_callback(_running.discard)
+    """Run (or resume) an investigation on this replica if no other replica holds it."""
+    if inv_id in _owned:
+        return
+    task = asyncio.create_task(_run_owned(inv_id))
+    _owned[inv_id] = task
+    task.add_done_callback(lambda _t: _owned.pop(inv_id, None))
 
 
-async def mark_stale_interrupted() -> None:
-    """At startup: runs whose process died (no update for a while) can't finish."""
+async def adopt_orphans() -> list[uuid.UUID]:
+    """Spawn the runs no replica holds (their replica died, restarted or lost its lease)."""
     async with AsyncSessionLocal() as db:
-        await db.execute(
-            update(CaseInvestigation)
-            .where(CaseInvestigation.status.in_(("queued", "running")),
-                   CaseInvestigation.updated_at < datetime.now(timezone.utc) - STALE_AFTER)
-            .values(status="interrupted", error="the server restarted during the investigation",
-                    finished_at=datetime.now(timezone.utc))
-        )
-        await db.execute(
-            update(InvestigationCommand)
-            .where(InvestigationCommand.status == "pending",
-                   InvestigationCommand.investigation_id.in_(
-                       select(CaseInvestigation.id).where(CaseInvestigation.status == "interrupted")))
-            .values(status="expired", decided_at=datetime.now(timezone.utc))
-        )
-        await _close_queue(db, InvestigationAction.investigation_id.in_(
-            select(CaseInvestigation.id).where(CaseInvestigation.status == "interrupted")),
-            "the server restarted during the investigation")
-        await db.commit()
+        ids = (await db.execute(select(CaseInvestigation.id).where(_claimable())
+                                .order_by(CaseInvestigation.created_at).limit(10))).scalars().all()
+    for inv_id in ids:
+        spawn(inv_id)
+    return list(ids)
+
+
+async def scheduler_loop() -> None:
+    """Runs on every replica for its lifetime."""
+    while True:
+        await asyncio.sleep(SCHEDULER_SECONDS)
+        try:
+            await adopt_orphans()
+        except Exception:  # noqa: BLE001 — try again next pass
+            log.exception("investigation_scheduler_failed")
+
+
+async def shutdown() -> None:
+    """Stop this replica's runs without finishing them; their leases expire for another replica."""
+    tasks = list(_owned.values())
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)

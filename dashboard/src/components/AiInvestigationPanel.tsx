@@ -164,6 +164,12 @@ function describe(step: Step, open: boolean, toggle: () => void): Row | null {
       }
     case 'waiting':
       return { icon: <Clock size={13} />, title: 'Waiting for a free slot on the host', detail: s.reason }
+    case 'resumed':
+      return { icon: <Play size={13} />, tone: 'var(--accent-orange)', title: 'Resumed on another server',
+        detail: `${s.replica} · after ${s.after_rounds} rounds; continued from the ledger` }
+    case 'reconciled':
+      return { icon: <CheckCircle2 size={13} />, title: `Picked up action #${s.ordinal}`,
+        detail: `${s.tool}: finished what the previous server started, without re-running it` }
     case 'hypothesis':
       return { icon: <Lightbulb size={13} />, tone: 'var(--accent-yellow)',
         title: <>Hypothesis <b>{s.state}</b> ({s.confidence}%)</>, detail: `${s.statement}${s.reason ? ` · ${s.reason}` : ''}` }

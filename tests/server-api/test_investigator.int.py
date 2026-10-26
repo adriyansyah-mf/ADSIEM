@@ -115,8 +115,8 @@ def _seed(hostname="web01"):
             await db.flush()
             case = Case(title="web01 compromise?", severity="high", group_id="blue", alert_id=alert.id)
             db.add(case)
-            if not await db.get(PlatformSetting, "ninerouter_api_key"):
-                db.add(PlatformSetting(key="ninerouter_api_key", value="test-key", is_secret=True))
+            # set, not just present: _seed_settings() seeds it empty, and a resumed run needs a provider
+            await db.merge(PlatformSetting(key="ninerouter_api_key", value="test-key", is_secret=True))
             await db.commit()
             return user.id, agent.id, case.id
     return _run(go())
@@ -757,6 +757,239 @@ def test_queue_routes_check_scope_state_and_duplicates(env):
             assert await status_of(routes.add_action, case_id, inv.id, add(tool="search_events", params={"query": "y"}),
                                    BackgroundTasks(), user=user) == 409
     _run(go())
+
+
+# ─── Leases and adoption (spec Phase 1b) ─────────────────────────
+
+def _new_run(user_id, case_id, **values):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            inv = CaseInvestigation(case_id=case_id, group_id="blue", started_by=user_id, steps=[], **values)
+            db.add(inv)
+            await db.commit()
+            return inv.id
+    return _run(go())
+
+
+def _get_run(inv_id):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            return await db.get(CaseInvestigation, inv_id)
+    return _run(go())
+
+
+async def _until(predicate, timeout=20.0):
+    """Poll an async predicate until it returns something truthy."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        value = await predicate()
+        if value:
+            return value
+        await asyncio.sleep(0.2)
+    raise AssertionError("condition not reached")
+
+
+async def _crash(task):
+    """What a dying process looks like to the run: cancelled mid-await, nothing finalized."""
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+def test_leases_are_exclusive_until_they_expire(env, monkeypatch):
+    from datetime import timedelta
+
+    from app.services import investigator
+
+    user_id, _, case_id = _seed(f"lease-{uuid.uuid4().hex[:8]}")
+    queued = _new_run(user_id, case_id, status="queued")
+    assert _run(investigator._claim(queued))
+    monkeypatch.setattr(investigator, "REPLICA_ID", "replica-b")
+    assert not _run(investigator._claim(queued))  # held by the first replica
+    expired = _new_run(user_id, case_id, status="running", lease_owner="dead-replica",
+                       lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=5))
+    assert _run(investigator._claim(expired))
+    # a run from before leases is adopted only once its old replica stopped updating it
+    fresh_legacy = _new_run(user_id, case_id, status="running")
+    stale_legacy = _new_run(user_id, case_id, status="running",
+                            updated_at=datetime.now(timezone.utc) - investigator.STALE_AFTER - timedelta(minutes=1))
+    assert not _run(investigator._claim(fresh_legacy))
+    assert _run(investigator._claim(stale_legacy))
+    finished = _new_run(user_id, case_id, status="finished")
+    assert not _run(investigator._claim(finished))
+
+
+def test_an_adopted_run_awaits_its_flow_instead_of_scheduling_it_again(env, monkeypatch):
+    from datetime import timedelta
+
+    from sqlalchemy import select, update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation, Flow, InvestigationAction
+    from app.services import investigator
+
+    host = f"resume-{uuid.uuid4().hex[:8]}"
+    user_id, agent_id, case_id = _seed(host)
+    inv_id = _new_run(user_id, case_id)
+    st = {}
+
+    def before(turn, results):
+        if turn == 1:
+            return ("run_artifact", {"artifact": "Linux.Sys.Pslist", "host": host, "reason": "what runs"})
+        raise AssertionError("the first replica dies before seeing the result")
+
+    def after(turn, results, messages):
+        if turn == 1:
+            brief = messages[2].content
+            assert "moved to another server" in brief and "#1 run_artifact" in brief and "→ completed" in brief
+            st["ev"] = brief.split("evidence_id ", 1)[1].split(":", 1)[0]
+            return json.dumps({"verdict": "true_positive", "confidence": 80, "executive_summary": "Miner.",
+                               "claims": [{"id": "c1", "section": "analysis", "text": "kworkerd from /tmp",
+                                           "evidence_ids": [st["ev"]]}]})
+        raise AssertionError(f"unexpected turn {turn}")
+
+    async def go():
+        async def flows():
+            async with AsyncSessionLocal() as db:
+                return (await db.execute(select(Flow).where(Flow.agent_id == agent_id))).scalars().all()
+
+        # replica A schedules the flow, then dies while waiting for the agent
+        monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: Scripted(before))
+        run = asyncio.create_task(investigator.run_investigation(inv_id))
+        await _until(flows)
+        await _crash(run)
+        async with AsyncSessionLocal() as db:
+            [row] = (await db.execute(select(InvestigationAction).where(
+                InvestigationAction.investigation_id == inv_id))).scalars().all()
+            assert row.status == "running" and row.result_ref["flow_id"]  # linked when it was scheduled
+            assert (await db.get(CaseInvestigation, inv_id)).status == "running"
+            await db.execute(update(CaseInvestigation).where(CaseInvestigation.id == inv_id).values(
+                lease_owner="dead-replica", lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
+            await db.commit()
+
+        # replica B adopts it; the agent answers now
+        model = Scripted(after)
+        monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: model)
+        stop = asyncio.Event()
+        agent = asyncio.create_task(_fake_agent(stop))
+        assert inv_id in await investigator.adopt_orphans()
+        await asyncio.wait_for(investigator._owned[inv_id], 60)
+        stop.set()
+        await agent
+        assert len(await flows()) == 1  # awaited, not scheduled again
+    _run(go())
+
+    inv = _get_run(inv_id)
+    assert inv.status == "finished", inv.error
+    assert inv.verdict == "true_positive" and inv.report_json["claims"][0]["verified"]
+    assert inv.lease_owner == investigator.REPLICA_ID and inv.lease_expires_at <= datetime.now(timezone.utc)
+    kinds = [s["kind"] for s in inv.steps]
+    assert kinds.count("started") == 1 and "resumed" in kinds and "reconciled" in kinds
+    [row] = _rows(InvestigationAction, inv_id)
+    assert row.status == "completed" and row.result_ref["evidence_ids"] == [st["ev"]]
+
+
+def test_a_pending_command_survives_adoption_and_runs_once(env, monkeypatch):
+    from sqlalchemy import select, update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Flow, InvestigationAction, InvestigationCommand
+    from app.services import investigator
+
+    _set_setting("ai_command_execution", "approval")
+    _set_setting("ai_command_autoapprove", "")
+    host = f"resume-{uuid.uuid4().hex[:8]}"
+    user_id, agent_id, case_id = _seed(host)
+    inv_id = _new_run(user_id, case_id)
+
+    def before(turn, results):
+        if turn == 1:
+            return ("run_command", {"host": host, "command": "ss", "args": ["-tnp"], "reason": "sockets"})
+        raise AssertionError("the first replica dies while the command waits for approval")
+
+    def after(turn, results, messages):
+        if turn == 1:
+            assert "#1 run_command" in messages[2].content and "→ completed" in messages[2].content
+            return "## Summary\nSockets checked after the move.\nVERDICT: inconclusive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    async def go():
+        async def pending():
+            async with AsyncSessionLocal() as db:
+                return (await db.execute(select(InvestigationCommand).where(
+                    InvestigationCommand.investigation_id == inv_id,
+                    InvestigationCommand.status == "pending"))).scalars().first()
+
+        monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: Scripted(before))
+        run = asyncio.create_task(investigator.run_investigation(inv_id))
+        cmd = await _until(pending)
+        await _crash(run)
+        assert (await pending()) is not None  # not expired by the dying replica
+
+        monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: Scripted(after))
+        stop = asyncio.Event()
+        agent = asyncio.create_task(_fake_agent(stop))
+        resumed = asyncio.create_task(investigator.run_investigation(inv_id))
+        await asyncio.sleep(1.0)  # the adopted run is waiting on the same command
+        async with AsyncSessionLocal() as db:
+            await db.execute(update(InvestigationCommand).where(InvestigationCommand.id == cmd.id)
+                             .values(status="approved", decided_by=user_id))
+            await db.commit()
+        await asyncio.wait_for(resumed, 60)
+        stop.set()
+        await agent
+        async with AsyncSessionLocal() as db:
+            flows = (await db.execute(select(Flow).where(Flow.agent_id == agent_id))).scalars().all()
+            cmds = (await db.execute(select(InvestigationCommand).where(
+                InvestigationCommand.investigation_id == inv_id))).scalars().all()
+            [action] = (await db.execute(select(InvestigationAction).where(
+                InvestigationAction.investigation_id == inv_id))).scalars().all()
+        assert len(cmds) == 1 and cmds[0].flow_id is not None
+        assert [f.id for f in flows] == [cmds[0].flow_id]  # one command, one flow
+        assert action.status == "completed" and action.result_ref["flow_id"] == str(cmds[0].flow_id)
+    try:
+        _run(go())
+    finally:
+        _set_setting("ai_command_execution", "off")
+    assert _get_run(inv_id).status == "finished"
+
+
+def test_a_lost_lease_stops_this_copy_without_finishing_the_run(env, monkeypatch):
+    from sqlalchemy import update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation
+    from app.services import investigator
+
+    monkeypatch.setattr(investigator, "LEASE_RENEW_SECONDS", 0.3)
+    user_id, _, case_id = _seed(f"lease-{uuid.uuid4().hex[:8]}")
+    inv_id = _new_run(user_id, case_id, status="queued")
+
+    async def slow_hosts(ctx, hostname_contains=""):
+        await asyncio.sleep(0.2)
+        return {"hosts": []}
+    monkeypatch.setattr(investigator, "list_hosts", slow_hosts)
+    monkeypatch.setattr(investigator, "make_chat_model",
+                        lambda *a, **k: Scripted(lambda turn, results: ("list_hosts", {"hostname_contains": str(turn)})))
+
+    async def go():
+        investigator.spawn(inv_id)
+        task = investigator._owned[inv_id]
+        await asyncio.sleep(1.0)
+        async with AsyncSessionLocal() as db:  # another replica took it over
+            await db.execute(update(CaseInvestigation).where(CaseInvestigation.id == inv_id)
+                             .values(lease_owner="replica-b"))
+            await db.commit()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 10)
+    _run(go())
+    inv = _get_run(inv_id)
+    assert inv.status == "running" and inv.finished_at is None  # left for the replica that holds it
+    assert inv.lease_owner == "replica-b" and inv.rounds_used >= 1
 
 
 def test_text_tool_calls_run_and_garbled_output_never_reaches_the_case(env, monkeypatch):

@@ -341,7 +341,9 @@ async def _migrate_investigation_ledger_columns() -> None:
     """Columns the investigation ledger (services/investigation_ledger.py) adds to existing tables."""
     from sqlalchemy import text
     async with engine.begin() as conn:
-        for col in ("phase VARCHAR(20)", "report_json JSONB", "budget_overrides JSONB NOT NULL DEFAULT '{}'::jsonb"):
+        for col in ("phase VARCHAR(20)", "report_json JSONB", "budget_overrides JSONB NOT NULL DEFAULT '{}'::jsonb",
+                    "lease_owner VARCHAR(120)", "lease_expires_at TIMESTAMPTZ",
+                    "rounds_used INTEGER NOT NULL DEFAULT 0", "active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0"):
             await conn.execute(text(f"ALTER TABLE case_investigations ADD COLUMN IF NOT EXISTS {col}"))
         for col in ("created_by_investigation_id UUID", "promoted_at TIMESTAMPTZ", "promoted_by UUID"):
             await conn.execute(text(f"ALTER TABLE flow_artifacts ADD COLUMN IF NOT EXISTS {col}"))
@@ -463,16 +465,19 @@ async def lifespan(app: FastAPI):
         await _migrate_investigation_ledger_columns()
         from app.services.knowledge_schema import migrate_knowledge
         await migrate_knowledge()
-        from app.services.investigator import mark_stale_interrupted
-        await mark_stale_interrupted()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
     await ensure_es_index()
     import asyncio
+    from app.services import investigator
     _listener_task = asyncio.create_task(_ws_redis_listener())
+    # adopts investigations whose replica died or restarted (lease expired)
+    _investigation_scheduler = asyncio.create_task(investigator.scheduler_loop())
     yield
     _listener_task.cancel()
+    _investigation_scheduler.cancel()
+    await investigator.shutdown()  # hand running investigations to another replica
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
 

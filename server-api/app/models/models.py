@@ -279,6 +279,12 @@ class CaseInvestigation(Base):
     # the structured report the Markdown above is rendered from (investigation_ledger.validate_report)
     report_json      = Column(JSONB)
     budget_overrides = Column(JSONB, nullable=False, default=dict)  # {"flows": extra runs an analyst granted}
+    # the replica running it (investigator.REPLICA_ID); another replica adopts it once the lease expires
+    lease_owner      = Column(String(120))
+    lease_expires_at = Column(DateTime(timezone=True))
+    # progress a replica that adopts the run resumes from
+    rounds_used      = Column(Integer, nullable=False, default=0)
+    active_seconds   = Column(Float, nullable=False, default=0.0)
     verdict          = Column(String(30))  # true_positive / false_positive / inconclusive
     error            = Column(Text)
     cancel_requested = Column(Boolean, nullable=False, default=False)

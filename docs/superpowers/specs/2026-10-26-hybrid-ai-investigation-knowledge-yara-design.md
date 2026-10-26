@@ -29,7 +29,8 @@ This document remains the umbrella design. The Knowledge Vault (section 9) and Y
   - Routes: `api/routes/investigations.py`, and artifact promotion in `api/routes/flows.py`.
   - UI: `dashboard/src/components/InvestigationLedger.tsx`.
   - Where the implementation settled a detail differently from revision 2, this text was updated: sections 5.3, 6.2, 6.5 and 6.6.
-- Phases 1b, 2, 3 and 4: not started.
+- **Phase 1b: implemented** on the same branch: leases, scheduler adoption and reconciliation (section 6.6).
+- Phases 2, 3 and 4: not started.
 
 ## 1. Summary
 
@@ -327,17 +328,28 @@ Phase 1a delivers the visible queue, the evidence ledger, analyst add/skip, and 
 
 #### Phase 1b: durable orchestrator
 
-- Investigation progress moves from the in-memory conversation to the database.
-- Each `server-api` replica runs a scheduler loop that claims work with leases:
-  - `investigations.lease_owner` and `lease_expires_at`, renewed every 30 s;
-  - action claims through `UPDATE ... WHERE status = 'queued' ... RETURNING` or `SELECT ... FOR UPDATE SKIP LOCKED`.
-- Planner and replanner calls become stateless. Each call is rebuilt from the case context, the action list with idempotency keys, compact evidence summaries, and the hypotheses. No conversation transcript is required to resume.
-- When a lease expires, another replica takes over:
-  - Tier 0 actions are re-run, because they are idempotent.
-  - Endpoint actions are reconciled against their flow or command state (`result_ref`) before any re-dispatch.
-- `mark_stale_interrupted()` is replaced by lease takeover. `interrupted` is kept only for runs whose model configuration has disappeared.
+As implemented:
 
-Phase 1b ships only once Phase 1a's tables and UI are stable. It is required before acceptance criterion 4 (no duplicate endpoint work across restarts) can be met.
+- **Leases.** One replica runs an investigation at a time, under a lease on `case_investigations`:
+  - The lease is held in `lease_owner` (`host:pid:random`, `investigator.REPLICA_ID`) and `lease_expires_at`.
+  - It lasts 90 s and is renewed every 30 s.
+  - The claim is one conditional `UPDATE ... RETURNING`.
+  - A run is claimable when its lease has expired, or when it never had a lease and is either `queued` or a pre-lease run whose `updated_at` is older than `STALE_AFTER`. That last condition keeps a rolling deploy from stealing a run that an old-code replica is still driving.
+- **Scheduler.** Each `server-api` replica runs `investigator.scheduler_loop()` from the app lifespan. Every 15 s it spawns up to ten claimable runs.
+- **Starting and stopping.** `spawn()` claims before running, so a start request and a scheduler pass can't both run the same investigation. On graceful shutdown, `investigator.shutdown()` cancels this replica's runs and expires their leases, so another replica adopts them at its next pass.
+- **Losing a lease.** If a renewal finds another owner, this copy is cancelled.
+- **Cancellation never finalizes.** A run cancelled by shutdown or a lost lease doesn't expire pending commands or close its queue, and its in-flight action rows stay `running`.
+- **Resuming without a transcript.** While a replica owns a run, the model's conversation stays in memory. The conversation is rebuilt only when a replica adopts a run:
+  - the case context, plus a ledger brief listing every action with its status, the evidence ids and summaries it produced, the hypotheses, and the budget used;
+  - `rounds_used` and `active_seconds` are saved every round, so the round budget and clock continue rather than restart.
+- **Reconciliation before the model runs:**
+  - An artifact action with a linked flow waits for that flow.
+  - A command resumes at its decision (an approval still counts) or at its flow, and is scheduled at most once.
+  - A held action keeps waiting for its analyst.
+  - An interrupted Tier 0 query, or endpoint work that never reached a flow, is marked failed and may run again.
+- **No double scheduling.** The flow id is generated before scheduling and written to the action row (and the command row) in the same transaction as the flow. A crash therefore can't leave a scheduled flow that the ledger doesn't know about.
+- **What replaces `mark_stale_interrupted()`.** The function is gone; adoption replaces it. `interrupted` remains only for an adopted run that has no AI provider configured.
+- **Not done.** Analyst-queued actions still run on the owning replica's round boundary, not through a separate action claim. A dedicated action-claim queue (`FOR UPDATE SKIP LOCKED`) is unnecessary while one replica owns the whole run.
 
 ## 7. Data Model
 
@@ -422,7 +434,8 @@ Rules:
 - `phase` (section 6.1);
 - `report_json` (section 8.1); the existing `report` keeps the rendered Markdown;
 - `budget_overrides` (JSON, section 6.5);
-- `lease_owner` and `lease_expires_at` (Phase 1b only).
+- `lease_owner` and `lease_expires_at` (Phase 1b);
+- `rounds_used` and `active_seconds`, the progress an adopting replica resumes from (Phase 1b).
 
 `flow_artifacts` gains:
 

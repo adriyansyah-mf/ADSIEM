@@ -229,11 +229,13 @@ async def _get_flow(db: AsyncSession, flow_id: UUID, group_filter: str | None) -
 async def schedule_flow(
     db: AsyncSession, redis: aioredis.Redis, *, agent_id: UUID, artifact: str, params: dict,
     group_filter: str | None, created_by: UUID | None, scheduled_by: str,
-    timeout: int | None = None, max_rows: int | None = None,
+    timeout: int | None = None, max_rows: int | None = None, flow_id: UUID | None = None,
 ) -> Flow:
     """Validate and queue one flow, then wake the agent. Raises HTTPException
     (404 agent/artifact, 409 no flow runner, 422 bad params). Shared by the
-    API and the AI investigator, so both go through the same checks."""
+    API and the AI investigator, so both go through the same checks. A caller
+    that passes flow_id may stage its own rows referencing it on `db`: they
+    commit together with the flow, or not at all."""
     aq = select(Agent).where(Agent.id == agent_id)
     if group_filter is not None:
         aq = aq.where(Agent.group_id == group_filter)
@@ -262,7 +264,7 @@ async def schedule_flow(
             raise HTTPException(422, "No enabled YARA rules — add one on the YARA page first")
         yara_rules = [{"id": str(r.id), "name": r.name, "content": r.content} for r in rows]
 
-    flow_id = uuid.uuid4()
+    flow_id = flow_id or uuid.uuid4()
     try:
         params = resolve_params(art, params)
         build_row_filter(art.content, params)  # detection must compile with these values
@@ -293,13 +295,14 @@ sources:
 
 async def schedule_command_flow(
     db: AsyncSession, redis: aioredis.Redis, *, agent: Agent, command: str, args: list[str],
-    timeout: int, created_by: UUID | None, scheduled_by: str,
+    timeout: int, created_by: UUID | None, scheduled_by: str, flow_id: UUID | None = None,
 ) -> Flow:
     """Queue one approved command for the agent's exec plugin. Built here, not
-    from an artifact: exec is in no saved artifact (flow_artifacts.INTERNAL_PLUGINS)."""
+    from an artifact: exec is in no saved artifact (flow_artifacts.INTERNAL_PLUGINS).
+    flow_id works as in schedule_flow: rows staged on `db` commit with the flow."""
     if agent.flow_poll_at is None:
         raise HTTPException(409, f"Agent {agent.hostname} has no flow runner; update it")
-    flow_id = uuid.uuid4()
+    flow_id = flow_id or uuid.uuid4()
     flow_timeout = timeout + 30  # the agent kills the command first and still reports
     request = {"id": str(flow_id), "artifact": COMMAND_ARTIFACT, "timeout": flow_timeout,
                "max_rows": DEFAULT_MAX_ROWS,
