@@ -32,7 +32,8 @@ This document remains the umbrella design. The Knowledge Vault (section 9) and Y
 - **Phase 1b: implemented** on the same branch: leases, scheduler adoption and reconciliation (section 6.6).
 - **Phase 2: implemented** on the same branch: the Knowledge Vault (section 9.8 lists how).
 - **Phase 3: implemented** on the same branch: file-feature collection and draft-only YARA (section 10.10 lists how).
-- Phase 4: not started. It needs the full-YARA items in the section 10.7 ownership table.
+- **Phase 4: implemented** on the same branch, including the full-YARA items from the section 10.7 ownership table (section 10.11 lists how).
+- Phase 5 (feedback and tuning): not started.
 
 ## 1. Summary
 
@@ -924,6 +925,47 @@ After activation:
 - Draft tasks run in the requesting replica. One interrupted by a restart is shown as failed after 15 minutes, and the analyst asks again.
 
 **Setting:** `yara_ai_generation` (`off`, `draft_only` default, `full`). `full` falls back to `draft_only` with an explanation until the capability exists.
+
+### 10.11 As implemented (Phase 4)
+
+The full-YARA items from the 10.7 ownership table were implemented here as well, since the engine is in-tree.
+
+**`yaracheck`:**
+- Lives in `agent/cmd/yaracheck`. It is built from `agent/internal/yara` in a `golang:1.25-alpine` stage of the server-api Dockerfile and installed at `/usr/local/bin/yaracheck`. The stage compiles standard-library code only, and a test guards that.
+- Commands:
+  - `capabilities`: engine version `siem-yara/1` (`yara.EngineVersion`), modules, modifiers, limits.
+  - `validate`: rule text on stdin; returns ok, error with line, rule names, the sha256 fingerprint and the engine version.
+  - `scan -rules`: scans files.
+- `server-api/app/services/yara_capability.py` runs it as a subprocess with a 30 s timeout, a CPU limit and a 1 GB address-space limit. It never loads a compiler library.
+
+**Capability:**
+- `GET /api/yara/capabilities` returns the engine plus the effective AI drafting mode. `yara_ai_generation=full` takes effect only when the binary answers.
+- Server-side sample and corpus tests report as unavailable: the platform has no governed sample store. Drafts are tested on endpoints instead.
+- The share of agents running a compatible engine (10.8) is not measured. Agents don't report an engine version yet, so activation does not check it.
+
+**Validation:**
+- `POST /api/yara-rules/validate` checks any text.
+- `POST /api/yara-rules/{id}/validate` stores a result on the rule, including the drafting quality checks. A blocking quality problem fails validation.
+
+**Rule-scoped test scans:**
+- `POST /api/yara-rules/{id}/test` needs `rules:update` and `agents:manage`.
+- It always includes the draft's sample (host and path, which must match) and up to ten analyst targets (baseline paths, which must not match).
+- Each target is a normal `*.Detection.Yara` flow whose request carries only this rule, through `schedule_flow(only_rules=...)`. The agent plugin already honoured an explicit `rules` argument, so the agent needed no change.
+- The result records per-target matches, errors, `baseline_matches` and the fingerprint it was run on.
+
+**Activation:**
+- `POST /api/yara-rules/{id}/activate` is the only way to enable an `ai_draft` rule; the toggle refuses and points to it.
+- It requires `full` mode, a passing validation and a passing test, both for the current content fingerprint, plus `confirm_fleet_deployment`. The refusal message states that the rule reaches every agent within a heartbeat and how many baseline matches the test found.
+- Any edit changes the fingerprint and voids both results. Changing the content of an enabled AI rule is refused until it is disabled; disabling is always allowed.
+- This replaces the "new draft revision while the active one keeps running" model of 10.5 with "disable, edit, validate, test, activate".
+
+**Provenance (10.9):**
+- The enabled ruleset sent to agents carries each rule's `revision` (the content fingerprint).
+- On-access matches now append `rule_id`, `revision`, and `case`, the last taken from the rule's meta, which AI drafts always set. `decoders/yara_match.yaml` maps them to `yara.rule_id`, `yara.revision` and `yara.case`, so the resulting alerts carry them.
+
+**Not done:**
+- False-positive feedback metrics.
+- Turning an approved rationale into a Knowledge Vault detection note.
 
 ## 11. API Surface
 

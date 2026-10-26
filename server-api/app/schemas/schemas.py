@@ -954,6 +954,11 @@ class YaraRuleOut(BaseModel):
     content: str
     is_enabled: bool
     created_at: datetime
+    origin: str = "manual"
+    draft_id: UUID | None = None
+    validation: dict | None = None
+    test_result: dict | None = None
+    activated_at: datetime | None = None
     model_config = {"from_attributes": True}
 
 class YaraScanRequest(BaseModel):

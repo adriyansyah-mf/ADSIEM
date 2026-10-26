@@ -230,6 +230,7 @@ async def schedule_flow(
     db: AsyncSession, redis: aioredis.Redis, *, agent_id: UUID, artifact: str, params: dict,
     group_filter: str | None, created_by: UUID | None, scheduled_by: str,
     timeout: int | None = None, max_rows: int | None = None, flow_id: UUID | None = None,
+    only_rules: list[dict] | None = None,
 ) -> Flow:
     """Validate and queue one flow, then wake the agent. Raises HTTPException
     (404 agent/artifact, 409 no flow runner, 422 bad params). Shared by the
@@ -257,8 +258,8 @@ async def schedule_flow(
     if not 1 <= max_rows <= MAX_MAX_ROWS:
         raise HTTPException(422, f"max_rows must be between 1 and {MAX_MAX_ROWS}")
 
-    yara_rules = None
-    if any(s.plugin == "yara" for s in art.sources):
+    yara_rules = only_rules  # a rule-scoped test scan: exactly these rules, enabled or not
+    if yara_rules is None and any(s.plugin == "yara" for s in art.sources):
         rows = (await db.execute(select(YaraRule).where(YaraRule.is_enabled == True))).scalars().all()  # noqa: E712
         if not rows:
             raise HTTPException(422, "No enabled YARA rules — add one on the YARA page first")

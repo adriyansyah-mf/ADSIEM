@@ -18,6 +18,10 @@ fields:
   file.path: file
   file.hash.sha256: sha256
   file.size: size
+  # provenance: the server's rule, the revision that fired, and the case an AI draft came from
+  yara.rule_id: rule_id
+  yara.revision: revision
+  yara.case: case
 static_fields:
   event.category: malware
   event.action: yara_match

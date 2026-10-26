@@ -57,6 +57,58 @@ function detail(err: unknown, fallback: string): string {
 
 const BUSY = new Set(['collecting', 'drafting'])
 
+export interface TestResultRow {
+  host: string; path: string; expect: 'match' | 'no_match'; recursive?: boolean
+  matched?: boolean; files?: string[]; error?: string | null; passed: boolean | null; flow_id?: string | null
+}
+
+export interface SavedRule {
+  id: string
+  name: string
+  content: string
+  is_enabled: boolean
+  origin: string
+  validation: { ok: boolean; error?: string; line?: number; fingerprint: string; engine_version?: string;
+    quality?: { blocking?: string[]; warnings?: string[] }; at?: string } | null
+  test_result: { status: 'running' | 'passed' | 'failed'; fingerprint: string; results: TestResultRow[];
+    baseline_matches?: number; at?: string | null } | null
+  activated_at: string | null
+}
+
+/** The disabled rule a draft was saved as, with its validate → test → activate state. */
+export function useSavedRule(ruleId: string | null) {
+  return useQuery<SavedRule>({
+    queryKey: ['yara-rule', ruleId],
+    queryFn: () => api.get(`/api/yara-rules/${ruleId}`).then(r => r.data),
+    enabled: !!ruleId,
+    refetchInterval: q => ((q.state.data as SavedRule | undefined)?.test_result?.status === 'running' ? 3000 : false),
+  })
+}
+
+export function useRuleLifecycle(ruleId: string | null) {
+  const qc = useQueryClient()
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['yara-rule', ruleId] }) }
+  const fail = (fallback: string) => (e: unknown) => { emitToast(detail(e, fallback), 'error'); refresh() }
+  return {
+    validate: useMutation({
+      mutationFn: () => api.post(`/api/yara-rules/${ruleId}/validate`).then(r => r.data as SavedRule),
+      onSuccess: refresh, onError: fail('Validation failed to run'),
+    }),
+    test: useMutation({
+      mutationFn: (targets: { host: string; path: string; expect: 'match' | 'no_match'; recursive: boolean }[]) =>
+        api.post(`/api/yara-rules/${ruleId}/test`, { targets }).then(r => r.data as SavedRule),
+      onSuccess: () => { emitToast('Test scans started on the endpoints', 'info'); refresh() },
+      onError: fail('Could not start the test'),
+    }),
+    activate: useMutation({
+      mutationFn: () => api.post(`/api/yara-rules/${ruleId}/activate`, { confirm_fleet_deployment: true })
+        .then(r => r.data as SavedRule),
+      onSuccess: () => { emitToast('Activated: every agent loads it at its next heartbeat', 'success'); refresh() },
+      onError: fail('Could not activate'),
+    }),
+  }
+}
+
 export function useMalware(caseId: string, invId: string | undefined) {
   const drafts = useQuery<YaraDraft[]>({
     queryKey: ['investigation', invId, 'yara-drafts'],

@@ -1,6 +1,17 @@
+# yaracheck: the agents' own YARA engine (agent/internal/yara) as a CLI, so
+# rules validate here exactly as they compile on endpoints
+# (app/services/yara_capability.py). Same module, same commit as the agents.
+FROM golang:1.25-alpine AS yaracheck
+WORKDIR /src/agent
+COPY agent/go.mod agent/go.sum ./
+COPY agent/internal/yara/ ./internal/yara/
+COPY agent/cmd/yaracheck/ ./cmd/yaracheck/
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/yaracheck ./cmd/yaracheck
+
 FROM python:3.12-slim
 
 WORKDIR /app
+COPY --from=yaracheck /out/yaracheck /usr/local/bin/yaracheck
 
 # Build context is the repo root (see Dockerfile.dockerignore) so the API can
 # share the worker's Sigma and decoder engines instead of keeping copies.

@@ -74,8 +74,11 @@ async def generation_mode(db) -> tuple[str, str | None]:
     if wanted not in MODES:
         wanted = "draft_only"
     if wanted == "full":
-        return "draft_only", ("full-YARA capability is not available yet: validation, test scans and activation "
-                              "are off, so drafts are saved disabled")
+        from app.services.yara_capability import capabilities
+        cap = await capabilities()
+        if not cap["available"]:
+            return "draft_only", (f"the full-YARA capability is unavailable ({cap.get('error')}): validation, "
+                                  "test scans and activation are off, so drafts stay disabled")
     return wanted, None
 
 

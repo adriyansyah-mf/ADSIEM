@@ -24,6 +24,11 @@ def invalidate() -> None:
     _cache = None
 
 
+def fingerprint(content: str) -> str:
+    """sha256 of the rule text, as agent/cmd/yaracheck computes it."""
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
 def ruleset_hash(rules: list[dict]) -> str:
     if not rules:
         return ""
@@ -38,7 +43,9 @@ async def enabled_ruleset(db: AsyncSession) -> tuple[str, list[dict]]:
     if _cache is not None and now - _cache[0] < CACHE_SECONDS:
         return _cache[1], _cache[2]
     result = await db.execute(select(YaraRule).where(YaraRule.is_enabled == True).order_by(YaraRule.name))  # noqa: E712
-    rules = [{"id": str(r.id), "name": r.name, "content": r.content} for r in result.scalars().all()]
+    # revision: the content fingerprint yaracheck reports, so a match names exactly what fired
+    rules = [{"id": str(r.id), "name": r.name, "content": r.content, "revision": fingerprint(r.content)}
+             for r in result.scalars().all()]
     digest = ruleset_hash(rules)
     _cache = (now, digest, rules)
     return digest, rules

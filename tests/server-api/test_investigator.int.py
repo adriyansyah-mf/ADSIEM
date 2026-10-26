@@ -274,6 +274,11 @@ async def _fake_agent(stop: asyncio.Event):
                             {"Stream": "stdout", "Line": 1, "Text": f"ran: {line}"},
                             {"Stream": "exit", "Line": 0, "Text": "exit code 0 after 3 ms", "ExitCode": 0},
                         ]))
+                    if src["plugin"] == "yara" and src["args"].get("path") == "/tmp/.x/kworkerd":
+                        # the sample: every rule the flow carries matches it; other paths stay clean
+                        db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[
+                            {"Rule": r["name"], "File": src["args"]["path"], "Size": 812, "Strings": "$c2@64"}
+                            for r in src["args"].get("rules") or []]))
                     if src["plugin"] == "filefeatures":
                         db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[{
                             "Path": src["args"]["path"], "Size": 812, "SHA256": "c" * 64, "Type": "ELF",
@@ -1333,5 +1338,128 @@ def test_a_supported_malware_file_gets_a_disabled_yara_draft(env, monkeypatch):
                     return exc
         exc = _run(off())
         assert exc.status_code == 409 and "turned off" in exc.detail
+    finally:
+        _set_setting("yara_ai_generation", "draft_only")
+
+
+# ─── Full-YARA lifecycle (spec Phase 4) ──────────────────────────
+
+def test_an_ai_rule_activates_only_after_validation_test_and_confirmation(env, monkeypatch):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.api.routes import yara_rules as routes
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Flow, PlatformSetting, YaraDraft, YaraRule
+    from app.schemas.schemas import YaraRuleCreate
+    from app.services import yara_capability, yara_ruleset
+
+    async def fake_validate(text):  # yaracheck itself is covered by test_yara_capability.py
+        return {"ok": "rule " in text, "rules": ["AI_kw"], "fingerprint": yara_ruleset.fingerprint(text),
+                "engine_version": "siem-yara/1"}
+
+    async def available():
+        return {"available": True, "validation": True}
+    monkeypatch.setattr(yara_capability, "validate", fake_validate)
+    monkeypatch.setattr(yara_capability, "capabilities", available)
+
+    host = f"act-{uuid.uuid4().hex[:8]}"
+    user_id, agent_id, case_id = _seed(host)
+    inv_id = _new_run(user_id, case_id, status="finished")
+    user = SimpleNamespace(**{**_analyst(user_id).__dict__, "role": SimpleNamespace(name="superadmin", permissions=[])})
+    content = ('rule AI_kw_' + uuid.uuid4().hex[:6] + ' {\n    meta:\n        case = "' + str(case_id) + '"\n'
+               '    strings:\n        $c2 = "203.0.113.9:443"\n        $cmd = "kworkerd -c %s"\n'
+               '    condition:\n        uint32(0) == 0x464C457F and filesize < 5MB and all of them\n}\n')
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            draft = YaraDraft(group_id="blue", investigation_id=inv_id, case_id=case_id, host=host,
+                              path="/tmp/.x/kworkerd", sha256="c" * 64, status="draft", support=[], rationale=[],
+                              limitations=[], false_positives=[], quality={}, mitre=[], tags=[])
+            db.add(draft)
+            await db.flush()
+            rule = YaraRule(name=content.split()[1], content=content, is_enabled=False, origin="ai_draft",
+                            draft_id=draft.id)
+            db.add(rule)
+            await db.commit()
+            rule_id = rule.id
+
+        async def call(fn, *args, **kw):
+            async with AsyncSessionLocal() as db:
+                return await fn(*args, db=db, **kw)
+
+        async def refused(fn, *args, **kw):
+            try:
+                await call(fn, *args, **kw)
+            except HTTPException as exc:
+                return exc
+            raise AssertionError("expected a refusal")
+
+        confirm = routes.ActivateRequest(confirm_fleet_deployment=True)
+        early = await refused(routes.activate_rule, rule_id, confirm, BackgroundTasks(), user=user)
+        assert early.status_code == 409 and "validate the current content first" in early.detail["problems"]
+        untested = await refused(routes.test_rule, rule_id, routes.TestRequest(), BackgroundTasks(), user=user,
+                                 group_filter="blue")
+        assert untested.status_code == 409
+
+        validated = await call(routes.validate_rule, rule_id, BackgroundTasks(), user=user)
+        assert validated.validation["ok"] and validated.validation["quality"]["blocking"] == []
+
+        stop = asyncio.Event()
+        agent = asyncio.create_task(_fake_agent(stop))
+        body = routes.TestRequest(targets=[routes.TestTarget(host=host, path="/usr/bin", expect="no_match",
+                                                             recursive=True)])
+        started = await call(routes.test_rule, rule_id, body, BackgroundTasks(), user=user, group_filter="blue")
+        assert started.test_result["status"] == "running"
+        assert [(r["path"], r["expect"]) for r in started.test_result["results"]] == [
+            ("/tmp/.x/kworkerd", "match"), ("/usr/bin", "no_match")]  # the sample is always tested
+
+        async def tested():
+            async with AsyncSessionLocal() as db:
+                r = await db.get(YaraRule, rule_id)
+                return r if r.test_result["status"] != "running" else None
+        rule = await _until(tested, 30)
+        stop.set()
+        await agent
+        assert rule.test_result["status"] == "passed", rule.test_result
+        assert [r["passed"] for r in rule.test_result["results"]] == [True, True]
+        assert rule.test_result["baseline_matches"] == 0
+        async with AsyncSessionLocal() as db:
+            flow = await db.get(Flow, uuid.UUID(rule.test_result["results"][0]["flow_id"]))
+        assert flow.artifact == "Linux.Detection.Yara"
+        assert [r["name"] for r in flow.request["sources"][0]["args"]["rules"]] == [rule.name]  # only this rule
+
+        unconfirmed = await refused(routes.activate_rule, rule_id, routes.ActivateRequest(), BackgroundTasks(),
+                                    user=user)
+        assert unconfirmed.status_code == 409 and any("full mode" in p for p in unconfirmed.detail["problems"])
+        async with AsyncSessionLocal() as db:  # inside the running loop: no _set_setting here
+            await db.merge(PlatformSetting(key="yara_ai_generation", value="full"))
+            await db.commit()
+        unconfirmed = await refused(routes.activate_rule, rule_id, routes.ActivateRequest(), BackgroundTasks(),
+                                    user=user)
+        assert unconfirmed.status_code == 422 and "every agent" in unconfirmed.detail["problems"][0]
+        toggled = await refused(routes.toggle_rule, rule_id, _=user)
+        assert toggled.status_code == 409 and "Activate" in toggled.detail
+
+        active = await call(routes.activate_rule, rule_id, confirm, BackgroundTasks(), user=user)
+        assert active.is_enabled and active.activated_at is not None
+        async with AsyncSessionLocal() as db:
+            yara_ruleset.invalidate()
+            _, rules = await yara_ruleset.enabled_ruleset(db)
+        mine = next(r for r in rules if r["id"] == str(rule_id))
+        assert mine["revision"] == yara_ruleset.fingerprint(content)  # agents report it with each match
+
+        changed = await refused(routes.update_rule, rule_id,
+                                YaraRuleCreate(name=active.name, content=content.replace("5MB", "6MB")), _=user)
+        assert changed.status_code == 409
+        off = await call(routes.toggle_rule, rule_id, _=user)  # disabling is always allowed
+        assert not off.is_enabled
+        edited = await call(routes.update_rule, rule_id, YaraRuleCreate(name=active.name,
+                                                                        content=content.replace("5MB", "6MB")), _=user)
+        again = await refused(routes.activate_rule, rule_id, confirm, BackgroundTasks(), user=user)
+        assert set(again.detail["problems"]) == {"validate the current content first",
+                                                 "run a test scan on the current content first"}
+        assert edited.validation["fingerprint"] != yara_ruleset.fingerprint(edited.content)
+    try:
+        _run(go())
     finally:
         _set_setting("yara_ai_generation", "draft_only")

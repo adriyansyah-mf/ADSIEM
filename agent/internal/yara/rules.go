@@ -16,6 +16,20 @@ import (
 	"sort"
 )
 
+// EngineVersion names the language subset this engine accepts. server-api's
+// yaracheck (cmd/yaracheck) reports it, and a validation is only trusted for
+// the version it was made with: bump it when the supported subset changes.
+const EngineVersion = "siem-yara/1"
+
+// Names returns the compiled rules' names, private and global ones included.
+func (r *Rules) Names() []string {
+	out := make([]string, 0, len(r.rules))
+	for _, rl := range r.rules {
+		out = append(out, rl.name)
+	}
+	return out
+}
+
 // Source is one rule text. Each source gets its own namespace, so rule
 // names only need to be unique within a source.
 type Source struct {

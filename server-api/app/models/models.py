@@ -544,6 +544,11 @@ class YaraRule(Base):
     # "ai_draft": saved from a YARA draft (services/yara_drafting.py); stays disabled until validated and tested
     origin      = Column(String(20), nullable=False, default="manual")
     draft_id    = Column(UUID(as_uuid=True))
+    # services/yara_capability.py: each result names the content fingerprint it is for; an edit voids it
+    validation  = Column(JSONB)   # {"ok", "error", "line", "fingerprint", "engine_version", "at", "quality"}
+    test_result = Column(JSONB)   # {"status", "fingerprint", "results": [...], "at"}
+    activated_by = Column(UUID(as_uuid=True))
+    activated_at = Column(DateTime(timezone=True))
 
 class YaraDraft(Base):
     """A YARA rule the AI drafted from one suspicious file's features (never the

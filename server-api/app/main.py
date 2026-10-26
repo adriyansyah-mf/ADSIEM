@@ -25,6 +25,7 @@ from app.api.routes.tasks import router as tasks_router, fleet_router
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.flows import router as flows_router, artifact_router as flow_artifacts_router, agent_router as agent_flows_router
 from app.api.routes.yara_rules import router as yara_router
+from app.api.routes.yara_rules import capability_router as yara_capability_router
 from app.api.routes.prevention_rules import router as prevention_router, agent_router as prevention_agent_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
@@ -349,7 +350,8 @@ async def _migrate_investigation_ledger_columns() -> None:
             await conn.execute(text(f"ALTER TABLE case_investigations ADD COLUMN IF NOT EXISTS {col}"))
         for col in ("created_by_investigation_id UUID", "promoted_at TIMESTAMPTZ", "promoted_by UUID"):
             await conn.execute(text(f"ALTER TABLE flow_artifacts ADD COLUMN IF NOT EXISTS {col}"))
-        for col in ("origin VARCHAR(20) NOT NULL DEFAULT 'manual'", "draft_id UUID"):
+        for col in ("origin VARCHAR(20) NOT NULL DEFAULT 'manual'", "draft_id UUID", "validation JSONB",
+                    "test_result JSONB", "activated_by UUID", "activated_at TIMESTAMPTZ"):
             await conn.execute(text(f"ALTER TABLE yara_rules ADD COLUMN IF NOT EXISTS {col}"))
 
 async def _migrate_agent_integrity() -> None:
@@ -500,7 +502,7 @@ for router in [
     auth.router, users.router, agents.router, ingest.router,
     logs.router, events.router, alerts.router, rules.router,
     decoders.router, webhooks.router, system.router, cases_router, settings_router, hygiene_router, ueba_router, fim_router, hunts_router,
-    tasks_router, fleet_router, artifacts_router, yara_router,
+    tasks_router, fleet_router, artifacts_router, yara_router, yara_capability_router,
     flows_router, flow_artifacts_router, agent_flows_router,
     enrollment_tokens_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
