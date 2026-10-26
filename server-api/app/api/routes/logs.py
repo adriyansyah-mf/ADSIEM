@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.deps import require_permission, get_scoped_group
 from app.core.es_client import search as es_search
-from app.core.query_builder import tree_to_query, sanitize_query_string
+from app.core.query_builder import text_search, tree_to_query
 from app.schemas.schemas import PaginatedResponse, RawLogOut
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
@@ -29,11 +29,7 @@ async def list_logs(
     if search:
         # query_string gives the box real Lucene syntax (field:value, wildcards,
         # AND/OR/NOT, ranges, ...) — bare terms fall back to raw_message.
-        filters.append({"query_string": {
-            "query": sanitize_query_string(search),
-            "default_field": "raw_message",
-            "allow_leading_wildcard": False,
-        }})
+        filters.append(text_search(search, "raw_message"))
     if filter_tree:
         q = tree_to_query(json.loads(filter_tree))
         if q:

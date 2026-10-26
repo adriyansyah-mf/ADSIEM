@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 
 from app.core.deps import get_scoped_group, require_permission
 from app.core.es_client import search as es_search
-from app.core.query_builder import tree_to_query, sanitize_query_string
+from app.core.query_builder import text_search, tree_to_query
 from app.schemas.schemas import EventOut, PaginatedResponse
 
 router = APIRouter(prefix="/api/events", tags=["events"])
@@ -29,11 +29,7 @@ async def list_events(
     if event_action:
         filters.append({"term": {"event_action": event_action}})
     if search:
-        filters.append({"query_string": {
-            "query": sanitize_query_string(search),
-            "default_field": "decoded_fields.*",
-            "allow_leading_wildcard": False,
-        }})
+        filters.append(text_search(search, "decoded_fields.*"))
     if filter_tree:
         q = tree_to_query(json.loads(filter_tree))
         if q:

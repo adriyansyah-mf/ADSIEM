@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
 from app.core.es_client import aggregate, index_stats
-from app.core.query_builder import sanitize_query_string
+from app.core.query_builder import text_search
 from app.models.models import User
 
 router = APIRouter(prefix="/api/elastic", tags=["elastic"])
@@ -45,13 +45,7 @@ def _base_filters(
     if group_filter:
         filters.append({"term": {"group_id": group_filter}})
     if search:
-        filters.append({
-            "query_string": {
-                "query": sanitize_query_string(search),
-                "default_field": "decoded_fields.*",
-                "allow_leading_wildcard": False,
-            }
-        })
+        filters.append(text_search(search, "decoded_fields.*"))
     if term_field and term_value:
         field = ALLOWED_TERM_FIELDS.get(term_field)
         if field:
