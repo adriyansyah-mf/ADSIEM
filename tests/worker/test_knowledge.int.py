@@ -29,13 +29,25 @@ SCHEMA = [
         kind VARCHAR(20) NOT NULL DEFAULT 'note', source VARCHAR(50) NOT NULL DEFAULT 'analyst', source_ref TEXT,
         title VARCHAR(300) NOT NULL, content TEXT NOT NULL, scope JSONB NOT NULL DEFAULT '{}'::jsonb,
         enabled BOOLEAN NOT NULL DEFAULT true, expires_at TIMESTAMPTZ, created_by UUID,
-        created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(), indexed_at TIMESTAMPTZ)""",
+        created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(), indexed_at TIMESTAMPTZ,
+        slug VARCHAR(200), path TEXT, tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+        frontmatter JSONB NOT NULL DEFAULT '{}'::jsonb, status VARCHAR(20) NOT NULL DEFAULT 'published',
+        trust VARCHAR(20) NOT NULL DEFAULT 'reviewed', content_type VARCHAR(30) NOT NULL DEFAULT 'environment',
+        owner_id UUID, reviewed_by UUID, reviewed_at TIMESTAMPTZ, version INTEGER NOT NULL DEFAULT 1,
+        checksum VARCHAR(64), index_error TEXT)""",
     """CREATE TABLE knowledge_chunks (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         entry_id UUID NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
         group_id VARCHAR(100) NOT NULL DEFAULT 'default', kind VARCHAR(20) NOT NULL, chunk_index INTEGER NOT NULL,
-        chunk_text TEXT NOT NULL, embedding vector(384) NOT NULL)""",
+        chunk_text TEXT NOT NULL, embedding vector(384) NOT NULL, heading TEXT,
+        tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', coalesce(heading, '') || ' ' || chunk_text)) STORED)""",
     "CREATE INDEX ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)",
+    """CREATE TABLE knowledge_links (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        source_id UUID NOT NULL REFERENCES knowledge_entries(id) ON DELETE CASCADE,
+        group_id VARCHAR(100) NOT NULL DEFAULT 'default', target VARCHAR(300) NOT NULL,
+        target_slug VARCHAR(200) NOT NULL, heading VARCHAR(300),
+        target_id UUID REFERENCES knowledge_entries(id) ON DELETE SET NULL)""",
     """CREATE TABLE ai_feedback (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(), entity_type VARCHAR(20) NOT NULL, entity_id UUID NOT NULL,
         context_text TEXT NOT NULL, ai_verdict VARCHAR(50), rating VARCHAR(20) NOT NULL, correct_verdict VARCHAR(50),
@@ -189,3 +201,97 @@ def test_feedback_that_never_got_embedded_is_backfilled(db):
     assert _run(backfill_feedback()) == 1
     assert _sql("SELECT count(*) AS n FROM feedback_embeddings")[0]["n"] == 1
     assert _run(backfill_feedback()) == 0
+
+
+# ─── Knowledge vault: hybrid retrieval ───────────────────────────
+
+def _query(query, group="blue", embed=None, **kw):
+    from worker.database import AsyncSessionLocal
+    from worker.knowledge_query import query_knowledge
+
+    async def vec(t):
+        return _vec(t)
+
+    async def go():
+        async with AsyncSessionLocal() as s:
+            return await query_knowledge(s, embed or vec, query, group, {}, False, **kw)
+    return _run(go())
+
+
+def _index():
+    from worker import knowledge
+    while _run(knowledge.index_pending()):
+        pass
+
+
+def test_only_published_articles_are_indexed_and_returned(db):
+    published = _note("Scanner exceptions", "The scanner runs nightly.")
+    draft = _note("Scanner draft", "Unreviewed scanner thoughts.", status="draft")
+    archived = _note("Old scanner policy", "The scanner used to run hourly.", status="archived")
+    _index()
+    stale = {r["id"]: r["pending"] for r in _sql(
+        "SELECT id::text AS id, indexed_at IS NULL AS pending FROM knowledge_entries")}
+    assert stale == {published: False, draft: True, archived: True}  # drafts wait until published
+    assert [n["id"] for n in _query("scanner activity")["notes"]] == [published]
+
+
+async def _no_model(_text):
+    return None
+
+
+def test_full_text_finds_articles_without_the_embedding_model(db):
+    article = _note("Kerberos attacks", "# Kerberos attacks\n\nIntro.\n\n## Kerberoasting\n\n"
+                    "Look for TGS requests with RC4 encryption for service accounts.")
+    _note("Unrelated", "Printer maintenance schedule.")
+    _index()
+    [note] = _query("Possible Kerberoasting: many TGS requests", embed=_no_model)["notes"]
+    assert note["id"] == article and note["heading"] == "Kerberoasting"
+    assert note["scores"]["vector"] == 0 and note["scores"]["fulltext"] > 0
+    assert note["link"] == f"/knowledge?article={article}" and note["version"] == 1
+
+
+def test_trust_weighting_and_metadata_filters(db):
+    draft_trust = _note("Backup notes (unreviewed)", "The backup job copies dumps.", trust="draft")
+    verified = _note("Backup runbook", "The backup job copies dumps.", trust="verified",
+                     frontmatter='{"mitre": ["T1567.002"], "platforms": ["linux"]}')
+    _index()
+    assert [n["id"] for n in _query("backup")["notes"]][:2] == [verified, draft_trust]  # same text, more trust
+    filtered = _query("backup", filters={"mitre": ["t1567.002"]})["notes"]
+    assert [n["id"] for n in filtered] == [verified]
+    assert _query("backup", filters={"platforms": ["windows"]})["notes"] == []
+
+
+def test_linked_articles_come_along_one_hop(db):
+    hub = _note("Backup window", "Backups run at 02:00; see the S3 bucket policy.")
+    linked = _note("S3 bucket policy", "Only the archiver role may write to the bucket.")  # nothing about backups
+    far = _note("Archiver role", "Owned by the platform team.")
+    _sql("INSERT INTO knowledge_links (source_id, group_id, target, target_slug, target_id) "
+         "VALUES (CAST(:a AS uuid), 'blue', 'S3 bucket policy', 's3-bucket-policy', CAST(:b AS uuid)), "
+         "(CAST(:b AS uuid), 'blue', 'Archiver role', 'archiver-role', CAST(:c AS uuid))", a=hub, b=linked, c=far)
+    _index()
+    notes = {n["id"]: n for n in _query("backup")["notes"]}
+    assert hub in notes and notes[linked]["linked_from"] == hub
+    assert far not in notes  # one hop only
+    assert notes[linked]["score"] < notes[hub]["score"]
+
+
+def test_a_failed_embedding_keeps_the_previous_version_searchable(db, monkeypatch):
+    from worker import knowledge
+
+    entry = _note("Backup schedule", "Backups at 02:00.")
+    _index()
+    _sql("UPDATE knowledge_entries SET content = 'Backups moved to 04:00.', updated_at = now() "
+         "WHERE id = CAST(:i AS uuid)", i=entry)
+
+    def broken(texts):
+        raise RuntimeError("model not loaded")
+    monkeypatch.setattr(knowledge, "embed_texts", broken)
+    assert _run(knowledge.index_pending()) == 0
+    row = _sql("SELECT index_error, (SELECT string_agg(chunk_text, ' ') FROM knowledge_chunks WHERE entry_id = e.id) "
+               "AS chunks FROM knowledge_entries e WHERE id = CAST(:i AS uuid)", i=entry)[0]
+    assert "model not loaded" in row["index_error"] and "02:00" in row["chunks"]
+    monkeypatch.setattr(knowledge, "embed_texts", lambda texts: [_vec(t) for t in texts])
+    _index()
+    row = _sql("SELECT index_error, (SELECT string_agg(chunk_text, ' ') FROM knowledge_chunks WHERE entry_id = e.id) "
+               "AS chunks FROM knowledge_entries e WHERE id = CAST(:i AS uuid)", i=entry)[0]
+    assert row["index_error"] is None and "04:00" in row["chunks"]

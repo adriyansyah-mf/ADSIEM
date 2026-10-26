@@ -216,12 +216,14 @@ def evidence_specs(tool: str, args: dict, result: Any) -> list[EvidenceSpec]:
         return [EvidenceSpec("ti_result", "malwarebazaar", h, _clip(f"MalwareBazaar {result.get('status')} for {h[:16]}…", 300),
                              _clip({k: v for k, v in result.items() if k != "raw"}, 1500), result, {"hashes": [h]})]
     if tool in ("search_knowledge", "search_sop"):
-        notes = result.get("notes") or []
-        ids = [str(n.get("id")) for n in notes if isinstance(n, dict) and n.get("id")]
-        titles = [str(n.get("title")) for n in notes if isinstance(n, dict) and n.get("title")]
+        notes = [n for n in result.get("notes") or [] if isinstance(n, dict) and n.get("id")]
+        ids = [str(n["id"]) for n in notes]
+        titles = {str(n["id"]): str(n.get("title") or "") for n in notes}
+        headings = {str(n["id"]): n.get("heading") for n in notes if n.get("heading")}
         return [EvidenceSpec(KNOWLEDGE, tool, _clip(args.get("query", ""), 255),
                              _clip(f"Knowledge: {args.get('query', '')}", 300),
-                             _clip("; ".join(titles) or result, 1500), result, {"knowledge_ids": ids})]
+                             _clip("; ".join(t for t in titles.values() if t) or result, 1500), result,
+                             {"knowledge_ids": ids, "titles": titles, "headings": headings})]
     if tool in SIEM_TOOLS and tool != "get_case":
         etype = "alert" if tool in ("get_alert", "search_alerts") else "event"
         source_id = str(result.get("id")) if tool == "get_alert" and result.get("id") else \
@@ -491,8 +493,11 @@ def render_markdown(report: dict, index: dict[str, InvestigationEvidence]) -> st
             ev = index.get(eid)
             lines.append(f"- **{label}** {ev.title if ev else eid} (`{eid}`)")
     if report["knowledge_citations"]:
+        titles = {k: t for ev in index.values() if ev.evidence_type == KNOWLEDGE
+                  for k, t in ((ev.entities or {}).get("titles") or {}).items()}
         lines += ["", "## Knowledge cited",
-                  *[f"- Knowledge: {k['entry_id']}{'#' + k['heading'] if k['heading'] else ''}" for k in report["knowledge_citations"]]]
+                  *[f"- Knowledge: {titles.get(k['entry_id']) or k['entry_id']}{'#' + k['heading'] if k['heading'] else ''}"
+                    for k in report["knowledge_citations"]]]
     lines += ["", f"VERDICT: {report['verdict']}"]
     return "\n".join(lines)
 

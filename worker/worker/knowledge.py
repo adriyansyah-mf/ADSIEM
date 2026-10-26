@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 import structlog
 from sqlalchemy import text
 
+from worker import knowledge_markdown as md
 from worker.database import AsyncSessionLocal
 from worker.knowledge_query import alert_entities, alert_query_text, query_knowledge, wants_payload_reference
 from worker.rag import embed_or_none, embed_texts
@@ -42,6 +43,7 @@ SYNC_QUEUE = "siem:knowledge:sync"     # server-api pushes here for "Sync now"
 STATE_KEY = "siem:knowledge:pat"       # status the Knowledge page shows
 SYNC_LOCK = "siem:knowledge:sync-lock"
 INDEX_LOCK = "siem:knowledge:index-lock"
+INDEX_QUEUE = "siem:knowledge:index"   # server-api pushes entry ids when an article is saved
 
 _SKIP_HEADINGS = re.compile(r"(?i)^(summary|table of contents|contents|references?|labs?|tools?|credits|thanks"
                             r"|challenges?|resources|methodology)$")
@@ -130,9 +132,9 @@ async def sync_payloadsallthethings(redis, url: str) -> dict:
             if old is None:
                 await db.execute(text("""
                     INSERT INTO knowledge_entries (id, group_id, kind, source, source_ref, title, content, scope,
-                                                   enabled, created_at, updated_at)
+                                                   enabled, created_at, updated_at, trust, content_type)
                     VALUES (gen_random_uuid(), '*', 'reference', :s, :ref, :title, :content, '{}'::jsonb,
-                            true, now(), now())
+                            true, now(), now(), 'external', 'external_reference')
                 """), {"s": PAT_SOURCE, "ref": e["source_ref"], "title": e["title"], "content": e["content"]})
                 stats["added"] += 1
             elif old[1] != e["content"]:
@@ -171,35 +173,49 @@ def chunk_text(content: str, size: int = CHUNK_CHARS) -> list[str]:
     return chunks
 
 
+def _chunks(row) -> list[tuple[str | None, str]]:
+    """Notes and vault articles split at their headings; reference sections by paragraph."""
+    if row["kind"] == "note":
+        return md.chunk_markdown(row["title"], row["content"])
+    return [(None, c) for c in chunk_text(row["content"])]
+
+
 async def index_pending(limit: int = INDEX_BATCH) -> int:
-    """Embed entries that are new or changed since they were last indexed."""
+    """Embed published entries that are new or changed since they were last
+    indexed. Drafts and archived articles never reach the AI, so they wait.
+    An entry's old chunks are replaced only once the new ones embedded: if
+    embedding fails, the previous published version stays searchable."""
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(text("""
             SELECT id::text AS id, group_id, kind, title, content
             FROM knowledge_entries
-            WHERE indexed_at IS NULL OR indexed_at < updated_at
+            WHERE (indexed_at IS NULL OR indexed_at < updated_at) AND status = 'published'
             ORDER BY (kind = 'note') DESC, updated_at
             LIMIT :n
         """), {"n": limit})).mappings().all()
     if not rows:
         return 0
-    pieces = [(r, i, c) for r in rows
-              for i, c in enumerate(chunk_text(f"{r['title']}\n{r['content']}" if r["kind"] == "note" else r["content"]))]
+    ids = [r["id"] for r in rows]
+    pieces = [(r, i, heading, c) for r in rows for i, (heading, c) in enumerate(_chunks(r))]
     try:
-        vectors = await asyncio.to_thread(embed_texts, [c for _, _, c in pieces])
+        vectors = await asyncio.to_thread(embed_texts, [c for *_, c in pieces])
     except Exception as exc:  # noqa: BLE001 — no model now; next round
         log.warning("knowledge_embed_failed", error=str(exc), entries=len(rows))
+        async with AsyncSessionLocal() as db:  # shown on the article as its index status
+            await db.execute(text("UPDATE knowledge_entries SET index_error = :e WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                             {"e": f"embedding failed: {exc}"[:500], "ids": ids})
+            await db.commit()
         return 0
     async with AsyncSessionLocal() as db:
-        ids = [r["id"] for r in rows]
         await db.execute(text("DELETE FROM knowledge_chunks WHERE entry_id = ANY(CAST(:ids AS uuid[]))"), {"ids": ids})
-        for (r, i, chunk), vec in zip(pieces, vectors):
+        for (r, i, heading, chunk), vec in zip(pieces, vectors):
             await db.execute(text("""
-                INSERT INTO knowledge_chunks (id, entry_id, group_id, kind, chunk_index, chunk_text, embedding)
-                VALUES (gen_random_uuid(), CAST(:e AS uuid), :g, :k, :i, :t, CAST(:v AS vector))
-            """), {"e": r["id"], "g": r["group_id"], "k": r["kind"], "i": i, "t": chunk, "v": str(vec)})
-        await db.execute(text("UPDATE knowledge_entries SET indexed_at = now() WHERE id = ANY(CAST(:ids AS uuid[]))"),
-                         {"ids": ids})
+                INSERT INTO knowledge_chunks (id, entry_id, group_id, kind, chunk_index, chunk_text, heading, embedding)
+                VALUES (gen_random_uuid(), CAST(:e AS uuid), :g, :k, :i, :t, :h, CAST(:v AS vector))
+            """), {"e": r["id"], "g": r["group_id"], "k": r["kind"], "i": i, "t": chunk, "h": heading,
+                   "v": str(vec)})
+        await db.execute(text("UPDATE knowledge_entries SET indexed_at = now(), index_error = NULL "
+                              "WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": ids})
         await db.commit()
     log.info("knowledge_indexed", entries=len(rows), chunks=len(pieces))
     return len(rows)
@@ -247,6 +263,19 @@ async def knowledge_loop() -> None:
             break
         except Exception as exc:  # noqa: BLE001
             log.error("knowledge_loop_error", error=str(exc))
+        await _wait_for_work()
+
+
+async def _wait_for_work() -> None:
+    """Until server-api saves an article (it pushes to INDEX_QUEUE) or LOOP_INTERVAL
+    passes; the periodic pass also recovers anything a lost push missed."""
+    from worker.redis_client import get_redis
+    try:
+        redis = await get_redis()
+        if await redis.blpop(INDEX_QUEUE, timeout=LOOP_INTERVAL):
+            await redis.delete(INDEX_QUEUE)  # one pass indexes every pending entry
+            return
+    except Exception:  # noqa: BLE001 — no Redis: fall back to polling
         await asyncio.sleep(LOOP_INTERVAL)
 
 

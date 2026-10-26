@@ -79,7 +79,8 @@ def test_flow_sources_become_evidence_and_get_ids():
     assert ledger.evidence_specs("run_artifact", {}, {"error": "offline"}) == []
     assert ledger.evidence_specs("list_hosts", {}, {"hosts": []}) == []
     k = ledger.evidence_specs("search_knowledge", {"query": "scanner"}, {"notes": [{"id": "n1", "title": "Nessus"}]})
-    assert k[0].evidence_type == ledger.KNOWLEDGE and k[0].entities == {"knowledge_ids": ["n1"]}
+    assert k[0].evidence_type == ledger.KNOWLEDGE
+    assert k[0].entities == {"knowledge_ids": ["n1"], "titles": {"n1": "Nessus"}, "headings": {}}
 
 
 def _hyp(source="planner"):

@@ -632,6 +632,65 @@ class KnowledgeEntry(Base):
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     indexed_at = Column(DateTime(timezone=True))                         # NULL or < updated_at: (re)embed
+    # Knowledge vault (services/knowledge_vault.py): Markdown articles with frontmatter and [[wikilinks]].
+    # Only published, enabled, unexpired entries reach the AI.
+    slug         = Column(String(200))                                   # wikilink target, unique per group
+    path         = Column(Text)                                          # vault path, e.g. "Windows/PowerShell.md"
+    tags         = Column(JSONB, nullable=False, default=list)
+    frontmatter  = Column(JSONB, nullable=False, default=dict)
+    status       = Column(String(20), nullable=False, default="published")  # draft | published | archived
+    trust        = Column(String(20), nullable=False, default="reviewed")   # draft | reviewed | verified | external
+    content_type = Column(String(30), nullable=False, default="environment")
+    owner_id     = Column(UUID(as_uuid=True))
+    reviewed_by  = Column(UUID(as_uuid=True))
+    reviewed_at  = Column(DateTime(timezone=True))
+    version      = Column(Integer, nullable=False, default=1)
+    checksum     = Column(String(64))
+    index_error  = Column(Text)                                          # why the last embedding failed
+
+
+class KnowledgeRevision(Base):
+    """An immutable snapshot of an article at one version; restoring one makes a new version."""
+    __tablename__ = "knowledge_revisions"
+    __table_args__ = (UniqueConstraint("entry_id", "version", name="uq_knowledge_revision_version"),)
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entry_id    = Column(UUID(as_uuid=True), ForeignKey("knowledge_entries.id", ondelete="CASCADE"), nullable=False, index=True)
+    version     = Column(Integer, nullable=False)
+    title       = Column(String(300), nullable=False)
+    content     = Column(Text, nullable=False)
+    frontmatter = Column(JSONB, nullable=False, default=dict)
+    status      = Column(String(20), nullable=False)
+    author_id   = Column(UUID(as_uuid=True))
+    note        = Column(Text)                                           # e.g. "restored version 2", "imported"
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+
+
+class KnowledgeLink(Base):
+    """A [[wikilink]] from one article; target_id is set once an article with that slug or title exists."""
+    __tablename__ = "knowledge_links"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_id   = Column(UUID(as_uuid=True), ForeignKey("knowledge_entries.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id    = Column(String(100), nullable=False, default="default")
+    target      = Column(String(300), nullable=False)                    # as written
+    target_slug = Column(String(200), nullable=False, index=True)
+    heading     = Column(String(300))
+    target_id   = Column(UUID(as_uuid=True), ForeignKey("knowledge_entries.id", ondelete="SET NULL"), index=True)
+
+
+class KnowledgeUsage(Base):
+    """Each time the AI retrieved or cited a knowledge entry."""
+    __tablename__ = "knowledge_usage"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entry_id         = Column(UUID(as_uuid=True), ForeignKey("knowledge_entries.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id         = Column(String(100), nullable=False, default="default")
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"), index=True)
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"))
+    use_type         = Column(String(20), nullable=False)                # retrieved | cited
+    query            = Column(Text)
+    heading          = Column(String(300))
+    version          = Column(Integer)
+    score            = Column(Float)
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
 
 
 class SopChunk(Base):

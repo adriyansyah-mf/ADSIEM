@@ -88,6 +88,8 @@ def env():
             await conn.execute(text("CREATE SCHEMA public"))
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all)
+        from app.services.knowledge_schema import migrate_knowledge
+        await migrate_knowledge()  # knowledge_chunks: search_knowledge queries it
     _run(setup())
     yield
     _run(engine.dispose())
@@ -493,6 +495,58 @@ def test_ledger_records_actions_evidence_and_a_cited_report(env, monkeypatch):
         async with AsyncSessionLocal() as db:
             return (await db.execute(select(CaseNote.content).where(CaseNote.case_id == case_id))).scalar_one()
     assert "[E1]" in _run(note())
+
+
+def test_knowledge_the_ai_retrieves_and_cites_is_recorded(env, monkeypatch):
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import KnowledgeEntry, KnowledgeUsage
+    from app.services import embeddings
+
+    async def no_model(_text):
+        return None
+    monkeypatch.setattr(embeddings, "embed", no_model)  # exact scope matching needs no model
+    user_id, _, case_id = _seed(f"kn-{uuid.uuid4().hex[:8]}")
+    ip = f"198.51.100.{uuid.uuid4().int % 250 + 1}"
+
+    async def note():
+        async with AsyncSessionLocal() as db:
+            e = KnowledgeEntry(group_id="blue", kind="note", title="Pentest box", content="Red team host.",
+                               scope={"ips": [ip], "hosts": [], "users": [], "rules": []}, status="published")
+            draft = KnowledgeEntry(group_id="blue", kind="note", title="Unreviewed idea", content="Maybe.",
+                                   scope={"ips": [ip], "hosts": [], "users": [], "rules": []}, status="draft")
+            db.add_all([e, draft])
+            await db.commit()
+            return str(e.id)
+    note_id = _run(note())
+    st = {}
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return ("search_knowledge", {"query": ip})
+        if turn == 2:
+            assert [n["id"] for n in results[-1]["notes"]] == [note_id]  # the draft never reaches the AI
+            assert results[-1]["notes"][0]["cite_as"] == "Knowledge: Pentest box"
+            st["alert"] = _context(messages)["alerts"][0]["evidence_id"]
+            return json.dumps({"verdict": "false_positive", "confidence": 70, "executive_summary": "Red team.",
+                               "claims": [{"id": "c1", "section": "analysis", "text": "The alert fired",
+                                           "evidence_ids": [st["alert"]]}],
+                               "knowledge_citations": [{"entry_id": note_id, "heading": ""}]})
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id)
+    assert inv.status == "finished", inv.error
+    assert "Knowledge: Pentest box" in inv.report
+
+    async def usage():
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(select(KnowledgeUsage).where(KnowledgeUsage.investigation_id == inv.id)
+                                     .order_by(KnowledgeUsage.created_at))).scalars().all()
+    rows = _run(usage())
+    assert [(r.use_type, str(r.entry_id), r.case_id) for r in rows] == [
+        ("retrieved", note_id, case_id), ("cited", note_id, case_id)]
+    assert rows[0].query == ip
 
 
 def test_a_verdict_resting_on_unverified_claims_is_downgraded(env, monkeypatch):

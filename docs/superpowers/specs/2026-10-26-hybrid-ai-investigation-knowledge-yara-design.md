@@ -30,7 +30,8 @@ This document remains the umbrella design. The Knowledge Vault (section 9) and Y
   - UI: `dashboard/src/components/InvestigationLedger.tsx`.
   - Where the implementation settled a detail differently from revision 2, this text was updated: sections 5.3, 6.2, 6.5 and 6.6.
 - **Phase 1b: implemented** on the same branch: leases, scheduler adoption and reconciliation (section 6.6).
-- Phases 2, 3 and 4: not started.
+- **Phase 2: implemented** on the same branch: the Knowledge Vault (section 9.8 lists how).
+- Phases 3 and 4: not started.
 
 ## 1. Summary
 
@@ -625,6 +626,58 @@ Two-way filesystem or Git synchronization is deferred. Native editing plus repea
 - Secrets are blocked before indexing and redacted from previews.
 - Analyst-provided text cannot change tool permissions, risk tier, or system instructions.
 - Every AI use is recorded in `knowledge_usage`.
+
+### 9.8 As implemented (Phase 2)
+
+**Where the code lives:**
+- Shared pure module: `worker/worker/knowledge_markdown.py` (frontmatter, headings, wikilinks, slugs, secret scan, checksum, heading chunks). The server-api image copies it, like `knowledge_query.py`.
+- Server: `server-api/app/services/knowledge_vault.py` (save, revisions, links, usage, import) and the `/api/knowledge/articles*` and `/api/knowledge/import` routes.
+- Indexing: `worker/worker/knowledge.py`. Retrieval: `worker/worker/knowledge_query.py`.
+- UI: `dashboard/src/components/KnowledgeVault.tsx`, the Vault tab on the Knowledge page.
+
+**Articles and quick notes:**
+- Articles are `knowledge_entries` rows of kind `note`. The existing quick-notes API keeps working: its notes are published, `reviewed` trust, and now also secret-scanned and pushed to the index queue.
+- A new vault article starts as a draft with `draft` trust.
+- Review rules:
+  - Another person marks it reviewed.
+  - Only a user with `settings:manage` marks it verified, or saves frontmatter that says `verified`.
+  - The author can't review their own article.
+
+**Frontmatter:**
+- Recognized keys: `title`, `tags`, `platforms`, `mitre` (validated technique ids), `type` (the six content types in section 9.1), `trust`, `expires`, `aliases`, `scope`.
+- Other keys, such as Obsidian's own, are kept as they are.
+- `scope.groups` names one group (or `"*"`) and must be the writer's own.
+- `scope.ips/hosts/users/rules` feed the existing exact matching.
+
+**Secret scan:** high-confidence credential shapes only (private keys, cloud and API tokens, JWTs, long credential assignments). A bare `password=` in a DFIR example is allowed. Matches are reported by line with a redacted excerpt, never echoed back.
+
+**Saving and revisions:**
+- Saving an unchanged checksum is a no-op.
+- A changed article gets a new version, an immutable `knowledge_revisions` row, and rebuilt `knowledge_links`.
+- Dangling links elsewhere resolve once an article with that slug or title appears.
+- Restoring a revision makes a new version; history is never rewritten.
+
+**Indexing:**
+- Event-driven: saves push to the Redis list `siem:knowledge:index`, and the worker's `BLPOP` wakes on it. The 60 s pass remains as recovery.
+- Only published entries are indexed.
+- Chunks follow H1–H3 sections and store their `heading`. A generated `tsvector` column (`simple` configuration) sits beside the embedding.
+- A failed embedding records `index_error` and leaves the previous chunks searchable.
+
+**Retrieval:**
+- Candidates come from exact scope, the vector top 20 and the full-text top 20 (an OR query with stopwords removed). All are filtered to published, enabled, unexpired entries in the group, optionally narrowed by tags, type, platform or MITRE technique.
+- Score = (0.65 × vector + 0.35 × normalized full text) × trust weight (verified 1.0, reviewed 0.9, external 0.75, draft 0.5) × recency (1.0 for 90 days, easing to 0.8 at two years).
+- Up to two one-hop link neighbours are added at half their parent's score.
+- Each result carries its heading, version, trust, `/knowledge?article=<id>` link and score breakdown.
+- Full text keeps retrieval working without the embedding model.
+
+**Usage tracking:** `search_knowledge` results and report `knowledge_citations` are written to `knowledge_usage` as `retrieved` and `cited`, with investigation and case. Alert triage in the worker does not record usage yet.
+
+**Obsidian import:**
+- One way, a zip upload with a dry run by default.
+- Limits: 20 MB compressed, 60 MB expanded, a 100:1 ratio, 2,000 notes, 1 MB per note.
+- Paths that escape the vault are refused. Hidden folders and `__MACOSX` are ignored, and non-Markdown files are listed as skipped. A single top folder is stripped.
+- Notes are upserted by path, and unchanged checksums are skipped.
+- The report lists frontmatter or secret errors and links that resolve nowhere.
 
 ## 10. Malware Finding and YARA Drafting
 

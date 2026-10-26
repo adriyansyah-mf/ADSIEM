@@ -9,6 +9,7 @@
 !worker/worker/decoder_engine.py
 !worker/worker/agent_health.py
 !worker/worker/knowledge_query.py
+!worker/worker/knowledge_markdown.py
 !worker/worker/soar/__init__.py
 !worker/worker/soar/graph.py
 !worker/worker/soar/template.py

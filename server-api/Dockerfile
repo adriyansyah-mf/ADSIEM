@@ -18,7 +18,7 @@ ENV FASTEMBED_CACHE_PATH=/opt/fastembed
 COPY worker/bake_embedding_model.py /tmp/
 RUN python /tmp/bake_embedding_model.py /opt/fastembed; chmod -R a+rX /opt/fastembed
 
-COPY worker/worker/__init__.py worker/worker/sigma_engine.py worker/worker/sigma_logsource.py worker/worker/decoder_engine.py worker/worker/agent_health.py worker/worker/knowledge_query.py ./worker/
+COPY worker/worker/__init__.py worker/worker/sigma_engine.py worker/worker/sigma_logsource.py worker/worker/decoder_engine.py worker/worker/agent_health.py worker/worker/knowledge_query.py worker/worker/knowledge_markdown.py ./worker/
 COPY worker/worker/soar/__init__.py worker/worker/soar/graph.py worker/worker/soar/template.py worker/worker/soar/curl.py ./worker/soar/
 COPY server-api/app/ ./app/
 

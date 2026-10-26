@@ -986,6 +986,10 @@ async def _complete_action(ctx: Ctx, action_id: uuid.UUID, name: str, args: dict
         row.status, row.decision_note, row.result_ref = status, note, ref
         row.error = _clip(str(result["error"]), 1000) if status == "failed" else None
         row.finished_at = datetime.now(timezone.utc)
+        if name == "search_knowledge" and status == "completed":
+            from app.services.knowledge_vault import record_usage
+            await record_usage(db, group_id=ctx.group_id, use_type="retrieved", notes=result.get("notes") or [],
+                               query=str(args.get("query") or ""), investigation_id=ctx.inv_id, case_id=ctx.case_id)
         await db.commit()
     if isinstance(result, dict):
         ledger.attach_ids(result, specs, ids)
@@ -1111,6 +1115,12 @@ async def _final_report(ctx: Ctx, chat, messages: list[BaseMessage], content: st
         if again is not None:
             report, problems = ledger.validate_report(again, index, known)
     report = ledger.finalize_report(report)
+    if report["knowledge_citations"]:
+        from app.services.knowledge_vault import record_usage
+        async with AsyncSessionLocal() as db:
+            await record_usage(db, group_id=ctx.group_id, use_type="cited", notes=report["knowledge_citations"],
+                               investigation_id=ctx.inv_id, case_id=ctx.case_id)
+            await db.commit()
     if report["unverified_claims"]:
         await _step(ctx.inv_id, "warning",
                     text=f"{report['unverified_claims']} report statements cite no evidence this investigation collected")
