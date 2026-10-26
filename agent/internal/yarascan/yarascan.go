@@ -38,9 +38,10 @@ const (
 
 // Rule is a rule source as the server sends it.
 type Rule struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Content string `json:"content"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Content  string `json:"content"`
+	Revision string `json:"revision"` // of Content; matches name the revision that fired
 }
 
 // Options configure a Scanner.
@@ -61,6 +62,7 @@ type Scanner struct {
 	rules    *yara.Rules
 	hash     string
 	ruleErrs []yara.SourceError
+	refs     map[string]Rule // namespace (the server's rule name) -> its id and revision
 
 	cacheMu sync.Mutex
 	cache   map[string]string // path -> sha256 + rule hash last scanned
@@ -119,12 +121,14 @@ func (s *Scanner) Hash() string {
 // compile are left out and returned.
 func (s *Scanner) SetRules(hash string, rules []Rule) []yara.SourceError {
 	srcs := make([]yara.Source, 0, len(rules))
+	refs := make(map[string]Rule, len(rules))
 	for _, r := range rules {
 		srcs = append(srcs, yara.Source{Namespace: r.Name, Text: r.Content})
+		refs[r.Name] = Rule{ID: r.ID, Name: r.Name, Revision: r.Revision}
 	}
 	compiled, errs := yara.CompileSources(srcs)
 	s.mu.Lock()
-	s.rules, s.hash, s.ruleErrs = compiled, hash, errs
+	s.rules, s.hash, s.ruleErrs, s.refs = compiled, hash, errs, refs
 	s.mu.Unlock()
 	for _, e := range errs {
 		slog.Warn("yara: rule does not compile, skipped", "rule", e.Namespace, "err", e.Err)
@@ -308,7 +312,7 @@ func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.Ru
 		slog.Warn("yara: scan limit hit", "path", path, "warning", w)
 	}
 	for _, m := range res.Matches {
-		s.opts.Push(LogType, MatchLine(m, path, digest, int64(len(data)), trigger))
+		s.opts.Push(LogType, MatchLine(m, s.ref(m.Namespace), path, digest, int64(len(data)), trigger))
 		slog.Warn("yara: match", "rule", m.Rule, "namespace", m.Namespace, "path", path)
 	}
 	return res.Matches, nil
@@ -384,8 +388,15 @@ func kv(s string) string {
 	return `"` + s + `"`
 }
 
-// MatchLine encodes one rule match for decoders/yara_match.yaml.
-func MatchLine(m yara.RuleMatch, path, sha string, size int64, trigger string) string {
+func (s *Scanner) ref(namespace string) Rule {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.refs[namespace]
+}
+
+// MatchLine encodes one rule match for decoders/yara_match.yaml. ref names the
+// server's rule and revision; a rule drafted from a case carries it in meta.
+func MatchLine(m yara.RuleMatch, ref Rule, path, sha string, size int64, trigger string) string {
 	var strs []string
 	seen := map[string]bool{}
 	for _, sm := range m.Strings {
@@ -398,5 +409,17 @@ func MatchLine(m yara.RuleMatch, path, sha string, size int64, trigger string) s
 	sort.Strings(strs)
 	return fmt.Sprintf("event=yara_match rule=%s namespace=%s severity=%s file=%s sha256=%s size=%d tags=%s strings=%s trigger=%s description=%s",
 		kv(m.Rule), kv(m.Namespace), Severity(m.Meta), kv(path), sha, size,
-		kv(strings.Join(m.Tags, ",")), kv(strings.Join(strs, ",")), trigger, kv(metaString(m.Meta, "description")))
+		kv(strings.Join(m.Tags, ",")), kv(strings.Join(strs, ",")), trigger, kv(metaString(m.Meta, "description"))) +
+		provenance(ref, metaString(m.Meta, "case"))
+}
+
+// provenance: the rule's id and revision, and the case it was drafted from (empty parts left out).
+func provenance(ref Rule, caseID string) string {
+	out := ""
+	for _, f := range [][2]string{{"rule_id", ref.ID}, {"revision", ref.Revision}, {"case", caseID}} {
+		if f[1] != "" {
+			out += " " + f[0] + "=" + kv(f[1])
+		}
+	}
+	return out
 }

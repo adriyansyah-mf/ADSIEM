@@ -83,7 +83,9 @@ async def list_flow_artifacts(
         q = q.where(FlowArtifact.group_id == group_filter)
     for row in (await db.execute(q)).scalars().all():
         try:
-            out.append(parse_artifact(row.content).summary())
+            out.append({**parse_artifact(row.content).summary(),
+                        "created_by_investigation_id": row.created_by_investigation_id,
+                        "promoted_at": row.promoted_at})
         except ArtifactError as exc:
             out.append({"name": row.name, "description": row.description or "", "builtin": False,
                         "parameters": [], "sources": [], "content": row.content, "error": str(exc)})
@@ -127,8 +129,35 @@ async def _save_artifact(db, body: FlowArtifactIn, user: User, group_filter: str
         row.name = art.name
     row.description = art.description
     row.content = body.content
+    if art.name.startswith("AI.") and row.promoted_at is None:
+        # a person saved this content: AI investigations may reuse it from now on
+        row.promoted_at, row.promoted_by = datetime.now(timezone.utc), user.id
     await db.commit()
     return art.summary()
+
+
+@artifact_router.post("/{name}/promote")
+async def promote_flow_artifact(
+    name: str,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_permission("agents:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    """Let every AI investigation in the group reuse an artifact one of them wrote."""
+    q = select(FlowArtifact).where(FlowArtifact.name == name)
+    if group_filter is not None:
+        q = q.where(FlowArtifact.group_id == group_filter)
+    row = (await db.execute(q)).scalar_one_or_none()
+    if row is None or not row.name.startswith("AI."):
+        raise HTTPException(404, "AI artifact not found")
+    if row.promoted_at is None:
+        row.promoted_at, row.promoted_by = datetime.now(timezone.utc), user.id
+        await db.commit()
+        background.add_task(audit_log, db, user.id, "flow_artifact_promoted", "flow_artifact", row.name,
+                            {"investigation": str(row.created_by_investigation_id or "")})
+    return {"name": row.name, "promoted_at": row.promoted_at,
+            "created_by_investigation_id": row.created_by_investigation_id}
 
 
 @artifact_router.post("", status_code=201)
@@ -200,11 +229,14 @@ async def _get_flow(db: AsyncSession, flow_id: UUID, group_filter: str | None) -
 async def schedule_flow(
     db: AsyncSession, redis: aioredis.Redis, *, agent_id: UUID, artifact: str, params: dict,
     group_filter: str | None, created_by: UUID | None, scheduled_by: str,
-    timeout: int | None = None, max_rows: int | None = None,
+    timeout: int | None = None, max_rows: int | None = None, flow_id: UUID | None = None,
+    only_rules: list[dict] | None = None,
 ) -> Flow:
     """Validate and queue one flow, then wake the agent. Raises HTTPException
     (404 agent/artifact, 409 no flow runner, 422 bad params). Shared by the
-    API and the AI investigator, so both go through the same checks."""
+    API and the AI investigator, so both go through the same checks. A caller
+    that passes flow_id may stage its own rows referencing it on `db`: they
+    commit together with the flow, or not at all."""
     aq = select(Agent).where(Agent.id == agent_id)
     if group_filter is not None:
         aq = aq.where(Agent.group_id == group_filter)
@@ -226,14 +258,14 @@ async def schedule_flow(
     if not 1 <= max_rows <= MAX_MAX_ROWS:
         raise HTTPException(422, f"max_rows must be between 1 and {MAX_MAX_ROWS}")
 
-    yara_rules = None
-    if any(s.plugin == "yara" for s in art.sources):
+    yara_rules = only_rules  # a rule-scoped test scan: exactly these rules, enabled or not
+    if yara_rules is None and any(s.plugin == "yara" for s in art.sources):
         rows = (await db.execute(select(YaraRule).where(YaraRule.is_enabled == True))).scalars().all()  # noqa: E712
         if not rows:
             raise HTTPException(422, "No enabled YARA rules — add one on the YARA page first")
         yara_rules = [{"id": str(r.id), "name": r.name, "content": r.content} for r in rows]
 
-    flow_id = uuid.uuid4()
+    flow_id = flow_id or uuid.uuid4()
     try:
         params = resolve_params(art, params)
         build_row_filter(art.content, params)  # detection must compile with these values
@@ -264,13 +296,14 @@ sources:
 
 async def schedule_command_flow(
     db: AsyncSession, redis: aioredis.Redis, *, agent: Agent, command: str, args: list[str],
-    timeout: int, created_by: UUID | None, scheduled_by: str,
+    timeout: int, created_by: UUID | None, scheduled_by: str, flow_id: UUID | None = None,
 ) -> Flow:
     """Queue one approved command for the agent's exec plugin. Built here, not
-    from an artifact: exec is in no saved artifact (flow_artifacts.INTERNAL_PLUGINS)."""
+    from an artifact: exec is in no saved artifact (flow_artifacts.INTERNAL_PLUGINS).
+    flow_id works as in schedule_flow: rows staged on `db` commit with the flow."""
     if agent.flow_poll_at is None:
         raise HTTPException(409, f"Agent {agent.hostname} has no flow runner; update it")
-    flow_id = uuid.uuid4()
+    flow_id = flow_id or uuid.uuid4()
     flow_timeout = timeout + 30  # the agent kills the command first and still reports
     request = {"id": str(flow_id), "artifact": COMMAND_ARTIFACT, "timeout": flow_timeout,
                "max_rows": DEFAULT_MAX_ROWS,

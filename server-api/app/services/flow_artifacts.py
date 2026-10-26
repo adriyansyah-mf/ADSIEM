@@ -38,6 +38,7 @@ PLUGINS = {
     "info", "pslist", "netstat", "users", "glob", "hash", "read_file",
     "persistence", "dmesg", "open_files", "yara",
     "memyara", "memrwx",  # process memory (agent/internal/task/memory.go)
+    "filefeatures",       # one file's features for YARA drafting (plugins_filefeatures.go)
     "eventlog", "services", "programs",  # Windows agents only
 }
 # Plugins no saved artifact may use: exec runs an operator-approved command
@@ -61,6 +62,8 @@ PLUGIN_COLUMNS = {
     "memyara": ["Pid", "Process", "Rule", "Namespace", "Address", "RegionStart", "RegionPerms",
                 "RegionKind", "RegionPath", "Strings"],
     "memrwx": ["Pid", "Process", "Start", "End", "Size", "Perms", "Kind", "Path"],
+    "filefeatures": ["Path", "Size", "SHA256", "Type", "Entropy", "Machine", "PackerIndicators", "PDB", "HasSignature",
+                     "Imports", "Exports", "Libraries", "Sections", "Strings", "Redacted", "MD5", "SHA1", "Truncated"],
     # eventlog rows also carry each event's EventData fields (after these)
     "eventlog": ["TimeCreated", "EventID", "Channel", "Provider", "Computer", "RecordID", "Level"],
     "services": ["Name", "DisplayName", "State", "StartMode", "Account", "Pid", "PathName", "Description"],

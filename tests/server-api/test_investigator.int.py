@@ -10,6 +10,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 import httpx
@@ -40,7 +41,9 @@ class Scripted:
         from langchain_core.messages import AIMessage, ToolMessage
         self.seen.append(list(messages))  # a copy: the caller appends the reply to its list
         results = [json.loads(m.content) for m in messages if isinstance(m, ToolMessage)]
-        step = self.script(len(self.seen), results)
+        # scripts that take a third argument also see the conversation (context, analyst notes, repair prompts)
+        wants_messages = self.script.__code__.co_argcount == 3
+        step = self.script(len(self.seen), results, messages) if wants_messages else self.script(len(self.seen), results)
         if isinstance(step, str):
             return AIMessage(content=step)
         name, args = step
@@ -85,6 +88,8 @@ def env():
             await conn.execute(text("CREATE SCHEMA public"))
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await conn.run_sync(Base.metadata.create_all)
+        from app.services.knowledge_schema import migrate_knowledge
+        await migrate_knowledge()  # knowledge_chunks: search_knowledge queries it
     _run(setup())
     yield
     _run(engine.dispose())
@@ -112,8 +117,8 @@ def _seed(hostname="web01"):
             await db.flush()
             case = Case(title="web01 compromise?", severity="high", group_id="blue", alert_id=alert.id)
             db.add(case)
-            if not await db.get(PlatformSetting, "ninerouter_api_key"):
-                db.add(PlatformSetting(key="ninerouter_api_key", value="test-key", is_secret=True))
+            # set, not just present: _seed_settings() seeds it empty, and a resumed run needs a provider
+            await db.merge(PlatformSetting(key="ninerouter_api_key", value="test-key", is_secret=True))
             await db.commit()
             return user.id, agent.id, case.id
     return _run(go())
@@ -269,6 +274,19 @@ async def _fake_agent(stop: asyncio.Event):
                             {"Stream": "stdout", "Line": 1, "Text": f"ran: {line}"},
                             {"Stream": "exit", "Line": 0, "Text": "exit code 0 after 3 ms", "ExitCode": 0},
                         ]))
+                    if src["plugin"] == "yara" and src["args"].get("path") == "/tmp/.x/kworkerd":
+                        # the sample: every rule the flow carries matches it; other paths stay clean
+                        db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[
+                            {"Rule": r["name"], "File": src["args"]["path"], "Size": 812, "Strings": "$c2@64"}
+                            for r in src["args"].get("rules") or []]))
+                    if src["plugin"] == "filefeatures":
+                        db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[{
+                            "Path": src["args"]["path"], "Size": 812, "SHA256": "c" * 64, "Type": "ELF",
+                            "Entropy": 7.4, "Imports": ["connect", "execve"], "PackerIndicators": ["UPX! marker"],
+                            "Strings": [{"Offset": 64, "Encoding": "ascii", "Value": "203.0.113.9:443"},
+                                        {"Offset": 96, "Encoding": "ascii", "Value": "ghp_" + "z" * 40},
+                                        {"Offset": 140, "Encoding": "ascii", "Value": "kworkerd -c %s"}],
+                            "Redacted": 0}]))
                     if src["plugin"] == "pslist":
                         db.add(FlowRowBatch(flow_id=flow.id, source=src["name"], rows=[
                             {"Pid": 4242, "Name": "kworkerd", "Exe": "/tmp/.x/kworkerd", "CommandLine": "kworkerd -c 203.0.113.9:443"},
@@ -278,7 +296,9 @@ async def _fake_agent(stop: asyncio.Event):
         await asyncio.sleep(0.5)
 
 
-def _investigate(script, monkeypatch, user_id, case_id, cancel_after=None):
+def _investigate(script, monkeypatch, user_id, case_id, cancel_after=None, setup=None):
+    """Run one investigation with a scripted model; `setup(inv_id)` (async) runs
+    first, e.g. to queue analyst actions or start an approver."""
     from app.core.database import AsyncSessionLocal
     from app.models.models import CaseInvestigation
     from app.services import investigator
@@ -292,6 +312,8 @@ def _investigate(script, monkeypatch, user_id, case_id, cancel_after=None):
             db.add(inv)
             await db.commit()
             inv_id = inv.id
+        if setup:
+            await setup(inv_id)
         stop = asyncio.Event()
         agent = asyncio.create_task(_fake_agent(stop))
         run = asyncio.create_task(investigator.run_investigation(inv_id))
@@ -399,6 +421,644 @@ def test_cancel_stops_the_run(env, monkeypatch):
     assert inv.steps[-1]["kind"] == "cancelled"
 
 
+# ─── Ledger (investigation_ledger.py, spec Phase 1a) ─────────────
+
+def _analyst(user_id):
+    """A superadmin calling the routes directly."""
+    return SimpleNamespace(id=user_id, username="ana", group_id="blue",
+                           role=SimpleNamespace(name="superadmin", permissions=[]))
+
+
+def _context(messages) -> dict:
+    """The case context the model was shown in its first prompt."""
+    return json.loads(messages[1].content.split("Context:\n", 1)[1])
+
+
+def _rows(model, inv_id):
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(select(model).where(model.investigation_id == inv_id)
+                                     .order_by(model.created_at))).scalars().all()
+    return _run(go())
+
+
+def test_ledger_records_actions_evidence_and_a_cited_report(env, monkeypatch):
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseNote, InvestigationAction, InvestigationEvidence, InvestigationHypothesis
+
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+    st = {}
+
+    def report(claims):
+        return json.dumps({"verdict": "true_positive", "confidence": 90, "executive_summary": "A miner runs from /tmp.",
+                           "claims": claims, "recommended_actions": ["Isolate the host"], "gaps": []})
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return ("run_artifact", {"artifact": "Linux.Sys.Pslist", "host": host, "reason": "what runs"})
+        if turn == 2:
+            st["flow"] = results[-1]["sources"][0]["evidence_id"]
+            return ("record_hypothesis", {"statement": "A miner runs from /tmp", "state": "supported",
+                                          "confidence": 85, "supporting_evidence_ids": [st["flow"]]})
+        if turn == 3:
+            assert results[-1]["state"] == "supported"
+            # the same collection, host spelled differently: endpoint work never repeats
+            return ("run_artifact", {"artifact": "Linux.Sys.Pslist", "host": host.upper(), "reason": "again"})
+        if turn == 4:
+            assert "already ran as action #1" in results[-1]["error"]
+            st["alert"] = _context(messages)["alerts"][0]["evidence_id"]
+            return report([
+                {"id": "c1", "section": "analysis", "text": "kworkerd runs from /tmp/.x", "evidence_ids": [st["flow"]]},
+                {"id": "c2", "section": "timeline", "text": "The reverse-shell alert fired", "evidence_ids": [st["alert"]]},
+                {"id": "c3", "section": "iocs", "text": "203.0.113.9", "evidence_ids": ["made-up"]},
+            ])
+        if turn == 5:  # one repair attempt, told exactly what failed
+            assert "claim c3 (iocs): made-up is not evidence from this investigation" in messages[-1].content
+            return report([
+                {"id": "c1", "section": "analysis", "text": "kworkerd runs from /tmp/.x", "evidence_ids": [st["flow"]]},
+                {"id": "c2", "section": "timeline", "text": "The reverse-shell alert fired", "evidence_ids": [st["alert"]]},
+                {"id": "c3", "section": "iocs", "text": "203.0.113.9 (kworkerd command line)", "evidence_ids": [st["flow"]]},
+            ])
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id)
+    assert inv.status == "finished", inv.error
+    assert inv.verdict == "true_positive" and inv.phase is None
+    assert inv.report_json["unverified_claims"] == 0 and all(c["verified"] for c in inv.report_json["claims"])
+    assert "kworkerd runs from /tmp/.x [E1]" in inv.report and "Unverified" not in inv.report
+    assert any(s["kind"] == "report_check" for s in inv.steps)
+
+    actions = sorted(_rows(InvestigationAction, inv.id), key=lambda a: a.ordinal)
+    assert [(a.tool, a.status, a.risk_tier, a.source) for a in actions] == [
+        ("run_artifact", "completed", 1, "planner"), ("record_hypothesis", "completed", 0, "planner")]
+    assert actions[0].result_ref["evidence_ids"] == [st["flow"]] and actions[0].result_ref["flow_id"]
+    evidence = {str(e.id): e for e in _rows(InvestigationEvidence, inv.id)}
+    assert evidence[st["alert"]].evidence_type == "alert" and evidence[st["flow"]].evidence_type == "flow_row"
+    [hyp] = _rows(InvestigationHypothesis, inv.id)
+    assert (hyp.state, hyp.confidence, hyp.supporting_evidence_ids) == ("supported", 85, [st["flow"]])
+
+    async def note():
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(select(CaseNote.content).where(CaseNote.case_id == case_id))).scalar_one()
+    assert "[E1]" in _run(note())
+
+
+def test_knowledge_the_ai_retrieves_and_cites_is_recorded(env, monkeypatch):
+    from sqlalchemy import select
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import KnowledgeEntry, KnowledgeUsage
+    from app.services import embeddings
+
+    async def no_model(_text):
+        return None
+    monkeypatch.setattr(embeddings, "embed", no_model)  # exact scope matching needs no model
+    user_id, _, case_id = _seed(f"kn-{uuid.uuid4().hex[:8]}")
+    ip = f"198.51.100.{uuid.uuid4().int % 250 + 1}"
+
+    async def note():
+        async with AsyncSessionLocal() as db:
+            e = KnowledgeEntry(group_id="blue", kind="note", title="Pentest box", content="Red team host.",
+                               scope={"ips": [ip], "hosts": [], "users": [], "rules": []}, status="published")
+            draft = KnowledgeEntry(group_id="blue", kind="note", title="Unreviewed idea", content="Maybe.",
+                                   scope={"ips": [ip], "hosts": [], "users": [], "rules": []}, status="draft")
+            db.add_all([e, draft])
+            await db.commit()
+            return str(e.id)
+    note_id = _run(note())
+    st = {}
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return ("search_knowledge", {"query": ip})
+        if turn == 2:
+            assert [n["id"] for n in results[-1]["notes"]] == [note_id]  # the draft never reaches the AI
+            assert results[-1]["notes"][0]["cite_as"] == "Knowledge: Pentest box"
+            st["alert"] = _context(messages)["alerts"][0]["evidence_id"]
+            return json.dumps({"verdict": "false_positive", "confidence": 70, "executive_summary": "Red team.",
+                               "claims": [{"id": "c1", "section": "analysis", "text": "The alert fired",
+                                           "evidence_ids": [st["alert"]]}],
+                               "knowledge_citations": [{"entry_id": note_id, "heading": ""}]})
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id)
+    assert inv.status == "finished", inv.error
+    assert "Knowledge: Pentest box" in inv.report
+
+    async def usage():
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(select(KnowledgeUsage).where(KnowledgeUsage.investigation_id == inv.id)
+                                     .order_by(KnowledgeUsage.created_at))).scalars().all()
+    rows = _run(usage())
+    assert [(r.use_type, str(r.entry_id), r.case_id) for r in rows] == [
+        ("retrieved", note_id, case_id), ("cited", note_id, case_id)]
+    assert rows[0].query == ip
+
+
+def test_a_verdict_resting_on_unverified_claims_is_downgraded(env, monkeypatch):
+    user_id, _, case_id = _seed(f"led-{uuid.uuid4().hex[:8]}")
+    bad = json.dumps({"verdict": "true_positive", "confidence": 70, "executive_summary": "Compromised.",
+                      "claims": [{"id": "c1", "section": "analysis", "text": "Ransomware encrypted /srv",
+                                  "evidence_ids": ["nothing"]}]})
+
+    def script(turn, results):
+        return bad if turn <= 2 else "unexpected"  # the repair repeats the same claim
+
+    inv, model = _investigate(script, monkeypatch, user_id, case_id)
+    assert inv.status == "finished" and len(model.seen) == 2
+    assert inv.verdict == "inconclusive" and inv.report_json["verdict_downgraded_from"] == "true_positive"
+    assert "## Unverified statements" in inv.report and "⚠ Ransomware encrypted /srv" in inv.report
+
+
+def test_analyst_actions_run_between_rounds_and_skips_hold(env, monkeypatch):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import InvestigationAction
+    from app.services import investigation_ledger as ledger
+
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+
+    async def setup(inv_id):
+        async with AsyncSessionLocal() as db:
+            for ordinal, artifact, status in ((1, "Linux.Sys.Pslist", "queued"), (2, "Linux.Network.Netstat", "skipped")):
+                params = {"artifact": artifact}
+                db.add(InvestigationAction(
+                    investigation_id=inv_id, group_id="blue", ordinal=ordinal, kind="artifact", tool="run_artifact",
+                    target=host, params=params, reason="analyst wants it", risk_tier=1, status=status,
+                    source="analyst", dependencies=[], idempotency_key=ledger.idempotency_key("run_artifact", host, params),
+                    result_ref={}, attempts=0, decision_note="not needed" if status == "skipped" else None))
+            await db.commit()
+
+    def script(turn, results, messages):
+        if turn == 1:
+            # the analyst's pslist ran before the model's first move, as its own tool call
+            assert "An analyst added action #1 (run_artifact)" in messages[-3].content
+            assert results[-1]["sources"][0]["rows"][0]["Exe"] == "/tmp/.x/kworkerd"
+            return ("run_artifact", {"artifact": "Linux.Network.Netstat", "host": host})
+        if turn == 2:
+            assert "skipped or rejected this exact action (#2) (not needed)" in results[-1]["error"]
+            return "## Summary\nThe analyst's pslist shows a miner.\nVERDICT: true_positive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id, setup=setup)
+    assert inv.status == "finished", inv.error
+    assert inv.report_json == {"citations_unchecked": True}  # a Markdown report: kept, but not citation-checked
+    rows = {a.ordinal: a for a in _rows(InvestigationAction, inv.id)}
+    assert (rows[1].status, rows[1].source) == ("completed", "analyst") and rows[1].result_ref["evidence_ids"]
+    assert rows[2].status == "skipped" and len(rows) == 2
+
+
+def _approver(inv_id, user_id, approve, seen, note=None):
+    """Decide the first action the policy holds, through the route, like an analyst in the UI."""
+    from fastapi import BackgroundTasks
+    from sqlalchemy import select
+
+    from app.api.routes import investigations as routes
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import InvestigationAction
+
+    async def go():
+        while True:
+            async with AsyncSessionLocal() as db:
+                row = (await db.execute(select(InvestigationAction).where(
+                    InvestigationAction.investigation_id == inv_id,
+                    InvestigationAction.status == "awaiting_approval"))).scalars().first()
+                if row is not None:
+                    seen.append(row.approval_reason)
+                    await routes.decide_action(row.id, routes.CommandDecision(approve=approve, note=note),
+                                               BackgroundTasks(), db=db, user=_analyst(user_id), group_filter="blue")
+                    return
+            await asyncio.sleep(0.3)
+    return asyncio.create_task(go())
+
+
+def test_another_runs_ai_artifact_waits_for_an_analyst(env, monkeypatch):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import FlowArtifact, InvestigationAction
+
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+    name = f"AI.Linux.Foreign{uuid.uuid4().hex[:6]}"
+    seen: list = []
+    tasks: list = []
+
+    async def setup(inv_id):
+        async with AsyncSessionLocal() as db:
+            db.add(FlowArtifact(name=name, content=TMP_ARTIFACT.replace("AI.Linux.TmpProcs", name), group_id="blue",
+                                created_by_investigation_id=uuid.uuid4()))
+            await db.commit()
+        tasks.append(_approver(inv_id, user_id, True, seen))
+
+    def script(turn, results):
+        if turn == 1:
+            return ("list_artifacts", {"os": "linux"})
+        if turn == 2:
+            assert name not in {a["name"] for a in results[-1]["artifacts"]}  # not offered for reuse
+            return ("run_artifact", {"artifact": name, "host": host, "reason": "reuse an earlier collector"})
+        if turn == 3:
+            assert results[-1]["status"] == "finished"
+            return "## Summary\nRan after approval.\nVERDICT: inconclusive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id, setup=setup)
+    assert inv.status == "finished", inv.error
+    assert "written by another AI investigation" in seen[0]
+    row = next(a for a in _rows(InvestigationAction, inv.id) if a.tool == "run_artifact")
+    assert row.status == "completed" and row.decided_by == user_id
+    kinds = [s["kind"] for s in inv.steps]
+    assert "approval_needed" in kinds and any(s["kind"] == "action_decision" and s["status"] == "approved" for s in inv.steps)
+
+
+def test_a_host_over_its_automatic_budget_needs_approval(env, monkeypatch):
+    from app.models.models import InvestigationAction
+    from app.services import investigation_ledger as ledger
+
+    monkeypatch.setattr(ledger, "HOST_AUTO_FLOWS", 1)
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+    seen: list = []
+
+    async def setup(inv_id):
+        _approver(inv_id, user_id, False, seen, note="enough for this host")
+
+    def script(turn, results):
+        if turn == 1:
+            return ("run_artifact", {"artifact": "Linux.Sys.Pslist", "host": host})
+        if turn == 2:
+            return ("run_artifact", {"artifact": "Linux.Network.Netstat", "host": host})
+        if turn == 3:
+            assert "did not approve this action (enough for this host)" in results[-1]["error"]
+            return ("run_artifact", {"artifact": "Linux.Network.Netstat", "host": host})
+        if turn == 4:
+            assert "skipped or rejected" in results[-1]["error"]
+            return "## Summary\nStopped at the host budget.\nVERDICT: inconclusive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    inv, _ = _investigate(script, monkeypatch, user_id, case_id, setup=setup)
+    assert inv.status == "finished", inv.error
+    assert "automatic collections on the host" in seen[0]
+    statuses = {a.params["artifact"]: a.status for a in _rows(InvestigationAction, inv.id)}
+    assert statuses == {"Linux.Sys.Pslist": "completed", "Linux.Network.Netstat": "skipped"}
+
+
+def test_promoting_an_ai_artifact_lets_other_runs_reuse_it(env):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.api.routes import flows
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import FlowArtifact
+    from app.services import investigator
+
+    name = f"AI.Linux.Promote{uuid.uuid4().hex[:6]}"
+    user_id, _, _ = _seed(f"led-{uuid.uuid4().hex[:8]}")
+    other_run = SimpleNamespace(inv_id=uuid.uuid4())
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            row = FlowArtifact(name=name, content=TMP_ARTIFACT.replace("AI.Linux.TmpProcs", name), group_id="blue",
+                               created_by_investigation_id=uuid.uuid4())
+            db.add(row)
+            await db.commit()
+            assert not investigator._reusable(row, other_run)
+            for who, group in ((name, "red"), ("Linux.Sys.Pslist", "blue")):  # other group; not an AI artifact
+                try:
+                    await flows.promote_flow_artifact(who, BackgroundTasks(), db=db, user=_analyst(user_id),
+                                                      group_filter=group)
+                    raise AssertionError("expected 404")
+                except HTTPException as exc:
+                    assert exc.status_code == 404
+            out = await flows.promote_flow_artifact(name, BackgroundTasks(), db=db, user=_analyst(user_id),
+                                                    group_filter="blue")
+            assert out["promoted_at"] is not None
+            await db.refresh(row)
+            assert row.promoted_by == user_id and investigator._reusable(row, other_run)
+    _run(go())
+
+
+def test_queue_routes_check_scope_state_and_duplicates(env):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.api.routes import investigations as routes
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation, InvestigationAction
+    from app.services import investigation_ledger as ledger
+
+    host = f"led-{uuid.uuid4().hex[:8]}"
+    user_id, _, case_id = _seed(host)
+    user = _analyst(user_id)
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            inv = CaseInvestigation(case_id=case_id, group_id="blue", started_by=user_id, status="running", steps=[])
+            db.add(inv)
+            await db.commit()
+
+            async def call(fn, *args, group="blue", **kw):
+                return await fn(*args, db=db, group_filter=group, **kw)
+
+            async def status_of(fn, *args, **kw):
+                try:
+                    await call(fn, *args, **kw)
+                except HTTPException as exc:
+                    return exc.status_code
+                return 200
+
+            add = routes.ActionIn
+            assert await status_of(routes.add_action, case_id, inv.id, add(tool="run_command"), BackgroundTasks(), user=user) == 422
+            assert await status_of(routes.add_action, case_id, inv.id, add(tool="run_artifact", params={"artifact": "X"}),
+                                   BackgroundTasks(), user=user) == 422  # no host
+            row = await call(routes.add_action, case_id, inv.id,
+                             add(tool="run_artifact", host=host, params={"artifact": "Linux.Sys.Pslist"}, reason="look"),
+                             BackgroundTasks(), user=user)
+            assert (row.status, row.source, row.risk_tier) == ("queued", "analyst", 1)
+            assert await status_of(routes.add_action, case_id, inv.id,
+                                   add(tool="run_artifact", host=host.upper(), params={"artifact": "Linux.Sys.Pslist"}),
+                                   BackgroundTasks(), user=user) == 409  # the same operation
+            assert await status_of(routes.add_action, case_id, inv.id,
+                                   add(tool="search_events", params={"query": "x"}, dependencies=[uuid.uuid4()]),
+                                   BackgroundTasks(), user=user) == 422  # unknown dependency
+            assert await status_of(routes.list_actions, case_id, inv.id, _=user, group="red") == 404
+
+            skipped = await call(routes.skip_action, row.id, BackgroundTasks(), user=user)
+            assert skipped.status == "skipped" and skipped.decided_by == user_id
+            assert await status_of(routes.skip_action, row.id, BackgroundTasks(), user=user) == 409
+
+            cmd = InvestigationAction(investigation_id=inv.id, group_id="blue", ordinal=9, kind="command",
+                                      tool="run_command", risk_tier=2, status="awaiting_approval", source="planner",
+                                      idempotency_key="k" * 64, params={}, dependencies=[], result_ref={}, attempts=1)
+            db.add(cmd)
+            await db.commit()
+            assert await status_of(routes.decide_action, cmd.id, routes.CommandDecision(approve=True),
+                                   BackgroundTasks(), user=user) == 409  # commands have their own decision route
+
+            ev_id = await ledger.record_evidence(db, investigation_id=inv.id, group_id="blue", action_id=None,
+                                                 spec=ledger.EvidenceSpec("event", "siem_query", "q", "t", "s", {"a": 1}))
+            await db.commit()
+            pinned = await call(routes.pin_evidence, ev_id, routes.PinIn(pinned=True), BackgroundTasks(), user=user)
+            assert pinned.pinned
+            assert await status_of(routes.pin_evidence, ev_id, routes.PinIn(), BackgroundTasks(), user=user, group="red") == 404
+
+            h = await call(routes.add_hypothesis, case_id, inv.id, routes.HypothesisIn(statement="Benign admin script"),
+                           BackgroundTasks(), user=user)
+            assert h.source == "analyst"
+            assert await status_of(routes.update_hypothesis, h.id, routes.HypothesisUpdate(state="supported"),
+                                   BackgroundTasks(), user=user) == 422  # no evidence
+            h = await call(routes.update_hypothesis, h.id,
+                           routes.HypothesisUpdate(state="supported", supporting_evidence_ids=[str(ev_id)]),
+                           BackgroundTasks(), user=user)
+            assert h.state == "supported"
+
+            raised = await call(routes.raise_budget, inv.id, routes.BudgetIn(flows=4), BackgroundTasks(), user=user)
+            assert raised.budget_overrides["flows"] == 4
+            assert await status_of(routes.raise_budget, inv.id, routes.BudgetIn(flows=2), BackgroundTasks(), user=user) == 409
+
+            inv.status = "finished"
+            await db.commit()
+            assert await status_of(routes.add_action, case_id, inv.id, add(tool="search_events", params={"query": "y"}),
+                                   BackgroundTasks(), user=user) == 409
+    _run(go())
+
+
+# ─── Leases and adoption (spec Phase 1b) ─────────────────────────
+
+def _new_run(user_id, case_id, **values):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            inv = CaseInvestigation(case_id=case_id, group_id="blue", started_by=user_id, steps=[], **values)
+            db.add(inv)
+            await db.commit()
+            return inv.id
+    return _run(go())
+
+
+def _get_run(inv_id):
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            return await db.get(CaseInvestigation, inv_id)
+    return _run(go())
+
+
+async def _until(predicate, timeout=20.0):
+    """Poll an async predicate until it returns something truthy."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < deadline:
+        value = await predicate()
+        if value:
+            return value
+        await asyncio.sleep(0.2)
+    raise AssertionError("condition not reached")
+
+
+async def _crash(task):
+    """What a dying process looks like to the run: cancelled mid-await, nothing finalized."""
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+
+def test_leases_are_exclusive_until_they_expire(env, monkeypatch):
+    from datetime import timedelta
+
+    from app.services import investigator
+
+    user_id, _, case_id = _seed(f"lease-{uuid.uuid4().hex[:8]}")
+    queued = _new_run(user_id, case_id, status="queued")
+    assert _run(investigator._claim(queued))
+    monkeypatch.setattr(investigator, "REPLICA_ID", "replica-b")
+    assert not _run(investigator._claim(queued))  # held by the first replica
+    expired = _new_run(user_id, case_id, status="running", lease_owner="dead-replica",
+                       lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=5))
+    assert _run(investigator._claim(expired))
+    # a run from before leases is adopted only once its old replica stopped updating it
+    fresh_legacy = _new_run(user_id, case_id, status="running")
+    stale_legacy = _new_run(user_id, case_id, status="running",
+                            updated_at=datetime.now(timezone.utc) - investigator.STALE_AFTER - timedelta(minutes=1))
+    assert not _run(investigator._claim(fresh_legacy))
+    assert _run(investigator._claim(stale_legacy))
+    finished = _new_run(user_id, case_id, status="finished")
+    assert not _run(investigator._claim(finished))
+
+
+def test_an_adopted_run_awaits_its_flow_instead_of_scheduling_it_again(env, monkeypatch):
+    from datetime import timedelta
+
+    from sqlalchemy import select, update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation, Flow, InvestigationAction
+    from app.services import investigator
+
+    host = f"resume-{uuid.uuid4().hex[:8]}"
+    user_id, agent_id, case_id = _seed(host)
+    inv_id = _new_run(user_id, case_id)
+    st = {}
+
+    def before(turn, results):
+        if turn == 1:
+            return ("run_artifact", {"artifact": "Linux.Sys.Pslist", "host": host, "reason": "what runs"})
+        raise AssertionError("the first replica dies before seeing the result")
+
+    def after(turn, results, messages):
+        if turn == 1:
+            brief = messages[2].content
+            assert "moved to another server" in brief and "#1 run_artifact" in brief and "→ completed" in brief
+            st["ev"] = brief.split("evidence_id ", 1)[1].split(":", 1)[0]
+            return json.dumps({"verdict": "true_positive", "confidence": 80, "executive_summary": "Miner.",
+                               "claims": [{"id": "c1", "section": "analysis", "text": "kworkerd from /tmp",
+                                           "evidence_ids": [st["ev"]]}]})
+        raise AssertionError(f"unexpected turn {turn}")
+
+    async def go():
+        async def flows():
+            async with AsyncSessionLocal() as db:
+                return (await db.execute(select(Flow).where(Flow.agent_id == agent_id))).scalars().all()
+
+        # replica A schedules the flow, then dies while waiting for the agent
+        monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: Scripted(before))
+        run = asyncio.create_task(investigator.run_investigation(inv_id))
+        await _until(flows)
+        await _crash(run)
+        async with AsyncSessionLocal() as db:
+            [row] = (await db.execute(select(InvestigationAction).where(
+                InvestigationAction.investigation_id == inv_id))).scalars().all()
+            assert row.status == "running" and row.result_ref["flow_id"]  # linked when it was scheduled
+            assert (await db.get(CaseInvestigation, inv_id)).status == "running"
+            await db.execute(update(CaseInvestigation).where(CaseInvestigation.id == inv_id).values(
+                lease_owner="dead-replica", lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1)))
+            await db.commit()
+
+        # replica B adopts it; the agent answers now
+        model = Scripted(after)
+        monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: model)
+        stop = asyncio.Event()
+        agent = asyncio.create_task(_fake_agent(stop))
+        assert inv_id in await investigator.adopt_orphans()
+        await asyncio.wait_for(investigator._owned[inv_id], 60)
+        stop.set()
+        await agent
+        assert len(await flows()) == 1  # awaited, not scheduled again
+    _run(go())
+
+    inv = _get_run(inv_id)
+    assert inv.status == "finished", inv.error
+    assert inv.verdict == "true_positive" and inv.report_json["claims"][0]["verified"]
+    assert inv.lease_owner == investigator.REPLICA_ID and inv.lease_expires_at <= datetime.now(timezone.utc)
+    kinds = [s["kind"] for s in inv.steps]
+    assert kinds.count("started") == 1 and "resumed" in kinds and "reconciled" in kinds
+    [row] = _rows(InvestigationAction, inv_id)
+    assert row.status == "completed" and row.result_ref["evidence_ids"] == [st["ev"]]
+
+
+def test_a_pending_command_survives_adoption_and_runs_once(env, monkeypatch):
+    from sqlalchemy import select, update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Flow, InvestigationAction, InvestigationCommand
+    from app.services import investigator
+
+    _set_setting("ai_command_execution", "approval")
+    _set_setting("ai_command_autoapprove", "")
+    host = f"resume-{uuid.uuid4().hex[:8]}"
+    user_id, agent_id, case_id = _seed(host)
+    inv_id = _new_run(user_id, case_id)
+
+    def before(turn, results):
+        if turn == 1:
+            return ("run_command", {"host": host, "command": "ss", "args": ["-tnp"], "reason": "sockets"})
+        raise AssertionError("the first replica dies while the command waits for approval")
+
+    def after(turn, results, messages):
+        if turn == 1:
+            assert "#1 run_command" in messages[2].content and "→ completed" in messages[2].content
+            return "## Summary\nSockets checked after the move.\nVERDICT: inconclusive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    async def go():
+        async def pending():
+            async with AsyncSessionLocal() as db:
+                return (await db.execute(select(InvestigationCommand).where(
+                    InvestigationCommand.investigation_id == inv_id,
+                    InvestigationCommand.status == "pending"))).scalars().first()
+
+        monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: Scripted(before))
+        run = asyncio.create_task(investigator.run_investigation(inv_id))
+        cmd = await _until(pending)
+        await _crash(run)
+        assert (await pending()) is not None  # not expired by the dying replica
+
+        monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: Scripted(after))
+        stop = asyncio.Event()
+        agent = asyncio.create_task(_fake_agent(stop))
+        resumed = asyncio.create_task(investigator.run_investigation(inv_id))
+        await asyncio.sleep(1.0)  # the adopted run is waiting on the same command
+        async with AsyncSessionLocal() as db:
+            await db.execute(update(InvestigationCommand).where(InvestigationCommand.id == cmd.id)
+                             .values(status="approved", decided_by=user_id))
+            await db.commit()
+        await asyncio.wait_for(resumed, 60)
+        stop.set()
+        await agent
+        async with AsyncSessionLocal() as db:
+            flows = (await db.execute(select(Flow).where(Flow.agent_id == agent_id))).scalars().all()
+            cmds = (await db.execute(select(InvestigationCommand).where(
+                InvestigationCommand.investigation_id == inv_id))).scalars().all()
+            [action] = (await db.execute(select(InvestigationAction).where(
+                InvestigationAction.investigation_id == inv_id))).scalars().all()
+        assert len(cmds) == 1 and cmds[0].flow_id is not None
+        assert [f.id for f in flows] == [cmds[0].flow_id]  # one command, one flow
+        assert action.status == "completed" and action.result_ref["flow_id"] == str(cmds[0].flow_id)
+    try:
+        _run(go())
+    finally:
+        _set_setting("ai_command_execution", "off")
+    assert _get_run(inv_id).status == "finished"
+
+
+def test_a_lost_lease_stops_this_copy_without_finishing_the_run(env, monkeypatch):
+    from sqlalchemy import update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import CaseInvestigation
+    from app.services import investigator
+
+    monkeypatch.setattr(investigator, "LEASE_RENEW_SECONDS", 0.3)
+    user_id, _, case_id = _seed(f"lease-{uuid.uuid4().hex[:8]}")
+    inv_id = _new_run(user_id, case_id, status="queued")
+
+    async def slow_hosts(ctx, hostname_contains=""):
+        await asyncio.sleep(0.2)
+        return {"hosts": []}
+    monkeypatch.setattr(investigator, "list_hosts", slow_hosts)
+    monkeypatch.setattr(investigator, "make_chat_model",
+                        lambda *a, **k: Scripted(lambda turn, results: ("list_hosts", {"hostname_contains": str(turn)})))
+
+    async def go():
+        investigator.spawn(inv_id)
+        task = investigator._owned[inv_id]
+        await asyncio.sleep(1.0)
+        async with AsyncSessionLocal() as db:  # another replica took it over
+            await db.execute(update(CaseInvestigation).where(CaseInvestigation.id == inv_id)
+                             .values(lease_owner="replica-b"))
+            await db.commit()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 10)
+    _run(go())
+    inv = _get_run(inv_id)
+    assert inv.status == "running" and inv.finished_at is None  # left for the replica that holds it
+    assert inv.lease_owner == "replica-b" and inv.rounds_used >= 1
+
+
 def test_text_tool_calls_run_and_garbled_output_never_reaches_the_case(env, monkeypatch):
     from sqlalchemy import select
 
@@ -456,7 +1116,7 @@ def test_commands_wait_for_an_analyst(env, monkeypatch):
     from sqlalchemy import select, update
 
     from app.core.database import AsyncSessionLocal
-    from app.models.models import Flow, InvestigationCommand
+    from app.models.models import Flow, InvestigationAction, InvestigationCommand, InvestigationEvidence
 
     _set_setting("ai_command_execution", "approval")
     _set_setting("ai_command_autoapprove", "hostname, bash")
@@ -520,6 +1180,16 @@ def test_commands_wait_for_an_analyst(env, monkeypatch):
             assert {f.artifact for f in flows} == {"AI.Command"}
             assert all(f.request["sources"][0]["plugin"] == "exec" for f in flows)
             assert flows and all(f.created_by == user_id for f in flows)
+            # each command is a tier-2 action in the ledger, linked to its command row
+            actions = (await db.execute(select(InvestigationAction).where(
+                InvestigationAction.investigation_id == inv.id).order_by(InvestigationAction.ordinal))).scalars().all()
+            assert [(a.params["command"], a.status, a.risk_tier, a.decision_note) for a in actions] == [
+                ("ss", "completed", 2, None), ("bash", "skipped", 2, "too broad"), ("/usr/bin/hostname", "completed", 2, None)]
+            assert [a.result_ref["command_id"] for a in actions] == [str(c.id) for c in cmds]
+            evidence = (await db.execute(select(InvestigationEvidence).where(
+                InvestigationEvidence.investigation_id == inv.id,
+                InvestigationEvidence.evidence_type == "command_result"))).scalars().all()
+            assert len(evidence) == 2 and all(e.sensitivity == "sensitive" for e in evidence)
     _run(check())
 
 
@@ -537,3 +1207,259 @@ def test_commands_are_off_by_default(env, monkeypatch):
     assert inv.status == "finished"
     assert "run_command" not in model.tool_names
     assert "cannot run commands" in model.seen[0][0].content
+
+
+# ─── YARA drafting (spec Phase 3) ────────────────────────────────
+
+def test_a_supported_malware_file_gets_a_disabled_yara_draft(env, monkeypatch):
+    from fastapi import BackgroundTasks, HTTPException
+    from sqlalchemy import select
+
+    from app.api.routes import yara_drafts as routes
+    from app.api.routes import yara_rules
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Flow, YaraDraft, YaraRule
+    from app.services import investigation_ledger as ledger
+    from app.services import investigator
+
+    sha = "c" * 64
+    host = f"mal-{uuid.uuid4().hex[:8]}"
+    user_id, agent_id, case_id = _seed(host)
+    inv_id = _new_run(user_id, case_id, status="finished")
+    user = SimpleNamespace(**{**_analyst(user_id).__dict__,
+                              "role": SimpleNamespace(name="superadmin", permissions=[])})
+    proposal = {"label": "kworkerd miner", "confidence": 80, "mitre": ["T1496"], "strings": [
+        {"id": "$c2", "kind": "text", "value": "203.0.113.9:443", "why": "C2 endpoint"},
+        {"id": "$cmd", "kind": "text", "value": "kworkerd -c %s", "why": "argument format"}],
+        "condition": "uint32(0) == 0x464C457F and filesize < 5MB and all of them",
+        "limitations": ["recompiled builds"], "false_positives": ["none known"]}
+    seen_by_model = []
+
+    def model_reply(turn, results, messages):
+        seen_by_model.append(messages[-1].content)
+        return json.dumps(proposal)
+    monkeypatch.setattr(investigator, "make_chat_model", lambda *a, **k: Scripted(model_reply))
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            files = [{"path": "/tmp/.x/kworkerd", "sha256": sha, "size": 812},
+                     {"path": "/usr/bin/ls", "sha256": "d" * 64, "size": 9}]
+            await ledger.record_evidence(db, investigation_id=inv_id, group_id="blue", action_id=None,
+                                         spec=ledger.EvidenceSpec("flow_row", "flow", "f:Hashes", "hashes", "2 rows",
+                                                                  {"f": 1}, {"hosts": [host], "files": files}))
+            await ledger.record_evidence(db, investigation_id=inv_id, group_id="blue", action_id=None,
+                                         spec=ledger.EvidenceSpec("ti_result", "malwarebazaar", sha, "MalwareBazaar found",
+                                                                  "found CoinMiner", {"h": sha},
+                                                                  {"hashes": [sha], "status": "found"}))
+            await db.commit()
+
+        async def call(fn, *args, **kw):
+            async with AsyncSessionLocal() as db:
+                return await fn(*args, db=db, **kw)
+
+        async def refused(fn, *args, **kw):
+            try:
+                await call(fn, *args, **kw)
+            except HTTPException as exc:
+                return exc
+            raise AssertionError("expected a refusal")
+
+        listing = await call(routes.malware_candidates, case_id, inv_id, _=user, group_filter="blue")
+        assert listing["mode"] == "draft_only"
+        eligible = {c["path"]: c["eligible"] for c in listing["candidates"]}
+        assert eligible == {"/tmp/.x/kworkerd": True, "/usr/bin/ls": False}
+        bare = await refused(routes.request_draft, inv_id, routes.DraftRequest(sha256="d" * 64), BackgroundTasks(),
+                             user=user, group_filter="blue")
+        assert bare.status_code == 409 and "bare hash" in bare.detail
+
+        stop = asyncio.Event()
+        agent = asyncio.create_task(_fake_agent(stop))
+        draft = await call(routes.request_draft, inv_id, routes.DraftRequest(sha256=sha.upper()), BackgroundTasks(),
+                           user=user, group_filter="blue")
+        assert draft.status == "collecting" and draft.support[0]["kind"] == "reputation"
+        again = await refused(routes.request_draft, inv_id, routes.DraftRequest(sha256=sha), BackgroundTasks(),
+                              user=user, group_filter="blue")
+        assert again.status_code == 409
+
+        async def finished():
+            d = await call(routes.get_draft, draft.id, _=user, group_filter="blue")
+            return d if d.status in ("draft", "failed") else None
+        done = await _until(finished, 30)
+        stop.set()
+        await agent
+        assert done.status == "draft", done.error
+        assert done.rule_name == "AI_kworkerd_miner_cccccccc" and done.quality["blocking"] == []
+        assert 'sample_sha256 = "' + sha + '"' in done.rule_text and "all of them" in done.rule_text
+        assert [s["value"] for s in done.features["Strings"]] == [
+            "203.0.113.9:443", "[redacted: credential]", "kworkerd -c %s"]
+        assert "ghp_" not in seen_by_model[0]  # the token never reached the model
+        async with AsyncSessionLocal() as db:
+            flow = await db.get(Flow, done.flow_id)
+        assert flow.artifact == "Generic.Forensics.FileFeatures" and flow.params["Path"] == "/tmp/.x/kworkerd"
+
+        hash_only = 'import "hash"\nrule AI_x { condition: hash.sha256(0, filesize) == "' + sha + '" }\n'
+        edited = await call(routes.edit_draft, draft.id, routes.DraftEdit(rule_text=hash_only), BackgroundTasks(),
+                            user=user, group_filter="blue")
+        assert any("hash-based" in b for b in edited.quality["blocking"])
+        blocked = await refused(routes.save_draft_as_rule, draft.id, BackgroundTasks(), user=user, group_filter="blue")
+        assert blocked.status_code == 422
+        await call(routes.edit_draft, draft.id, routes.DraftEdit(rule_text=done.rule_text), BackgroundTasks(),
+                   user=user, group_filter="blue")
+        saved = await call(routes.save_draft_as_rule, draft.id, BackgroundTasks(), user=user, group_filter="blue")
+        async with AsyncSessionLocal() as db:
+            rule = await db.get(YaraRule, saved.yara_rule_id)
+            assert (rule.is_enabled, rule.origin, rule.draft_id) == (False, "ai_draft", draft.id)
+        enable = await refused(yara_rules.toggle_rule, rule.id, _=user)
+        assert enable.status_code == 409 and "stays disabled" in enable.detail
+
+        await call(routes.dismiss_candidate, inv_id, routes.DraftRequest(sha256="d" * 64), BackgroundTasks(),
+                   user=user, group_filter="blue")
+        listing = await call(routes.malware_candidates, case_id, inv_id, _=user, group_filter="blue")
+        assert {c["path"]: c["draft_status"] for c in listing["candidates"]} == {
+            "/tmp/.x/kworkerd": "draft", "/usr/bin/ls": "dismissed"}
+        async with AsyncSessionLocal() as db:
+            drafts = (await db.execute(select(YaraDraft).where(YaraDraft.investigation_id == inv_id))).scalars().all()
+        assert len(drafts) == 2
+    _run(go())
+
+    _set_setting("yara_ai_generation", "off")
+    try:
+        from fastapi import BackgroundTasks, HTTPException
+
+        from app.api.routes import yara_drafts as routes
+        from app.core.database import AsyncSessionLocal
+
+        async def off():
+            async with AsyncSessionLocal() as db:
+                try:
+                    await routes.request_draft(inv_id, routes.DraftRequest(sha256=sha), BackgroundTasks(), db=db,
+                                               user=user, group_filter="blue")
+                except HTTPException as exc:
+                    return exc
+        exc = _run(off())
+        assert exc.status_code == 409 and "turned off" in exc.detail
+    finally:
+        _set_setting("yara_ai_generation", "draft_only")
+
+
+# ─── Full-YARA lifecycle (spec Phase 4) ──────────────────────────
+
+def test_an_ai_rule_activates_only_after_validation_test_and_confirmation(env, monkeypatch):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.api.routes import yara_rules as routes
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Flow, PlatformSetting, YaraDraft, YaraRule
+    from app.schemas.schemas import YaraRuleCreate
+    from app.services import yara_capability, yara_ruleset
+
+    async def fake_validate(text):  # yaracheck itself is covered by test_yara_capability.py
+        return {"ok": "rule " in text, "rules": ["AI_kw"], "fingerprint": yara_ruleset.fingerprint(text),
+                "engine_version": "siem-yara/1"}
+
+    async def available():
+        return {"available": True, "validation": True}
+    monkeypatch.setattr(yara_capability, "validate", fake_validate)
+    monkeypatch.setattr(yara_capability, "capabilities", available)
+
+    host = f"act-{uuid.uuid4().hex[:8]}"
+    user_id, agent_id, case_id = _seed(host)
+    inv_id = _new_run(user_id, case_id, status="finished")
+    user = SimpleNamespace(**{**_analyst(user_id).__dict__, "role": SimpleNamespace(name="superadmin", permissions=[])})
+    content = ('rule AI_kw_' + uuid.uuid4().hex[:6] + ' {\n    meta:\n        case = "' + str(case_id) + '"\n'
+               '    strings:\n        $c2 = "203.0.113.9:443"\n        $cmd = "kworkerd -c %s"\n'
+               '    condition:\n        uint32(0) == 0x464C457F and filesize < 5MB and all of them\n}\n')
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            draft = YaraDraft(group_id="blue", investigation_id=inv_id, case_id=case_id, host=host,
+                              path="/tmp/.x/kworkerd", sha256="c" * 64, status="draft", support=[], rationale=[],
+                              limitations=[], false_positives=[], quality={}, mitre=[], tags=[])
+            db.add(draft)
+            await db.flush()
+            rule = YaraRule(name=content.split()[1], content=content, is_enabled=False, origin="ai_draft",
+                            draft_id=draft.id)
+            db.add(rule)
+            await db.commit()
+            rule_id = rule.id
+
+        async def call(fn, *args, **kw):
+            async with AsyncSessionLocal() as db:
+                return await fn(*args, db=db, **kw)
+
+        async def refused(fn, *args, **kw):
+            try:
+                await call(fn, *args, **kw)
+            except HTTPException as exc:
+                return exc
+            raise AssertionError("expected a refusal")
+
+        confirm = routes.ActivateRequest(confirm_fleet_deployment=True)
+        early = await refused(routes.activate_rule, rule_id, confirm, BackgroundTasks(), user=user)
+        assert early.status_code == 409 and "validate the current content first" in early.detail["problems"]
+        untested = await refused(routes.test_rule, rule_id, routes.TestRequest(), BackgroundTasks(), user=user,
+                                 group_filter="blue")
+        assert untested.status_code == 409
+
+        validated = await call(routes.validate_rule, rule_id, BackgroundTasks(), user=user)
+        assert validated.validation["ok"] and validated.validation["quality"]["blocking"] == []
+
+        stop = asyncio.Event()
+        agent = asyncio.create_task(_fake_agent(stop))
+        body = routes.TestRequest(targets=[routes.TestTarget(host=host, path="/usr/bin", expect="no_match",
+                                                             recursive=True)])
+        started = await call(routes.test_rule, rule_id, body, BackgroundTasks(), user=user, group_filter="blue")
+        assert started.test_result["status"] == "running"
+        assert [(r["path"], r["expect"]) for r in started.test_result["results"]] == [
+            ("/tmp/.x/kworkerd", "match"), ("/usr/bin", "no_match")]  # the sample is always tested
+
+        async def tested():
+            async with AsyncSessionLocal() as db:
+                r = await db.get(YaraRule, rule_id)
+                return r if r.test_result["status"] != "running" else None
+        rule = await _until(tested, 30)
+        stop.set()
+        await agent
+        assert rule.test_result["status"] == "passed", rule.test_result
+        assert [r["passed"] for r in rule.test_result["results"]] == [True, True]
+        assert rule.test_result["baseline_matches"] == 0
+        async with AsyncSessionLocal() as db:
+            flow = await db.get(Flow, uuid.UUID(rule.test_result["results"][0]["flow_id"]))
+        assert flow.artifact == "Linux.Detection.Yara"
+        assert [r["name"] for r in flow.request["sources"][0]["args"]["rules"]] == [rule.name]  # only this rule
+
+        unconfirmed = await refused(routes.activate_rule, rule_id, routes.ActivateRequest(), BackgroundTasks(),
+                                    user=user)
+        assert unconfirmed.status_code == 409 and any("full mode" in p for p in unconfirmed.detail["problems"])
+        async with AsyncSessionLocal() as db:  # inside the running loop: no _set_setting here
+            await db.merge(PlatformSetting(key="yara_ai_generation", value="full"))
+            await db.commit()
+        unconfirmed = await refused(routes.activate_rule, rule_id, routes.ActivateRequest(), BackgroundTasks(),
+                                    user=user)
+        assert unconfirmed.status_code == 422 and "every agent" in unconfirmed.detail["problems"][0]
+        toggled = await refused(routes.toggle_rule, rule_id, _=user)
+        assert toggled.status_code == 409 and "Activate" in toggled.detail
+
+        active = await call(routes.activate_rule, rule_id, confirm, BackgroundTasks(), user=user)
+        assert active.is_enabled and active.activated_at is not None
+        async with AsyncSessionLocal() as db:
+            yara_ruleset.invalidate()
+            _, rules = await yara_ruleset.enabled_ruleset(db)
+        mine = next(r for r in rules if r["id"] == str(rule_id))
+        assert mine["revision"] == yara_ruleset.fingerprint(content)  # agents report it with each match
+
+        changed = await refused(routes.update_rule, rule_id,
+                                YaraRuleCreate(name=active.name, content=content.replace("5MB", "6MB")), _=user)
+        assert changed.status_code == 409
+        off = await call(routes.toggle_rule, rule_id, _=user)  # disabling is always allowed
+        assert not off.is_enabled
+        edited = await call(routes.update_rule, rule_id, YaraRuleCreate(name=active.name,
+                                                                        content=content.replace("5MB", "6MB")), _=user)
+        again = await refused(routes.activate_rule, rule_id, confirm, BackgroundTasks(), user=user)
+        assert set(again.detail["problems"]) == {"validate the current content first",
+                                                 "run a test scan on the current content first"}
+        assert edited.validation["fingerprint"] != yara_ruleset.fingerprint(edited.content)
+    try:
+        _run(go())
+    finally:
+        _set_setting("yara_ai_generation", "draft_only")

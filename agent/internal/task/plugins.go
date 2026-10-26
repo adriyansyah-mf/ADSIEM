@@ -44,6 +44,8 @@ var Plugins = map[string]Plugin{
 	"yara":        pluginYara,
 	"memyara":     pluginMemYara,
 	"memrwx":      pluginMemRWX,
+	// one file's features for malware triage and YARA drafting (plugins_filefeatures.go)
+	"filefeatures": pluginFileFeatures,
 	// operator-approved commands only, never in an artifact (plugins_exec.go)
 	"exec": pluginExec,
 	// Windows-only (plugins_windows*.go); elsewhere they say so

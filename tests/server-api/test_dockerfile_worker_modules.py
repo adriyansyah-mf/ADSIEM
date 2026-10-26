@@ -41,3 +41,22 @@ def test_worker_subpackages_land_in_matching_directories():
         dirs = {str(Path(s).parent).removeprefix("worker/worker").strip("/") for s in sources}
         assert len(dirs) == 1, f"one COPY mixes worker directories: {line}"
         assert dest.rstrip("/") == ("./worker/" + dirs.pop()).rstrip("/"), f"wrong destination: {line}"
+
+
+def test_yaracheck_is_built_from_the_agent_engine_and_installed():
+    # app/services/yara_capability.py runs `yaracheck`; without it AI YARA drafts can never activate
+    dockerfile = (ROOT / "server-api" / "Dockerfile").read_text()
+    assert "go build" in dockerfile and "./cmd/yaracheck" in dockerfile
+    assert "COPY agent/internal/yara/" in dockerfile and "COPY agent/cmd/yaracheck/" in dockerfile
+    assert re.search(r"^COPY --from=yaracheck \S+ /usr/local/bin/yaracheck$", dockerfile, re.M)
+    ignore = (ROOT / "server-api" / "Dockerfile.dockerignore").read_text()
+    for path in ("!agent/go.mod", "!agent/go.sum", "!agent/internal/yara", "!agent/cmd/yaracheck"):
+        assert re.search(rf"^{re.escape(path)}$", ignore, re.M), f"Dockerfile.dockerignore must let through {path}"
+    # the stage compiles only what the engine and the CLI import: the standard library
+    for src in [*(ROOT / "agent/internal/yara").glob("*.go"), *(ROOT / "agent/cmd/yaracheck").glob("*.go")]:
+        block = re.search(r"import \((.*?)\)|import (\"[^\"]+\")", src.read_text(), re.S)
+        if src.name.endswith("_test.go") or block is None:  # some engine files import nothing
+            continue
+        for imp in re.findall(r'"([\w./-]+)"', block.group(0)):
+            assert "." not in imp.split("/")[0] or imp.startswith("github.com/siem-platform/agent/internal/yara"), \
+                f"{src.name} imports {imp}, which the yaracheck stage would have to download"

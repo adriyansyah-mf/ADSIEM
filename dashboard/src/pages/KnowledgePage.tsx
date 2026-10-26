@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import KnowledgeVault from '@/components/KnowledgeVault'
 import { format, formatDistanceToNow } from 'date-fns'
 import { CheckCircle2, CircleDashed, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import { api } from '@/api/client'
@@ -319,10 +321,16 @@ function TestTab() {
   )
 }
 
-const TABS = [['notes', 'Notes'], ['reference', 'Payload reference'], ['learned', 'Learned from feedback'], ['test', 'Test']] as const
+const TABS = [
+  ['vault', 'Vault'], ['notes', 'Quick notes'], ['reference', 'Payload reference'], ['learned', 'Learned from feedback'],
+  ['test', 'Test'],
+] as const
 
 export default function KnowledgePage() {
-  const [tab, setTab] = useState<(typeof TABS)[number][0]>('notes')
+  // /knowledge?article=<id> is the canonical link the AI cites (worker/knowledge_query.py)
+  const [params] = useSearchParams()
+  const article = params.get('article')
+  const [tab, setTab] = useState<(typeof TABS)[number][0]>('vault')
   const [draft, setDraft] = useState<Draft | null>(null)
   return (
     <div>
@@ -341,6 +349,7 @@ export default function KnowledgePage() {
           }}>{name}</button>
         ))}
       </div>
+      {tab === 'vault' && <KnowledgeVault initialId={article} />}
       {tab === 'notes' && <NotesTab draft={draft} setDraft={setDraft} />}
       {tab === 'reference' && <ReferenceTab />}
       {tab === 'learned' && <LearnedTab makeNote={d => { setDraft(d); setTab('notes') }} />}

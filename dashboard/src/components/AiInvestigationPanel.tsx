@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceStrict } from 'date-fns'
 import {
-  AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleStop, FileCode2, FileText,
-  Play, Search, Server, Terminal, XCircle,
+  AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleStop, Clock, FileCode2, FileText,
+  Lightbulb, Play, Search, Server, ShieldQuestion, Terminal, XCircle,
 } from 'lucide-react'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
+import { useInvestigationControls, useInvestigationLedger } from '@/hooks/useInvestigationLedger'
 import MarkdownNote from '@/components/MarkdownNote'
 import { HashEnrichmentEvidence } from '@/components/HashEnrichmentEvidence'
+import { ActionApprovals, EvidenceView, HypothesesView, QueueView } from '@/components/InvestigationLedger'
+import MalwareDrafts from '@/components/MalwareDrafts'
 
 interface Step {
   ts: string
@@ -33,9 +36,12 @@ interface Investigation {
   id: string
   case_id: string
   status: 'queued' | 'running' | 'finished' | 'error' | 'cancelled' | 'interrupted'
+  phase: 'planning' | 'collecting' | 'analyzing' | 'reporting' | null
   model: string | null
   verdict: string | null
   report: string | null
+  report_json: { citations_unchecked?: boolean; unverified_claims?: number; confidence?: number; verdict_downgraded_from?: string } | null
+  budget_overrides: { flows?: number; raised_by?: string }
   error: string | null
   steps: Step[]
   commands: Command[]
@@ -148,6 +154,29 @@ function describe(step: Step, open: boolean, toggle: () => void): Row | null {
       }
     case 'refused':
       return { icon: <Ban size={13} />, tone: 'var(--accent-red)', title: 'Refused', detail: s.reason }
+    case 'approval_needed':
+      return { icon: <ShieldQuestion size={13} />, tone: 'var(--accent-orange)',
+        title: <>Waiting for approval: <b>{s.tool}</b>{s.host ? <> on <b>{s.host}</b></> : null}</>, detail: s.reason }
+    case 'action_decision':
+      return {
+        icon: s.status === 'approved' ? <CheckCircle2 size={13} /> : <Ban size={13} />,
+        tone: s.status === 'approved' ? 'var(--accent-green)' : 'var(--accent-red)',
+        title: `Action ${s.status}`, detail: s.note ?? undefined,
+      }
+    case 'waiting':
+      return { icon: <Clock size={13} />, title: 'Waiting for a free slot on the host', detail: s.reason }
+    case 'resumed':
+      return { icon: <Play size={13} />, tone: 'var(--accent-orange)', title: 'Resumed on another server',
+        detail: `${s.replica} · after ${s.after_rounds} rounds; continued from the ledger` }
+    case 'reconciled':
+      return { icon: <CheckCircle2 size={13} />, title: `Picked up action #${s.ordinal}`,
+        detail: `${s.tool}: finished what the previous server started, without re-running it` }
+    case 'hypothesis':
+      return { icon: <Lightbulb size={13} />, tone: 'var(--accent-yellow)',
+        title: <>Hypothesis <b>{s.state}</b> ({s.confidence}%)</>, detail: `${s.statement}${s.reason ? ` · ${s.reason}` : ''}` }
+    case 'report_check':
+      return { icon: <AlertTriangle size={13} />, tone: 'var(--accent-yellow)', title: 'Report citations checked',
+        detail: `${(s.problems ?? []).length} problems sent back to the model for one repair` }
     case 'warning':
       return { icon: <AlertTriangle size={13} />, tone: 'var(--accent-yellow)', title: 'Warning', detail: s.text }
     case 'finished':
@@ -243,8 +272,13 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
   })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showReasoning, setShowReasoning] = useState(false)
+  const [tab, setTab] = useState<'activity' | 'queue' | 'evidence' | 'hypotheses'>('activity')
   const current = runs.find(r => r.id === selectedId) ?? runs[0]
   const active = current ? ACTIVE.has(current.status) : false
+  const ledger = useInvestigationLedger(caseId, current?.id, active)
+  const { raiseBudget } = useInvestigationControls(caseId, current?.id)
+  // artifacts this run wrote: reusable by other runs only once promoted
+  const written = current ? [...new Set(current.steps.filter(s => s.kind === 'artifact').map(s => String(s.name)))] : []
 
   // the report is added to the case as a note: refresh the case when a run ends
   const [wasActive, setWasActive] = useState(false)
@@ -286,10 +320,20 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
             <CircleStop size={13} /> CANCEL
           </button>
         )}
+        {active && current && !current.budget_overrides?.flows && (
+          <button onClick={() => raiseBudget.mutate(6)} disabled={raiseBudget.isPending}
+            title="Once per investigation: six more live-response runs"
+            style={{ ...btn, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)' }}>
+            +6 RUNS
+          </button>
+        )}
         {current && (
           <>
             <Pill text={current.status} color={STATUS_COLOR[current.status] ?? 'var(--text-muted)'} />
+            {active && current.phase && <Pill text={current.phase} color="var(--accent-cyan)" />}
             {verdict && <Pill text={verdict.label} color={verdict.color} />}
+            {current.report_json?.verdict_downgraded_from && <Pill text="downgraded: unverified" color="var(--accent-yellow)" />}
+            {current.report_json?.citations_unchecked && <Pill text="citations unchecked" color="var(--accent-yellow)" />}
             <span style={{ ...mono, fontSize: '11px', color: 'var(--text-muted)' }}>
               {current.model}
               {current.finished_at && ` · ${formatDistanceStrict(new Date(current.finished_at), new Date(current.created_at))}`}
@@ -325,16 +369,37 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
           {(current.commands ?? []).filter(c => c.status === 'pending').map(c => (
             <PendingCommand key={c.id} cmd={c} onDecided={() => qc.invalidateQueries({ queryKey: ['investigations', caseId] })} />
           ))}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={label}>Activity</span>
-            {thoughts > 0 && (
+          <ActionApprovals caseId={caseId} invId={current.id} actions={ledger.actions} />
+          <MalwareDrafts caseId={caseId} invId={current.id} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', borderBottom: '1px solid var(--border)' }}>
+            {([
+              ['activity', 'Activity'],
+              ['queue', `Queue (${ledger.actions.length})`],
+              ['evidence', `Evidence (${ledger.evidence.length})`],
+              ['hypotheses', `Hypotheses (${ledger.hypotheses.length})`],
+            ] as const).map(([key, text]) => (
+              <button key={key} onClick={() => setTab(key)}
+                style={{ ...label, padding: '4px 0', color: tab === key ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                  borderBottom: tab === key ? '2px solid var(--accent-cyan)' : '2px solid transparent', marginBottom: '-1px' }}>
+                {text}
+              </button>
+            ))}
+            {tab === 'activity' && thoughts > 0 && (
               <button onClick={() => setShowReasoning(v => !v)}
-                style={{ ...mono, fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                style={{ ...mono, marginLeft: 'auto', fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
                 {showReasoning ? <ChevronDown size={12} /> : <ChevronRight size={12} />} reasoning ({thoughts})
               </button>
             )}
           </div>
-          <Timeline steps={current.steps} showReasoning={showReasoning} />
+          {tab === 'activity' && <Timeline steps={current.steps} showReasoning={showReasoning} />}
+          {tab === 'queue' && (
+            <QueueView caseId={caseId} invId={current.id} actions={ledger.actions} active={active}
+              artifactsToPromote={active ? [] : written} />
+          )}
+          {tab === 'evidence' && <EvidenceView caseId={caseId} invId={current.id} evidence={ledger.evidence} />}
+          {tab === 'hypotheses' && (
+            <HypothesesView caseId={caseId} invId={current.id} hypotheses={ledger.hypotheses} evidence={ledger.evidence} />
+          )}
           {current.report && (
             <>
               <span style={label}>Report</span>

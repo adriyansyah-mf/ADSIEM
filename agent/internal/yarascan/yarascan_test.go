@@ -68,10 +68,26 @@ func TestMatchLineQuoting(t *testing.T) {
 		Meta:    []yara.Meta{{Key: "description", Value: "two\nlines"}},
 		Strings: []yara.StringMatch{{ID: "$b", Offset: 9}, {ID: "$a", Offset: 3}, {ID: "$a", Offset: 30}},
 	}
-	got := MatchLine(m, `C:\Temp\evil "1".php`, "abc", 42, "on_access")
+	got := MatchLine(m, Rule{}, `C:\Temp\evil "1".php`, "abc", 42, "on_access")
 	want := `event=yara_match rule="r1" namespace="pack \"x\"" severity=high file="C:\\Temp\\evil \"1\".php" sha256=abc size=42 tags="a,b" strings="$a@3,$b@9" trigger=on_access description="two lines"`
 	if got != want {
 		t.Fatalf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestMatchLineCarriesRuleRevisionAndCase(t *testing.T) {
+	m := yara.RuleMatch{Rule: "AI_x", Namespace: "AI_x", Meta: []yara.Meta{{Key: "case", Value: "c-1"}}}
+	got := MatchLine(m, Rule{ID: "r-9", Revision: "abc123"}, "/tmp/x", "sha", 1, "on_access")
+	if !strings.HasSuffix(got, ` rule_id="r-9" revision="abc123" case="c-1"`) {
+		t.Fatalf("provenance missing: %s", got)
+	}
+}
+
+func TestSetRulesRemembersEachRulesIDAndRevision(t *testing.T) {
+	s := New(Options{Roots: []string{t.TempDir()}, Push: func(string, string) {}})
+	s.SetRules("h", []Rule{{ID: "r-9", Name: "AI_x", Revision: "abc123", Content: `rule AI_x { condition: true }`}})
+	if ref := s.ref("AI_x"); ref.ID != "r-9" || ref.Revision != "abc123" {
+		t.Fatalf("ref: %+v", ref)
 	}
 }
 

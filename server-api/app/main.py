@@ -14,6 +14,7 @@ import app.models.models  # noqa: F401 — ensure all models are registered befo
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
 from app.api.routes.cases import router as cases_router
 from app.api.routes.investigations import router as investigations_router
+from app.api.routes.yara_drafts import router as yara_drafts_router
 from app.api.routes.evidence import router as evidence_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.hygiene import router as hygiene_router
@@ -24,6 +25,7 @@ from app.api.routes.tasks import router as tasks_router, fleet_router
 from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.flows import router as flows_router, artifact_router as flow_artifacts_router, agent_router as agent_flows_router
 from app.api.routes.yara_rules import router as yara_router
+from app.api.routes.yara_rules import capability_router as yara_capability_router
 from app.api.routes.prevention_rules import router as prevention_router, agent_router as prevention_agent_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
@@ -75,6 +77,7 @@ _DEFAULT_SETTINGS = [
     ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),
     ("malwarebazaar_enabled", "false",                  False, "Allow AI case investigations to send observed file hashes to MalwareBazaar (true/false). Metadata only: no file uploads or sample downloads"),
     ("malwarebazaar_api_key", "",                       True,  "MalwareBazaar Auth-Key from auth.abuse.ch; requires malwarebazaar_enabled=true. Check abuse.ch fair-use/commercial terms before enabling"),
+    ("yara_ai_generation", "draft_only",                False, "AI YARA drafting from investigation evidence: off, draft_only (collect file features and save disabled drafts), or full (adds validation, test scans and activation; falls back to draft_only until the full-YARA capability exists)"),
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
     ("otx_api_key",        "",                          True,  "AlienVault OTX API key — free (otx.alienvault.com)"),
     ("greynoise_api_key",  "",                          True,  "GreyNoise API key — optional, community endpoint used if empty"),
@@ -337,6 +340,20 @@ async def _migrate_agent_evidence_health() -> None:
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health JSONB"))
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health_at TIMESTAMPTZ"))
 
+async def _migrate_investigation_ledger_columns() -> None:
+    """Columns the investigation ledger (services/investigation_ledger.py) adds to existing tables."""
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        for col in ("phase VARCHAR(20)", "report_json JSONB", "budget_overrides JSONB NOT NULL DEFAULT '{}'::jsonb",
+                    "lease_owner VARCHAR(120)", "lease_expires_at TIMESTAMPTZ",
+                    "rounds_used INTEGER NOT NULL DEFAULT 0", "active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0"):
+            await conn.execute(text(f"ALTER TABLE case_investigations ADD COLUMN IF NOT EXISTS {col}"))
+        for col in ("created_by_investigation_id UUID", "promoted_at TIMESTAMPTZ", "promoted_by UUID"):
+            await conn.execute(text(f"ALTER TABLE flow_artifacts ADD COLUMN IF NOT EXISTS {col}"))
+        for col in ("origin VARCHAR(20) NOT NULL DEFAULT 'manual'", "draft_id UUID", "validation JSONB",
+                    "test_result JSONB", "activated_by UUID", "activated_at TIMESTAMPTZ"):
+            await conn.execute(text(f"ALTER TABLE yara_rules ADD COLUMN IF NOT EXISTS {col}"))
+
 async def _migrate_agent_integrity() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -451,18 +468,22 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
+        await _migrate_investigation_ledger_columns()
         from app.services.knowledge_schema import migrate_knowledge
         await migrate_knowledge()
-        from app.services.investigator import mark_stale_interrupted
-        await mark_stale_interrupted()
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
     await ensure_es_index()
     import asyncio
+    from app.services import investigator
     _listener_task = asyncio.create_task(_ws_redis_listener())
+    # adopts investigations whose replica died or restarted (lease expired)
+    _investigation_scheduler = asyncio.create_task(investigator.scheduler_loop())
     yield
     _listener_task.cancel()
+    _investigation_scheduler.cancel()
+    await investigator.shutdown()  # hand running investigations to another replica
 
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
 
@@ -481,13 +502,13 @@ for router in [
     auth.router, users.router, agents.router, ingest.router,
     logs.router, events.router, alerts.router, rules.router,
     decoders.router, webhooks.router, system.router, cases_router, settings_router, hygiene_router, ueba_router, fim_router, hunts_router,
-    tasks_router, fleet_router, artifacts_router, yara_router,
+    tasks_router, fleet_router, artifacts_router, yara_router, yara_capability_router,
     flows_router, flow_artifacts_router, agent_flows_router,
     enrollment_tokens_router, audit_logs_router,
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
-    investigations_router, knowledge_router, evidence_router,
+    investigations_router, yara_drafts_router, knowledge_router, evidence_router,
     prevention_router, prevention_agent_router,
 ]:
     app.include_router(router)

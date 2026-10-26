@@ -270,10 +270,21 @@ class CaseInvestigation(Base):
     group_id         = Column(String(100), nullable=False, default="default")
     # queued → running → finished | error | cancelled | interrupted (server restarted mid-run)
     status           = Column(String(20), nullable=False, default="queued")
+    # while running: planning → collecting ⇄ analyzing → reporting
+    phase            = Column(String(20))
     started_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     model            = Column(String(100))
     steps            = Column(JSONB, nullable=False, default=list)
     report           = Column(Text)
+    # the structured report the Markdown above is rendered from (investigation_ledger.validate_report)
+    report_json      = Column(JSONB)
+    budget_overrides = Column(JSONB, nullable=False, default=dict)  # {"flows": extra runs an analyst granted}
+    # the replica running it (investigator.REPLICA_ID); another replica adopts it once the lease expires
+    lease_owner      = Column(String(120))
+    lease_expires_at = Column(DateTime(timezone=True))
+    # progress a replica that adopts the run resumes from
+    rounds_used      = Column(Integer, nullable=False, default=0)
+    active_seconds   = Column(Float, nullable=False, default=0.0)
     verdict          = Column(String(30))  # true_positive / false_positive / inconclusive
     error            = Column(Text)
     cancel_requested = Column(Boolean, nullable=False, default=False)
@@ -306,6 +317,88 @@ class InvestigationCommand(Base):
     decision_note    = Column(Text)
     flow_id          = Column(UUID(as_uuid=True))
     created_at       = Column(DateTime(timezone=True), default=now_utc)
+
+class InvestigationAction(Base):
+    """One step of an investigation's queue: a tool call the AI made or an
+    analyst added. The risk tier is the server's (investigation_ledger.py),
+    never the model's; the idempotency key keeps endpoint work from repeating."""
+    __tablename__ = "investigation_actions"
+    __table_args__ = (UniqueConstraint("investigation_id", "idempotency_key", name="uq_investigation_action_key"),)
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id  = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                               nullable=False, index=True)
+    group_id          = Column(String(100), nullable=False, default="default")
+    ordinal           = Column(Integer, nullable=False)
+    kind              = Column(String(20), nullable=False)   # siem_query / artifact / command / authoring / analysis
+    tool              = Column(String(60), nullable=False)
+    target            = Column(String(255))                  # host as given
+    agent_id          = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), index=True)
+    params            = Column(JSONB, nullable=False, default=dict)
+    reason            = Column(Text)
+    expected_evidence = Column(Text)
+    risk_tier         = Column(Integer, nullable=False, default=0)
+    approval_reason   = Column(Text)                         # why the policy wants a person
+    # queued → running → completed | failed | cancelled; queued → awaiting_approval → queued | skipped
+    status            = Column(String(20), nullable=False, default="queued", index=True)
+    source            = Column(String(20), nullable=False, default="planner")  # planner / replanner / analyst
+    dependencies      = Column(JSONB, nullable=False, default=list)
+    idempotency_key   = Column(String(64), nullable=False)
+    result_ref        = Column(JSONB, nullable=False, default=dict)  # flow_id, command_id, evidence_ids
+    error             = Column(Text)
+    attempts          = Column(Integer, nullable=False, default=0)
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    decided_by        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at        = Column(DateTime(timezone=True))
+    decision_note     = Column(Text)
+    created_at        = Column(DateTime(timezone=True), default=now_utc)
+    started_at        = Column(DateTime(timezone=True))
+    finished_at       = Column(DateTime(timezone=True))
+    updated_at        = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class InvestigationEvidence(Base):
+    """Something an investigation observed. Report claims cite these ids; the
+    canonical data (flow rows, events, command output) stays in its own store."""
+    __tablename__ = "investigation_evidence"
+    __table_args__ = (UniqueConstraint("investigation_id", "content_hash", name="uq_investigation_evidence_hash"),)
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    action_id        = Column(UUID(as_uuid=True), ForeignKey("investigation_actions.id", ondelete="SET NULL"))
+    group_id         = Column(String(100), nullable=False, default="default")
+    # event / alert / flow_row / file / hash / command_result / ti_result / knowledge_guidance
+    evidence_type    = Column(String(30), nullable=False)
+    source_type      = Column(String(30), nullable=False)
+    source_id        = Column(String(255))
+    title            = Column(String(300), nullable=False)
+    summary          = Column(Text)
+    observed_at      = Column(DateTime(timezone=True))
+    entities         = Column(JSONB, nullable=False, default=dict)
+    content_hash     = Column(String(64), nullable=False)
+    confidence       = Column(Integer)
+    sensitivity      = Column(String(20), nullable=False, default="normal")  # normal / sensitive / restricted
+    pinned           = Column(Boolean, nullable=False, default=False)
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+    updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class InvestigationHypothesis(Base):
+    """An explanation the investigation is testing, with the evidence for and against it."""
+    __tablename__ = "investigation_hypotheses"
+    id                         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id           = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                                        nullable=False, index=True)
+    group_id                   = Column(String(100), nullable=False, default="default")
+    ordinal                    = Column(Integer, nullable=False)
+    statement                  = Column(Text, nullable=False)
+    state                      = Column(String(20), nullable=False, default="open")  # open/supported/refuted/inconclusive/superseded
+    confidence                 = Column(Integer, nullable=False, default=50)
+    supporting_evidence_ids    = Column(JSONB, nullable=False, default=list)
+    contradicting_evidence_ids = Column(JSONB, nullable=False, default=list)
+    open_questions             = Column(JSONB, nullable=False, default=list)
+    superseded_by              = Column(UUID(as_uuid=True))
+    source                     = Column(String(20), nullable=False, default="planner")
+    history                    = Column(JSONB, nullable=False, default=list)
+    created_at                 = Column(DateTime(timezone=True), default=now_utc)
+    updated_at                 = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 class CaseNote(Base):
     __tablename__ = "case_notes"
@@ -448,6 +541,48 @@ class YaraRule(Base):
     content     = Column(Text, nullable=False)
     is_enabled  = Column(Boolean, nullable=False, default=True)
     created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    # "ai_draft": saved from a YARA draft (services/yara_drafting.py); stays disabled until validated and tested
+    origin      = Column(String(20), nullable=False, default="manual")
+    draft_id    = Column(UUID(as_uuid=True))
+    # services/yara_capability.py: each result names the content fingerprint it is for; an edit voids it
+    validation  = Column(JSONB)   # {"ok", "error", "line", "fingerprint", "engine_version", "at", "quality"}
+    test_result = Column(JSONB)   # {"status", "fingerprint", "results": [...], "at"}
+    activated_by = Column(UUID(as_uuid=True))
+    activated_at = Column(DateTime(timezone=True))
+
+class YaraDraft(Base):
+    """A YARA rule the AI drafted from one suspicious file's features (never the
+    file itself), for an analyst to review. collecting → drafting → draft,
+    or failed / dismissed. Saving it creates a disabled yara_rules row."""
+    __tablename__ = "yara_drafts"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id         = Column(String(100), nullable=False, default="default")
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    evidence_id      = Column(UUID(as_uuid=True))                       # the file observation it started from
+    host             = Column(String(255))
+    agent_id         = Column(UUID(as_uuid=True))
+    path             = Column(Text)
+    sha256           = Column(String(64), nullable=False, index=True)
+    status           = Column(String(20), nullable=False, default="collecting")
+    flow_id          = Column(UUID(as_uuid=True))
+    features         = Column(JSONB)                                   # bounded, credentials redacted
+    support          = Column(JSONB, nullable=False, default=list)      # findings that made the file eligible
+    rule_name        = Column(String(128))
+    rule_text        = Column(Text)
+    rationale        = Column(JSONB, nullable=False, default=list)      # [{id, value, why}]
+    limitations      = Column(JSONB, nullable=False, default=list)
+    false_positives  = Column(JSONB, nullable=False, default=list)
+    quality          = Column(JSONB, nullable=False, default=dict)      # {"blocking": [...], "warnings": [...]}
+    confidence       = Column(Integer)
+    mitre            = Column(JSONB, nullable=False, default=list)
+    tags             = Column(JSONB, nullable=False, default=list)
+    error            = Column(Text)
+    yara_rule_id     = Column(UUID(as_uuid=True))
+    created_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+    updated_at       = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 class EnrollmentToken(Base):
     __tablename__ = "enrollment_tokens"
@@ -539,6 +674,65 @@ class KnowledgeEntry(Base):
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     indexed_at = Column(DateTime(timezone=True))                         # NULL or < updated_at: (re)embed
+    # Knowledge vault (services/knowledge_vault.py): Markdown articles with frontmatter and [[wikilinks]].
+    # Only published, enabled, unexpired entries reach the AI.
+    slug         = Column(String(200))                                   # wikilink target, unique per group
+    path         = Column(Text)                                          # vault path, e.g. "Windows/PowerShell.md"
+    tags         = Column(JSONB, nullable=False, default=list)
+    frontmatter  = Column(JSONB, nullable=False, default=dict)
+    status       = Column(String(20), nullable=False, default="published")  # draft | published | archived
+    trust        = Column(String(20), nullable=False, default="reviewed")   # draft | reviewed | verified | external
+    content_type = Column(String(30), nullable=False, default="environment")
+    owner_id     = Column(UUID(as_uuid=True))
+    reviewed_by  = Column(UUID(as_uuid=True))
+    reviewed_at  = Column(DateTime(timezone=True))
+    version      = Column(Integer, nullable=False, default=1)
+    checksum     = Column(String(64))
+    index_error  = Column(Text)                                          # why the last embedding failed
+
+
+class KnowledgeRevision(Base):
+    """An immutable snapshot of an article at one version; restoring one makes a new version."""
+    __tablename__ = "knowledge_revisions"
+    __table_args__ = (UniqueConstraint("entry_id", "version", name="uq_knowledge_revision_version"),)
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entry_id    = Column(UUID(as_uuid=True), ForeignKey("knowledge_entries.id", ondelete="CASCADE"), nullable=False, index=True)
+    version     = Column(Integer, nullable=False)
+    title       = Column(String(300), nullable=False)
+    content     = Column(Text, nullable=False)
+    frontmatter = Column(JSONB, nullable=False, default=dict)
+    status      = Column(String(20), nullable=False)
+    author_id   = Column(UUID(as_uuid=True))
+    note        = Column(Text)                                           # e.g. "restored version 2", "imported"
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+
+
+class KnowledgeLink(Base):
+    """A [[wikilink]] from one article; target_id is set once an article with that slug or title exists."""
+    __tablename__ = "knowledge_links"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_id   = Column(UUID(as_uuid=True), ForeignKey("knowledge_entries.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id    = Column(String(100), nullable=False, default="default")
+    target      = Column(String(300), nullable=False)                    # as written
+    target_slug = Column(String(200), nullable=False, index=True)
+    heading     = Column(String(300))
+    target_id   = Column(UUID(as_uuid=True), ForeignKey("knowledge_entries.id", ondelete="SET NULL"), index=True)
+
+
+class KnowledgeUsage(Base):
+    """Each time the AI retrieved or cited a knowledge entry."""
+    __tablename__ = "knowledge_usage"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    entry_id         = Column(UUID(as_uuid=True), ForeignKey("knowledge_entries.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id         = Column(String(100), nullable=False, default="default")
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"), index=True)
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"))
+    use_type         = Column(String(20), nullable=False)                # retrieved | cited
+    query            = Column(Text)
+    heading          = Column(String(300))
+    version          = Column(Integer)
+    score            = Column(Float)
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
 
 
 class SopChunk(Base):
@@ -635,6 +829,10 @@ class FlowArtifact(Base):
     content     = Column(Text, nullable=False)
     group_id    = Column(String(100), nullable=False, default="default")
     created_by  = Column(UUID(as_uuid=True))
+    # AI.* artifacts: the investigation that wrote it; other runs need it promoted (or approved) to reuse it
+    created_by_investigation_id = Column(UUID(as_uuid=True))
+    promoted_at = Column(DateTime(timezone=True))
+    promoted_by = Column(UUID(as_uuid=True))
     created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
     updated_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
 

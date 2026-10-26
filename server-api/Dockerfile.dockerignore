@@ -9,8 +9,17 @@
 !worker/worker/decoder_engine.py
 !worker/worker/agent_health.py
 !worker/worker/knowledge_query.py
+!worker/worker/knowledge_markdown.py
 !worker/worker/soar/__init__.py
 !worker/worker/soar/graph.py
 !worker/worker/soar/template.py
 !worker/worker/soar/curl.py
+# yaracheck build stage: the agent module's YARA engine and the CLI, not its test fixtures
+!agent/go.mod
+!agent/go.sum
+!agent/internal/yara
+agent/internal/yara/testdata
+agent/internal/yara/*_test.go
+!agent/cmd/yaracheck
+agent/cmd/yaracheck/*_test.go
 **/__pycache__
