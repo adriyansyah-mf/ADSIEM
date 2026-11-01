@@ -11,7 +11,7 @@ import (
 type Sensor struct{}
 
 // Start is only available on Windows.
-func Start(*buffer.Buffer) (*Sensor, error) { return nil, etw.ErrUnsupported }
+func Start(*buffer.Buffer, ...string) (*Sensor, error) { return nil, etw.ErrUnsupported }
 
 // SysmonInstalled is always false off Windows.
 func SysmonInstalled() bool { return false }

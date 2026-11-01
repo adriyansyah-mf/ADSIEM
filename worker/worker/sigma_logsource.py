@@ -167,7 +167,11 @@ def _windows_sources() -> list[Source]:
     # absent: Sysmon's event IDs and field names, its own log types.
     for category, log_type, event_id in (("process_creation", "windows_etw_process", "1"),
                                          ("network_connection", "windows_etw_network", "3"),
-                                         ("dns_query", "windows_etw_dns", "22")):
+                                         ("dns_query", "windows_etw_dns", "22"),
+                                         ("file_event", "windows_etw_file", "11"),
+                                         ("file_delete", "windows_etw_file", "23"),
+                                         ("image_load", "windows_etw_image", "7"),
+                                         ("driver_load", "windows_etw_image", "6")):
         out.append(Source("windows", None, category, log_types=(log_type,),
                           when=(("EventID", "eq", (event_id,)),), raw_kv=True, aliases=_WIN_ALIASES))
     return out
