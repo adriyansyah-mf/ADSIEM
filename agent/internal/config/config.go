@@ -82,6 +82,9 @@ type RansomwareConfig struct {
 	// CanaryDirs (globs) and CanaryNames replace the defaults.
 	CanaryDirs  []string `yaml:"canary_dirs"`
 	CanaryNames []string `yaml:"canary_names"`
+	// CanaryVisible plants the canaries in plain sight instead of hidden
+	// (dot files, hidden attribute on Windows).
+	CanaryVisible bool `yaml:"canary_visible"`
 	// AllowImages are extra executable basenames the heuristics ignore.
 	AllowImages []string `yaml:"allow_images"`
 }

@@ -284,11 +284,12 @@ func run(configPath string, stop <-chan struct{}) {
 	var onFile func(linsensor.FileEvent)
 	if !cfg.Ransomware.Disabled {
 		opts := ransomguard.Options{
-			Push:        func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
-			CanaryDirs:  cfg.Ransomware.CanaryDirs,
-			CanaryNames: cfg.Ransomware.CanaryNames,
-			AllowImages: cfg.Ransomware.AllowImages,
-			Kill:        !cfg.Ransomware.ReportOnly,
+			Push:          func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			CanaryDirs:    cfg.Ransomware.CanaryDirs,
+			CanaryNames:   cfg.Ransomware.CanaryNames,
+			CanaryVisible: cfg.Ransomware.CanaryVisible,
+			AllowImages:   cfg.Ransomware.AllowImages,
+			Kill:          !cfg.Ransomware.ReportOnly,
 		}
 		if cfg.Ransomware.Isolate {
 			opts.Isolate = func() error { _, err := fwEngine.Isolate(); return err }

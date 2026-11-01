@@ -117,11 +117,11 @@ func TestCanaries(t *testing.T) {
 	dir := t.TempDir()
 	os.Mkdir(filepath.Join(dir, "alice"), 0o755)
 	os.Mkdir(filepath.Join(dir, "bob"), 0o755)
-	c := newCanaries([]string{filepath.Join(dir, "*"), filepath.Join(dir, "missing")}, nil)
+	c := newCanaries([]string{filepath.Join(dir, "*"), filepath.Join(dir, "missing")}, nil, false)
 	if n := c.plant(); n != 4 {
 		t.Fatalf("planted %d", n)
 	}
-	a := filepath.Join(dir, "alice", "!siem-canary.pdf")
+	a := filepath.Join(dir, "alice", ".siem-canary.pdf")
 	if !c.isCanary(a) || c.isCanary(filepath.Join(dir, "alice", "notes.txt")) {
 		t.Fatal("isCanary")
 	}
@@ -176,7 +176,7 @@ func TestGuardCanaryKillsAndReports(t *testing.T) {
 	g := New(Options{Push: out.push, CanaryDirs: []string{dir}, Kill: true, Isolate: func() error { isolated = true; return nil }})
 	g.response = func(pid uint32) (int, error) { mu.Lock(); killed = append(killed, pid); mu.Unlock(); return 3, nil }
 	g.can.plant()
-	canary := filepath.Join(dir, "!siem-canary.pdf")
+	canary := filepath.Join(dir, ".siem-canary.pdf")
 	g.Observe(linsensor.FileEvent{Action: "rename", From: canary, Path: canary + ".locked", PID: 42, PPID: 1, UID: 1000, Image: "/tmp/.x/crypt", Comm: "crypt"})
 	lines := out.wait(t, 1)
 	want := `detection=canary confirmed=true response=killed Canary="` + canary + `" FileAction=rename Image="/tmp/.x/crypt" Comm="crypt" PID=42 PPID=1 User=1000 Killed=3 Isolated=true`
