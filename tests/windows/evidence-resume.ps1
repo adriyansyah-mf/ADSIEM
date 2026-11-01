@@ -26,7 +26,8 @@ $packages = @(
     "./agent/internal/etw",  # real ETW sessions: kernel logger and manifest providers
     "./agent/internal/winsensor", # ETW process telemetry, end to end
     "./agent/internal/ransomguard", # ETW file events -> guard -> TerminateProcess, end to end
-    "./agent/internal/firewall"   # Windows Defender Firewall backend and expiry
+    "./agent/internal/firewall",  # Windows Defender Firewall backend and expiry
+    "./agent/internal/update"     # self-update: MSI detection, verification
 )
 $failed = @()
 $logs = Join-Path ($env:RUNNER_TEMP ?? $env:TEMP) "evidence-go-test"

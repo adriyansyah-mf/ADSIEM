@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     ALLOW_PRIVATE_WEBHOOK_TARGETS: bool = False
     LOG_LEVEL: str = "info"
     EVIDENCE_INGEST_ENABLED: bool = False
+    # Agent self-update: base64 ed25519 public keys (comma separated). When set,
+    # only packages they verify are offered; agents verify with their own keys
+    # either way (services/agent_update.py).
+    AGENT_UPDATE_PUBLIC_KEYS: str = ""
     EVIDENCE_GROUP_BUDGET_BYTES: int = Field(default=1 << 30, gt=0)
     # agents' heartbeat interval (agent config server.heartbeat_interval); evidence
     # health older than two of them is shown as stale

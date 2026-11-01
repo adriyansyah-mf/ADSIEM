@@ -137,6 +137,13 @@ type AntiTamperConfig struct {
 	UnlockService bool `yaml:"unlock_service"`
 }
 
+// UpdateConfig: self-update from the server's rollout. Packages must be
+// signed by a key built into the agent or listed here (base64 ed25519).
+type UpdateConfig struct {
+	Disabled    bool     `yaml:"disabled"`
+	TrustedKeys []string `yaml:"trusted_keys"`
+}
+
 type Config struct {
 	Agent        AgentConfig        `yaml:"agent"`
 	Server       ServerConfig       `yaml:"server"`
@@ -155,6 +162,7 @@ type Config struct {
 	LiveResponse LiveResponseConfig `yaml:"live_response"`
 	AntiTamper   AntiTamperConfig   `yaml:"anti_tamper"`
 	Prevention   PreventionConfig   `yaml:"prevention"`
+	Update       UpdateConfig       `yaml:"update"`
 }
 
 func Load(path string) (*Config, error) {

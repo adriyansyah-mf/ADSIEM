@@ -60,6 +60,7 @@ agent/
 | YARA engine | `internal/yara/` | checked against libyara 4.5 by `testdata/differential` (`gen_expected.py` regenerates `expected.json`); unsupported features are compile errors |
 | On-access YARA | `internal/yarascan/` | heartbeat `yara_rules_hash` → `POST /api/ingest/yara-rules`; matches are `yara_match` lines (`decoders/yara_match.yaml`, `rules/yara_match_*.yaml`) |
 | Process memory | `internal/memscan/`, `internal/task/memory.go` | plugins `memyara`/`memrwx` (keep `PLUGINS` in flow_artifacts.py in sync), task `memory_scan`, periodic `process_memory_rwx` sweep — see `docs/operations/memory-scan.md` |
+| Self-update | `internal/update`, `cmd/agent/update.go`, `cmd/siem-update-sign` | installs the heartbeat's offer only if a trusted ed25519 key (`-X main.UpdateKeys` + `update.trusted_keys`) signed its manifest and the download matches it; deb/rpm in a `systemd-run` transient unit, MSI detached; outcome in `update/state.json` across the restart. Operator guide: `docs/operations/agent-self-update.md` |
 
 ## CONVENTIONS
 
@@ -74,6 +75,8 @@ agent/
 - **Local rules must group by a regex, not a kv field, for syslog sources.** `auth.log` and Apache `access.log` are free text — `GroupBy: "host"` silently never matches and the rule looks installed but dead. `GroupExpr` exists for exactly this; `internal/detect/defaults_test.go` pins the patterns against real lab lines.
 - **Local detection observes before delivery**, in `senderLoop`, so it keeps working while the server is unreachable. Moving that call onto the success path silently disables offline detection.
 - **Local blocks reuse the firewall guard**: a rule that would block the SIEM IP, gateway or loopback is refused and the detection records `block_error` instead of blocking.
+- **An installer must never be the agent's child on Linux**: the package's prerm stops `siem-agent.service`, which kills its whole cgroup, a `systemd-run --wait` client included. The transient unit is only started; its wrapper writes `install.result` and restarts the service after a failure. Never delete the downloaded package after a failed wait: dpkg may still be reading it.
+- **Self-update keeps the package manager's view right**: the deb keeps the token-bearing `config.yaml` with `--force-confold`; the MSI allows downgrades (`AllowDowngrades`) because a rollback is a downgrade.
 - **Expired rules are swept by the engine** (`Engine.Sweep`, every 15 s on a real backend). Windows rules never time out, and even nft's self-expiring elements stayed in the engine's applied set, where they counted against the detection cap (`BlockedEntries`) until local blocking silently stopped.
 - **Windows local blocking needs both** `firewall.enabled: true` (the MSI's default config leaves it off: the engine is then noop and `block_ip` falls back to direct netsh) and `detect.enabled: true` with `windows_logon_bruteforce` in `detect.rules`.
 - **Undelivered entries are spilled to disk** and replayed both at boot and when a send succeeds after a failure; without the reconnect replay they stay stranded until restart.
@@ -81,6 +84,7 @@ agent/
 - **Buffer contract**: `Pop()` returns `(entry, ok)`; sender must re-`Push` on 5xx.
 - **YARA behaviour follows libyara 4.5, quirks included**: regex matches stop at 1024 bytes, an undefined operand makes `and`/`or` false, a string only used as `$a at <literal>` is only recorded at that offset. Change semantics only with a differential case that shows libyara agrees.
 - Module path is `github.com/siem-platform/agent`; deps are deliberately minimal (`cilium/ebpf`, `fsnotify`, `yaml.v3`). Firewall shells out to `nft`, no netlink library.
+- **Do not trust an update key from the server**: keys come only from the build (`UPDATE_KEYS`) or the local config, never from enrollment or a heartbeat — otherwise the server could sign its own binaries.
 
 ## ANTI-PATTERNS
 
