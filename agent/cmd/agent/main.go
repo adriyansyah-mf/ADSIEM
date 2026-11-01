@@ -333,11 +333,12 @@ func run(configPath string, stop <-chan struct{}) {
 	if runtime.GOOS == "windows" && cfg.ETW.Mode != "off" {
 		if cfg.ETW.Mode == "auto" && winsensor.SysmonInstalled() {
 			slog.Info("ETW sensor off: Sysmon is installed (set etw.mode: on to run both)")
-		} else if sensor, err := winsensor.Start(buf); err != nil {
+		} else if sensor, err := winsensor.Start(buf, cfg.ETW.DisabledEvents...); err != nil {
 			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
-			slog.Info("ETW sensor running", "telemetry", "process, network, dns")
+			slog.Info("ETW sensor running", "telemetry", "process, network, dns, file, image",
+				"disabled", cfg.ETW.DisabledEvents)
 		}
 	}
 

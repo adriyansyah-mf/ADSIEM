@@ -1,0 +1,25 @@
+# ETW file deleted (agent/internal/winsensor, Microsoft-Windows-Kernel-File).
+# Sysmon 23 field names, so windows/file_delete rules apply.
+name: win_etw_file_delete
+log_type: windows_etw_file
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=23 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  Image: Image
+  TargetFilename: TargetFilename
+  ProcessId: ProcessId
+  User: User
+  process.name: Image
+  process.executable: Image
+  process.pid: ProcessId
+  file.path: TargetFilename
+  user.name: User
+static_fields:
+  event.category: file
+  event.action: file_deleted

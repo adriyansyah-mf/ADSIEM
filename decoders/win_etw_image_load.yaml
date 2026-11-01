@@ -1,0 +1,27 @@
+# ETW image (DLL) load (agent/internal/winsensor, Microsoft-Windows-Kernel-Process
+# ImageLoad). Sysmon 7 field names, so windows/image_load rules apply. No
+# Signed/Signature/Hashes: ETW does not carry them.
+name: win_etw_image_load
+log_type: windows_etw_image
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=7 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  Image: Image
+  ImageLoaded: ImageLoaded
+  ProcessId: ProcessId
+  User: User
+  process.name: Image
+  process.executable: Image
+  process.pid: ProcessId
+  dll.path: ImageLoaded
+  file.path: ImageLoaded
+  user.name: User
+static_fields:
+  event.category: library
+  event.action: image_loaded

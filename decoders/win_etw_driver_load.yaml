@@ -1,0 +1,19 @@
+# ETW kernel driver load (agent/internal/winsensor: a Kernel-Process ImageLoad
+# into the System process). Sysmon 6 field names, so windows/driver_load
+# rules apply. No Signed/Signature/Hashes: ETW does not carry them.
+name: win_etw_driver_load
+log_type: windows_etw_image
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=6 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  ImageLoaded: ImageLoaded
+  file.path: ImageLoaded
+static_fields:
+  event.category: driver
+  event.action: driver_loaded

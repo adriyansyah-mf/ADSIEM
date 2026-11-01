@@ -4,6 +4,7 @@ package winsensor
 
 import (
 	"log/slog"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,6 +35,8 @@ const (
 	providerProcess
 	networkEvent
 	dnsEvent
+	fileEvent
+	imageEvent
 )
 
 type source struct {
@@ -45,11 +48,17 @@ type source struct {
 // agent fell behind), so they are visible on the server.
 const LogTypeStatus = "windows_etw_status"
 
-// Start begins process, network and DNS telemetry: a private kernel logger
-// session (command lines, users), Microsoft-Windows-Kernel-Process (image
-// paths, integrity levels), Kernel-Network TCP connect/accept and DNS-Client
-// query completions, the last three filtered to those events in the kernel.
-func Start(buf *buffer.Buffer) (*Sensor, error) {
+// Start begins process, network, DNS, file and image telemetry: a private
+// kernel logger session (command lines, users), Microsoft-Windows-Kernel-
+// Process (image paths, integrity levels), Kernel-Network TCP connect/accept,
+// DNS-Client query completions, Kernel-File creates, renames and deletes and
+// Kernel-Process image loads, each filtered to those events in the kernel.
+// disabled names event groups (GroupFile, GroupImage) not to start.
+func Start(buf *buffer.Buffer, disabled ...string) (*Sensor, error) {
+	off := map[string]bool{}
+	for _, g := range disabled {
+		off[g] = true
+	}
 	s := &Sensor{events: make(chan source, 8192), stop: make(chan struct{}), done: make(chan struct{})}
 	push := func(k kind) func(*etw.Event) {
 		return func(ev *etw.Event) {
@@ -72,6 +81,20 @@ func Start(buf *buffer.Buffer) (*Sensor, error) {
 		{etw.Config{Name: "SIEMAgent-DNS", Providers: []etw.Provider{{GUID: dnsClientProvider,
 			EventIDs: dnsEventIDs}}}, dnsEvent},
 	}
+	if !off[GroupFile] {
+		configs = append(configs, struct {
+			cfg etw.Config
+			k   kind
+		}{etw.Config{Name: "SIEMAgent-File", Providers: []etw.Provider{{GUID: kernelFileProvider,
+			Keywords: kernelFileKeywords, EventIDs: fileEventIDs}}}, fileEvent})
+	}
+	if !off[GroupImage] {
+		configs = append(configs, struct {
+			cfg etw.Config
+			k   kind
+		}{etw.Config{Name: "SIEMAgent-Image", Providers: []etw.Provider{{GUID: kernelProcessProvider,
+			Keywords: imageKeyword, EventIDs: []uint16{imageLoadEvent}}}}, imageEvent})
+	}
 	for _, c := range configs {
 		ses, err := etw.Start(c.cfg, push(c.k))
 		if err != nil {
@@ -85,11 +108,12 @@ func Start(buf *buffer.Buffer) (*Sensor, error) {
 
 	devices := newDeviceMap()
 	j := newProcessJoiner(processImagePath, devices.dosPath)
-	go s.run(j, buf)
+	files := newFileTracker(j, uint32(windows.GetCurrentProcessId()), longPathName)
+	go s.run(j, files, buf)
 	return s, nil
 }
 
-func (s *Sensor) run(j *processJoiner, buf *buffer.Buffer) {
+func (s *Sensor) run(j *processJoiner, files *fileTracker, buf *buffer.Buffer) {
 	defer close(s.done)
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
@@ -107,6 +131,7 @@ func (s *Sensor) run(j *processJoiner, buf *buffer.Buffer) {
 		select {
 		case <-s.stop:
 			emit(LogTypeProcess, j.flush(time.Now().Add(joinWindow))...)
+			emitOut(buf, files.flushAll())
 			return
 		case src := <-s.events:
 			now := time.Now()
@@ -119,9 +144,14 @@ func (s *Sensor) run(j *processJoiner, buf *buffer.Buffer) {
 				emit(LogTypeNetwork, j.network(src.ev))
 			case dnsEvent:
 				emit(LogTypeDNS, j.dns(src.ev))
+			case fileEvent:
+				emitOut(buf, files.file(src.ev))
+			case imageEvent:
+				emitOut(buf, files.image(src.ev))
 			}
 		case now := <-tick.C:
 			emit(LogTypeProcess, j.flush(now)...)
+			emitOut(buf, files.tick())
 		case <-report.C:
 			if d := s.dropped.Load(); d != reported {
 				slog.Warn("etw sensor dropped events: the agent fell behind", "dropped", d-reported)
@@ -131,6 +161,33 @@ func (s *Sensor) run(j *processJoiner, buf *buffer.Buffer) {
 			}
 		}
 	}
+}
+
+func emitOut(buf *buffer.Buffer, lines []out) {
+	for _, o := range lines {
+		if o.line != "" {
+			buf.Push(tailer.Encode(o.logType, o.line))
+		}
+	}
+}
+
+// longPathName expands 8.3 components (RUNNER~1) of p's directory, which
+// still exists when the file itself was renamed away.
+func longPathName(p string) string {
+	dir, base := filepath.Split(p)
+	if dir == "" {
+		return p
+	}
+	in, err := windows.UTF16PtrFromString(dir)
+	if err != nil {
+		return p
+	}
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n, err := windows.GetLongPathName(in, &buf[0], uint32(len(buf)))
+	if err != nil || n == 0 || int(n) > len(buf) {
+		return p
+	}
+	return filepath.Join(windows.UTF16ToString(buf[:n]), base)
 }
 
 // Dropped is the number of events lost because the agent fell behind.

@@ -52,6 +52,9 @@ type NetwatchConfig struct {
 // installed, so the same activity is not reported twice; "on" and "off".
 type ETWConfig struct {
 	Mode string `yaml:"mode"`
+	// DisabledEvents switches event groups off: "file" (Kernel-File creates,
+	// renames, deletes), "image" (DLL and driver loads).
+	DisabledEvents []string `yaml:"disabled_events"`
 }
 
 type DetectConfig struct {
@@ -178,6 +181,11 @@ func Load(path string) (*Config, error) {
 	case "auto", "on", "off":
 	default:
 		return nil, fmt.Errorf("etw.mode %q: use auto, on or off", cfg.ETW.Mode)
+	}
+	for _, g := range cfg.ETW.DisabledEvents {
+		if g != "file" && g != "image" {
+			return nil, fmt.Errorf("etw.disabled_events: unknown group %q (file, image)", g)
+		}
 	}
 	if err := cfg.defaultEvidence(); err != nil {
 		return nil, err

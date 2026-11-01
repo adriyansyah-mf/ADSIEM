@@ -1,0 +1,31 @@
+# ETW file created or renamed (agent/internal/winsensor, Microsoft-Windows-Kernel-File,
+# no Sysmon needed). Sysmon 11 field names, so windows/file_event rules apply
+# (worker/worker/sigma_logsource.py maps windows_etw_file EventID 11 to that
+# category). A rename is an EventID 11 line for the new name with
+# SourceFilename set and FileAction="rename": a .locked or .exe appearing is
+# what the file_event rules look for, however it got there.
+name: win_etw_file_event
+log_type: windows_etw_file
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=11 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  Image: Image
+  TargetFilename: TargetFilename
+  SourceFilename: SourceFilename
+  FileAction: FileAction
+  ProcessId: ProcessId
+  User: User
+  process.name: Image
+  process.executable: Image
+  process.pid: ProcessId
+  file.path: TargetFilename
+  user.name: User
+static_fields:
+  event.category: file
+  event.action: file_created
