@@ -3,6 +3,7 @@
 package winsensor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,22 @@ import (
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/tailer"
 )
+
+// loadDLLEnv makes the test binary a helper that loads the DLL it names and exits.
+const loadDLLEnv = "WINSENSOR_LOAD_DLL"
+
+func TestMain(m *testing.M) {
+	if dll := os.Getenv(loadDLLEnv); dll != "" {
+		h, err := windows.LoadLibrary(dll)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "LoadLibrary:", err)
+			os.Exit(2)
+		}
+		windows.FreeLibrary(h)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 // The sensor on a real Windows host (elevated): a child process creates,
 // renames and deletes a marked file, the test loads a marked DLL, and each
@@ -39,7 +56,9 @@ func TestSensorReportsFilesAndImageLoads(t *testing.T) {
 	script := fmt.Sprintf(`echo x> "%s" && ren "%s" "%s" && del "%s"`, plain, plain, filepath.Base(locked), locked)
 	// The raw command line: exec.Command escapes quotes as \", which cmd /c
 	// does not understand.
-	sh := exec.Command("cmd.exe")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	sh := exec.CommandContext(ctx, "cmd.exe")
 	sh.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe /c "` + script + `"`}
 	if out, err := sh.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
@@ -52,14 +71,19 @@ func TestSensorReportsFilesAndImageLoads(t *testing.T) {
 	}
 	os.WriteFile(dll, data, 0o644)
 	// The DLL is loaded by a child too (the agent's own loads are skipped):
-	// rundll32 loads it and fails to find the entry point, which is fine.
-	exec.Command(filepath.Join(sys, "rundll32.exe"), dll+",SiemNoSuchEntry").Run()
+	// this test binary as a helper that only calls LoadLibrary. Not rundll32:
+	// a missing entry point opens a message box that nobody closes on CI.
+	helper := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
+	helper.Env = append(os.Environ(), loadDLLEnv+"="+dll)
+	if out, err := helper.CombinedOutput(); err != nil {
+		t.Fatalf("dll helper: %v: %s", err, out)
+	}
 
 	want := map[string][]string{
-		"create": {`EventID=11 `, `FileAction="create"`, `TargetFilename="` + plain + `"`, `cmd.exe"`},
+		"create": {`EventID=11 `, `FileAction="create"`, `TargetFilename="` + plain + `"`, `ProcessId="`},
 		"rename": {`EventID=11 `, `FileAction="rename"`, `TargetFilename="` + locked + `"`, `SourceFilename="` + plain + `"`},
 		"delete": {`EventID=23 `, `FileAction="delete"`, `TargetFilename="` + locked + `"`},
-		"image":  {`EventID=7 `, `ImageLoaded="` + dll + `"`, `rundll32.exe"`},
+		"image":  {`EventID=7 `, `ImageLoaded="` + dll + `"`, `ProcessId="`},
 	}
 	got := map[string]string{}
 	var seen []string
@@ -91,7 +115,9 @@ func TestSensorReportsFilesAndImageLoads(t *testing.T) {
 		if got[name] == "" {
 			t.Errorf("no %s line; marked lines seen:\n%s", name, strings.Join(seen, "\n"))
 		} else {
-			t.Logf("%s: %s", name, got[name])
+			// Image comes from the process start, a different session: for a
+			// short-lived child it may not have arrived yet. Logged, not required.
+			t.Logf("%s (Image set: %v): %s", name, strings.Contains(got[name], ` Image="`), got[name])
 		}
 	}
 	if d := s.Dropped(); d > 0 {
