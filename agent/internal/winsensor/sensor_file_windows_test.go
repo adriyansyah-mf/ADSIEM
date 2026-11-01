@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -36,7 +37,11 @@ func TestSensorReportsFilesAndImageLoads(t *testing.T) {
 	locked := plain + ".locked"
 	// cmd.exe, not the test: the agent's own PID is never reported.
 	script := fmt.Sprintf(`echo x> "%s" && ren "%s" "%s" && del "%s"`, plain, plain, filepath.Base(locked), locked)
-	if out, err := exec.Command("cmd.exe", "/c", script).CombinedOutput(); err != nil {
+	// The raw command line: exec.Command escapes quotes as \", which cmd /c
+	// does not understand.
+	sh := exec.Command("cmd.exe")
+	sh.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe /c "` + script + `"`}
+	if out, err := sh.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %s", err, out)
 	}
 	sys, _ := windows.GetSystemDirectory()
