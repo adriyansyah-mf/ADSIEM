@@ -76,11 +76,32 @@ class Agent(Base):
     # last durable-evidence health snapshot (schemas.EvidenceHealth), stamped with server receipt time
     evidence_health    = Column(JSONB)
     evidence_health_at = Column(DateTime(timezone=True))
+    # Self-update: rollout ring (0 canary … 2 everyone else) and the agent's
+    # last reported update status (schemas.AgentUpdateStatus)
+    update_ring        = Column(Integer, nullable=False, default=2, server_default="2")
+    update_status      = Column(JSONB)
+    update_status_at   = Column(DateTime(timezone=True))
     enrolled_at  = Column(DateTime(timezone=True), default=now_utc)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     log_sources  = relationship("AgentLogSource", back_populates="agent", cascade="all, delete-orphan")
     firewall_rules = relationship("AgentFirewallRule", back_populates="agent", cascade="all, delete-orphan")
+
+class AgentUpdatePolicy(Base):
+    """The agent version a group should run. Agents whose ring is at most
+    `stage` are offered it; `revision` changes with the target or a retry, so
+    agents attempt a version that failed before again."""
+    __tablename__ = "agent_update_policies"
+    group_id       = Column(String(100), primary_key=True)
+    target_version = Column(String(50), nullable=False)
+    stage          = Column(Integer, nullable=False, default=0)
+    paused         = Column(Boolean, nullable=False, default=False)
+    pause_reason   = Column(Text)
+    revision       = Column(Integer, nullable=False, default=1)
+    max_failures   = Column(Integer, nullable=False, default=1)  # failed or stalled agents that pause the rollout
+    updated_by     = Column(UUID(as_uuid=True))
+    created_at     = Column(DateTime(timezone=True), default=now_utc)
+    updated_at     = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 class AgentLogSource(Base):
     __tablename__ = "agent_log_sources"

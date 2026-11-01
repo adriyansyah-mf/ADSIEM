@@ -15,7 +15,7 @@ wix extension add -g WixToolset.Util.wixext/5.0.2 | Out-Null
 $bin = "dist\msi-bin"
 New-Item -ItemType Directory -Force -Path $bin, "dist\packages" | Out-Null
 $env:CGO_ENABLED = "0"; $env:GOOS = "windows"; $env:GOARCH = "amd64"
-go build -ldflags "-s -w -X main.Version=$Version" -o "$bin\siem-agent.exe" .\cmd\agent\
+go build -ldflags "-s -w -X main.Version=$Version -X main.UpdateKeys=$env:UPDATE_KEYS" -o "$bin\siem-agent.exe" .\cmd\agent\
 if ($LASTEXITCODE -ne 0) { throw "go build failed" }
 
 $out = "dist\packages\siem-agent-$Version-x64.msi"

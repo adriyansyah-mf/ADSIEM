@@ -15,7 +15,9 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="SIEM Agent" Manufacturer="SIEM Platform" Version="$(Version)"
            UpgradeCode="0F952687-E21C-4316-9931-D9A9C4FE7FA2" Scope="perMachine" Compressed="yes">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of SIEM Agent is already installed." />
+    <!-- Downgrades allowed: rolling back a self-update rollout installs the
+         older MSI over the newer one (agent/internal/update). -->
+    <MajorUpgrade AllowDowngrades="yes" />
     <MediaTemplate EmbedCab="yes" />
 
     <Property Id="SERVER_URL" Secure="yes" />
