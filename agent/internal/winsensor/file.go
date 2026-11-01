@@ -124,7 +124,14 @@ type fileTracker struct {
 	deferred []deferredLine
 }
 
-// deferredLine is built once the process is known or joinWindow has passed;
+// fileJoinWindow bounds how long a file or image line waits for its
+// process's full image path. Longer than joinWindow: the process-start
+// session's events arrive with ETW's buffer flushes, which on a busy host
+// took more than 1.5 s (Image="cmd.exe" on CI); a bare name misses
+// Image|endswith rules.
+const fileJoinWindow = 3 * time.Second
+
+// deferredLine is built once the process is known or fileJoinWindow has passed;
 // build returns "" for a line that is not to be sent (a repeated image load).
 type deferredLine struct {
 	pid     uint32
@@ -299,13 +306,13 @@ func (t *fileTracker) build(d deferredLine) []out {
 }
 
 // tick sends the deferred lines whose process is now known or that waited
-// joinWindow, and the summaries of file windows that have ended.
+// fileJoinWindow, and the summaries of file windows that have ended.
 func (t *fileTracker) tick() []out {
 	now := t.now()
 	var res []out
 	kept := t.deferred[:0]
 	for _, d := range t.deferred {
-		if t.j.knows(d.pid) || now.Sub(d.at) >= joinWindow {
+		if t.j.knows(d.pid) || now.Sub(d.at) >= fileJoinWindow {
 			res = append(res, t.build(d)...)
 		} else {
 			kept = append(kept, d)

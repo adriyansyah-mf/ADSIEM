@@ -148,7 +148,7 @@ func TestOnFileSeesEveryEvent(t *testing.T) {
 }
 
 // A short-lived child's file event often arrives before its process start
-// (another session): the line waits for the start, or joinWindow at most.
+// (another session): the line waits for the start, or fileJoinWindow at most.
 func TestFileLineWaitsForItsProcess(t *testing.T) {
 	tr, now := newTestTracker()
 	tr.j.fullImage = func(uint32) string { return "" } // gone by then
@@ -160,15 +160,19 @@ func TestFileLineWaitsForItsProcess(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0].line, `Image="C:\Windows\System32\cmd.exe" User="WIN\bob"`) {
 		t.Fatalf("after the start = %v", got)
 	}
-	// A process never seen: sent without Image after joinWindow.
+	// A process never seen: sent without Image after fileJoinWindow.
 	tr.file(kf(fileCreateNew, 56, "FileName", vol+`\data\b.txt`))
 	if got := tr.tick(); got != nil {
 		t.Fatalf("sent early: %v", got)
 	}
 	*now = now.Add(joinWindow)
+	if got := tr.tick(); got != nil {
+		t.Fatalf("sent after joinWindow, before fileJoinWindow: %v", got)
+	}
+	*now = now.Add(fileJoinWindow - joinWindow)
 	got = tr.tick()
 	if len(got) != 1 || strings.Contains(got[0].line, ` Image=`) || !strings.Contains(got[0].line, `b.txt`) {
-		t.Fatalf("after joinWindow = %v", got)
+		t.Fatalf("after fileJoinWindow = %v", got)
 	}
 	// Only the kernel half (a bare name) seen: still waiting for the full path.
 	tr.file(kf(fileCreateNew, 58, "FileName", vol+`\data\c.txt`))
