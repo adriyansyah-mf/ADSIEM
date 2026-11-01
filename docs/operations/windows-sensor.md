@@ -19,7 +19,7 @@ Measured on the Windows runner (`etw.TestFileAndImageSources`): the event header
 
 A Create (12) with `FILE_DELETE_ON_CLOSE` in `CreateOptions` is reported as a delete: the file goes when its last handle closes, without a DeletePath event.
 
-`Image` and `User` come from the process-start session. A short-lived child's file or image event often arrives before its start, so a line for a process not seen yet waits up to 1.5 s (the process join window) and is sent as soon as the start arrives, or without `Image` after that.
+`Image` and `User` come from the process-start session. A short-lived child's file or image event often arrives before its start, so a line for a process not seen yet (or seen only with a bare name) waits up to 3 s and is sent as soon as the full image path arrives, or with what is known after that. 1.5 s was measured too short on a busy CI runner.
 
 Not reported: directories (`FILE_DIRECTORY_FILE`), paths without a drive letter (named pipes, mailslots, the network redirector), `\Windows\Prefetch\`, `\System Volume Information\`, `\$Extend\`, and the agent's own process (its journal and spill files would feed back).
 
