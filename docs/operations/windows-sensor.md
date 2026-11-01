@@ -17,6 +17,10 @@
 
 Measured on the Windows runner (`etw.TestFileAndImageSources`): the event header's PID is the process that acted. CreateNewFile (30) and DeletePath (26) carry the long path. RenamePath (27) carries only the new path; the old one is the Create (12) of the same `FileObject`, kept in a bounded map, whose `FileName` may be in 8.3 form (`RUNNER~1`), so its directory is expanded with `GetLongPathName`. Reads, writes and closes are not subscribed: writes carry no name, and in-place overwrites are left to the anti-ransomware work.
 
+A Create (12) with `FILE_DELETE_ON_CLOSE` in `CreateOptions` is reported as a delete: the file goes when its last handle closes, without a DeletePath event.
+
+`Image` and `User` come from the process-start session. A short-lived child's file or image event often arrives before its start, so a line for a process not seen yet waits up to 1.5 s (the process join window) and is sent as soon as the start arrives, or without `Image` after that.
+
 Not reported: directories (`FILE_DIRECTORY_FILE`), paths without a drive letter (named pipes, mailslots, the network redirector), `\Windows\Prefetch\`, `\System Volume Information\`, `\$Extend\`, and the agent's own process (its journal and spill files would feed back).
 
 Like the Linux sensor, one process ships at most 30 file lines a minute; the rest are counted into one `FileAction="summary"` line (EventID 1100, `Creates`/`Renames`/`Deletes` and a sample path) when its minute ends.

@@ -5,8 +5,10 @@ package etw
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -60,6 +62,17 @@ func TestFileAndImageSources(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// cmd's del: does it delete through DeletePath (26) or a delete-on-close
+	// open, and with which name? Every Kernel-File event of that cmd is logged.
+	victim := filepath.Join(dir, marker+"-del.locked")
+	os.WriteFile(victim, []byte("x"), 0o644)
+	del := exec.Command("cmd.exe")
+	del.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd.exe /c del "` + victim + `"`}
+	if out, err := del.CombinedOutput(); err != nil {
+		t.Fatalf("del: %v: %s", err, out)
+	}
+	delPID := uint32(del.Process.Pid)
+
 	sys, _ := windows.GetSystemDirectory()
 	dll := filepath.Join(dir, marker+".dll")
 	if data, err := os.ReadFile(filepath.Join(sys, "version.dll")); err == nil {
@@ -110,6 +123,17 @@ func TestFileAndImageSources(t *testing.T) {
 		}
 	}
 	t.Logf("kernel-file events by id: %v", byID)
+	for _, e := range fileRec.events {
+		if e.PID == delPID {
+			v, _ := e.Get("FileName")
+			if v == "" {
+				v, _ = e.Get("FilePath")
+			}
+			if strings.Contains(strings.ToLower(v), `\temp\`) || e.ID == 26 || e.ID == 27 {
+				dump(t, fmt.Sprintf("cmd del (pid %d) kernel-file id %d", delPID, e.ID), e)
+			}
+		}
+	}
 	fileRec.mu.Unlock()
 
 	imgRec.mu.Lock()

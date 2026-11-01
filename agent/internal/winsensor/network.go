@@ -106,5 +106,13 @@ func (j *processJoiner) owner(pid uint32) (image, user string) {
 		}
 		return p.image, p.user
 	}
+	if p := j.pending[pid]; p != nil && p.image != "" { // one half of its start seen
+		return p.image, p.user
+	}
 	return j.fullImage(pid), ""
+}
+
+// knows reports whether pid's start was seen (whole or half).
+func (j *processJoiner) knows(pid uint32) bool {
+	return j.known[pid] != nil || j.pending[pid] != nil
 }

@@ -48,9 +48,10 @@ var fileEventIDs = []uint16{fileCreate, fileDeletePath, fileRenamePath, fileCrea
 // Microsoft-Windows-Kernel-Process ImageLoad (WINEVENT_KEYWORD_IMAGE): ProcessID,
 // ImageName (an NT device path). A load into PID 0 or 4 is a kernel driver.
 const (
-	imageLoadEvent  = 5
-	imageKeyword    = 0x40
-	fileDirectoryOp = 0x1 // FILE_DIRECTORY_FILE in CreateOptions
+	imageLoadEvent    = 5
+	imageKeyword      = 0x40
+	fileDirectoryOp   = 0x1    // FILE_DIRECTORY_FILE in CreateOptions
+	fileDeleteOnClose = 0x1000 // FILE_DELETE_ON_CLOSE in CreateOptions
 )
 
 const (
@@ -94,7 +95,21 @@ type fileTracker struct {
 	objects map[string]string // FileObject -> device path of its open
 	windows map[uint32]*fileWindowState
 	images  map[string]time.Time // image|dll (or driver path) -> last reported
+	// deferred lines wait for their process's start, which comes through
+	// another session: a short-lived child's file event often arrives first.
+	deferred []deferredLine
 }
+
+// deferredLine is built once the process is known or joinWindow has passed;
+// build returns "" for a line that is not to be sent (a repeated image load).
+type deferredLine struct {
+	pid     uint32
+	at      time.Time
+	logType string
+	build   func(image, user string) string
+}
+
+const maxDeferred = 4096
 
 func newFileTracker(j *processJoiner, self uint32, longPath func(string) string) *fileTracker {
 	if longPath == nil {
@@ -121,6 +136,11 @@ func (t *fileTracker) file(ev *etw.Event) []out {
 				t.objects = map[string]string{}
 			}
 			t.objects[obj] = name
+		}
+		// An open with FILE_DELETE_ON_CLOSE deletes the file when its last
+		// handle closes, without a DeletePath event.
+		if opts, ok := number(ev, "CreateOptions"); ok && opts&fileDeleteOnClose != 0 && opts&fileDirectoryOp == 0 {
+			return t.emit(ev.PID, "delete", t.longPath(t.path(name)), "")
 		}
 		return nil
 	case fileCreateNew:
@@ -182,16 +202,17 @@ func (t *fileTracker) emit(pid uint32, action, target, source string) []out {
 	}
 	if w.sent < fileBudget {
 		w.sent++
-		image, user := t.j.owner(pid)
 		id := 11
 		if action == "delete" {
 			id = 23
 		}
-		return append(res, out{LogTypeFile, line(id, [][2]string{
-			{"Channel", "ETW"}, {"Provider", "Microsoft-Windows-Kernel-File"},
-			{"ProcessId", strconv.FormatUint(uint64(pid), 10)}, {"Image", image}, {"User", user},
-			{"FileAction", action}, {"TargetFilename", target}, {"SourceFilename", source},
-		})})
+		return append(res, t.withOwner(pid, LogTypeFile, func(image, user string) string {
+			return line(id, [][2]string{
+				{"Channel", "ETW"}, {"Provider", "Microsoft-Windows-Kernel-File"},
+				{"ProcessId", strconv.FormatUint(uint64(pid), 10)}, {"Image", image}, {"User", user},
+				{"FileAction", action}, {"TargetFilename", target}, {"SourceFilename", source},
+			})
+		})...)
 	}
 	switch action {
 	case "create":
@@ -220,10 +241,42 @@ func (t *fileTracker) summary(pid uint32, w *fileWindowState) []out {
 	})}}
 }
 
-// tick flushes the summaries of file windows that have ended.
+// withOwner builds the line now when pid's start was seen, else defers it.
+func (t *fileTracker) withOwner(pid uint32, logType string, build func(image, user string) string) []out {
+	if t.j.knows(pid) {
+		return t.build(deferredLine{pid: pid, logType: logType, build: build})
+	}
+	var res []out
+	if len(t.deferred) >= maxDeferred { // a burst: send the oldest as it is rather than grow
+		res = t.build(t.deferred[0])
+		t.deferred = t.deferred[1:]
+	}
+	t.deferred = append(t.deferred, deferredLine{pid: pid, at: t.now(), logType: logType, build: build})
+	return res
+}
+
+func (t *fileTracker) build(d deferredLine) []out {
+	image, user := t.j.owner(d.pid)
+	if l := d.build(image, user); l != "" {
+		return []out{{d.logType, l}}
+	}
+	return nil
+}
+
+// tick sends the deferred lines whose process is now known or that waited
+// joinWindow, and the summaries of file windows that have ended.
 func (t *fileTracker) tick() []out {
 	now := t.now()
 	var res []out
+	kept := t.deferred[:0]
+	for _, d := range t.deferred {
+		if t.j.knows(d.pid) || now.Sub(d.at) >= joinWindow {
+			res = append(res, t.build(d)...)
+		} else {
+			kept = append(kept, d)
+		}
+	}
+	t.deferred = kept
 	for pid, w := range t.windows {
 		if now.Sub(w.start) >= fileWindow {
 			res = append(res, t.summary(pid, w)...)
@@ -233,9 +286,13 @@ func (t *fileTracker) tick() []out {
 	return res
 }
 
-// flushAll emits every pending summary (the sensor is stopping).
+// flushAll emits every deferred line and pending summary (the sensor is stopping).
 func (t *fileTracker) flushAll() []out {
 	var res []out
+	for _, d := range t.deferred {
+		res = append(res, t.build(d)...)
+	}
+	t.deferred = nil
 	for pid, w := range t.windows {
 		res = append(res, t.summary(pid, w)...)
 		delete(t.windows, pid)
@@ -268,15 +325,16 @@ func (t *fileTracker) image(ev *etw.Event) []out {
 			{"Channel", "ETW"}, {"Provider", "Microsoft-Windows-Kernel-Process"}, {"ImageLoaded", loaded},
 		})}}
 	}
-	image, user := t.j.owner(pid)
-	if !t.firstSeen(strings.ToLower(image) + "|" + strings.ToLower(loaded)) {
-		return nil
-	}
-	return []out{{LogTypeImage, line(7, [][2]string{
-		{"Channel", "ETW"}, {"Provider", "Microsoft-Windows-Kernel-Process"},
-		{"ProcessId", strconv.FormatUint(uint64(pid), 10)}, {"Image", image}, {"User", user},
-		{"ImageLoaded", loaded},
-	})}}
+	return t.withOwner(pid, LogTypeImage, func(image, user string) string {
+		if !t.firstSeen(strings.ToLower(image) + "|" + strings.ToLower(loaded)) {
+			return ""
+		}
+		return line(7, [][2]string{
+			{"Channel", "ETW"}, {"Provider", "Microsoft-Windows-Kernel-Process"},
+			{"ProcessId", strconv.FormatUint(uint64(pid), 10)}, {"Image", image}, {"User", user},
+			{"ImageLoaded", loaded},
+		})
+	})
 }
 
 // firstSeen reports whether key was not reported within imageDedupe, and

@@ -29,6 +29,10 @@ func newTestTracker() (*fileTracker, *time.Time) {
 			}
 			return p
 		})
+	// The processes in these tests were seen starting; TestFileLineWaitsForItsProcess has one that was not.
+	for _, pid := range []uint32{7, 6796} {
+		j.remember(&process{pid: pid, image: `C:\Tools\locker.exe`})
+	}
 	now := time.Unix(1000, 0)
 	tr := newFileTracker(j, 99, func(p string) string { return strings.Replace(p, `RUNNER~1`, `runneradmin`, 1) })
 	tr.now = func() time.Time { return now }
@@ -55,6 +59,11 @@ func TestFileCreateRenameDelete(t *testing.T) {
 	got = tr.file(kf(fileDeletePath, 7, "FileObject", "0xC", "FilePath", vol+`\Users\runneradmin\doc.txt.locked`))
 	if len(got) != 1 || !strings.HasPrefix(got[0].line, "EventID=23 ") || !strings.Contains(got[0].line, `FileAction="delete"`) {
 		t.Fatalf("delete = %v", got)
+	}
+	// FILE_DELETE_ON_CLOSE open: a delete without DeletePath (8.3 dir expanded).
+	got = tr.file(kf(fileCreate, 7, "FileObject", "0xD", "CreateOptions", "0x1001060", "FileName", vol+`\Users\RUNNER~1\old.txt`))
+	if len(got) != 1 || !strings.HasPrefix(got[0].line, "EventID=23 ") || !strings.Contains(got[0].line, `TargetFilename="C:\Users\runneradmin\old.txt"`) {
+		t.Fatalf("delete on close = %v", got)
 	}
 }
 
@@ -115,5 +124,40 @@ func TestImageAndDriverLoads(t *testing.T) {
 	}
 	if got := tr.image(dll("99", vol+`\Windows\System32\x.dll`)); got != nil {
 		t.Fatalf("the agent's own loads are reported: %v", got)
+	}
+}
+
+// A short-lived child's file event often arrives before its process start
+// (another session): the line waits for the start, or joinWindow at most.
+func TestFileLineWaitsForItsProcess(t *testing.T) {
+	tr, now := newTestTracker()
+	tr.j.fullImage = func(uint32) string { return "" } // gone by then
+	if got := tr.file(kf(fileCreateNew, 55, "FileName", vol+`\data\a.txt`)); got != nil {
+		t.Fatalf("sent before its process was seen: %v", got)
+	}
+	tr.j.remember(&process{pid: 55, image: `C:\Windows\System32\cmd.exe`, user: `WIN\bob`})
+	got := tr.tick()
+	if len(got) != 1 || !strings.Contains(got[0].line, `Image="C:\Windows\System32\cmd.exe" User="WIN\bob"`) {
+		t.Fatalf("after the start = %v", got)
+	}
+	// A process never seen: sent without Image after joinWindow.
+	tr.file(kf(fileCreateNew, 56, "FileName", vol+`\data\b.txt`))
+	if got := tr.tick(); got != nil {
+		t.Fatalf("sent early: %v", got)
+	}
+	*now = now.Add(joinWindow)
+	got = tr.tick()
+	if len(got) != 1 || strings.Contains(got[0].line, ` Image=`) || !strings.Contains(got[0].line, `b.txt`) {
+		t.Fatalf("after joinWindow = %v", got)
+	}
+	// Image loads dedupe on the resolved image.
+	dll := &etw.Event{ID: imageLoadEvent, Props: []etw.Property{{Name: "ProcessID", Value: "57"}, {Name: "ImageName", Value: vol + `\x.dll`}}}
+	tr.image(dll)
+	tr.j.remember(&process{pid: 57, image: `C:\A\a.exe`})
+	if got := tr.tick(); len(got) != 1 || !strings.Contains(got[0].line, `Image="C:\A\a.exe"`) {
+		t.Fatalf("deferred image load = %v", got)
+	}
+	if got := tr.flushAll(); got != nil {
+		t.Fatalf("nothing should be left: %v", got)
 	}
 }
