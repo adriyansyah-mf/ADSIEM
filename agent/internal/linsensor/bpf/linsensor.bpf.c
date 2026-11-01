@@ -810,6 +810,12 @@ int handle_exit(void *ctx)
 // hits were lost without an error. The sys_exit_* tracepoints were
 // reliable and stay (the pairing counters in stats show it).
 #if defined(__TARGET_ARCH_arm64)
+// arm64's struct pt_regs starts with regs[31] (in an anonymous union with
+// user_regs); CO-RE matches fields through anonymous members by name.
+struct pt_regs___siem {
+	__u64 regs[31];
+} __attribute__((preserve_access_index));
+
 #define NR_openat        56
 #define NR_unlinkat      35
 #define NR_renameat      38
@@ -888,12 +894,25 @@ int raw_sys_enter(struct bpf_raw_tracepoint_args *ctx)
 	default:
 		return 0;
 	}
-	struct pt_regs *regs = (struct pt_regs *)ctx->args[0];
 	unsigned long a[4];
+#if defined(__TARGET_ARCH_arm64)
+	// The vendored vmlinux.h is x86's, so libbpf's arm64 PT_REGS_* macros
+	// (struct user_pt_regs) do not compile; a local CO-RE flavour of arm64's
+	// pt_regs is relocated against the running kernel's BTF instead. At
+	// sys_enter x0..x3 still hold the arguments (x0 becomes the return value
+	// only at exit).
+	struct pt_regs___siem *regs = (struct pt_regs___siem *)ctx->args[0];
+	a[0] = BPF_CORE_READ(regs, regs[0]);
+	a[1] = BPF_CORE_READ(regs, regs[1]);
+	a[2] = BPF_CORE_READ(regs, regs[2]);
+	a[3] = BPF_CORE_READ(regs, regs[3]);
+#else
+	struct pt_regs *regs = (struct pt_regs *)ctx->args[0];
 	a[0] = PT_REGS_PARM1_CORE_SYSCALL(regs);
 	a[1] = PT_REGS_PARM2_CORE_SYSCALL(regs);
 	a[2] = PT_REGS_PARM3_CORE_SYSCALL(regs);
 	a[3] = PT_REGS_PARM4_CORE_SYSCALL(regs);
+#endif
 	switch (id) {
 	case NR_openat:
 		open_enter(a[0], (const char *)a[1], a[2]);

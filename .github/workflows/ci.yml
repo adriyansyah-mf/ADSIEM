@@ -81,6 +81,22 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq clang llvm
           make -C agent bpf
 
+      # The release also builds arm64; an x86-only construct in a BPF object
+      # (agent-v1.10.0's first run: struct user_pt_regs) must fail here, not
+      # at release time. Output goes to /tmp: the x86 objects stay in place.
+      - name: eBPF objects compile for arm64
+        working-directory: agent
+        run: |
+          set -e
+          clang -O2 -g -target bpf -D__TARGET_ARCH_arm64 -I internal/procexec/bpf/include \
+            -c internal/procexec/bpf/execve.bpf.c -o /tmp/execve-arm64.bpf.o
+          for src in netwatch/bpf/netwatch linsensor/bpf/linsensor; do
+            clang -O2 -g -target bpf -D__TARGET_ARCH_arm64 -I internal \
+              -c internal/$src.bpf.c -o /tmp/$(basename $src)-arm64.bpf.o
+          done
+          clang -O2 -g -target bpf -D__TARGET_ARCH_arm64 \
+            -c internal/prevent/bpf/prevent.bpf.c -o /tmp/prevent-arm64.bpf.o
+
       - name: go test (all agent packages)
         run: go test -race ./agent/... ./tests/agent/...
 
