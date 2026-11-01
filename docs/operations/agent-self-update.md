@@ -54,10 +54,30 @@ Agents built before a key existed trust nothing. Install a release built with
 the key once by hand (or add the key to `update.trusted_keys` in the agent's
 config); after that, updates are automatic.
 
-### Self-built packages (package-builder)
+### Packages on the server (package-builder)
 
-`package-builder` builds packages into the `agent_packages` volume. To make
-them updatable:
+`package-builder` fills the `agent_packages` volume that server-api serves to
+agents (`/api/agent/update/package/<file>`). Agents never download from GitHub.
+
+**Default: the release's packages.** For the version in `agent/VERSION`,
+`packaging/fetch-release.sh` downloads every `siem-agent*.deb`, `.rpm` and
+`.msi` of GitHub release `agent-v<VERSION>`, with their `.sig`, and serves them
+instead of the local build. They were signed by the release workflow, so the
+private key stays in GitHub and is never on the server. Bump `agent/VERSION`
+to the released version, then:
+
+```bash
+docker compose build package-builder && docker compose run --rm package-builder
+```
+
+Without a release for that version (or with GitHub unreachable: downloads are
+bounded and retried) the locally built packages are served, unsigned, and the
+build log says so. A release made before the signing key existed has no
+`.sig`: it installs, but is never offered as an update.
+
+**Alternative: sign local builds** (a version not released yet). The private
+key then has to be on the server, which lets anyone who takes the server sign
+updates for every agent:
 
 ```bash
 docker compose build --build-arg UPDATE_KEYS="<public key>" package-builder   # agents trust the key
@@ -69,8 +89,7 @@ the image.
 
 Each build moves the previous build's signed packages to `archive/` in the
 volume. The deploy wizard serves only the newest build, while rollouts can
-still offer, and roll back to, the archived ones. The released MSI is
-downloaded together with its `.sig`.
+still offer, and roll back to, the archived ones.
 
 ## Running a rollout
 

@@ -31,18 +31,16 @@ RUN export VERSION="$(cat VERSION)" \
     && bash packaging/build-deb.sh >/dev/null \
     && ARCH=x86_64 bash packaging/build-rpm.sh >/dev/null \
     && ARCH=amd64 bash packaging/build-windows.sh
-# The MSI needs WiX on Windows, so it's built (and smoke-tested) by the release
-# workflow; take the one for this version from the release when it exists.
-# Without it the dashboard offers the Windows zip instead.
-ARG AGENT_RELEASES=https://github.com/adriyansyah-mf/ADSIEM/releases/download
-RUN VERSION="$(cat VERSION)" \
-    && (curl -fsSL -o "dist/packages/siem-agent-${VERSION}-x64.msi" \
-          "${AGENT_RELEASES}/agent-v${VERSION}/siem-agent-${VERSION}-x64.msi" \
-        || { rm -f "dist/packages/siem-agent-${VERSION}-x64.msi"; echo "no MSI released for ${VERSION}; serving the zip"; }) \
-    && (curl -fsSL -o "dist/packages/siem-agent-${VERSION}-x64.msi.sig" \
-          "${AGENT_RELEASES}/agent-v${VERSION}/siem-agent-${VERSION}-x64.msi.sig" \
-        || rm -f "dist/packages/siem-agent-${VERSION}-x64.msi.sig")
-# /output is the agent_packages volume. With SIEM_UPDATE_SIGNING_KEY in the
-# environment the locally built packages are signed for self-update (the
-# released MSI keeps the release's signature); see packaging/publish-packages.sh.
+# Serve the release's signed deb/rpm/msi for this version when it exists
+# (packaging/fetch-release.sh): the release workflow built, tested and signed
+# them with a key that stays in GitHub, and their agents trust it, so
+# self-update works with no signing key on this server. The MSI needs WiX on
+# Windows, so it only ever comes from a release; without one the dashboard
+# offers the Windows zip. Without a release the local builds above are served
+# unsigned.
+ARG AGENT_REPO=adriyansyah-mf/ADSIEM
+RUN sh packaging/fetch-release.sh "$(cat VERSION)" dist/packages
+# /output is the agent_packages volume. SIEM_UPDATE_SIGNING_KEY in the
+# environment would also sign local builds (packaging/publish-packages.sh);
+# not needed when the release's packages are served.
 CMD ["sh", "packaging/publish-packages.sh"]
