@@ -66,6 +66,15 @@ func Start(opts Options) (*Sensor, error) {
 	s := &Sensor{coll: coll, stop: make(chan struct{})}
 	var skipped []string
 	for name, ps := range spec.Programs {
+		if raw, ok := strings.CutPrefix(ps.SectionName, "raw_tracepoint/"); ok {
+			l, err := link.AttachRawTracepoint(link.RawTracepointOptions{Name: raw, Program: coll.Programs[name]})
+			if err != nil {
+				s.close()
+				return nil, fmt.Errorf("attach raw tracepoint %s: %w", raw, err)
+			}
+			s.links = append(s.links, l)
+			continue
+		}
 		group, tp, ok := strings.Cut(strings.TrimPrefix(ps.SectionName, "tracepoint/"), "/")
 		if !ok {
 			continue
@@ -190,6 +199,26 @@ func (s *Sensor) drops() uint64 {
 		n += v
 	}
 	return n
+}
+
+// stats sums the BPF enter/exit pairing counters (ST_* in linsensor.bpf.c).
+func (s *Sensor) stats() map[string]uint64 {
+	names := []string{"stash", "take_ok", "missing", "kind_mismatch", "failed", "stash_err"}
+	out := map[string]uint64{}
+	m := s.coll.Maps["stats"]
+	if m == nil {
+		return out
+	}
+	for i, name := range names {
+		var perCPU []uint64
+		if err := m.Lookup(uint32(i), &perCPU); err != nil {
+			continue
+		}
+		for _, v := range perCPU {
+			out[name] += v
+		}
+	}
+	return out
 }
 
 type linuxProc struct{}

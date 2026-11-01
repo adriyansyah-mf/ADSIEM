@@ -60,6 +60,9 @@ func helper(what string) int {
 		var ws unix.WaitStatus
 		unix.Wait4(target.Process.Pid, &ws, 0, nil)
 		unix.PtraceDetach(target.Process.Pid)
+		// The agent reads the target's image from /proc when it handles
+		// the record; killing the target at once raced that on busy hosts.
+		time.Sleep(time.Second)
 		return 0
 	case "setuid":
 		// Real uid 1000, effective 0 (like a setuid-root binary run by a
@@ -84,6 +87,7 @@ type collected struct {
 	mu    sync.Mutex
 	lines []string
 	files []FileEvent
+	diag  func() string // sensor counters, printed when a wait fails
 }
 
 func (c *collected) push(logType, line string) {
@@ -117,9 +121,13 @@ func (c *collected) wait(t *testing.T, parts ...string) string {
 		c.mu.Unlock()
 		time.Sleep(50 * time.Millisecond)
 	}
+	diag := ""
+	if c.diag != nil {
+		diag = c.diag() // takes c.mu itself
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	t.Fatalf("no line with %q; got:\n%s", parts, strings.Join(c.lines, "\n"))
+	t.Fatalf("no line with %q (%s); got:\n%s", parts, diag, strings.Join(c.lines, "\n"))
 	return ""
 }
 
@@ -170,6 +178,13 @@ func TestSensorEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Stop()
+	c.diag = func() string {
+		c.mu.Lock()
+		n := len(c.files)
+		c.mu.Unlock()
+		return fmt.Sprintf("drops=%d file_events=%d bpf=%v", s.drops(), n, s.stats())
+	}
+	defer func() { t.Log(c.diag()) }()
 
 	dir := t.TempDir()
 	sh := exec.Command("sh", "-c", "cd "+dir+" && echo x > rel.txt && mv rel.txt moved.txt && rm moved.txt && mkdir d && rmdir d")
