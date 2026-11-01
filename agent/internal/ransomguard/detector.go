@@ -37,6 +37,11 @@ var DefaultAllowImages = []string{
 	// Build tools write and rename hundreds of cache files a minute
 	// (measured: go build -a). Interpreters are deliberately not here.
 	"go", "cargo", "rustc", "cc1", "cc1plus", "ld", "ld.lld", "collect2", "as", "make", "ninja", "cmake",
+	// Windows: installers and servicing, Defender, sync and copy tools,
+	// search indexing, build tools. Matched case-insensitively.
+	"msiexec.exe", "trustedinstaller.exe", "tiworker.exe", "dism.exe", "dismhost.exe", "cleanmgr.exe",
+	"msmpeng.exe", "mpcmdrun.exe", "onedrive.exe", "robocopy.exe", "searchindexer.exe", "git.exe",
+	"go.exe", "msbuild.exe", "cl.exe", "link.exe", "devenv.exe",
 }
 
 type procWindow struct {
@@ -62,7 +67,7 @@ type detector struct {
 func newDetector(allow []string) *detector {
 	d := &detector{allow: map[string]bool{}, procs: map[uint32]*procWindow{}}
 	for _, a := range append(append([]string{}, DefaultAllowImages...), allow...) {
-		d.allow[a] = true
+		d.allow[strings.ToLower(a)] = true
 	}
 	return d
 }
@@ -85,7 +90,7 @@ func ext(p string) string { return strings.ToLower(filepath.Ext(p)) }
 // observe adds one event and returns a finding the first time a process
 // crosses a threshold in its window.
 func (d *detector) observe(ev linsensor.FileEvent) *finding {
-	if d.allow[filepath.Base(ev.Image)] || d.allow[ev.Comm] {
+	if d.allow[strings.ToLower(filepath.Base(ev.Image))] || d.allow[strings.ToLower(ev.Comm)] {
 		return nil
 	}
 	w := d.procs[ev.PID]

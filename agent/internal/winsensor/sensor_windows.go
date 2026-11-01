@@ -55,8 +55,13 @@ const LogTypeStatus = "windows_etw_status"
 // Kernel-Process image loads, each filtered to those events in the kernel.
 // disabled names event groups (GroupFile, GroupImage) not to start.
 func Start(buf *buffer.Buffer, disabled ...string) (*Sensor, error) {
+	return StartWith(buf, Options{Disabled: disabled})
+}
+
+// StartWith is Start with Options (OnFile for the anti-ransomware guard).
+func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 	off := map[string]bool{}
-	for _, g := range disabled {
+	for _, g := range opts.Disabled {
 		off[g] = true
 	}
 	s := &Sensor{events: make(chan source, 8192), stop: make(chan struct{}), done: make(chan struct{})}
@@ -109,6 +114,7 @@ func Start(buf *buffer.Buffer, disabled ...string) (*Sensor, error) {
 	devices := newDeviceMap()
 	j := newProcessJoiner(processImagePath, devices.dosPath)
 	files := newFileTracker(j, uint32(windows.GetCurrentProcessId()), longPathName)
+	files.onFile = opts.OnFile
 	go s.run(j, files, buf)
 	return s, nil
 }

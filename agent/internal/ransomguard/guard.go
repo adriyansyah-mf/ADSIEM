@@ -78,11 +78,15 @@ func (g *Guard) Run(ctx context.Context) {
 	}
 }
 
-// Observe takes one file event from the Linux sensor. It must stay
-// cheap: entropy checks and responses run on their own goroutine.
+// Observe takes one file event from the Linux sensor (or the Windows ETW
+// sensor, adapted). It must stay cheap: entropy checks and responses run on
+// their own goroutine.
 func (g *Guard) Observe(ev linsensor.FileEvent) {
-	for _, p := range []string{ev.Path, ev.From} {
-		if p != "" && g.can.isCanary(p) {
+	for _, name := range []string{ev.Path, ev.From} {
+		if name == "" {
+			continue
+		}
+		if p, ok := g.can.canaryPath(name); ok {
 			retired := g.can.strike(p)
 			go func() {
 				g.act(detection{kind: "canary", pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
@@ -127,8 +131,10 @@ type detection struct {
 	err            string
 }
 
-// protectedImages are never killed.
-var protectedImages = map[string]bool{"systemd": true, "init": true, "sshd": true, "siem-agent": true}
+// protectedImages are never killed (basenames, lower case). On Windows
+// killTree also refuses critical system processes and the agent's ancestors.
+var protectedImages = map[string]bool{"systemd": true, "init": true, "sshd": true, "siem-agent": true,
+	"siem-agent.exe": true}
 
 func (g *Guard) act(d detection) {
 	d.response = "none"
@@ -136,7 +142,7 @@ func (g *Guard) act(d detection) {
 		switch {
 		case g.response == nil:
 			d.response = "unsupported"
-		case d.pid == 1 || protectedImages[filepath.Base(d.image)]:
+		case d.pid == 1 || protectedImages[strings.ToLower(filepath.Base(d.image))]:
 			d.response = "kill_refused"
 		default:
 			n, err := g.response(d.pid)

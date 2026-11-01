@@ -76,6 +76,28 @@ const fileSummaryEvent = 1100
 // by Windows itself.
 var skipFilePrefixes = []string{`\windows\prefetch\`, `\system volume information\`, `\$extend\`}
 
+// Options configure StartWith.
+type Options struct {
+	// Disabled event groups (GroupFile, GroupImage).
+	Disabled []string
+	// OnFile, if set, sees every file event before rate limiting.
+	OnFile func(FileEvent)
+}
+
+// FileEvent is one file create, rename or delete, before rate limiting: the
+// anti-ransomware heuristics (internal/ransomguard) see every one. Image may
+// be empty or a bare name for a process whose start has not arrived yet.
+type FileEvent struct {
+	Time   time.Time
+	PID    uint32
+	PPID   uint32
+	Image  string
+	User   string
+	Action string // create, rename, delete
+	Path   string // the new name for a rename
+	From   string // the old name for a rename, when known
+}
+
 type fileWindowState struct {
 	start                     time.Time
 	sent                      int
@@ -91,6 +113,8 @@ type fileTracker struct {
 	// longPath expands the 8.3 components of an existing path (identity off Windows).
 	longPath func(string) string
 	now      func() time.Time
+	// onFile, when set, sees every file event before the budget.
+	onFile func(FileEvent)
 
 	objects map[string]string // FileObject -> device path of its open
 	windows map[uint32]*fileWindowState
@@ -188,6 +212,17 @@ func (t *fileTracker) emit(pid uint32, action, target, source string) []out {
 		return nil
 	}
 	now := t.now()
+	if t.onFile != nil {
+		image, user := t.j.owner(pid)
+		var ppid uint32
+		if p := t.j.known[pid]; p != nil {
+			ppid = p.ppid
+		} else if p := t.j.pending[pid]; p != nil {
+			ppid = p.ppid
+		}
+		t.onFile(FileEvent{Time: now, PID: pid, PPID: ppid, Image: image, User: user,
+			Action: action, Path: target, From: source})
+	}
 	w := t.windows[pid]
 	var res []out
 	if w == nil || now.Sub(w.start) >= fileWindow {
