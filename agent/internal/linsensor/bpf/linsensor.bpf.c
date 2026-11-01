@@ -270,10 +270,9 @@ static __always_inline int skip_self(void)
 	return tgid && *tgid == (bpf_get_current_pid_tgid() >> 32);
 }
 
-SEC("tracepoint/syscalls/sys_enter_prctl")
-int enter_prctl(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_prctl(const unsigned long *args)
 {
-	if (ctx->args[0] != SELF_MAGIC)
+	if (args[0] != SELF_MAGIC)
 		return 0;
 	__u32 zero = 0;
 	__u32 *tgid = bpf_map_lookup_elem(&self, &zero);
@@ -359,17 +358,15 @@ static __always_inline void open_enter(long dfd, const char *name, long flags)
 	stash(K_OPEN, dfd, (__u64)name, flags, 0);
 }
 
-SEC("tracepoint/syscalls/sys_enter_open")
-int enter_open(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_open(const unsigned long *args)
 {
-	open_enter(AT_FDCWD_, (const char *)ctx->args[0], ctx->args[1]);
+	open_enter(AT_FDCWD_, (const char *)args[0], args[1]);
 	return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_creat")
-int enter_creat(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_creat(const unsigned long *args)
 {
-	open_enter(AT_FDCWD_, (const char *)ctx->args[0], O_CREAT_ | O_WRONLY_ | O_TRUNC_);
+	open_enter(AT_FDCWD_, (const char *)args[0], O_CREAT_ | O_WRONLY_ | O_TRUNC_);
 	return 0;
 }
 
@@ -418,10 +415,9 @@ static __always_inline void rename_enter(long olddfd, const char *old, long newd
 	stash(K_RENAME, olddfd, (__u64)old, newdfd, (__u64)new);
 }
 
-SEC("tracepoint/syscalls/sys_enter_rename")
-int enter_rename(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_rename(const unsigned long *args)
 {
-	rename_enter(AT_FDCWD_, (const char *)ctx->args[0], AT_FDCWD_, (const char *)ctx->args[1]);
+	rename_enter(AT_FDCWD_, (const char *)args[0], AT_FDCWD_, (const char *)args[1]);
 	return 0;
 }
 
@@ -473,19 +469,17 @@ static __always_inline void unlink_enter(long dfd, const char *name, long flags)
 	stash(K_UNLINK, dfd, (__u64)name, flags, 0);
 }
 
-SEC("tracepoint/syscalls/sys_enter_unlink")
-int enter_unlink(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_unlink(const unsigned long *args)
 {
-	unlink_enter(AT_FDCWD_, (const char *)ctx->args[0], 0);
+	unlink_enter(AT_FDCWD_, (const char *)args[0], 0);
 	return 0;
 }
 
 #define AT_REMOVEDIR_ 0x200
 
-SEC("tracepoint/syscalls/sys_enter_rmdir")
-int enter_rmdir(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_rmdir(const unsigned long *args)
 {
-	unlink_enter(AT_FDCWD_, (const char *)ctx->args[0], AT_REMOVEDIR_);
+	unlink_enter(AT_FDCWD_, (const char *)args[0], AT_REMOVEDIR_);
 	return 0;
 }
 
@@ -564,10 +558,9 @@ int exit_finit_module(struct trace_event_raw_sys_exit *ctx)
 	return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_delete_module")
-int enter_delete_module(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_delete_module(const unsigned long *args)
 {
-	stash(K_MODULE_DELETE, ctx->args[0], ctx->args[1], 0, 0);
+	stash(K_MODULE_DELETE, args[0], args[1], 0, 0);
 	return 0;
 }
 
@@ -595,16 +588,15 @@ int exit_delete_module(struct trace_event_raw_sys_exit *ctx)
 #define PTRACE_ATTACH_   16
 #define PTRACE_SEIZE_    0x4206
 
-SEC("tracepoint/syscalls/sys_enter_ptrace")
-int enter_ptrace(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_ptrace(const unsigned long *args)
 {
-	long req = ctx->args[0];
+	long req = args[0];
 	if (req != PTRACE_ATTACH_ && req != PTRACE_SEIZE_ && req != PTRACE_POKETEXT_ &&
 	    req != PTRACE_POKEDATA_ && req != PTRACE_POKEUSER_ && req != PTRACE_SETREGS_)
 		return 0;
 	if (skip_self())
 		return 0;
-	stash(K_PTRACE, req, ctx->args[1], ctx->args[2], 0);
+	stash(K_PTRACE, req, args[1], args[2], 0);
 	return 0;
 }
 
@@ -644,45 +636,39 @@ static __always_inline void setid_enter(__u64 which, __u32 a, __u32 b, __u32 c, 
 	bpf_map_update_elem(&pending_args, &id, &p, BPF_ANY);
 }
 
-SEC("tracepoint/syscalls/sys_enter_setuid")
-int enter_setuid(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_setuid(const unsigned long *args)
 {
-	setid_enter(ID_SETUID, ctx->args[0], 0, 0, 1);
+	setid_enter(ID_SETUID, args[0], 0, 0, 1);
 	return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_setreuid")
-int enter_setreuid(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_setreuid(const unsigned long *args)
 {
-	setid_enter(ID_SETREUID, ctx->args[0], ctx->args[1], 0, 2);
+	setid_enter(ID_SETREUID, args[0], args[1], 0, 2);
 	return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_setresuid")
-int enter_setresuid(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_setresuid(const unsigned long *args)
 {
-	setid_enter(ID_SETRESUID, ctx->args[0], ctx->args[1], ctx->args[2], 3);
+	setid_enter(ID_SETRESUID, args[0], args[1], args[2], 3);
 	return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_setgid")
-int enter_setgid(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_setgid(const unsigned long *args)
 {
-	setid_enter(ID_SETGID, ctx->args[0], 0, 0, 1);
+	setid_enter(ID_SETGID, args[0], 0, 0, 1);
 	return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_setregid")
-int enter_setregid(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_setregid(const unsigned long *args)
 {
-	setid_enter(ID_SETREGID, ctx->args[0], ctx->args[1], 0, 2);
+	setid_enter(ID_SETREGID, args[0], args[1], 0, 2);
 	return 0;
 }
 
-SEC("tracepoint/syscalls/sys_enter_setresgid")
-int enter_setresgid(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_setresgid(const unsigned long *args)
 {
-	setid_enter(ID_SETRESGID, ctx->args[0], ctx->args[1], ctx->args[2], 3);
+	setid_enter(ID_SETRESGID, args[0], args[1], args[2], 3);
 	return 0;
 }
 
@@ -715,13 +701,12 @@ int exit_setregid(struct trace_event_raw_sys_exit *ctx) { setid_exit(ctx->ret); 
 SEC("tracepoint/syscalls/sys_exit_setresgid")
 int exit_setresgid(struct trace_event_raw_sys_exit *ctx) { setid_exit(ctx->ret); return 0; }
 
-SEC("tracepoint/syscalls/sys_enter_capset")
-int enter_capset(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_capset(const unsigned long *args)
 {
 	if ((__u32)bpf_get_current_uid_gid() == 0)
 		return 0;
 	struct __user_cap_data_struct data = {};
-	if (bpf_probe_read_user(&data, sizeof(data), (void *)ctx->args[1]) < 0)
+	if (bpf_probe_read_user(&data, sizeof(data), (void *)args[1]) < 0)
 		return 0;
 	if (!data.effective)
 		return 0;
@@ -746,12 +731,11 @@ int exit_capset(struct trace_event_raw_sys_exit *ctx)
 
 // ─── memfd and fileless exec ─────────────────────────────────────────
 
-SEC("tracepoint/syscalls/sys_enter_memfd_create")
-int enter_memfd_create(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int enter_memfd_create(const unsigned long *args)
 {
 	if (skip_self())
 		return 0;
-	stash(K_MEMFD, ctx->args[0], ctx->args[1], 0, 0);
+	stash(K_MEMFD, args[0], args[1], 0, 0);
 	return 0;
 }
 
@@ -816,15 +800,15 @@ int handle_exit(void *ctx)
 	return 0;
 }
 
-// ─── syscall entry for path-at-arg1 syscalls ─────────────────────────
+// ─── syscall entry ───────────────────────────────────────────────────
 
-// The per-syscall sys_enter tracepoints of openat, renameat(2), unlinkat
-// and (f)init_module never ran on kernel 7.0 (GitHub's 7.0.0-azure):
-// every syscall whose user string is not the first argument was dropped
-// before the BPF program, while rmdir/open/creat (string first) and all
-// sys_exit tracepoints kept working. raw_syscalls/sys_enter does not go
-// through that code, so these arguments are captured here instead. The
-// exit side stays on the per-syscall tracepoints.
+// Arguments are stashed from one raw tracepoint on raw_syscalls/sys_enter,
+// dispatched by syscall number, not from the per-syscall sys_enter_*
+// tracepoints: on kernel 7.0 (GitHub's 7.0.0-azure) those did not run the
+// program for some syscalls, a different set from run to run (openat,
+// renameat2, unlinkat, then rmdir), so file events and ransomware canary
+// hits were lost without an error. The sys_exit_* tracepoints were
+// reliable and stay (the pairing counters in stats show it).
 #if defined(__TARGET_ARCH_arm64)
 #define NR_openat        56
 #define NR_unlinkat      35
@@ -832,6 +816,22 @@ int handle_exit(void *ctx)
 #define NR_renameat2     276
 #define NR_init_module   105
 #define NR_finit_module  273
+#define NR_prctl          167
+#define NR_open           -2 // x86 only, never matches
+#define NR_creat          -3 // x86 only, never matches
+#define NR_rename         -4 // x86 only, never matches
+#define NR_unlink         -5 // x86 only, never matches
+#define NR_rmdir          -6 // x86 only, never matches
+#define NR_delete_module  106
+#define NR_ptrace         117
+#define NR_setuid         146
+#define NR_setreuid       145
+#define NR_setresuid      147
+#define NR_setgid         144
+#define NR_setregid       143
+#define NR_setresgid      149
+#define NR_capset         91
+#define NR_memfd_create   279
 #else
 #define NR_openat        257
 #define NR_unlinkat      263
@@ -839,35 +839,125 @@ int handle_exit(void *ctx)
 #define NR_renameat2     316
 #define NR_init_module   175
 #define NR_finit_module  313
+#define NR_prctl          157
+#define NR_open           2
+#define NR_creat          85
+#define NR_rename         82
+#define NR_unlink         87
+#define NR_rmdir          84
+#define NR_delete_module  176
+#define NR_ptrace         101
+#define NR_setuid         105
+#define NR_setreuid       113
+#define NR_setresuid      117
+#define NR_setgid         106
+#define NR_setregid       114
+#define NR_setresgid      119
+#define NR_capset         126
+#define NR_memfd_create   319
 #endif
 
 SEC("raw_tracepoint/sys_enter")
 int raw_sys_enter(struct bpf_raw_tracepoint_args *ctx)
 {
 	long id = (long)ctx->args[1];
-	if (id != NR_openat && id != NR_unlinkat && id != NR_renameat && id != NR_renameat2 &&
-	    id != NR_init_module && id != NR_finit_module)
-		return 0;
-	struct pt_regs *regs = (struct pt_regs *)ctx->args[0];
-	long a0 = PT_REGS_PARM1_CORE_SYSCALL(regs);
-	long a1 = PT_REGS_PARM2_CORE_SYSCALL(regs);
-	long a2 = PT_REGS_PARM3_CORE_SYSCALL(regs);
 	switch (id) {
 	case NR_openat:
-		open_enter(a0, (const char *)a1, a2);
+	case NR_unlinkat:
+	case NR_renameat:
+	case NR_renameat2:
+	case NR_init_module:
+	case NR_finit_module:
+	case NR_prctl:
+	case NR_open:
+	case NR_creat:
+	case NR_rename:
+	case NR_unlink:
+	case NR_rmdir:
+	case NR_delete_module:
+	case NR_ptrace:
+	case NR_setuid:
+	case NR_setreuid:
+	case NR_setresuid:
+	case NR_setgid:
+	case NR_setregid:
+	case NR_setresgid:
+	case NR_capset:
+	case NR_memfd_create:
+		break;
+	default:
+		return 0;
+	}
+	struct pt_regs *regs = (struct pt_regs *)ctx->args[0];
+	unsigned long a[4];
+	a[0] = PT_REGS_PARM1_CORE_SYSCALL(regs);
+	a[1] = PT_REGS_PARM2_CORE_SYSCALL(regs);
+	a[2] = PT_REGS_PARM3_CORE_SYSCALL(regs);
+	a[3] = PT_REGS_PARM4_CORE_SYSCALL(regs);
+	switch (id) {
+	case NR_openat:
+		open_enter(a[0], (const char *)a[1], a[2]);
 		break;
 	case NR_unlinkat:
-		unlink_enter(a0, (const char *)a1, a2);
+		unlink_enter(a[0], (const char *)a[1], a[2]);
 		break;
 	case NR_renameat:
 	case NR_renameat2:
-		rename_enter(a0, (const char *)a1, a2, (const char *)PT_REGS_PARM4_CORE_SYSCALL(regs));
+		rename_enter(a[0], (const char *)a[1], a[2], (const char *)a[3]);
 		break;
 	case NR_init_module:
-		stash(K_MODULE_INIT, a1, a2, 0, 0);
+		stash(K_MODULE_INIT, a[1], a[2], 0, 0);
 		break;
 	case NR_finit_module:
-		stash(K_MODULE_FINIT, a0, a1, a2, 0);
+		stash(K_MODULE_FINIT, a[0], a[1], a[2], 0);
+		break;
+	case NR_prctl:
+		enter_prctl(a);
+		break;
+	case NR_open:
+		enter_open(a);
+		break;
+	case NR_creat:
+		enter_creat(a);
+		break;
+	case NR_rename:
+		enter_rename(a);
+		break;
+	case NR_unlink:
+		enter_unlink(a);
+		break;
+	case NR_rmdir:
+		enter_rmdir(a);
+		break;
+	case NR_delete_module:
+		enter_delete_module(a);
+		break;
+	case NR_ptrace:
+		enter_ptrace(a);
+		break;
+	case NR_setuid:
+		enter_setuid(a);
+		break;
+	case NR_setreuid:
+		enter_setreuid(a);
+		break;
+	case NR_setresuid:
+		enter_setresuid(a);
+		break;
+	case NR_setgid:
+		enter_setgid(a);
+		break;
+	case NR_setregid:
+		enter_setregid(a);
+		break;
+	case NR_setresgid:
+		enter_setresgid(a);
+		break;
+	case NR_capset:
+		enter_capset(a);
+		break;
+	case NR_memfd_create:
+		enter_memfd_create(a);
 		break;
 	}
 	return 0;
