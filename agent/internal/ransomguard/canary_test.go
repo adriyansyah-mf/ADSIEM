@@ -83,7 +83,7 @@ func TestGuardKillsOnWindowsCanaryInAnotherCase(t *testing.T) {
 	g.Observe(linsensor.FileEvent{Action: "delete", Path: strings.ToUpper(filepath.Join(dir, ".c.pdf")), PID: 3100,
 		Image: `C:\Users\bob\AppData\Local\Temp\LOCKER.EXE`, Comm: "LOCKER.EXE"})
 	if l := out.wait(t, 1)[0]; !strings.Contains(l, "detection=canary confirmed=true response=killed") ||
-		!strings.Contains(l, `Canary="`+filepath.Join(dir, ".c.pdf")+`"`) || killed != 3100 {
+		!strings.Contains(l, "Canary="+kv(filepath.Join(dir, ".c.pdf"))) || killed != 3100 {
 		t.Fatalf("line = %s, killed %d", l, killed)
 	}
 }
@@ -144,7 +144,7 @@ func TestGuardReportsRetired(t *testing.T) {
 		out.wait(t, i+1)
 	}
 	lines := out.wait(t, retireAfter+1)
-	if !strings.HasPrefix(lines[retireAfter], `detection=canary_retired confirmed=false response=none Canary="`+p+`" Image="/usr/bin/deployer"`) {
+	if !strings.HasPrefix(lines[retireAfter], "detection=canary_retired confirmed=false response=none Canary="+kv(p)+` Image="/usr/bin/deployer"`) {
 		t.Fatalf("lines = %q", lines)
 	}
 	if g.can.plant(); g.can.isCanary(p) {
