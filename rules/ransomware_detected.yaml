@@ -9,6 +9,11 @@ detection:
     event.action: ransomware
     ransomware.confirmed: 'true'
   condition: selection
+# One alert per program per host in 10 minutes: several canaries touched by
+# the same encryptor are one incident. Another binary still alerts.
+suppression:
+  group_by: [hostname, process.executable]
+  timewindow: 600
 level: critical
 tags:
   - attack.impact

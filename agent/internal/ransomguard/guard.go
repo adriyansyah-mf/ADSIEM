@@ -26,7 +26,10 @@ type Options struct {
 	Push        func(logType, line string)
 	CanaryDirs  []string // globs; empty means DefaultCanaryDirs
 	CanaryNames []string
-	AllowImages []string // basenames excluded from the heuristics
+	// CanaryVisible plants canaries in plain sight (VisibleCanaryNames,
+	// no hidden attribute on Windows) instead of hidden.
+	CanaryVisible bool
+	AllowImages   []string // basenames excluded from the heuristics
 	// Kill stops the process tree on a canary hit or a confirmed
 	// heuristic. Isolate, when set, also cuts the host off the network.
 	Kill    bool
@@ -46,7 +49,7 @@ type Guard struct {
 func New(opts Options) *Guard {
 	return &Guard{
 		opts:     opts,
-		can:      newCanaries(opts.CanaryDirs, opts.CanaryNames),
+		can:      newCanaries(opts.CanaryDirs, opts.CanaryNames, opts.CanaryVisible),
 		det:      newDetector(opts.AllowImages),
 		response: killTree,
 	}
@@ -66,6 +69,9 @@ func (g *Guard) Run(ctx context.Context) {
 		case <-t.C:
 			for _, p := range g.can.verify() {
 				g.report(detection{kind: "canary_changed", canary: p})
+				if g.can.strike(p) {
+					g.report(detection{kind: "canary_retired", canary: p})
+				}
 			}
 			g.can.plant()
 		}
@@ -77,9 +83,15 @@ func (g *Guard) Run(ctx context.Context) {
 func (g *Guard) Observe(ev linsensor.FileEvent) {
 	for _, p := range []string{ev.Path, ev.From} {
 		if p != "" && g.can.isCanary(p) {
-			g.can.forget(p)
-			go g.act(detection{kind: "canary", pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
-				comm: ev.Comm, canary: p, action: ev.Action, confirmed: true})
+			retired := g.can.strike(p)
+			go func() {
+				g.act(detection{kind: "canary", pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
+					comm: ev.Comm, canary: p, action: ev.Action, confirmed: true})
+				if retired {
+					g.report(detection{kind: "canary_retired", canary: p, image: ev.Image, comm: ev.Comm,
+						pid: ev.PID, ppid: ev.PPID, uid: ev.UID})
+				}
+			}()
 			return
 		}
 	}

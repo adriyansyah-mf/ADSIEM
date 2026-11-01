@@ -4,12 +4,18 @@ Roadmap item 3.4. `agent/internal/ransomguard` stops ransomware two ways and rep
 
 ## Canary files
 
-The agent plants `!siem-canary.pdf` (sorts before anything else) and `.siem-canary.docx` (hidden) in:
+The agent plants `.siem-canary.pdf` and `.siem-canary.docx` in:
 
-- Linux: `/root`, `/home/*`, `/srv`, `/var/www`
+- Linux: `/root`, `/home/*`, `/srv`
 - Windows: `C:\Users\*\Documents`, `C:\Users\*\Desktop`, `C:\Users\Public\Documents`
 
+They are hidden so users don't see, open or delete them: dot files on Linux (`ls` and file managers skip them; ransomware that walks a directory does not), plus the *hidden* attribute on Windows (not *system*, which some ransomware skips). Agents before this change planted a visible `!siem-canary.pdf`; the agent deletes it on start, but only if the file still holds canary content. `canary_visible: true` restores the visible names.
+
+Web roots (`/var/www`) are not in the defaults any more: deploys (`rsync --delete`, a `git` checkout) rewrite them, which killed the deploy and raised a critical alert each time, and the web server served the canary. The bulk-encryption heuristics below still cover them. Add them back with `canary_dirs` if nothing deploys there.
+
 Nothing legitimate touches them. On Linux the eBPF sensor (`internal/linsensor`) reports a write, rename or delete of a canary with the process that did it, and the guard acts at once (`detection=canary`). Every 30 seconds the agent also checks the canaries' content and recreates missing ones. A change found that way has no process attached (`detection=canary_changed`). This is the only canary signal on Windows and on Linux hosts without eBPF.
+
+A canary changed 3 times within 24 hours (by either path) is **retired**: the agent stops planting it in that spot for 24 hours and reports `detection=canary_retired` once, with the process if one is known. That is a legitimate tool rewriting the directory, not ransomware, which is stopped on the first hit. Retirement lives in memory and resets when the agent restarts.
 
 ## Bulk-encryption heuristics (Linux)
 
@@ -37,12 +43,19 @@ ransomware:
   isolate: false          # true: also isolate the host on a confirmed detection
   canary_dirs: []         # globs; replace the defaults
   canary_names: []
+  canary_visible: false   # true: plant !siem-canary.pdf in sight, no hidden attribute
   allow_images: []        # extra basenames the heuristics ignore
 ```
 
 ## Alerts
 
-`decoders/ransomware_activity.yaml`. Two rules: *Ransomware Activity On Endpoint* (critical, `ransomware.confirmed: true`, which covers canary hits and confirmed heuristics) and *Ransomware Canary File Changed* (high, the periodic check).
+`decoders/ransomware_activity.yaml`. Three rules, each suppressed so one incident is one alert (the lines stay searchable in the log):
+
+| Rule | Level | Fires on | Suppression |
+|---|---|---|---|
+| *Ransomware Activity On Endpoint* | critical | `ransomware.confirmed: true` (canary hits, confirmed heuristics) | 10 min per host and `process.executable` |
+| *Ransomware Canary File Changed* | high | `canary_changed` (the periodic check) | 1 h per host |
+| *Ransomware Canary Retired* | medium | `canary_retired` | 24 h per host and canary |
 
 ## Testing
 

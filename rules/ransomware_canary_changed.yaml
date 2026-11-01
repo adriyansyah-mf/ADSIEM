@@ -9,6 +9,11 @@ detection:
     event.action: ransomware
     ransomware.detection: canary_changed
   condition: selection
+# One alert per host per hour: ransomware changes every canary in one
+# sweep, and the lines are kept in the log either way.
+suppression:
+  group_by: hostname
+  timewindow: 3600
 level: high
 tags:
   - attack.impact

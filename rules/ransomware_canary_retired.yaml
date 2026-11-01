@@ -1,0 +1,18 @@
+title: Ransomware Canary Retired
+id: rule-ransomware-canary-retired
+description: A canary file (ransomware.canary) was changed or deleted 3 times within 24 hours, so the agent stopped planting it there for 24 hours. That is usually a legitimate tool rewriting the directory (a deploy, a sync client, a restore; see Image). If so, leave that directory out of the agent's ransomware.canary_dirs; if no such tool explains it, treat the earlier canary alerts on this host as real.
+logsource:
+  product: ransomware
+  service: activity
+detection:
+  selection:
+    event.action: ransomware
+    ransomware.detection: canary_retired
+  condition: selection
+suppression:
+  group_by: [hostname, ransomware.canary]
+  timewindow: 86400
+level: medium
+tags:
+  - attack.impact
+  - attack.t1486

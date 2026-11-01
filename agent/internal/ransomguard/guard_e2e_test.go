@@ -128,7 +128,7 @@ func TestRansomwareEndToEnd(t *testing.T) {
 	}
 
 	// Canary: one write is enough.
-	canary := filepath.Join(canaryDir, "!siem-canary.pdf")
+	canary := filepath.Join(canaryDir, ".siem-canary.pdf")
 	if _, err := os.Stat(canary); err != nil {
 		t.Fatalf("canary not planted: %v", err)
 	}
