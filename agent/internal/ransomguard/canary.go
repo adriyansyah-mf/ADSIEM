@@ -60,6 +60,7 @@ func DefaultCanaryDirs() []string {
 type canaries struct {
 	dirs, names []string
 	hide        bool
+	fold        bool // compare paths case-insensitively (Windows)
 	now         func() time.Time
 
 	mu      sync.Mutex
@@ -79,7 +80,7 @@ func newCanaries(dirs, names []string, visible bool) *canaries {
 			names = VisibleCanaryNames
 		}
 	}
-	return &canaries{dirs: dirs, names: names, hide: !visible, now: time.Now,
+	return &canaries{dirs: dirs, names: names, hide: !visible, fold: runtime.GOOS == "windows", now: time.Now,
 		files: map[string]string{}, hits: map[string][]time.Time{}, retired: map[string]time.Time{}}
 }
 
@@ -172,10 +173,26 @@ func (c *canaries) removeLegacy(dirs []string) {
 }
 
 func (c *canaries) isCanary(path string) bool {
+	_, ok := c.canaryPath(path)
+	return ok
+}
+
+// canaryPath returns the planted path that path names. Windows paths are
+// case-insensitive: the sensor may report another case than the glob gave.
+func (c *canaries) canaryPath(path string) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_, ok := c.files[path]
-	return ok
+	if _, ok := c.files[path]; ok {
+		return path, true
+	}
+	if c.fold {
+		for p := range c.files {
+			if strings.EqualFold(p, path) {
+				return p, true
+			}
+		}
+	}
+	return "", false
 }
 
 // verify returns the canaries that were changed or removed since they

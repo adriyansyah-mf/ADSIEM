@@ -179,7 +179,7 @@ func TestGuardCanaryKillsAndReports(t *testing.T) {
 	canary := filepath.Join(dir, ".siem-canary.pdf")
 	g.Observe(linsensor.FileEvent{Action: "rename", From: canary, Path: canary + ".locked", PID: 42, PPID: 1, UID: 1000, Image: "/tmp/.x/crypt", Comm: "crypt"})
 	lines := out.wait(t, 1)
-	want := `detection=canary confirmed=true response=killed Canary="` + canary + `" FileAction=rename Image="/tmp/.x/crypt" Comm="crypt" PID=42 PPID=1 User=1000 Killed=3 Isolated=true`
+	want := "detection=canary confirmed=true response=killed Canary=" + kv(canary) + ` FileAction=rename Image="/tmp/.x/crypt" Comm="crypt" PID=42 PPID=1 User=1000 Killed=3 Isolated=true`
 	if lines[0] != want {
 		t.Fatalf("got  %s\nwant %s", lines[0], want)
 	}

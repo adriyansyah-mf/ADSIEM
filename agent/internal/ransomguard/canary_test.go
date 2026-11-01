@@ -1,6 +1,7 @@
 package ransomguard
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,50 @@ func TestLegacyCanaryRemoved(t *testing.T) {
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
 
+// On Windows the sensor may report a canary in another case than planted.
+func TestCanaryPathFoldsCaseOnWindows(t *testing.T) {
+	dir := t.TempDir()
+	c := newCanaries([]string{dir}, []string{".C.pdf"}, false)
+	c.plant()
+	planted := filepath.Join(dir, ".C.pdf")
+	other := strings.ToUpper(planted)
+	c.fold = false
+	if c.isCanary(other) {
+		t.Fatal("case-sensitive host matched another case")
+	}
+	c.fold = true
+	if p, ok := c.canaryPath(other); !ok || p != planted {
+		t.Fatalf("canaryPath(%q) = %q, %v", other, p, ok)
+	}
+}
+
+func TestGuardKillsOnWindowsCanaryInAnotherCase(t *testing.T) {
+	dir := t.TempDir()
+	var out sink
+	g := New(Options{Push: out.push, CanaryDirs: []string{dir}, CanaryNames: []string{".c.pdf"}, Kill: true})
+	g.can.fold = true
+	var killed uint32
+	g.response = func(pid uint32) (int, error) { killed = pid; return 1, nil }
+	g.can.plant()
+	g.Observe(linsensor.FileEvent{Action: "delete", Path: strings.ToUpper(filepath.Join(dir, ".c.pdf")), PID: 3100,
+		Image: `C:\Users\bob\AppData\Local\Temp\LOCKER.EXE`, Comm: "LOCKER.EXE"})
+	if l := out.wait(t, 1)[0]; !strings.Contains(l, "detection=canary confirmed=true response=killed") ||
+		!strings.Contains(l, "Canary="+kv(filepath.Join(dir, ".c.pdf"))) || killed != 3100 {
+		t.Fatalf("line = %s, killed %d", l, killed)
+	}
+}
+
+func TestWindowsAllowListIgnoresCase(t *testing.T) {
+	d := newDetector(nil)
+	for i := 0; i < 2*minExtRenames; i++ {
+		e := ev(13, "rename", fmt.Sprintf(`C:\d\%d.bak`, i), fmt.Sprintf(`C:\d\%d.txt`, i), 0)
+		e.Image, e.Comm = `C:\Windows\System32\Robocopy.exe`, "Robocopy.exe"
+		if f := d.observe(e); f != nil {
+			t.Fatalf("robocopy is allowed: %+v", f)
+		}
+	}
+}
+
 func TestCanaryRetiresAndRearms(t *testing.T) {
 	dir := t.TempDir()
 	now := t0
@@ -99,7 +144,7 @@ func TestGuardReportsRetired(t *testing.T) {
 		out.wait(t, i+1)
 	}
 	lines := out.wait(t, retireAfter+1)
-	if !strings.HasPrefix(lines[retireAfter], `detection=canary_retired confirmed=false response=none Canary="`+p+`" Image="/usr/bin/deployer"`) {
+	if !strings.HasPrefix(lines[retireAfter], "detection=canary_retired confirmed=false response=none Canary="+kv(p)+` Image="/usr/bin/deployer"`) {
 		t.Fatalf("lines = %q", lines)
 	}
 	if g.can.plant(); g.can.isCanary(p) {

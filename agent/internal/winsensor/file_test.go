@@ -127,6 +127,26 @@ func TestImageAndDriverLoads(t *testing.T) {
 	}
 }
 
+// OnFile (the anti-ransomware feed) sees every event, past the line budget.
+func TestOnFileSeesEveryEvent(t *testing.T) {
+	tr, _ := newTestTracker()
+	var seen []FileEvent
+	tr.onFile = func(e FileEvent) { seen = append(seen, e) }
+	tr.file(kf(fileCreate, 7, "FileObject", "0xE", "FileName", vol+`\data\a.txt`))
+	tr.file(kf(fileRenamePath, 7, "FileObject", "0xE", "FilePath", vol+`\data\a.txt.locked`))
+	for i := 0; i < fileBudget+10; i++ {
+		tr.file(kf(fileDeletePath, 7, "FilePath", vol+`\data\x`))
+	}
+	if len(seen) != fileBudget+11 {
+		t.Fatalf("OnFile saw %d events, want %d", len(seen), fileBudget+11)
+	}
+	r := seen[0]
+	if r.Action != "rename" || r.PID != 7 || r.Image != `C:\Tools\locker.exe` ||
+		r.Path != `C:\data\a.txt.locked` || r.From != `C:\data\a.txt` {
+		t.Fatalf("rename event = %+v", r)
+	}
+}
+
 // A short-lived child's file event often arrives before its process start
 // (another session): the line waits for the start, or joinWindow at most.
 func TestFileLineWaitsForItsProcess(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"syscall"
@@ -333,7 +334,8 @@ func run(configPath string, stop <-chan struct{}) {
 	if runtime.GOOS == "windows" && cfg.ETW.Mode != "off" {
 		if cfg.ETW.Mode == "auto" && winsensor.SysmonInstalled() {
 			slog.Info("ETW sensor off: Sysmon is installed (set etw.mode: on to run both)")
-		} else if sensor, err := winsensor.Start(buf, cfg.ETW.DisabledEvents...); err != nil {
+		} else if sensor, err := winsensor.StartWith(buf, winsensor.Options{
+			Disabled: cfg.ETW.DisabledEvents, OnFile: windowsFileFeed(onFile)}); err != nil {
 			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
@@ -533,4 +535,16 @@ func flushBuffer(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 func mustHostname() string {
 	h, _ := os.Hostname()
 	return h
+}
+
+// windowsFileFeed adapts the ETW sensor's file events to the anti-ransomware
+// guard's (linsensor.FileEvent); nil when the guard is off.
+func windowsFileFeed(onFile func(linsensor.FileEvent)) func(winsensor.FileEvent) {
+	if onFile == nil {
+		return nil
+	}
+	return func(e winsensor.FileEvent) {
+		onFile(linsensor.FileEvent{Time: e.Time, PID: e.PID, PPID: e.PPID, Image: e.Image,
+			Comm: filepath.Base(e.Image), Action: e.Action, Path: e.Path, From: e.From})
+	}
 }
