@@ -84,6 +84,7 @@ type collected struct {
 	mu    sync.Mutex
 	lines []string
 	files []FileEvent
+	diag  func() string // sensor counters, printed when a wait fails
 }
 
 func (c *collected) push(logType, line string) {
@@ -117,9 +118,13 @@ func (c *collected) wait(t *testing.T, parts ...string) string {
 		c.mu.Unlock()
 		time.Sleep(50 * time.Millisecond)
 	}
+	diag := ""
+	if c.diag != nil {
+		diag = c.diag() // takes c.mu itself
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	t.Fatalf("no line with %q; got:\n%s", parts, strings.Join(c.lines, "\n"))
+	t.Fatalf("no line with %q (%s); got:\n%s", parts, diag, strings.Join(c.lines, "\n"))
 	return ""
 }
 
@@ -170,6 +175,13 @@ func TestSensorEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Stop()
+	c.diag = func() string {
+		c.mu.Lock()
+		n := len(c.files)
+		c.mu.Unlock()
+		return fmt.Sprintf("drops=%d file_events=%d bpf=%v", s.drops(), n, s.stats())
+	}
+	defer func() { t.Log(c.diag()) }()
 
 	dir := t.TempDir()
 	sh := exec.Command("sh", "-c", "cd "+dir+" && echo x > rel.txt && mv rel.txt moved.txt && rm moved.txt && mkdir d && rmdir d")

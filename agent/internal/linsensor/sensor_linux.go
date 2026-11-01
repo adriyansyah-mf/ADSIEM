@@ -192,6 +192,26 @@ func (s *Sensor) drops() uint64 {
 	return n
 }
 
+// stats sums the BPF enter/exit pairing counters (ST_* in linsensor.bpf.c).
+func (s *Sensor) stats() map[string]uint64 {
+	names := []string{"stash", "take_ok", "missing", "kind_mismatch", "failed", "stash_err"}
+	out := map[string]uint64{}
+	m := s.coll.Maps["stats"]
+	if m == nil {
+		return out
+	}
+	for i, name := range names {
+		var perCPU []uint64
+		if err := m.Lookup(uint32(i), &perCPU); err != nil {
+			continue
+		}
+		for _, v := range perCPU {
+			out[name] += v
+		}
+	}
+	return out
+}
+
 type linuxProc struct{}
 
 func (linuxProc) Exe(tgid uint32) string {

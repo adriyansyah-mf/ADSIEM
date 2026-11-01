@@ -240,6 +240,29 @@ struct {
 	__type(value, struct pending);
 } pending_args SEC(".maps");
 
+// Per-stage counters of the enter/exit pairing (sensor.stats): a record
+// that never reaches the ring buffer shows where it was lost.
+#define ST_STASH    0 // sys_enter stashed arguments
+#define ST_TAKE_OK  1 // sys_exit found them, syscall succeeded
+#define ST_MISSING  2 // sys_exit found nothing (evicted, or enter not seen)
+#define ST_KIND     3 // sys_exit found another syscall's arguments
+#define ST_FAILED   4 // syscall returned an error
+#define ST_STASH_ERR 5 // map update failed
+#define ST_N        6
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, ST_N);
+	__type(key, __u32);
+	__type(value, __u64);
+} stats SEC(".maps");
+
+static __always_inline void count(__u32 i)
+{
+	__u64 *n = bpf_map_lookup_elem(&stats, &i);
+	if (n)
+		__sync_fetch_and_add(n, 1);
+}
+
 static __always_inline int skip_self(void)
 {
 	__u32 zero = 0;
@@ -298,7 +321,10 @@ static __always_inline void stash(__u32 kind, __u64 a0, __u64 a1, __u64 a2, __u6
 {
 	__u64 id = bpf_get_current_pid_tgid();
 	struct pending p = {.kind = kind, .a = {a0, a1, a2, a3}};
-	bpf_map_update_elem(&pending_args, &id, &p, BPF_ANY);
+	if (bpf_map_update_elem(&pending_args, &id, &p, BPF_ANY))
+		count(ST_STASH_ERR);
+	else
+		count(ST_STASH);
 }
 
 // take returns the stashed arguments of this thread's syscall if it was
@@ -307,11 +333,17 @@ static __always_inline int take(__u32 kind, long ret, struct pending *out)
 {
 	__u64 id = bpf_get_current_pid_tgid();
 	struct pending *p = bpf_map_lookup_elem(&pending_args, &id);
-	if (!p)
+	if (!p) {
+		count(ST_MISSING);
 		return 0;
+	}
 	int ok = p->kind == kind && ret >= 0;
-	if (ok)
+	if (ok) {
 		__builtin_memcpy(out, p, sizeof(*out));
+		count(ST_TAKE_OK);
+	} else {
+		count(p->kind != kind ? ST_KIND : ST_FAILED);
+	}
 	bpf_map_delete_elem(&pending_args, &id);
 	return ok;
 }
