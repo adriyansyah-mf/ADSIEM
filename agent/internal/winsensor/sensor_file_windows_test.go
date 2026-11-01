@@ -80,7 +80,7 @@ func TestSensorReportsFilesAndImageLoads(t *testing.T) {
 	}
 
 	want := map[string][]string{
-		"create": {`EventID=11 `, `FileAction="create"`, `TargetFilename="` + plain + `"`, `ProcessId="`},
+		"create": {`EventID=11 `, `FileAction="create"`, `TargetFilename="` + plain + `"`, `\cmd.exe"`},
 		"rename": {`EventID=11 `, `FileAction="rename"`, `TargetFilename="` + locked + `"`, `SourceFilename="` + plain + `"`},
 		"delete": {`EventID=23 `, `FileAction="delete"`, `TargetFilename="` + locked + `"`},
 		"image":  {`EventID=7 `, `ImageLoaded="` + dll + `"`, `ProcessId="`},

@@ -112,7 +112,13 @@ func (j *processJoiner) owner(pid uint32) (image, user string) {
 	return j.fullImage(pid), ""
 }
 
-// knows reports whether pid's start was seen (whole or half).
+// knows reports whether pid's start was seen with its full image path: the
+// kernel logger half alone has only a name ("cmd.exe"), which Image|endswith
+// '\cmd.exe' rules do not match.
 func (j *processJoiner) knows(pid uint32) bool {
-	return j.known[pid] != nil || j.pending[pid] != nil
+	if p := j.known[pid]; p != nil {
+		return true
+	}
+	p := j.pending[pid]
+	return p != nil && strings.ContainsRune(p.image, '\\')
 }

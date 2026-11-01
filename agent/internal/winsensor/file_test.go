@@ -150,6 +150,17 @@ func TestFileLineWaitsForItsProcess(t *testing.T) {
 	if len(got) != 1 || strings.Contains(got[0].line, ` Image=`) || !strings.Contains(got[0].line, `b.txt`) {
 		t.Fatalf("after joinWindow = %v", got)
 	}
+	// Only the kernel half (a bare name) seen: still waiting for the full path.
+	tr.file(kf(fileCreateNew, 58, "FileName", vol+`\data\c.txt`))
+	tr.j.pending[58] = &process{pid: 58, image: "cmd.exe", haveKernel: true}
+	if got := tr.tick(); got != nil {
+		t.Fatalf("sent with a bare image name: %v", got)
+	}
+	tr.j.pending[58].image = `C:\Windows\System32\cmd.exe`
+	if got := tr.tick(); len(got) != 1 || !strings.Contains(got[0].line, `Image="C:\Windows\System32\cmd.exe"`) {
+		t.Fatalf("after the provider half = %v", got)
+	}
+	delete(tr.j.pending, 58)
 	// Image loads dedupe on the resolved image.
 	dll := &etw.Event{ID: imageLoadEvent, Props: []etw.Property{{Name: "ProcessID", Value: "57"}, {Name: "ImageName", Value: vol + `\x.dll`}}}
 	tr.image(dll)
