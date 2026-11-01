@@ -60,6 +60,9 @@ func helper(what string) int {
 		var ws unix.WaitStatus
 		unix.Wait4(target.Process.Pid, &ws, 0, nil)
 		unix.PtraceDetach(target.Process.Pid)
+		// The agent reads the target's image from /proc when it handles
+		// the record; killing the target at once raced that on busy hosts.
+		time.Sleep(time.Second)
 		return 0
 	case "setuid":
 		// Real uid 1000, effective 0 (like a setuid-root binary run by a

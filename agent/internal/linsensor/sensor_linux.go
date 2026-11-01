@@ -66,6 +66,15 @@ func Start(opts Options) (*Sensor, error) {
 	s := &Sensor{coll: coll, stop: make(chan struct{})}
 	var skipped []string
 	for name, ps := range spec.Programs {
+		if raw, ok := strings.CutPrefix(ps.SectionName, "raw_tracepoint/"); ok {
+			l, err := link.AttachRawTracepoint(link.RawTracepointOptions{Name: raw, Program: coll.Programs[name]})
+			if err != nil {
+				s.close()
+				return nil, fmt.Errorf("attach raw tracepoint %s: %w", raw, err)
+			}
+			s.links = append(s.links, l)
+			continue
+		}
 		group, tp, ok := strings.Cut(strings.TrimPrefix(ps.SectionName, "tracepoint/"), "/")
 		if !ok {
 			continue

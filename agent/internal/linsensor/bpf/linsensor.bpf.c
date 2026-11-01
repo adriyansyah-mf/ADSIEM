@@ -359,13 +359,6 @@ static __always_inline void open_enter(long dfd, const char *name, long flags)
 	stash(K_OPEN, dfd, (__u64)name, flags, 0);
 }
 
-SEC("tracepoint/syscalls/sys_enter_openat")
-int enter_openat(struct trace_event_raw_sys_enter *ctx)
-{
-	open_enter(ctx->args[0], (const char *)ctx->args[1], ctx->args[2]);
-	return 0;
-}
-
 SEC("tracepoint/syscalls/sys_enter_open")
 int enter_open(struct trace_event_raw_sys_enter *ctx)
 {
@@ -425,20 +418,6 @@ static __always_inline void rename_enter(long olddfd, const char *old, long newd
 	stash(K_RENAME, olddfd, (__u64)old, newdfd, (__u64)new);
 }
 
-SEC("tracepoint/syscalls/sys_enter_renameat")
-int enter_renameat(struct trace_event_raw_sys_enter *ctx)
-{
-	rename_enter(ctx->args[0], (const char *)ctx->args[1], ctx->args[2], (const char *)ctx->args[3]);
-	return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_renameat2")
-int enter_renameat2(struct trace_event_raw_sys_enter *ctx)
-{
-	rename_enter(ctx->args[0], (const char *)ctx->args[1], ctx->args[2], (const char *)ctx->args[3]);
-	return 0;
-}
-
 SEC("tracepoint/syscalls/sys_enter_rename")
 int enter_rename(struct trace_event_raw_sys_enter *ctx)
 {
@@ -492,13 +471,6 @@ static __always_inline void unlink_enter(long dfd, const char *name, long flags)
 	if (skip_self())
 		return;
 	stash(K_UNLINK, dfd, (__u64)name, flags, 0);
-}
-
-SEC("tracepoint/syscalls/sys_enter_unlinkat")
-int enter_unlinkat(struct trace_event_raw_sys_enter *ctx)
-{
-	unlink_enter(ctx->args[0], (const char *)ctx->args[1], ctx->args[2]);
-	return 0;
 }
 
 SEC("tracepoint/syscalls/sys_enter_unlink")
@@ -557,13 +529,6 @@ int exit_rmdir(struct trace_event_raw_sys_exit *ctx)
 
 // ─── kernel modules ──────────────────────────────────────────────────
 
-SEC("tracepoint/syscalls/sys_enter_init_module")
-int enter_init_module(struct trace_event_raw_sys_enter *ctx)
-{
-	stash(K_MODULE_INIT, ctx->args[1], ctx->args[2], 0, 0);
-	return 0;
-}
-
 SEC("tracepoint/syscalls/sys_exit_init_module")
 int exit_init_module(struct trace_event_raw_sys_exit *ctx)
 {
@@ -576,13 +541,6 @@ int exit_init_module(struct trace_event_raw_sys_exit *ctx)
 	ev->arg0 = p.a[0]; // image length
 	bpf_probe_read_user_str(ev->path2, sizeof(ev->path2), (const char *)p.a[1]);
 	bpf_ringbuf_submit(ev, 0);
-	return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_finit_module")
-int enter_finit_module(struct trace_event_raw_sys_enter *ctx)
-{
-	stash(K_MODULE_FINIT, ctx->args[0], ctx->args[1], ctx->args[2], 0);
 	return 0;
 }
 
@@ -855,5 +813,62 @@ int handle_exit(void *ctx)
 		return 0;
 	ev->arg0 = BPF_CORE_READ(task, exit_code);
 	bpf_ringbuf_submit(ev, 0);
+	return 0;
+}
+
+// ─── syscall entry for path-at-arg1 syscalls ─────────────────────────
+
+// The per-syscall sys_enter tracepoints of openat, renameat(2), unlinkat
+// and (f)init_module never ran on kernel 7.0 (GitHub's 7.0.0-azure):
+// every syscall whose user string is not the first argument was dropped
+// before the BPF program, while rmdir/open/creat (string first) and all
+// sys_exit tracepoints kept working. raw_syscalls/sys_enter does not go
+// through that code, so these arguments are captured here instead. The
+// exit side stays on the per-syscall tracepoints.
+#if defined(__TARGET_ARCH_arm64)
+#define NR_openat        56
+#define NR_unlinkat      35
+#define NR_renameat      38
+#define NR_renameat2     276
+#define NR_init_module   105
+#define NR_finit_module  273
+#else
+#define NR_openat        257
+#define NR_unlinkat      263
+#define NR_renameat      264
+#define NR_renameat2     316
+#define NR_init_module   175
+#define NR_finit_module  313
+#endif
+
+SEC("raw_tracepoint/sys_enter")
+int raw_sys_enter(struct bpf_raw_tracepoint_args *ctx)
+{
+	long id = (long)ctx->args[1];
+	if (id != NR_openat && id != NR_unlinkat && id != NR_renameat && id != NR_renameat2 &&
+	    id != NR_init_module && id != NR_finit_module)
+		return 0;
+	struct pt_regs *regs = (struct pt_regs *)ctx->args[0];
+	long a0 = PT_REGS_PARM1_CORE_SYSCALL(regs);
+	long a1 = PT_REGS_PARM2_CORE_SYSCALL(regs);
+	long a2 = PT_REGS_PARM3_CORE_SYSCALL(regs);
+	switch (id) {
+	case NR_openat:
+		open_enter(a0, (const char *)a1, a2);
+		break;
+	case NR_unlinkat:
+		unlink_enter(a0, (const char *)a1, a2);
+		break;
+	case NR_renameat:
+	case NR_renameat2:
+		rename_enter(a0, (const char *)a1, a2, (const char *)PT_REGS_PARM4_CORE_SYSCALL(regs));
+		break;
+	case NR_init_module:
+		stash(K_MODULE_INIT, a1, a2, 0, 0);
+		break;
+	case NR_finit_module:
+		stash(K_MODULE_FINIT, a0, a1, a2, 0);
+		break;
+	}
 	return 0;
 }
