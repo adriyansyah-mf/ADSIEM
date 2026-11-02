@@ -42,6 +42,7 @@ type Monitor struct {
 	link    link.Link
 	reader  *ringbuf.Reader
 	stopped chan struct{}
+	done    chan struct{} // closed when loop returns
 }
 
 // Start attaches the execve tracepoint program and begins pushing decoded
@@ -84,7 +85,7 @@ func Start(buf *buffer.Buffer) (*Monitor, error) {
 		return nil, fmt.Errorf("open ringbuf reader: %w", err)
 	}
 
-	m := &Monitor{coll: coll, link: tp, reader: rd, stopped: make(chan struct{})}
+	m := &Monitor{coll: coll, link: tp, reader: rd, stopped: make(chan struct{}), done: make(chan struct{})}
 	go m.loop(buf)
 	slog.Info("procexec: attached to tracepoint/syscalls/sys_enter_execve")
 	return m, nil
@@ -93,11 +94,13 @@ func Start(buf *buffer.Buffer) (*Monitor, error) {
 func (m *Monitor) Stop() {
 	close(m.stopped)
 	m.reader.Close()
+	<-m.done // the loop may still be pushing a record: wait before closing the maps
 	m.link.Close()
 	m.coll.Close()
 }
 
 func (m *Monitor) loop(buf *buffer.Buffer) {
+	defer close(m.done)
 	for {
 		record, err := m.reader.Read()
 		if err != nil {
