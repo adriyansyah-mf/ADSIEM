@@ -224,6 +224,8 @@ type HeartbeatResponse struct {
 	EvidenceProtocols []int `json:"evidence_protocols"`
 	// >0: the server takes this many events per POST /api/ingest/v2/logs.
 	EvidenceBatchMax int `json:"evidence_batch_max"`
+	// >0: the server takes this many legacy log lines per POST /api/ingest/logs.
+	LogBatchMax int `json:"log_batch_max"`
 	// Version of the enabled YARA rule set ("" when there is none); the
 	// rules themselves are fetched from /api/ingest/yara-rules on change.
 	YaraRulesHash string `json:"yara_rules_hash"`
@@ -237,7 +239,12 @@ type HeartbeatResponse struct {
 var (
 	evidenceV2       atomic.Bool
 	evidenceBatchMax atomic.Int64
+	logBatchMax      atomic.Int64
 )
+
+// LogBatchMax is how many legacy log lines the last successful heartbeat said
+// one POST /api/ingest/logs takes; 0 (older server) means one per POST /log.
+func LogBatchMax() int { return int(logBatchMax.Load()) }
 
 // EvidenceHealth, when set (durable evidence mode), returns the journal's
 // cumulative health for the heartbeat. Counters live in the journal, so a
@@ -315,6 +322,7 @@ func Loop(
 			if err := json.Unmarshal(body, &hbResp); err == nil {
 				storeUninstallHash(hbResp.UninstallTokenSHA256)
 				storeEvidenceProtocols(hbResp.EvidenceProtocols, hbResp.EvidenceBatchMax)
+				logBatchMax.Store(int64(max(hbResp.LogBatchMax, 0)))
 				if Updater != nil {
 					Updater.Offer(hbResp.Update)
 				}

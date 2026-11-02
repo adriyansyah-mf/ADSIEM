@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -182,6 +183,7 @@ func run(configPath string, stop <-chan struct{}) {
 		durable.importLegacy(cfg.Buffer.SpillPath, cfg.Agent.ID, mustHostname()) // before any producer starts
 	} else {
 		buf = buffer.New(cfg.Agent.BufferSize)
+		buf.SetUrgent(isUrgentEntry)
 		if spill, err = buffer.OpenSpill(cfg.Buffer.SpillPath); err != nil {
 			slog.Warn("disk spill unavailable; undelivered events will be lost on restart", "err", err)
 			spill = nil
@@ -499,14 +501,43 @@ func sendEntry(ctx context.Context, entry string, c *client.Client, cfg *config.
 		return false, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 500 {
+	return deliveryResult(resp, logType)
+}
+
+// deliveryResult: 5xx, and 401/403 (this agent's token is refused: dropping
+// would throw away everything, and retrying at once floods the server) are
+// retried with a backoff; other refusals drop the entry.
+func deliveryResult(resp *http.Response, what string) (bool, error) {
+	switch {
+	case resp.StatusCode >= 500:
 		return false, fmt.Errorf("server status %d", resp.StatusCode)
-	}
-	if resp.StatusCode >= 300 {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return false, fmt.Errorf("server refused this agent's token (status %d); re-enroll the agent", resp.StatusCode)
+	case resp.StatusCode >= 300:
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		slog.Error("log rejected by server, dropping entry", "status", resp.StatusCode, "body", string(body), "log_type", logType)
+		slog.Error("log rejected by server, dropping", "status", resp.StatusCode, "body", string(body), "log_type", what)
 	}
 	return true, nil
+}
+
+// sendBatch sends entries in one POST /api/ingest/logs.
+func sendBatch(ctx context.Context, entries []string, c *client.Client, cfg *config.Config) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	host := mustHostname()
+	batch := make([]map[string]any, 0, len(entries))
+	for _, entry := range entries {
+		logType, location, rawMessage := tailer.Decode(entry)
+		batch = append(batch, map[string]any{
+			"agent_id": cfg.Agent.ID, "log_type": logType, "raw_message": rawMessage, "location": location,
+			"received_at": now, "hostname": host,
+		})
+	}
+	resp, err := c.PostContext(ctx, "/api/ingest/logs", map[string]any{"entries": batch})
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	return deliveryResult(resp, fmt.Sprintf("batch of %d", len(entries)))
 }
 
 // wait sleeps d or until ctx ends; false when ctx ended.
@@ -521,35 +552,70 @@ func wait(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+// urgentLogTypes jump the legacy queue: a detection must reach the server
+// before the telemetry backlog ahead of it.
+var urgentLogTypes = map[string]bool{
+	malhash.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
+	ransomguard.LogType: true, "local_detection": true, "linux_sensor_health": true,
+}
+
+func isUrgentEntry(entry string) bool {
+	logType, _, _ := tailer.Decode(entry)
+	return urgentLogTypes[logType]
+}
+
+// maxBatchBytes bounds one POST /api/ingest/logs (nginx takes 10 MB).
+const maxBatchBytes = 2 << 20
+
+// logBatchMax is what the server's heartbeat advertised (tests replace it).
+var logBatchMax = heartbeat.LogBatchMax
+
 func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill *buffer.Spill, detector *detect.Engine) {
 	backoff := time.Second
 	wasOffline := false
 	replaySpill(buf, spill)
 
 	for ctx.Err() == nil {
-		entry, ok := buf.Pop()
-		if !ok {
+		batchMax := logBatchMax()
+		n := batchMax
+		if n <= 0 {
+			n = 1 // older server: one line per POST /api/ingest/log
+		}
+		entries := buf.PopN(n, maxBatchBytes)
+		if len(entries) == 0 {
 			backoff = time.Second
 			wait(ctx, 100*time.Millisecond)
 			continue
 		}
-		logType, _, rawMessage := tailer.Decode(entry)
 
 		// Local detection observes every event exactly once, before delivery:
 		// it must keep working while the server is unreachable.
 		if detector != nil {
-			detector.Emit(detector.Observe(logType, rawMessage))
+			for _, entry := range entries {
+				logType, _, rawMessage := tailer.Decode(entry)
+				detector.Emit(detector.Observe(logType, rawMessage))
+			}
 		}
 
-		sent, err := sendEntry(ctx, entry, c, cfg)
+		var sent bool
+		var err error
+		if batchMax <= 0 {
+			sent, err = sendEntry(ctx, entries[0], c, cfg)
+		} else {
+			sent, err = sendBatch(ctx, entries, c, cfg)
+		}
 		if !sent {
-			buf.Push(entry) // re-queue (also when shutdown cancelled the request)
+			for _, entry := range entries {
+				buf.Push(entry) // re-queue (also when shutdown cancelled the request)
+			}
 			if ctx.Err() != nil {
 				return
 			}
-			spill.Append(entry)
+			for _, entry := range entries {
+				spill.Append(entry)
+			}
 			wasOffline = true
-			slog.Warn("send failed, backing off", "backoff", backoff, "err", err)
+			slog.Warn("send failed, backing off", "backoff", backoff, "entries", len(entries), "err", err)
 			if !wait(ctx, backoff) {
 				return
 			}
