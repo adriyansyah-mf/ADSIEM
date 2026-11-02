@@ -43,6 +43,7 @@ type process struct {
 	user, integrityLevel string
 	started              time.Time
 	haveKernel, haveProv bool
+	notified             bool // onStart already called for this start
 }
 
 // processJoiner merges the two halves of each process start and remembers
@@ -102,6 +103,7 @@ func (j *processJoiner) kernel(ev *etw.Event, now time.Time) []string {
 			p.image, _ = ev.Get("ImageFileName") // a name only: the provider half has the path
 		}
 		p.haveKernel = true
+		j.notify(p)
 		return j.complete(pid)
 	}
 	return nil
@@ -127,6 +129,7 @@ func (j *processJoiner) provider(ev *etw.Event, now time.Time) []string {
 		p.integrityLevel = integrityLevel(label)
 	}
 	p.haveProv = true
+	j.notify(p)
 	return j.complete(pid)
 }
 
@@ -184,7 +187,8 @@ func (j *processJoiner) emit(pid uint32) []string {
 			parent.image = full
 		}
 	}
-	if j.onStart != nil {
+	if j.onStart != nil && !p.notified {
+		p.notified = true
 		ps := ProcessStart{PID: p.pid, PPID: p.ppid, Image: p.image, CommandLine: p.commandLine, User: p.user}
 		if parent != nil {
 			ps.ParentImage = parent.image
@@ -192,6 +196,36 @@ func (j *processJoiner) emit(pid uint32) []string {
 		j.onStart(ps)
 	}
 	return []string{processLine(p, parent)}
+}
+
+// notify hands a start to onStart as soon as its full image path is known,
+// without waiting for the other half (up to joinWindow; ETW delivers each
+// session on its own buffer flushes): from the Kernel-Process half, or, when
+// the kernel logger half comes first with a bare name, from the process
+// itself while it runs. Execution prevention terminates a blocked program
+// this much sooner. Called once per start; emit covers the rest.
+func (j *processJoiner) notify(p *process) {
+	if j.onStart == nil || p.notified {
+		return
+	}
+	image := p.image
+	if !strings.ContainsRune(image, '\\') {
+		if image = j.fullImage(p.pid); image == "" {
+			return // gone already, or not readable: emit reports what is known
+		}
+		p.image = image
+	}
+	p.notified = true
+	ps := ProcessStart{PID: p.pid, PPID: p.ppid, Image: image, CommandLine: p.commandLine, User: p.user}
+	if parent := j.known[p.ppid]; parent != nil {
+		if !strings.ContainsRune(parent.image, '\\') {
+			if full := j.fullImage(p.ppid); full != "" {
+				parent.image = full
+			}
+		}
+		ps.ParentImage = parent.image
+	}
+	j.onStart(ps)
 }
 
 func (j *processJoiner) remember(p *process) {
