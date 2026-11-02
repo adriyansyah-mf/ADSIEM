@@ -127,6 +127,35 @@ var ConfigPath string
 // integrityEvery: hashing reads the whole binary, so not on every beat.
 const integrityEvery = 5 * time.Minute
 
+// Unreadable is sent instead of a hash once a file could not be hashed on
+// unreadableAfter checks in a row: a deleted or unreadable binary or config
+// is tampering too, and the server then sees a change from the last hash
+// (agent_integrity_changed). One failure alone stays "" (not a change): a
+// file being replaced by an upgrade can fail once.
+const (
+	Unreadable      = "unreadable"
+	unreadableAfter = 2
+)
+
+var hashFailures = map[string]int{} // by file kind; currentIntegrity's callers are serial
+
+// hashOrMark hashes path, or reports it Unreadable after repeated failures.
+// An unconfigured path ("" with kind config) is never a failure.
+func hashOrMark(kind, path string) string {
+	if path == "" && kind == "config" {
+		return ""
+	}
+	if h := sha256File(path); h != "" {
+		hashFailures[kind] = 0
+		return h
+	}
+	hashFailures[kind]++
+	if hashFailures[kind] >= unreadableAfter {
+		return Unreadable
+	}
+	return ""
+}
+
 func sha256File(path string) string {
 	if path == "" {
 		return ""
@@ -150,9 +179,11 @@ func currentIntegrity() *Integrity {
 			exe = resolved
 		}
 	}
-	in := Integrity{ConfigSHA256: sha256File(ConfigPath)}
+	in := Integrity{ConfigSHA256: hashOrMark("config", ConfigPath)}
 	if err == nil {
-		in.BinarySHA256 = sha256File(exe)
+		in.BinarySHA256 = hashOrMark("binary", exe)
+	} else {
+		in.BinarySHA256 = hashOrMark("binary", "")
 	}
 	if in == (Integrity{}) {
 		return nil

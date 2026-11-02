@@ -119,8 +119,21 @@ func TestIntegrityHashesBinaryAndConfig(t *testing.T) {
 		t.Fatalf("right token: %v", err)
 	}
 
+	// a missing config: empty once (an upgrade may be replacing it), then
+	// Unreadable, which the server sees as a change; a good hash resets it
 	ConfigPath = filepath.Join(t.TempDir(), "missing.yaml")
 	if in := currentIntegrity(); in.ConfigSHA256 != "" || in.BinarySHA256 == "" {
-		t.Fatalf("a missing config hashes as empty: %+v", in)
+		t.Fatalf("a missing config hashes as empty the first time: %+v", in)
+	}
+	if in := currentIntegrity(); in.ConfigSHA256 != Unreadable {
+		t.Fatalf("a config missing twice in a row must be %q: %+v", Unreadable, in)
+	}
+	ConfigPath = cfg
+	if in := currentIntegrity(); len(in.ConfigSHA256) != 64 {
+		t.Fatalf("readable again: %+v", in)
+	}
+	ConfigPath = filepath.Join(t.TempDir(), "missing.yaml")
+	if in := currentIntegrity(); in.ConfigSHA256 != "" {
+		t.Fatalf("the failure count must reset after a good hash: %+v", in)
 	}
 }

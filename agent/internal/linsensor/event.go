@@ -40,6 +40,8 @@ const (
 	LogMemfd     = "linux_memfd_create"
 	LogFileless  = "linux_fileless_exec"
 	LogExit      = "linux_process_exit"
+	// LogHealth is the sensor's own tamper checks (health.go).
+	LogHealth = "linux_sensor_health"
 )
 
 const (

@@ -22,6 +22,19 @@ Decoders: `decoders/linux_{file_event,kernel_module,ptrace,privilege_change,memf
 
 Shipped rules: Fileless Process Execution (critical), Process Injection Via Ptrace (high, debuggers excluded), Unexpected Privilege Change To Root (high, setuid tools excluded), Kernel Module Loaded (medium), Kernel Module Loaded From Memory (high), LD Preload Hijack File Written (high), SSH Authorized Keys Modified (medium).
 
+## Tamper checks
+
+Root can blind an eBPF sensor without stopping the agent, so the agent's heartbeat, stop and integrity alerts would not fire. `internal/linsensor/health.go` checks the sensor itself and reports `linux_sensor_health` lines (`decoders/linux_sensor_health.yaml`):
+
+| Check | How | Line | Rule |
+|---|---|---|---|
+| Exclusion map | Every 30 s the `self` map (the agent's tgid, whose events the kernel skips) is re-read. Another tgid there (`bpftool map update name self ...`) hides that process: the map is restored and reported. | `event=self_map_overwritten expected_tgid= found_tgid= restored=` | SIEM Agent Sensor Exclusion Tampered (critical) |
+| End to end | Every 5 minutes (first after 30 s) a child `/bin/sh` creates and removes `/var/tmp/.siem-sensor-canary-<pid>`. If the sensor does not see it within 15 s, its programs were detached or its tracepoints stopped firing. Only changes are reported; the canary's own events are not shipped. | `event=sensor_blind`, then `event=sensor_recovered` | SIEM Agent Sensor Blind (high) |
+
+The canary needs the file event group (not in `disabled_events`) and `/bin/sh`; without them it is not run, and nothing is reported. The child's process start is ordinary telemetry (parent `siem-agent`).
+
+Integrity: the heartbeat's binary and config hashes report `unreadable` once a file could not be hashed on two checks in a row (5 minutes apart), so a deleted or locked binary or config raises *SIEM Agent Binary/Config Modified* instead of going quiet. One failure alone is ignored: an upgrade replacing the file can fail once.
+
 ## Configuration
 
 ```yaml

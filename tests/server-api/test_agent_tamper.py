@@ -37,6 +37,17 @@ def test_nothing_reported_or_unchanged_or_unreadable_is_no_event():
     assert check_integrity(_agent(A, B, "1.7.0"), "1.7.0", {"binary_sha256": A, "config_sha256": ""}) == ({}, [])
 
 
+def test_a_file_unreadable_twice_in_a_row_is_one_event():
+    # agent/internal/heartbeat sends "unreadable" once hashing failed on two
+    # checks in a row (a deleted or locked config or binary)
+    updates, events = check_integrity(_agent(A, B, "1.7.0"), "1.7.0", {"binary_sha256": A, "config_sha256": "unreadable"})
+    assert updates == {"config_sha256": "unreadable"}
+    assert events == [{"file": "config", "previous": B, "current": "unreadable", "version": "1.7.0"}]
+    # still unreadable: no second event
+    assert check_integrity(_agent(A, "unreadable", "1.7.0"), "1.7.0",
+                           {"binary_sha256": A, "config_sha256": "unreadable"}) == ({}, [])
+
+
 def test_uninstall_token_is_stable_per_agent_and_only_its_hash_leaves():
     import hashlib
 
