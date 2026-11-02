@@ -258,9 +258,12 @@ func run(configPath string, stop <-chan struct{}) {
 	}
 	go flows.Run(flowCtx)
 
-	// Execution prevention (Linux): the server's rules, enforced by the BPF
-	// LSM and/or a fanotify helper; rules default to detect-only.
-	if runtime.GOOS == "linux" && !cfg.Prevention.Disabled {
+	// Execution prevention: the server's rules, enforced on Linux by the BPF
+	// LSM and/or a fanotify helper (before the program runs), on Windows by
+	// terminating a matching process as soon as the ETW sensor reports its
+	// start; rules default to detect-only.
+	var preventer *prevent.Manager
+	if (runtime.GOOS == "linux" || runtime.GOOS == "windows") && !cfg.Prevention.Disabled {
 		if pm, err := prevent.Start(prevent.Options{
 			Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
 		}); err != nil {
@@ -268,6 +271,7 @@ func run(configPath string, stop <-chan struct{}) {
 		} else {
 			defer pm.Close()
 			go pm.Run(flowCtx, c)
+			preventer = pm
 		}
 	}
 
@@ -336,7 +340,8 @@ func run(configPath string, stop <-chan struct{}) {
 		if cfg.ETW.Mode == "auto" && winsensor.SysmonInstalled() {
 			slog.Info("ETW sensor off: Sysmon is installed (set etw.mode: on to run both)")
 		} else if sensor, err := winsensor.StartWith(buf, winsensor.Options{
-			Disabled: cfg.ETW.DisabledEvents, OnFile: windowsFileFeed(onFile)}); err != nil {
+			Disabled: cfg.ETW.DisabledEvents, OnFile: windowsFileFeed(onFile),
+			OnProcess: windowsProcessFeed(preventer)}); err != nil {
 			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
@@ -536,6 +541,17 @@ func flushBuffer(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
 func mustHostname() string {
 	h, _ := os.Hostname()
 	return h
+}
+
+// windowsProcessFeed hands the ETW sensor's process starts to execution
+// prevention; nil when prevention is off.
+func windowsProcessFeed(pm *prevent.Manager) func(winsensor.ProcessStart) {
+	if pm == nil {
+		return nil
+	}
+	return func(p winsensor.ProcessStart) {
+		pm.ObserveExec(prevent.ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image, ParentImage: p.ParentImage})
+	}
 }
 
 // windowsFileFeed adapts the ETW sensor's file events to the anti-ransomware

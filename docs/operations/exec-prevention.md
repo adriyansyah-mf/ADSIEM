@@ -1,4 +1,6 @@
-# Execution prevention (Linux)
+# Execution prevention (Linux, and Windows after the fact)
+
+Windows: see [Windows](#windows) below: the same rules, but a block rule terminates the program right after it starts.
 
 Roadmap item 3.3. Linux agents check every program before it starts against the rules on the dashboard's **Prevention** page (`/api/prevention-rules`) and either report the match (**detect**) or refuse to run it (**block**, the exec fails with `EPERM`). New rules default to detect. Review the alerts first, then switch the rule to block; per-group policy (roadmap 2.4) will make that per group.
 
@@ -27,6 +29,17 @@ The agent fetches rules every minute (`POST /api/ingest/prevention-rules`, answe
 Every match is a `linux_exec_prevention` line (`decoders/linux_exec_prevention.yaml`): `action=blocked|detected`, `rule`, `rule_type`, `engine`, `Image`, `ParentImage` (a basename from the LSM engine), `SHA256` (fanotify). The same rule, program and parent are reported at most once a minute. Rules `linux_exec_blocked.yaml` (high) and `linux_exec_detected.yaml` (medium) raise the alerts.
 
 Agent config: `prevention.disabled: true` stops enforcing and reporting on that host.
+
+## Windows
+
+Windows agents enforce the same rules (`engines_windows.go`, `engine=etw`), with one difference that matters: there is no kernel driver, so nothing can refuse a start. The ETW sensor (`internal/winsensor`) hands every process start to the engine once both halves are joined (full image path, parent image); a match on a **block** rule is terminated with `TerminateProcess` right away and reported `action=terminated`. **The program ran for a moment** (the time ETW takes to deliver the start, typically well under a second), so a block rule on Windows limits damage rather than preventing it. Detect rules report `action=detected`.
+
+- Paths and names compare case-insensitively; `dir` rules split on `\`. Path rules use Windows paths (`C:\Tools\nc.exe`; the server accepts drive-letter paths); a Linux agent skips them and a Windows agent skips `/...` paths, each with a log line.
+- Never terminated: critical processes from System32 (smss, csrss, wininit, winlogon, services, lsass, svchost, dwm, ...), `cmd.exe`, `powershell.exe`, `explorer.exe` and the agent. A block rule on one of them stays detect-only; a hash or parent rule that matches one reports `action=detected` with `Error`.
+- Hash rules read the executable once per path, size and modification time (cached), off the sensor's goroutine.
+- Needs the ETW sensor: with `etw.mode: auto` and Sysmon installed the sensor is off, and so is prevention on that host.
+- Lines: `windows_exec_prevention` (`decoders/windows_exec_prevention.yaml`); rule *Execution Terminated By Prevention Rule On Windows* (high).
+- Test: `TestWindowsKillOnExecEndToEnd` (native-evidence job): a copy of `ping.exe` under a block rule is terminated within seconds, a copy under a detect rule runs to the end.
 
 ## Testing
 

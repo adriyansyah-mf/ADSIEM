@@ -62,6 +62,13 @@ async def test_operator_crud_and_validation(api):
     assert (await c.post("/api/prevention-rules", json={"name": "no tmp", "rule_type": "dir", "value": "/var/tmp"})).status_code == 409
     h = await c.post("/api/prevention-rules", json={"name": "bad", "rule_type": "hash", "value": "AB" * 32, "action": "block"})
     assert h.json()["value"] == "ab" * 32
+    # Windows paths: Windows agents enforce them, Linux agents skip them
+    w = await c.post("/api/prevention-rules", json={"name": "win tool", "rule_type": "path",
+                                                     "value": "C:\\Tools\\nc.exe", "action": "block"})
+    assert w.status_code == 201, w.text
+    assert (await c.post("/api/prevention-rules", json={"name": "win rel", "rule_type": "dir",
+                                                        "value": "C:Tools"})).status_code == 422
+    assert (await c.delete(f"/api/prevention-rules/{w.json()['id']}")).status_code == 204
     r = await c.put(f"/api/prevention-rules/{rule['id']}", json={"name": "no tmp", "rule_type": "dir", "value": "/tmp", "action": "block"})
     assert r.json()["action"] == "block"
     assert (await c.patch(f"/api/prevention-rules/{rule['id']}/toggle")).json()["is_enabled"] is False

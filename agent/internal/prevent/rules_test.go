@@ -1,3 +1,7 @@
+//go:build !windows
+
+// Linux semantics (exact case, / paths); Windows: prevent_windows_test.go.
+
 package prevent
 
 import (

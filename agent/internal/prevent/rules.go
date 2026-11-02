@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -80,6 +81,37 @@ var protectedPaths = []string{
 	"/usr/sbin/sshd", "/usr/bin/sudo", "/usr/bin/login", "/usr/sbin/nft", "/usr/sbin/iptables",
 }
 
+// foldCase: Windows paths and file names are case-insensitive, so rule
+// values and the executions they are matched against are lower-cased there.
+// Linux keeps exact case (the BPF LSM engine loads these values as they are).
+var foldCase = runtime.GOOS == "windows"
+
+func fold(s string) string {
+	if foldCase {
+		return strings.ToLower(s)
+	}
+	return s
+}
+
+// windowsProtected are never blocked on Windows: the critical processes
+// (terminating one crashes or locks up the host), the shell and PowerShell
+// an administrator recovers with, and Explorer. They are taken from the
+// system directory, so a copy elsewhere with the same name is not protected.
+func windowsProtected() []string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	sys := filepath.Join(root, "System32")
+	var out []string
+	for _, n := range []string{"smss.exe", "csrss.exe", "wininit.exe", "winlogon.exe", "services.exe",
+		"lsass.exe", "lsaiso.exe", "svchost.exe", "dwm.exe", "fontdrvhost.exe", "conhost.exe",
+		"cmd.exe", "WindowsPowerShell\\v1.0\\powershell.exe"} {
+		out = append(out, filepath.Join(sys, n))
+	}
+	return append(out, filepath.Join(root, "explorer.exe"))
+}
+
 // guard explains why a block rule must not be enforced, or returns "".
 type guard struct {
 	paths  []string
@@ -89,6 +121,9 @@ type guard struct {
 func newGuard() *guard {
 	g := &guard{hashes: map[string]string{}}
 	paths := append([]string{}, protectedPaths...)
+	if runtime.GOOS == "windows" {
+		paths = windowsProtected()
+	}
 	if exe, err := os.Executable(); err == nil {
 		paths = append(paths, exe)
 	}
@@ -97,7 +132,7 @@ func newGuard() *guard {
 		if err != nil {
 			continue
 		}
-		g.paths = append(g.paths, real)
+		g.paths = append(g.paths, fold(real))
 		if h, err := hashFile(real, 256<<20); err == nil {
 			g.hashes[h] = real
 		}
@@ -106,8 +141,9 @@ func newGuard() *guard {
 }
 
 func under(path, dir string) bool {
-	dir = strings.TrimSuffix(dir, "/")
-	return path == dir || strings.HasPrefix(path, dir+"/") || dir == ""
+	sep := string(filepath.Separator)
+	dir = strings.TrimSuffix(dir, sep)
+	return path == dir || strings.HasPrefix(path, dir+sep) || dir == ""
 }
 
 func (g *guard) refuse(c *compiled) string {
@@ -119,7 +155,7 @@ func (g *guard) refuse(c *compiled) string {
 	case TypePath, TypeDir:
 		target := c.Value
 		if real, err := filepath.EvalSymlinks(target); err == nil {
-			target = real
+			target = fold(real)
 		}
 		for _, p := range g.paths {
 			if (c.RuleType == TypePath && p == target) || (c.RuleType == TypeDir && under(p, target)) {
@@ -154,12 +190,13 @@ func compileWith(rules []Rule, g *guard) (*Policy, []error) {
 			}
 		case TypePath, TypeDir:
 			if !filepath.IsAbs(r.Value) {
-				errs = append(errs, fmt.Errorf("rule %q: %s must be an absolute path", r.Name, r.RuleType))
+				// also a path for the other OS (C:\... on Linux, /usr/... on Windows)
+				errs = append(errs, fmt.Errorf("rule %q: %s must be an absolute path on this system", r.Name, r.RuleType))
 				continue
 			}
-			c.Value = filepath.Clean(r.Value)
+			c.Value = fold(filepath.Clean(r.Value))
 		case TypeParent:
-			c.parents, c.children = splitNames(r.Parent), splitNames(r.Value)
+			c.parents, c.children = splitNames(fold(r.Parent)), splitNames(fold(r.Value))
 			if len(c.parents) == 0 || len(c.children) == 0 {
 				errs = append(errs, fmt.Errorf("rule %q: parent rules need parent and child names", r.Name))
 				continue
@@ -213,6 +250,7 @@ type Exec struct {
 // parent, then hash (the only one that reads the file). kernelDecides
 // leaves out the rule types the BPF LSM engine already enforces.
 func (p *Policy) Match(e Exec, kernelDecides bool) *compiled {
+	e.Path, e.Parent = fold(e.Path), fold(e.Parent)
 	if !kernelDecides {
 		if c := p.paths[e.Path]; c != nil {
 			return c

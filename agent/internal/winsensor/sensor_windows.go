@@ -113,6 +113,7 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 
 	devices := newDeviceMap()
 	j := newProcessJoiner(processImagePath, devices.dosPath)
+	j.onStart = opts.OnProcess
 	files := newFileTracker(j, uint32(windows.GetCurrentProcessId()), longPathName)
 	files.onFile = opts.OnFile
 	go s.run(j, files, buf)
