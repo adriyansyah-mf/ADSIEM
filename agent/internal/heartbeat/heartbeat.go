@@ -232,6 +232,8 @@ type HeartbeatResponse struct {
 	// "<seq>:<action>" of the known-malware hash set, "" when it is off (or
 	// the server is older); changes are fetched from /api/ingest/malware-hashes.
 	MalwareHashesVersion string `json:"malware_hashes_version"`
+	// Version of the group policy (internal/policy); "" from older servers.
+	PolicyVersion string `json:"policy_version"`
 	// Set while this agent's group rollout wants it on another version.
 	Update *update.Offer `json:"update"`
 }

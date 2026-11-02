@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Shield, FileText, Activity, Bell,
   BookOpen, Code, Users, Webhook, LogOut, Sun, Moon,
   ShieldAlert, GitMerge, ClipboardList, ArrowRightLeft, BookMarked,
-  FolderOpen, HeartPulse, Brain, Search, Terminal, Package, FileCode, Settings, Ban, ShieldX
+  FolderOpen, HeartPulse, Brain, Search, Terminal, Package, FileCode, Settings, Ban, ShieldX, ShieldCheck
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -26,6 +26,7 @@ const nav = [
   { to: '/yara',          label: 'YARA',         icon: FileCode,        minRole: 'analyst'    },
   { to: '/prevention',    label: 'Prevention',   icon: Ban,             minRole: 'analyst'    },
   { to: '/malware-hashes',label: 'Malware Hashes',icon: ShieldX,        minRole: 'analyst'    },
+  { to: '/policies',      label: 'Policies',     icon: ShieldCheck,     minRole: 'analyst'    },
   { to: '/artifacts',     label: 'Artifacts',    icon: Package,         minRole: 'analyst'    },
   { to: '/sop',           label: 'SOP Docs',     icon: BookMarked,      minRole: 'analyst'    },
   { to: '/handover',      label: 'Handover',     icon: ArrowRightLeft,  minRole: 'analyst'    },

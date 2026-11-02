@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/siem-platform/agent/internal/malhash"
+	"github.com/siem-platform/agent/internal/policy"
 )
 
 // End-to-end against the running kernel: needs root and, for the LSM
@@ -217,6 +218,50 @@ func TestKnownMalwareE2E(t *testing.T) {
 	install(malhash.ActionOff, "")
 	if o, err := run(bad); err != nil || !strings.Contains(o, "ran-bad-"+tag) {
 		t.Errorf("off: %v %s", err, o)
+	}
+}
+
+// TestGroupPolicyE2E: the fanotify helper honours the group policy: an
+// excluded hash runs, prevention off lets everything run, back on blocks.
+func TestGroupPolicyE2E(t *testing.T) {
+	if os.Getenv("PREVENT_E2E") != "1" {
+		t.Skip("set PREVENT_E2E=1 (needs root)")
+	}
+	rnd := make([]byte, 6)
+	rand.Read(rnd)
+	tag := hex.EncodeToString(rnd)
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "tool.sh")
+	writeScript(t, bad, "ran-tool-"+tag)
+	sum, err := hashFile(bad, maxHashBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out lines
+	m, err := Start(Options{Push: out.push})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	m.Apply("e2e", []Rule{{ID: "r1", Name: "tool hash", RuleType: TypeHash, Value: sum, Action: ActionBlock}})
+	ran := func() bool {
+		o, err := run(bad)
+		return err == nil && strings.Contains(o, "ran-tool-"+tag)
+	}
+	if ran() {
+		t.Fatal("the hash rule must block before any policy")
+	}
+	m.SetGate(false, []policy.Exclusion{{Kind: "sha256", Value: sum, Scopes: []string{policy.ScopePrevention}}})
+	if !ran() {
+		t.Fatal("an excluded hash must run")
+	}
+	m.SetGate(true, nil)
+	if !ran() {
+		t.Fatal("prevention off: it runs")
+	}
+	m.SetGate(false, nil)
+	if ran() {
+		t.Fatal("prevention back on: blocked again")
 	}
 }
 

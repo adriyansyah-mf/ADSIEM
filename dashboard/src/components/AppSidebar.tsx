@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { Activity, ArrowUpCircle, Ban, Bell, BookOpen, Brain, ClipboardList, Crosshair, FileBarChart, FileText,
   FolderOpen, Grid3x3, HeartPulse, LayoutDashboard, Lock, LogOut, PanelLeftClose,
-  PanelLeftOpen, Radio, ScanLine, Server, Settings, Shield, ShieldX, Terminal, Users, Webhook, Wrench, X } from 'lucide-react'
+  PanelLeftOpen, Radio, ScanLine, Server, Settings, Shield, ShieldCheck, ShieldX, Terminal, Users, Webhook, Wrench, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 
@@ -41,6 +41,7 @@ export const NAVIGATION: readonly { readonly label: string; readonly items: read
     { to: '/yara', label: 'YARA', icon: ScanLine },
     { to: '/prevention', label: 'Prevention', icon: Ban },
     { to: '/malware-hashes', label: 'Malware hashes', icon: ShieldX },
+    { to: '/policies', label: 'Policies', icon: ShieldCheck },
     { to: '/reports', label: 'Reports', icon: FileBarChart },
   ] },
   { label: 'Administration', items: [

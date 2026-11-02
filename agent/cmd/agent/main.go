@@ -30,6 +30,7 @@ import (
 	"github.com/siem-platform/agent/internal/memscan"
 	"github.com/siem-platform/agent/internal/netwatch"
 	"github.com/siem-platform/agent/internal/notify"
+	"github.com/siem-platform/agent/internal/policy"
 	"github.com/siem-platform/agent/internal/prevent"
 	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/ransomguard"
@@ -195,7 +196,12 @@ func run(configPath string, stop <-chan struct{}) {
 	}
 	// Windows: pop-ups for signed-in users when malware is found or stopped
 	// (after the legacy import above, so old entries do not pop up again).
+	// The group policy from the server (protections on/off, exclusions),
+	// applied to each protection as it starts and on every change.
+	polStore := policy.Open(filepath.Join(task.StateDir(cfg), policy.FileName))
+	var notifier *notify.Notifier
 	if n := notify.New(); n != nil && !cfg.Notify.Disabled {
+		notifier = n
 		buf.SetObserver(func(entry string) {
 			logType, _, line := tailer.Decode(entry)
 			n.Observe(logType, line)
@@ -301,6 +307,7 @@ func run(configPath string, stop <-chan struct{}) {
 	// Ransomware protection: canary files everywhere; on Linux also the
 	// bulk-encryption heuristics fed by the sensor below.
 	var onFile func(linsensor.FileEvent)
+	var guard *ransomguard.Guard
 	if !cfg.Ransomware.Disabled {
 		opts := ransomguard.Options{
 			Push:          func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
@@ -310,10 +317,12 @@ func run(configPath string, stop <-chan struct{}) {
 			AllowImages:   cfg.Ransomware.AllowImages,
 			Kill:          !cfg.Ransomware.ReportOnly,
 		}
+		isolate := func() error { _, err := fwEngine.Isolate(); return err }
 		if cfg.Ransomware.Isolate {
-			opts.Isolate = func() error { _, err := fwEngine.Isolate(); return err }
+			opts.Isolate = isolate
 		}
-		guard := ransomguard.New(opts)
+		opts.IsolateFunc = isolate
+		guard = ransomguard.New(opts)
 		go guard.Run(flowCtx)
 		onFile = guard.Observe
 	}
@@ -392,6 +401,11 @@ func run(configPath string, stop <-chan struct{}) {
 		preventer.SetKnownMalware(malStore.Current(), malStore.File())
 	}
 	go malStore.SyncLoop(flowCtx, c)
+	malFiles.Excluded = func(path, sha string) bool {
+		return polStore.Current().Settings.Excluded(policy.ScopeMalware, policy.Match{Path: path, Image: path, SHA256: sha})
+	}
+	polStore.OnChange(func(p *policy.Policy) { applyPolicy(p.Settings, preventer, notifier, guard) })
+	go polStore.SyncLoop(flowCtx, c)
 
 	// On-access YARA scanning of risky directories with the server's rules
 	yaraScanner := yarascan.New(yarascan.Options{
@@ -399,6 +413,10 @@ func run(configPath string, stop <-chan struct{}) {
 		MaxFileSize: cfg.Yara.MaxFileSizeMB << 20,
 		Push:        push,
 		OnHash:      malFiles.Check,
+		Skip: func(path string) bool {
+			s := polStore.Current().Settings
+			return !s.YaraOnAccess || s.Excluded(policy.ScopeYara, policy.Match{Path: path, Image: path})
+		},
 	})
 	go yaraScanner.SyncLoop(flowCtx, c)
 	if !cfg.Yara.Disabled {
@@ -416,6 +434,7 @@ func run(configPath string, stop <-chan struct{}) {
 			fimWatcher.UpdatePaths(resp.FimPaths)
 			yaraScanner.Want(resp.YaraRulesHash)
 			malStore.Want(resp.MalwareHashesVersion)
+			polStore.Want(resp.PolicyVersion)
 			fwEngine.RefreshGuard(cfg.Server.URL)
 
 			if len(resp.Firewall) > 0 || fwEngine.BlockedEntries() > 0 {
@@ -712,6 +731,23 @@ func mustHostname() string {
 
 // windowsProcessFeed hands the ETW sensor's process starts to execution
 // prevention; nil when prevention is off.
+// applyPolicy hands the group policy to the protections running here (nil
+// ones did not start: their local config turned them off, which stays).
+func applyPolicy(s policy.Settings, pm *prevent.Manager, n *notify.Notifier, g *ransomguard.Guard) {
+	if pm != nil {
+		pm.SetGate(!s.PreventionEnabled, append(s.For(policy.ScopePrevention), s.For(policy.ScopeMalware)...))
+	}
+	n.SetEnabled(s.NotifyUser)
+	if g != nil {
+		g.SetRuntime(ransomguard.Runtime{
+			Off: s.RansomwareMode == "off", Kill: s.RansomwareMode != "report", Isolate: s.RansomwareIsolate,
+			Excluded: func(image string) bool {
+				return s.Excluded(policy.ScopeRansomware, policy.Match{Image: image})
+			},
+		})
+	}
+}
+
 func windowsProcessFeed(pm *prevent.Manager) func(winsensor.ProcessStart) {
 	if pm == nil {
 		return nil

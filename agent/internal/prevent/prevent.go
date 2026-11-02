@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/siem-platform/agent/internal/malhash"
+	"github.com/siem-platform/agent/internal/policy"
 )
 
 // LogType of decision lines on Linux (decoders/linux_exec_prevention.yaml);
@@ -110,8 +111,11 @@ type Manager struct {
 	// known-malware set (internal/malhash) every policy also checks
 	malware     *malhash.Set
 	malwareFile string
-	last        map[string]time.Time // decision dedupe
-	lastMu      sync.Mutex
+	// group policy (internal/policy): prevention off, exclusions
+	off        bool
+	exclusions []policy.Exclusion
+	last       map[string]time.Time // decision dedupe
+	lastMu     sync.Mutex
 }
 
 // Start starts the platform engines; it fails where there are none.
@@ -163,8 +167,9 @@ func (m *Manager) Apply(hash string, rules []Rule) {
 	m.mu.Lock()
 	p = p.withMalware(m.malware, m.malwareFile)
 	m.hash, m.policy = hash, p
+	enforced := m.gated(p)
 	m.mu.Unlock()
-	m.eng.apply(p)
+	m.eng.apply(enforced)
 	blocking := 0
 	for _, c := range p.Rules {
 		if c.block {
@@ -186,9 +191,38 @@ func (m *Manager) SetKnownMalware(set *malhash.Set, file string) {
 	}
 	p = p.withMalware(set, file)
 	m.policy = p
+	enforced := m.gated(p)
 	m.mu.Unlock()
-	m.eng.apply(p)
+	m.eng.apply(enforced)
 	slog.Info("prevent: known-malware hashes applied", "hashes", set.Len(), "action", set.Action)
+}
+
+// SetGate applies the group policy: off stops enforcing and reporting
+// every rule and the known-malware check; exclusions (prevention and
+// malware scopes) are honoured by what is decided in user space.
+func (m *Manager) SetGate(off bool, exclusions []policy.Exclusion) {
+	m.mu.Lock()
+	m.off, m.exclusions = off, exclusions
+	p := m.policy
+	if p == nil {
+		p, _ = Compile(nil)
+		p = p.withMalware(m.malware, m.malwareFile)
+		m.policy = p
+	}
+	enforced := m.gated(p)
+	m.mu.Unlock()
+	m.eng.apply(enforced)
+	slog.Info("prevent: group policy applied", "off", off, "exclusions", len(exclusions))
+}
+
+// gated is what the engines enforce: nothing while the group policy turns
+// prevention off (so the BPF LSM rules are emptied too), else p with the
+// policy's exclusions. m.mu held.
+func (m *Manager) gated(p *Policy) *Policy {
+	if m.off {
+		return (&Policy{hashes: map[string]*compiled{}, paths: map[string]*compiled{}}).withGate(true, nil)
+	}
+	return p.withGate(false, m.exclusions)
 }
 
 // report pushes a decision line; the same rule, image and parent are
@@ -257,7 +291,10 @@ func (m *Manager) Run(ctx context.Context, c Poster) {
 			slog.Warn("prevent: could not fetch rules, will retry", "err", err)
 		} else {
 			m.mu.Lock()
-			p := m.policy
+			var p *Policy
+			if m.policy != nil {
+				p = m.gated(m.policy)
+			}
 			m.mu.Unlock()
 			if p != nil {
 				m.eng.apply(p)

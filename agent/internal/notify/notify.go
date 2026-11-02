@@ -31,6 +31,17 @@ type Notifier struct {
 	mu     sync.Mutex
 	recent map[string]time.Time
 	window []time.Time
+	off    bool // the group policy turned pop-ups off
+}
+
+// SetEnabled follows the group policy (notify_user).
+func (n *Notifier) SetEnabled(on bool) {
+	if n == nil {
+		return
+	}
+	n.mu.Lock()
+	n.off = !on
+	n.mu.Unlock()
 }
 
 // New returns the platform's notifier (nil where there is none).
@@ -60,6 +71,9 @@ func (n *Notifier) Observe(logType, line string) {
 func (n *Notifier) allow(msg string) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	if n.off {
+		return false
+	}
 	now := n.now()
 	if t, ok := n.recent[msg]; ok && now.Sub(t) < repeatEvery {
 		return false

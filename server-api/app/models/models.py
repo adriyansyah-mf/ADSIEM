@@ -103,6 +103,16 @@ class AgentUpdatePolicy(Base):
     created_at     = Column(DateTime(timezone=True), default=now_utc)
     updated_at     = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
+class AgentPolicy(Base):
+    """A group's protection policy and exclusions (services/agent_policy.py
+    validates `settings`); agents fetch their group's, or "default"'s."""
+    __tablename__ = "agent_policies"
+    group_id   = Column(String(100), primary_key=True)
+    settings   = Column(JSONB, nullable=False, default=dict)
+    revision   = Column(Integer, nullable=False, default=1)
+    updated_by = Column(String(255))
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
 class AgentLogSource(Base):
     __tablename__ = "agent_log_sources"
     id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

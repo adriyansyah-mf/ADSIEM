@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/siem-platform/agent/internal/malhash"
+	"github.com/siem-platform/agent/internal/policy"
 )
 
 // Rule types and actions as the server sends them.
@@ -72,6 +73,9 @@ type Policy struct {
 	// hashes, which a known-malware match never blocks
 	malware     *malhash.Set
 	malwareFile string
+	// group policy: off stops everything; exclusions (prevention / malware scope)
+	off         bool
+	exclusions  []policy.Exclusion
 	guardHashes map[string]string
 }
 
@@ -86,7 +90,17 @@ func (p *Policy) withMalware(set *malhash.Set, file string) *Policy {
 func (p *Policy) checksMalware() bool { return p.malware.Active() }
 
 // active reports whether there is anything to decide.
-func (p *Policy) active() bool { return len(p.Rules) > 0 || p.checksMalware() }
+func (p *Policy) active() bool { return !p.off && (len(p.Rules) > 0 || p.checksMalware()) }
+
+// withGate returns a copy of p switched off (the group policy turned
+// prevention off) or with the exclusions of the prevention and malware
+// scopes (only rules decided in user space honour them: hash rules,
+// known-malware, and everything where fanotify decides).
+func (p *Policy) withGate(off bool, exclusions []policy.Exclusion) *Policy {
+	q := *p
+	q.off, q.exclusions = off, exclusions
+	return &q
+}
 
 // malwareRule is what a known-malware match reports: index -1, blocking
 // when the server says block and the file is not one the guard protects.
@@ -290,6 +304,34 @@ type Exec struct {
 // parent, then hash (the only one that reads the file). kernelDecides
 // leaves out the rule types the BPF LSM engine already enforces.
 func (p *Policy) Match(e Exec, kernelDecides bool) *compiled {
+	if p.off {
+		return nil
+	}
+	var sum string
+	if h := e.Hash; h != nil {
+		e.Hash = func() (string, bool) {
+			v, ok := h()
+			if ok {
+				sum = v
+			}
+			return v, ok
+		}
+	}
+	c := p.match(e, kernelDecides)
+	if c == nil || len(p.exclusions) == 0 {
+		return c
+	}
+	scope := policy.ScopePrevention
+	if c.RuleType == TypeKnownMalware {
+		scope = policy.ScopeMalware
+	}
+	if (policy.Settings{Exclusions: p.exclusions}).Excluded(scope, policy.Match{Image: e.Path, Path: e.Path, SHA256: sum}) {
+		return nil
+	}
+	return c
+}
+
+func (p *Policy) match(e Exec, kernelDecides bool) *compiled {
 	e.Path, e.Parent = fold(e.Path), fold(e.Parent)
 	if !kernelDecides {
 		if c := p.paths[e.Path]; c != nil {

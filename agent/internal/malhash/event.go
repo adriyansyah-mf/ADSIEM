@@ -66,6 +66,9 @@ type FileChecker struct {
 	Store      *Store
 	Push       func(logType, line string)
 	Quarantine func(path string) error
+	// Excluded, when set, leaves out files the group policy excludes
+	// (malware scope).
+	Excluded func(path, sha string) bool
 
 	mu   sync.Mutex
 	last map[string]time.Time
@@ -78,7 +81,7 @@ func (f *FileChecker) Check(path, sha string, size int64) {
 		return
 	}
 	label, ok := set.Lookup(sha)
-	if !ok {
+	if !ok || (f.Excluded != nil && f.Excluded(path, sha)) {
 		return
 	}
 	if !f.first(path + "|" + sha) {
