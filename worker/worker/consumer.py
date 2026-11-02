@@ -18,6 +18,7 @@ from worker.alert_manager import create_alert
 from worker.ueba.scorer import score_event as ueba_score_event
 from worker.es_client import index_log
 from worker import evidence_inbox
+from worker.policy_exclusions import excluded as excluded_by_policy
 from worker.malware_feed import learn_from_event
 
 log = structlog.get_logger()
@@ -130,6 +131,13 @@ async def process_message(
     flat_event = {**decoded, "group_id": group_id, "hostname": hostname, "raw_message": raw_message,
                   "log_type": log_type}
     rule_matches = await sig_engine.evaluate(flat_event)
+    if rule_matches:
+        # the group policy's alert exclusions (a known-good program, folder, hash or command line)
+        skip = await excluded_by_policy(flat_event, group_id)
+        if skip is not None:
+            log.info("alert_excluded_by_policy", group_id=group_id, kind=skip.get("kind"),
+                     value=skip.get("value"), rules=[m["title"] for m in rule_matches])
+            rule_matches = []
     for match in rule_matches:
         sigma_matches.labels(rule_id=match["id"]).inc()
         alerts_total.labels(severity=match["level"], rule_id=match["id"]).inc()

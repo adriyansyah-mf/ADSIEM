@@ -56,6 +56,10 @@ type Options struct {
 	// (the known-malware check, internal/malhash); files are then read even
 	// with no YARA rules loaded.
 	OnHash func(path, sha256 string, size int64)
+	// Skip, when set and true for a file, leaves the YARA scan out (the
+	// group policy turned on-access YARA off, or excludes the path); the
+	// file still goes to OnHash.
+	Skip func(path string) bool
 }
 
 // Scanner owns the rule set and the on-access watcher.
@@ -309,7 +313,7 @@ func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.Ru
 	if s.opts.OnHash != nil {
 		s.opts.OnHash(path, digest, int64(len(data)))
 	}
-	if !haveRules {
+	if !haveRules || (s.opts.Skip != nil && s.opts.Skip(path)) {
 		return nil, nil
 	}
 	sctx, cancel := context.WithTimeout(ctx, scanTimeout)

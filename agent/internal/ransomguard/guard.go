@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/siem-platform/agent/internal/linsensor"
@@ -34,11 +35,23 @@ type Options struct {
 	// heuristic. Isolate, when set, also cuts the host off the network.
 	Kill    bool
 	Isolate func() error
+	// IsolateFunc cuts the host off when the group policy asks for it
+	// (Runtime.Isolate) though the local config does not.
+	IsolateFunc func() error
+}
+
+// Runtime is what the group policy sets while the agent runs (internal/policy).
+type Runtime struct {
+	Off      bool // no reaction: canaries stay, nothing is reported or stopped
+	Kill     bool // with the local Kill (report_only there wins)
+	Isolate  bool // or the local isolate
+	Excluded func(image string) bool
 }
 
 type Guard struct {
 	opts Options
 	can  *canaries
+	rt   atomic.Pointer[Runtime]
 
 	mu  sync.Mutex
 	det *detector
@@ -47,12 +60,14 @@ type Guard struct {
 }
 
 func New(opts Options) *Guard {
-	return &Guard{
+	g := &Guard{
 		opts:     opts,
 		can:      newCanaries(opts.CanaryDirs, opts.CanaryNames, opts.CanaryVisible),
 		det:      newDetector(opts.AllowImages),
 		response: killTree,
 	}
+	g.rt.Store(&Runtime{Kill: true})
+	return g
 }
 
 // Run plants the canaries and re-checks them until ctx ends. The check
@@ -82,6 +97,10 @@ func (g *Guard) Run(ctx context.Context) {
 // sensor, adapted). It must stay cheap: entropy checks and responses run on
 // their own goroutine.
 func (g *Guard) Observe(ev linsensor.FileEvent) {
+	rt := g.rt.Load()
+	if rt.Off {
+		return
+	}
 	for _, name := range []string{ev.Path, ev.From} {
 		if name == "" {
 			continue
@@ -98,6 +117,9 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 			}()
 			return
 		}
+	}
+	if rt.Excluded != nil && rt.Excluded(ev.Image) {
+		return // e.g. a backup tool the policy excludes: no heuristics
 	}
 	g.mu.Lock()
 	f := g.det.observe(ev)
@@ -136,9 +158,14 @@ type detection struct {
 var protectedImages = map[string]bool{"systemd": true, "init": true, "sshd": true, "siem-agent": true,
 	"siem-agent.exe": true}
 
+// SetRuntime applies the group policy.
+func (g *Guard) SetRuntime(r Runtime) { g.rt.Store(&r) }
+
 func (g *Guard) act(d detection) {
 	d.response = "none"
-	if g.opts.Kill && d.confirmed && d.pid != 0 {
+	rt := g.rt.Load()
+	excluded := rt.Excluded != nil && rt.Excluded(d.image)
+	if g.opts.Kill && rt.Kill && !excluded && d.confirmed && d.pid != 0 {
 		switch {
 		case g.response == nil:
 			d.response = "unsupported"
@@ -152,8 +179,12 @@ func (g *Guard) act(d detection) {
 				d.response, d.err = "kill_failed", err.Error()
 			}
 		}
-		if g.opts.Isolate != nil {
-			if err := g.opts.Isolate(); err != nil {
+		isolate := g.opts.Isolate
+		if isolate == nil && rt.Isolate {
+			isolate = g.opts.IsolateFunc
+		}
+		if isolate != nil {
+			if err := isolate(); err != nil {
 				d.err = strings.TrimSpace(d.err + " isolate: " + err.Error())
 			} else {
 				d.isolated = true

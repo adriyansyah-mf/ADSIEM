@@ -35,6 +35,7 @@ import LiveResponsePage from '@/pages/LiveResponsePage'
 import YaraPage from '@/pages/YaraPage'
 import PreventionPage from '@/pages/PreventionPage'
 import MalwareHashesPage from '@/pages/MalwareHashesPage'
+import PoliciesPage from '@/pages/PoliciesPage'
 import AuditLogsPage from '@/pages/AuditLogsPage'
 import SoarPage from '@/pages/SoarPage'
 import SoarEditorPage from '@/pages/SoarEditorPage'
@@ -85,6 +86,7 @@ export default function App() {
             <Route path="/yara" element={<YaraPage />} />
             <Route path="/prevention" element={<PreventionPage />} />
             <Route path="/malware-hashes" element={<MalwareHashesPage />} />
+            <Route path="/policies" element={<PoliciesPage />} />
             <Route path="/agent-updates" element={<AgentUpdatesPage />} />
             <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />
             <Route path="/soar/:id" element={<ProtectedRoute minRole="analyst"><SoarEditorPage /></ProtectedRoute>} />

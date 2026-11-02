@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/siem-platform/agent/internal/malhash"
+	"github.com/siem-platform/agent/internal/policy"
 )
 
 // The fanotify engine runs in a helper process (the agent binary started
@@ -43,6 +44,9 @@ type helperPolicy struct {
 	// version changes; empty when execs are not checked against it
 	MalwareFile    string `json:"malware_file,omitempty"`
 	MalwareVersion string `json:"malware_version,omitempty"`
+	// the group policy: everything off, or these exclusions honoured
+	Off        bool               `json:"off,omitempty"`
+	Exclusions []policy.Exclusion `json:"exclusions,omitempty"`
 }
 
 // helperDecision is a decision, or with Applied set the acknowledgement
@@ -116,6 +120,7 @@ func RunHelper() int {
 		if malware != nil {
 			p = p.withMalware(malware, msg.MalwareFile)
 		}
+		p = p.withGate(msg.Off, msg.Exclusions)
 		eng.setPolicy(p, msg.KernelDecides)
 		write(helperDecision{Applied: len(p.Rules) + 1})
 	}
@@ -215,7 +220,7 @@ func (c *fanClient) setPolicy(p *Policy, kernelDecides bool) {
 		}
 		rules = append(rules, rr)
 	}
-	msg := helperPolicy{Rules: rules, KernelDecides: kernelDecides}
+	msg := helperPolicy{Rules: rules, KernelDecides: kernelDecides, Off: p.off, Exclusions: p.exclusions}
 	if p.checksMalware() && p.malwareFile != "" {
 		msg.MalwareFile = p.malwareFile
 		msg.MalwareVersion = fmt.Sprintf("%s|%s|%d|%d", p.malware.Version, p.malware.Action, p.malware.Seq, p.malware.Len())
