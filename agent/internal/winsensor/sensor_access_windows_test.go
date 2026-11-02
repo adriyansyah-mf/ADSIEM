@@ -96,8 +96,9 @@ func TestSensorReportsAccessThreadAndRegistry(t *testing.T) {
 
 	pid := strconv.Itoa(target.Process.Pid)
 	want := map[string][]string{
-		"access":   {`EventID=10 `, `TargetProcessId="` + pid + `"`, `\ping.exe"`, `GrantedAccess="0x`},
-		"thread":   {`EventID=8 `, `TargetProcessId="` + pid + `"`, `\ping.exe"`},
+		// the helper's own open and thread, not csrss's (left out) or anyone else's
+		"access":   {`EventID=10 `, `winsensor.test`, `TargetProcessId="` + pid + `"`, `\ping.exe"`, `GrantedAccess="0x`},
+		"thread":   {`EventID=8 `, `winsensor.test`, `TargetProcessId="` + pid + `"`, `\ping.exe"`},
 		"registry": {`EventID=13 `, `EventType="SetValue"`, `\CurrentVersion\Run\` + marker + `"`, `Details="C:\Users\Public\` + marker + `.exe"`},
 	}
 	got := map[string]string{}
@@ -133,6 +134,11 @@ func TestSensorReportsAccessThreadAndRegistry(t *testing.T) {
 			t.Errorf("no %s line; related lines seen:\n%s", name, strings.Join(seen, "\n"))
 		} else {
 			t.Logf("%s: %s", name, got[name])
+		}
+	}
+	for _, l := range seen {
+		if strings.Contains(strings.ToLower(l), `\csrss.exe"`) && strings.HasPrefix(l, "EventID=10 ") {
+			t.Errorf("csrss opening a new process is not reported: %s", l)
 		}
 	}
 	if d := s.Dropped(); d > 0 {

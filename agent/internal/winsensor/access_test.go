@@ -25,6 +25,7 @@ func accessSetup() (*processJoiner, *accessTracker) {
 	j.remember(&process{pid: 700, image: `C:\Windows\System32\lsass.exe`, user: `NT AUTHORITY\SYSTEM`})
 	j.remember(&process{pid: 6788, image: `C:\Users\alice\AppData\Local\Temp\dump.exe`, user: `WIN01\alice`})
 	j.remember(&process{pid: 4100, image: `C:\Windows\explorer.exe`, user: `WIN01\alice`})
+	j.remember(&process{pid: 600, image: `C:\Windows\System32\csrss.exe`, user: `NT AUTHORITY\SYSTEM`})
 	return j, newAccessTracker(j, 999)
 }
 
@@ -62,6 +63,7 @@ func TestOnlyInjectionRightsOrLsassAreReported(t *testing.T) {
 		{openProc(4, "700", "0x1010", "0"), false},             // System
 		{openProc(999, "700", "0x1010", "0"), false},           // the agent itself
 		{openProc(6788, "6788", "0x1FFFFF", "0"), false},       // itself
+		{openProc(600, "4100", "0x1FFFFF", "0"), false},        // csrss opens every new process
 	}
 	for i, c := range cases {
 		got := a.openProcess(c.ev, now)

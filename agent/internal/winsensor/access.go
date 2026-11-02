@@ -42,6 +42,8 @@ const (
 	accessVMWrite      = 0x0020
 )
 
+const csrssPath = `C:\Windows\System32\csrss.exe`
+
 // accessRepeat: the same source, target and access is reported once per
 // window (system processes open others all the time).
 const accessRepeat = 10 * time.Minute
@@ -95,6 +97,11 @@ func (a *accessTracker) openProcess(ev *etw.Event, now time.Time) string {
 		return ""
 	}
 	srcImage, srcUser := a.j.owner(src)
+	// csrss opens every new process with full access (measured on the
+	// Windows runner): one line per program started, never an attack.
+	if strings.EqualFold(srcImage, csrssPath) {
+		return ""
+	}
 	granted := fmt.Sprintf("0x%X", access)
 	if !a.first("a|"+srcImage+"|"+targetImage+"|"+granted, now) {
 		return ""
