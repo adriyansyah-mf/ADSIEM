@@ -22,6 +22,18 @@ Decoders: `decoders/linux_{file_event,kernel_module,ptrace,privilege_change,memf
 
 Shipped rules: Fileless Process Execution (critical), Process Injection Via Ptrace (high, debuggers excluded), Unexpected Privilege Change To Root (high, setuid tools excluded), Kernel Module Loaded (medium), Kernel Module Loaded From Memory (high), LD Preload Hijack File Written (high), SSH Authorized Keys Modified (medium).
 
+## Credential access, memory injection and persistence (agent 1.13, the Linux side of the Windows sensor's process access and registry watcher)
+
+| Line | Source | Means |
+|---|---|---|
+| `linux_process_access action=vm_read / vm_write` | `process_vm_readv` / `process_vm_writev` that succeeded | a program read or wrote another process's memory (own memory left out) |
+| `linux_process_access action=mem_read / mem_write` | open of `/proc/<pid>/mem` (read-only opens of it are passed by the kernel program; `/proc/self/mem` is not) | the same through procfs; writes there used to be dropped with the rest of `/proc` |
+| `linux_file_event action=read TargetFilename=/etc/shadow` | read-only open of `/etc/shadow` or `/etc/gshadow` (the only read-only opens the kernel program passes besides `/proc/<pid>/mem`) | password hashes read |
+
+The same reader, target and action (or reader and file) is sent once per 10 minutes. `disabled_events: [access]` turns all three off. Persistence needs no new telemetry: every write to cron, systemd, boot scripts, shell profiles, sudoers / PAM, udev / autostart / MOTD and account files is already a `linux_file_event`; the rules below look at them.
+
+Rules: credential process memory read (sshd, sudo, su, login, keyrings, ssh-agent; critical), memory written into another process (high), `/etc/shadow` read by a program outside login / sudo / account tools (high), cron / systemd unit / user unit / timer, boot scripts, shell startup files by a non-editor, sudoers / PAM files and modules, autostart / udev / update-motd.d, account files outside account tools (package managers left out everywhere), LibreOffice starting a shell, downloads into `/tmp` / `/var/tmp` / `/dev/shm` (curl, wget, Python / Perl one-liners), `chmod +x` there or a program started from there. Memory access and ptrace also appear in the alert's Process tree.
+
 ## Tamper checks
 
 Root can blind an eBPF sensor without stopping the agent, so the agent's heartbeat, stop and integrity alerts would not fire. `internal/linsensor/health.go` checks the sensor itself and reports `linux_sensor_health` lines (`decoders/linux_sensor_health.yaml`):
@@ -40,7 +52,7 @@ Integrity: the heartbeat's binary and config hashes report `unreadable` once a f
 ```yaml
 linux_sensor:
   disabled: false
-  disabled_events: []   # any of: file, module, ptrace, privilege, memfd, exit
+  disabled_events: []   # any of: file, module, ptrace, privilege, memfd, exit, access
 ```
 
 Fileless exec cannot be switched off. The sensor never reports the agent's own process; it learns its kernel-side pid with a `prctl` handshake at start, which also works when the agent runs in a container. In a container the agent still needs the host pid namespace (`--pid=host`) for the `/proc` lookups of processes that started before it.

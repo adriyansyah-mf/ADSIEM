@@ -44,6 +44,7 @@ char LICENSE[] SEC("license") = "GPL";
 #define K_EXEC          11
 #define K_FILELESS_EXEC 12
 #define K_EXIT          13
+#define K_VM_ACCESS     14
 
 // Which set*id call a K_SETID record came from (arg0).
 #define ID_SETUID    1
@@ -349,11 +350,42 @@ static __always_inline int take(__u32 kind, long ret, struct pending *out)
 
 // ─── file writes ─────────────────────────────────────────────────────
 
+// sensitive_read: a read-only open the sensor reports anyway: the password
+// hashes (/etc/shadow, /etc/gshadow) and another process's memory
+// (/proc/<pid>/mem): credential theft, the Linux side of reading lsass.
+// Fixed indexes only, so the verifier sees every access bounded.
+static __always_inline int sensitive_read(const char *name)
+{
+	char b[20] = {};
+	long n = bpf_probe_read_user_str(b, sizeof(b), name);
+	if (n <= 0)
+		return 0;
+	if (b[0] == '/' && b[1] == 'e' && b[2] == 't' && b[3] == 'c' && b[4] == '/') {
+		if (n == 12 && b[5] == 's' && b[6] == 'h' && b[7] == 'a' && b[8] == 'd' && b[9] == 'o' && b[10] == 'w')
+			return 1;
+		if (n == 13 && b[5] == 'g' && b[6] == 's' && b[7] == 'h' && b[8] == 'a' && b[9] == 'd' &&
+		    b[10] == 'o' && b[11] == 'w')
+			return 1;
+		return 0;
+	}
+	if (!(b[0] == '/' && b[1] == 'p' && b[2] == 'r' && b[3] == 'o' && b[4] == 'c' && b[5] == '/'))
+		return 0;
+	if (b[6] < '0' || b[6] > '9') // /proc/self/mem is the caller's own
+		return 0;
+	// "/proc/<pid>/mem": the NUL is at index n-1 (between 11 and 19)
+#pragma unroll
+	for (int i = 11; i < 20; i++) {
+		if (i == n - 1)
+			return b[i - 4] == '/' && b[i - 3] == 'm' && b[i - 2] == 'e' && b[i - 1] == 'm';
+	}
+	return 0;
+}
+
 static __always_inline void open_enter(long dfd, const char *name, long flags)
 {
 	if (skip_self())
 		return;
-	if (!(flags & (O_WRONLY_ | O_RDWR_ | O_CREAT_ | O_TRUNC_)))
+	if (!(flags & (O_WRONLY_ | O_RDWR_ | O_CREAT_ | O_TRUNC_)) && !sensitive_read(name))
 		return;
 	stash(K_OPEN, dfd, (__u64)name, flags, 0);
 }
@@ -616,6 +648,46 @@ int exit_ptrace(struct trace_event_raw_sys_exit *ctx)
 	return 0;
 }
 
+// ─── another process's memory: process_vm_readv / writev ─────────────
+
+static __always_inline int enter_vm_access(const unsigned long *args, __u64 write)
+{
+	if (skip_self())
+		return 0;
+	__u32 target = (__u32)args[0];
+	if (target == (__u32)(bpf_get_current_pid_tgid() >> 32))
+		return 0; // its own memory
+	stash(K_VM_ACCESS, target, write, 0, 0);
+	return 0;
+}
+
+static __always_inline int exit_vm_access(long ret)
+{
+	struct pending p;
+	if (!take(K_VM_ACCESS, ret, &p))
+		return 0;
+	struct sensor_event *ev = reserve(K_VM_ACCESS);
+	if (!ev)
+		return 0;
+	ev->arg0 = p.a[0]; // target pid
+	ev->arg1 = p.a[1]; // 1: write
+	ev->ret = ret;     // bytes
+	bpf_ringbuf_submit(ev, 0);
+	return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_process_vm_readv")
+int exit_process_vm_readv(struct trace_event_raw_sys_exit *ctx)
+{
+	return exit_vm_access(ctx->ret);
+}
+
+SEC("tracepoint/syscalls/sys_exit_process_vm_writev")
+int exit_process_vm_writev(struct trace_event_raw_sys_exit *ctx)
+{
+	return exit_vm_access(ctx->ret);
+}
+
 // ─── privilege gain ──────────────────────────────────────────────────
 
 // setid_enter stashes a set*id call that sets some id to 0 (root) while
@@ -838,6 +910,8 @@ struct pt_regs___siem {
 #define NR_setresgid      149
 #define NR_capset         91
 #define NR_memfd_create   279
+#define NR_process_vm_readv  270
+#define NR_process_vm_writev 271
 #else
 #define NR_openat        257
 #define NR_unlinkat      263
@@ -861,6 +935,8 @@ struct pt_regs___siem {
 #define NR_setresgid      119
 #define NR_capset         126
 #define NR_memfd_create   319
+#define NR_process_vm_readv  310
+#define NR_process_vm_writev 311
 #endif
 
 SEC("raw_tracepoint/sys_enter")
@@ -890,6 +966,8 @@ int raw_sys_enter(struct bpf_raw_tracepoint_args *ctx)
 	case NR_setresgid:
 	case NR_capset:
 	case NR_memfd_create:
+	case NR_process_vm_readv:
+	case NR_process_vm_writev:
 		break;
 	default:
 		return 0;
@@ -977,6 +1055,12 @@ int raw_sys_enter(struct bpf_raw_tracepoint_args *ctx)
 		break;
 	case NR_memfd_create:
 		enter_memfd_create(a);
+		break;
+	case NR_process_vm_readv:
+		enter_vm_access(a, 0);
+		break;
+	case NR_process_vm_writev:
+		enter_vm_access(a, 1);
 		break;
 	}
 	return 0;

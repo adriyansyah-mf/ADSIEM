@@ -29,6 +29,7 @@ const (
 	kindExec         = 11
 	kindFilelessExec = 12
 	kindExit         = 13
+	kindVMAccess     = 14
 )
 
 // Log types, one decoder each in decoders/.
@@ -40,6 +41,10 @@ const (
 	LogMemfd     = "linux_memfd_create"
 	LogFileless  = "linux_fileless_exec"
 	LogExit      = "linux_process_exit"
+	// LogProcessAccess: another process's memory read or written
+	// (process_vm_readv / writev, /proc/<pid>/mem), the Linux side of
+	// Windows process access (Sysmon 10).
+	LogProcessAccess = "linux_process_access"
 	// LogHealth is the sensor's own tamper checks (health.go).
 	LogHealth = "linux_sensor_health"
 )
@@ -178,6 +183,15 @@ func ptraceLine(ev rawEvent, image, targetImage string) string {
 		req = fmt.Sprint(ev.arg0)
 	}
 	fmt.Fprintf(&sb, `action=%s TargetPID=%d TargetImage=%s`, req, ev.arg1, kv(targetImage))
+	identity(&sb, ev, image)
+	return sb.String()
+}
+
+// accessLine: action vm_read / vm_write (process_vm_readv / writev) or
+// mem_read / mem_write (/proc/<pid>/mem).
+func accessLine(ev rawEvent, action string, target uint64, image, targetImage string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `action=%s TargetPID=%d TargetImage=%s`, action, target, kv(targetImage))
 	identity(&sb, ev, image)
 	return sb.String()
 }

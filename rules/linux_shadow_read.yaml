@@ -1,0 +1,57 @@
+title: Password Hash File Read By Unusual Program
+id: rule-linux-shadow-read
+description: >-
+  /etc/shadow or /etc/gshadow (the password hashes) was opened for reading by
+  a program that is not part of login, sudo or account management: hashes
+  copied for offline cracking (T1003.008). Image read it.
+logsource:
+  product: linux
+  service: file_event
+detection:
+  read:
+    file.action: read
+    TargetFilename:
+      - /etc/shadow
+      - /etc/gshadow
+  auth:
+    Image|endswith:
+      - /unix_chkpwd
+      - /unix_update
+      - /sshd
+      - /sshd-session
+      - /login
+      - /su
+      - /sudo
+      - /passwd
+      - /chpasswd
+      - /chage
+      - /useradd
+      - /usermod
+      - /userdel
+      - /groupadd
+      - /groupmod
+      - /groupdel
+      - /gpasswd
+      - /newusers
+      - /pwck
+      - /grpck
+      - /pwconv
+      - /grpconv
+      - /vipw
+      - /systemd-sysusers
+      - /systemd-homed
+      - /accounts-daemon
+      - /polkit-agent-helper-1
+      - /gdm-session-worker
+      - /lightdm
+      - /sssd
+      - /nscd
+      - /cron
+      - /crond
+      - /dpkg
+      - /rpm
+  condition: read and not auth
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1003.008

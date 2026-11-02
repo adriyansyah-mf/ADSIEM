@@ -1,0 +1,27 @@
+title: Process Memory Written By Another Process On Linux
+id: rule-linux-process-access-write
+description: >-
+  A program wrote into another process's memory with process_vm_writev or
+  through /proc/<pid>/mem: code injection without ptrace, the Linux side of
+  Windows injection rights (T1055.009). Debuggers are left out.
+logsource:
+  product: linux
+  service: process_access
+detection:
+  write:
+    access.action:
+      - vm_write
+      - mem_write
+  debugger:
+    Image|endswith:
+      - /gdb
+      - /lldb
+      - /valgrind
+      - /criu
+      - /rr
+  condition: write and not debugger
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.privilege_escalation
+  - attack.t1055.009

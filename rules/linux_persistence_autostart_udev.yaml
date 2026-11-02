@@ -1,0 +1,40 @@
+title: Autostart, Udev Or MOTD Script Written On Linux
+id: rule-linux-persistence-autostart-udev
+description: >-
+  A desktop autostart entry, a udev rule or an update-motd.d script was
+  created or changed outside a package manager: each runs a command on its
+  own (at login, when a device appears, at every SSH login) (T1547.013,
+  T1546).
+logsource:
+  product: linux
+  category: file_event
+detection:
+  dirs:
+    TargetFilename|startswith:
+      - /etc/udev/rules.d/
+      - /lib/udev/rules.d/
+      - /usr/lib/udev/rules.d/
+      - /etc/xdg/autostart/
+      - /etc/update-motd.d/
+  user_autostart:
+    TargetFilename|contains: /.config/autostart/
+  package:
+    Image|endswith:
+      - /dpkg
+      - /apt
+      - /apt-get
+      - /rpm
+      - /yum
+      - /dnf
+      - /zypper
+      - /pacman
+      - /apk
+      - /microdnf
+      - /snapd
+      - /packagekitd
+  condition: (dirs or user_autostart) and not package
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1547.013
+  - attack.t1546

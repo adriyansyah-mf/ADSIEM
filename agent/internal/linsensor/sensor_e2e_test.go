@@ -79,8 +79,55 @@ func helper(what string) int {
 		return 0
 	case "exit7":
 		return 7
+	case "memaccess":
+		return memAccessHelper()
 	}
 	return 1
+}
+
+// memAccessHelper reads a sleeping child's memory with process_vm_readv,
+// writes the same bytes back with process_vm_writev, opens its
+// /proc/<pid>/mem and reads /etc/shadow: what a credential dumper does.
+func memAccessHelper() int {
+	target := exec.Command("sleep", "5")
+	if err := target.Start(); err != nil {
+		return 2
+	}
+	defer target.Process.Kill()
+	time.Sleep(200 * time.Millisecond) // exec done: /proc shows sleep
+	pid := target.Process.Pid
+	maps, err := os.ReadFile(fmt.Sprintf("/proc/%d/maps", pid))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	var start uint64
+	fmt.Sscanf(strings.SplitN(string(maps), "-", 2)[0], "%x", &start)
+	buf := make([]byte, 16)
+	local := []unix.Iovec{{Base: &buf[0], Len: uint64(len(buf))}}
+	remote := []unix.RemoteIovec{{Base: uintptr(start), Len: len(buf)}}
+	if _, err := unix.ProcessVMReadv(pid, local, remote, 0); err != nil {
+		fmt.Fprintln(os.Stderr, "process_vm_readv:", err)
+		return 2
+	}
+	if _, err := unix.ProcessVMWritev(pid, local, remote, 0); err != nil {
+		// the first mapping may be read-only: the attempt failed, nothing to report
+		fmt.Fprintln(os.Stderr, "process_vm_writev (not required):", err)
+	}
+	if f, err := os.Open(fmt.Sprintf("/proc/%d/mem", pid)); err == nil {
+		f.Close()
+	} else {
+		fmt.Fprintln(os.Stderr, "open mem:", err)
+		return 2
+	}
+	if f, err := os.Open("/etc/shadow"); err == nil {
+		f.Close()
+	} else {
+		fmt.Fprintln(os.Stderr, "open shadow:", err)
+		return 2
+	}
+	time.Sleep(time.Second) // the agent reads the target's image from /proc
+	return 0
 }
 
 type collected struct {
@@ -213,6 +260,14 @@ func TestSensorEndToEnd(t *testing.T) {
 		t.Fatalf("setuid helper: %v", err)
 	}
 	c.wait(t, LogPrivilege, "action=setuid", `IDs="0"`, "User=1000", "EUID=0")
+
+	mem := runHelper(t, "memaccess")
+	if err := mem.Run(); err != nil {
+		t.Fatalf("memaccess helper: %v", err)
+	}
+	c.wait(t, LogProcessAccess, "action=vm_read", `TargetImage="/usr/bin/sleep"`)
+	c.wait(t, LogProcessAccess, "action=mem_read", `TargetImage="/usr/bin/sleep"`)
+	c.wait(t, LogFile, "action=read", `TargetFilename="/etc/shadow"`)
 
 	cmd := runHelper(t, "exit7")
 	cmd.Run()

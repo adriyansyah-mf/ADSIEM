@@ -1,0 +1,42 @@
+title: Boot Script Written On Linux
+id: rule-linux-persistence-boot-scripts
+description: >-
+  /etc/rc.local or an init.d / rc?.d script was created or changed by
+  something other than a package manager: it runs as root at every boot
+  (T1037.004).
+logsource:
+  product: linux
+  category: file_event
+detection:
+  boot:
+    TargetFilename|startswith:
+      - /etc/rc.local
+      - /etc/init.d/
+      - /etc/rc.d/
+      - /etc/rc0.d/
+      - /etc/rc1.d/
+      - /etc/rc2.d/
+      - /etc/rc3.d/
+      - /etc/rc4.d/
+      - /etc/rc5.d/
+      - /etc/rc6.d/
+      - /etc/rcS.d/
+  package:
+    Image|endswith:
+      - /dpkg
+      - /apt
+      - /apt-get
+      - /rpm
+      - /yum
+      - /dnf
+      - /zypper
+      - /pacman
+      - /apk
+      - /microdnf
+      - /update-rc.d
+      - /insserv
+  condition: boot and not package
+level: high
+tags:
+  - attack.persistence
+  - attack.t1037.004

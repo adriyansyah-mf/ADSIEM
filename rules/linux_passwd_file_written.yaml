@@ -1,0 +1,52 @@
+title: Account File Written Outside Account Tools On Linux
+id: rule-linux-passwd-file-written
+description: >-
+  /etc/passwd, /etc/shadow or /etc/group was written by a program that is not
+  an account-management tool or package manager: an account added or a
+  password hash changed by hand, e.g. a backdoor user with uid 0 (T1136.001,
+  T1098).
+logsource:
+  product: linux
+  category: file_event
+detection:
+  account:
+    TargetFilename:
+      - /etc/passwd
+      - /etc/shadow
+      - /etc/group
+      - /etc/gshadow
+  tools:
+    Image|endswith:
+      - /useradd
+      - /usermod
+      - /userdel
+      - /adduser
+      - /deluser
+      - /groupadd
+      - /groupmod
+      - /groupdel
+      - /gpasswd
+      - /passwd
+      - /chpasswd
+      - /chfn
+      - /chsh
+      - /chage
+      - /newusers
+      - /vipw
+      - /pwconv
+      - /grpconv
+      - /pwck
+      - /grpck
+      - /systemd-sysusers
+      - /accounts-daemon
+      - /dpkg
+      - /rpm
+      - /yum
+      - /dnf
+      - /apk
+  condition: account and not tools
+level: high
+tags:
+  - attack.persistence
+  - attack.t1136.001
+  - attack.t1098

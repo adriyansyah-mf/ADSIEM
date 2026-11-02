@@ -23,7 +23,7 @@ EXEC_LOG_TYPES = ("linux_process_exec", "windows_etw_process")
 EXEC_DECODERS = ("win_sysmon_1_process_created",)
 ACTIVITY_LOG_TYPES = ("linux_file_event", "windows_etw_file", "linux_network_connect", "linux_network_accept",
                       "windows_etw_network", "linux_dns_query", "windows_etw_dns", "known_malware",
-                      "linux_process_exit", "windows_etw_access")
+                      "linux_process_exit", "windows_etw_access", "linux_process_access", "linux_ptrace")
 MAX_DEPTH = 10
 LOOKBACK = timedelta(days=3)
 LOOKAHEAD = timedelta(hours=1)
@@ -137,7 +137,8 @@ def _event_of(doc: dict) -> dict:
     f = doc.get("decoded_fields") or {}
     lt = doc.get("log_type") or ""
     kind = ("file" if "file" in lt else "dns" if "dns" in lt else "malware" if lt == "known_malware"
-            else "exit" if lt == "linux_process_exit" else "access" if lt == "windows_etw_access" else "network")
+            else "exit" if lt == "linux_process_exit"
+            else "access" if lt in ("windows_etw_access", "linux_process_access", "linux_ptrace") else "network")
     detail = {
         "file": lambda: {"path": _first(f, "file.path", "TargetFilename"),
                          "action": _first(f, "file.action", "FileAction", "event.action")},
@@ -149,9 +150,11 @@ def _event_of(doc: dict) -> dict:
                             "sha256": _first(f, "file.hash.sha256"), "path": _first(f, "file.path")},
         "exit": lambda: {"code": _first(f, "process.exit_code")},
         # opened another process with injection / memory-read rights, or started a thread in it
-        "access": lambda: {"target": _first(f, "TargetImage", "process.target.executable"),
+        # (Linux: process_vm_readv/writev, /proc/<pid>/mem, ptrace)
+        "access": lambda: {"target": _first(f, "TargetImage", "process.target.executable", "ptrace.target.executable"),
                            "action": "remote_thread" if f.get("event.action") == "create_remote_thread"
-                           else _first(f, "GrantedAccess")},
+                           else _first(f, "GrantedAccess", "access.action")
+                           or ("ptrace " + _first(f, "ptrace.request") if f.get("ptrace.request") else "")},
     }[kind]()
     return {"id": doc["id"], "kind": kind, "time": doc.get("created_at"), "pid": _first(f, "process.pid", "ProcessId"),
             **detail}

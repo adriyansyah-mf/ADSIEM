@@ -1,0 +1,33 @@
+title: Program Made Executable Or Run From A Temporary Folder On Linux
+id: rule-linux-temp-executable
+description: >-
+  A file in /tmp, /var/tmp or /dev/shm was made executable (chmod +x or a
+  7xx / 5xx mode), or a program was started from there: the step after a
+  dropper downloads its payload (T1105, T1059.004).
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  chmod:
+    Image|endswith: /chmod
+    CommandLine|contains:
+      - +x
+      - ' 7'
+      - ' 5'
+  temp_arg:
+    CommandLine|contains:
+      - /tmp/
+      - /var/tmp/
+      - /dev/shm/
+  run_from_temp:
+    Image|startswith:
+      - /tmp/
+      - /var/tmp/
+      - /dev/shm/
+  condition: (chmod and temp_arg) or run_from_temp
+level: medium
+tags:
+  - attack.execution
+  - attack.t1059.004
+  - attack.command_and_control
+  - attack.t1105

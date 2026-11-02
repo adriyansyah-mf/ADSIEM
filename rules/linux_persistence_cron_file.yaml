@@ -1,0 +1,36 @@
+title: Cron Job File Written On Linux
+id: rule-linux-persistence-cron-file
+description: >-
+  A cron table or cron directory file was created or changed by something
+  other than a package manager: a scheduled job that runs whatever it names,
+  a common persistence step (T1053.003). TargetFilename is the job, Image
+  the writer.
+logsource:
+  product: linux
+  category: file_event
+detection:
+  cron:
+    TargetFilename|startswith:
+      - /etc/cron
+      - /var/spool/cron/
+      - /etc/anacrontab
+  package:
+    Image|endswith:
+      - /dpkg
+      - /apt
+      - /apt-get
+      - /rpm
+      - /yum
+      - /dnf
+      - /zypper
+      - /pacman
+      - /apk
+      - /microdnf
+      - /snapd
+      - /packagekitd
+  condition: cron and not package
+level: medium
+tags:
+  - attack.persistence
+  - attack.execution
+  - attack.t1053.003

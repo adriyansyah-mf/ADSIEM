@@ -15,7 +15,13 @@ const (
 	GroupPrivilege = "privilege"
 	GroupMemfd     = "memfd"
 	GroupExit      = "exit"
+	// GroupAccess: other processes' memory read or written and
+	// /etc/shadow reads (the Windows sensor's process access).
+	GroupAccess = "access"
 )
+
+// accessDedupe: the same reader, target and action once per window.
+const accessDedupe = 10 * time.Minute
 
 const (
 	// fileBudget is how many file events one process may ship per
@@ -168,6 +174,12 @@ func (p *processor) handle(ev rawEvent) {
 			return
 		}
 		p.push(LogMemfd, memfdLine(ev, img))
+	case kindVMAccess:
+		action := "vm_read"
+		if ev.arg1 == 1 {
+			action = "vm_write"
+		}
+		p.access(ev, action, ev.arg0)
 	case kindExec:
 		p.setImage(ev.tgid, ev.path)
 	case kindFilelessExec:
@@ -186,6 +198,39 @@ func (p *processor) handle(ev rawEvent) {
 	}
 }
 
+// access reports one process reading or writing another's memory.
+func (p *processor) access(ev rawEvent, action string, target uint64) {
+	if p.disabled[GroupAccess] || uint64(ev.tgid) == target {
+		return
+	}
+	image := p.image(ev.tgid, ev.comm)
+	targetImage := p.proc.Exe(uint32(target))
+	if p.dedupe("access|"+image+"|"+targetImage+"|"+action, accessDedupe) {
+		return
+	}
+	p.push(LogProcessAccess, accessLine(ev, action, target, image, targetImage))
+}
+
+// procMem: the pid of a /proc/<pid>/mem path.
+func procMem(path string) (uint64, bool) {
+	rest, ok := strings.CutPrefix(path, "/proc/")
+	if !ok {
+		return 0, false
+	}
+	pid, tail, ok := strings.Cut(rest, "/")
+	if !ok || tail != "mem" || pid == "" {
+		return 0, false
+	}
+	var n uint64
+	for _, c := range pid {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	return n, true
+}
+
 func (p *processor) handleFile(ev rawEvent) {
 	fe := FileEvent{
 		Time: p.now(), PID: ev.tgid, PPID: ev.ppid, UID: ev.uid, Comm: ev.comm,
@@ -193,6 +238,28 @@ func (p *processor) handleFile(ev rawEvent) {
 	}
 	switch ev.kind {
 	case kindOpen:
+		write := ev.arg0&(oWronly|oRdwr|oCreat|oTrunc) != 0
+		if pid, ok := procMem(fe.Path); ok {
+			action := "mem_read"
+			if write {
+				action = "mem_write"
+			}
+			p.access(ev, action, pid)
+			return
+		}
+		if !write {
+			// the kernel passes read-only opens of /etc/shadow and
+			// /etc/gshadow only: credential access
+			if p.disabled[GroupAccess] {
+				return
+			}
+			fe.Action = "read"
+			fe.Image = p.image(ev.tgid, ev.comm)
+			if !p.dedupe("read|"+fe.Image+"|"+fe.Path, accessDedupe) {
+				p.push(LogFile, fe.line())
+			}
+			return
+		}
 		fe.Action = "write"
 		if ev.arg0&oCreat != 0 {
 			fe.Action = "create"

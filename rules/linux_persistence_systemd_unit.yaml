@@ -1,0 +1,43 @@
+title: Systemd Service Or Timer Written On Linux
+id: rule-linux-persistence-systemd-unit
+description: >-
+  A systemd service or timer unit (system-wide or a user's) was created or
+  changed by something other than a package manager: it starts whatever
+  ExecStart names at boot, login or on a schedule (T1543.002, T1053.006).
+logsource:
+  product: linux
+  category: file_event
+detection:
+  dirs:
+    TargetFilename|startswith:
+      - /etc/systemd/system/
+      - /lib/systemd/system/
+      - /usr/lib/systemd/system/
+      - /run/systemd/system/
+  user_dir:
+    TargetFilename|contains: /.config/systemd/user/
+  unit:
+    TargetFilename|endswith:
+      - .service
+      - .timer
+  package:
+    Image|endswith:
+      - /dpkg
+      - /apt
+      - /apt-get
+      - /rpm
+      - /yum
+      - /dnf
+      - /zypper
+      - /pacman
+      - /apk
+      - /microdnf
+      - /snapd
+      - /packagekitd
+      - /systemd
+  condition: (dirs or user_dir) and unit and not package
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1543.002
+  - attack.t1053.006
