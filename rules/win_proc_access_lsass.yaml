@@ -1,0 +1,39 @@
+title: LSASS Memory Read By Untrusted Program
+id: rule-win-proc-access-lsass
+description: >-
+  A program outside the Windows and Program Files folders, or a script host
+  or LOLBin (rundll32 comsvcs MiniDump, PowerShell, Task Manager), opened
+  lsass.exe with the right to read its memory: credential dumping (Mimikatz,
+  procdump, nanodump). SourceImage did it; treat the host's cached
+  credentials as stolen until shown otherwise (T1003.001).
+logsource:
+  product: windows
+  category: process_access
+detection:
+  lsass:
+    TargetImage|endswith: '\lsass.exe'
+  trusted:
+    SourceImage|startswith:
+      - 'C:\Windows\System32\'
+      - 'C:\Windows\SysWOW64\'
+      - 'C:\Program Files\'
+      - 'C:\Program Files (x86)\'
+      - 'C:\ProgramData\Microsoft\Windows Defender\'
+  lolbin:
+    SourceImage|endswith:
+      - '\rundll32.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cmd.exe'
+      - '\taskmgr.exe'
+      - '\wmic.exe'
+      - '\mshta.exe'
+      - '\cscript.exe'
+      - '\wscript.exe'
+      - '\procdump.exe'
+      - '\procdump64.exe'
+  condition: lsass and (not trusted or lolbin)
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.001

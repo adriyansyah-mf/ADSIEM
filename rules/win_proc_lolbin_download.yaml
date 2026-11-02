@@ -1,0 +1,33 @@
+title: Built-in Windows Tool Used To Download A File
+id: rule-win-proc-lolbin-download
+description: >-
+  certutil, bitsadmin or PowerShell was run with download arguments: living
+  off the land to fetch a payload (T1105). CommandLine shows the URL.
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  certutil:
+    Image|endswith: '\certutil.exe'
+    CommandLine|contains:
+      - 'urlcache'
+      - 'verifyctl'
+  bitsadmin:
+    Image|endswith: '\bitsadmin.exe'
+    CommandLine|contains: '/transfer'
+  powershell:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'DownloadFile'
+      - 'DownloadString'
+      - 'Invoke-WebRequest'
+      - 'iwr '
+      - 'Net.WebClient'
+      - 'Start-BitsTransfer'
+  condition: certutil or bitsadmin or powershell
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1105

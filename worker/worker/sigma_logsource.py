@@ -171,9 +171,16 @@ def _windows_sources() -> list[Source]:
                                          ("file_event", "windows_etw_file", "11"),
                                          ("file_delete", "windows_etw_file", "23"),
                                          ("image_load", "windows_etw_image", "7"),
-                                         ("driver_load", "windows_etw_image", "6")):
+                                         ("driver_load", "windows_etw_image", "6"),
+                                         ("process_access", "windows_etw_access", "10"),
+                                         ("create_remote_thread", "windows_etw_access", "8")):
         out.append(Source("windows", None, category, log_types=(log_type,),
                           when=(("EventID", "eq", (event_id,)),), raw_kv=True, aliases=_WIN_ALIASES))
+    # the agent's registry persistence watcher: Sysmon 12/13 lookalikes
+    for category in ("registry_add", "registry_delete", "registry_set", "registry_event"):
+        ids, extra = SYSMON_CATEGORIES[category]
+        out.append(Source("windows", None, category, log_types=("windows_etw_registry",),
+                          when=(("EventID", "eq", ids), *extra), raw_kv=True, aliases=_WIN_ALIASES))
     return out
 
 

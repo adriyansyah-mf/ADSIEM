@@ -1,0 +1,23 @@
+title: Image File Execution Options Debugger Or Silent Exit Monitor Set
+id: rule-win-registry-ifeo-debugger
+description: >-
+  A Debugger (Image File Execution Options) or MonitorProcess
+  (SilentProcessExit) value was set: whenever the named program starts or
+  exits, Windows runs Details instead or as well. Used for persistence and
+  to hijack accessibility tools such as sethc.exe (T1546.012).
+logsource:
+  product: windows
+  category: registry_set
+detection:
+  ifeo:
+    TargetObject|contains: '\Image File Execution Options\'
+    TargetObject|endswith: '\Debugger'
+  silent_exit:
+    TargetObject|contains: '\SilentProcessExit\'
+    TargetObject|endswith: '\MonitorProcess'
+  condition: ifeo or silent_exit
+level: high
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1546.012

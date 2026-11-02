@@ -1,0 +1,26 @@
+title: Winlogon Shell Or Userinit Changed
+id: rule-win-registry-winlogon-changed
+description: >-
+  Winlogon's Shell, Userinit or Taskman value was changed: Windows starts
+  Details at every logon instead of, or alongside, the normal shell
+  (T1547.004). The defaults are explorer.exe and
+  C:\Windows\system32\userinit.exe,
+logsource:
+  product: windows
+  category: registry_set
+detection:
+  winlogon:
+    TargetObject|endswith:
+      - '\Winlogon\Shell'
+      - '\Winlogon\Userinit'
+      - '\Winlogon\Taskman'
+  default:
+    Details:
+      - 'explorer.exe'
+      - 'C:\Windows\system32\userinit.exe,'
+      - 'C:\Windows\system32\userinit.exe'
+  condition: winlogon and not default
+level: high
+tags:
+  - attack.persistence
+  - attack.t1547.004

@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -357,8 +358,13 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
-			slog.Info("ETW sensor running", "telemetry", "process, network, dns, file, image",
+			slog.Info("ETW sensor running", "telemetry", "process, network, dns, file, image, access, thread",
 				"disabled", cfg.ETW.DisabledEvents)
+			if !slices.Contains(cfg.ETW.DisabledEvents, winsensor.GroupRegistry) {
+				reg := winsensor.StartRegistry(buf)
+				stopProducers = append(stopProducers, reg.Close)
+				slog.Info("registry persistence watcher running")
+			}
 		}
 	}
 

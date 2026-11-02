@@ -1,0 +1,38 @@
+title: Run Key Points To A Script Or User Folder
+id: rule-win-registry-run-key-suspicious
+description: >-
+  A Run / RunOnce value now starts a program from a user-writable folder,
+  a script host, an encoded PowerShell command or a download at every
+  logon: persistence (T1547.001). TargetObject is the value, Details what it
+  runs.
+logsource:
+  product: windows
+  category: registry_set
+detection:
+  run_key:
+    TargetObject|contains: '\CurrentVersion\Run'
+  suspicious:
+    Details|contains:
+      - '\AppData\'
+      - '\Temp\'
+      - '\Users\Public\'
+      - '\ProgramData\'
+      - 'powershell'
+      - 'pwsh'
+      - 'cmd /c'
+      - 'cmd.exe /c'
+      - 'wscript'
+      - 'cscript'
+      - 'mshta'
+      - 'rundll32'
+      - 'regsvr32'
+      - 'http:'
+      - 'https:'
+      - '-enc'
+      - 'certutil'
+      - 'bitsadmin'
+  condition: run_key and suspicious
+level: high
+tags:
+  - attack.persistence
+  - attack.t1547.001

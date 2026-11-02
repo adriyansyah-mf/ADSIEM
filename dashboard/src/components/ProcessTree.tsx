@@ -2,14 +2,15 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import {
-  AlertTriangle, Ban, Check, Copy, FileText, Globe, Loader2, Lock, Network, ShieldOff, ShieldX, Skull, Star,
+  AlertTriangle, Ban, Check, Copy, FileText, Globe, Loader2, Lock, Network, ShieldOff, ShieldX, Skull, Star, Syringe,
 } from 'lucide-react'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 
 interface TreeEvent {
   id: string
-  kind: 'file' | 'network' | 'dns' | 'malware'
+  kind: 'file' | 'network' | 'dns' | 'malware' | 'access'
+  target?: string
   time: string
   path?: string
   action?: string
@@ -40,7 +41,7 @@ interface ProcessNode {
   exited?: string
   exit_code?: string
   events?: TreeEvent[]
-  counts?: Partial<Record<'file' | 'network' | 'dns' | 'malware', number>>
+  counts?: Partial<Record<'file' | 'network' | 'dns' | 'malware' | 'access', number>>
 }
 
 interface TreeAgent {
@@ -115,6 +116,7 @@ function Row({ n, selected, onSelect, indent, last }: {
         {!!c.file && <span className="flex items-center gap-0.5"><FileText size={11} />{c.file}</span>}
         {!!c.network && <span className="flex items-center gap-0.5"><Network size={11} />{c.network}</span>}
         {!!c.dns && <span className="flex items-center gap-0.5"><Globe size={11} />{c.dns}</span>}
+        {!!c.access && <span className="flex items-center gap-0.5 text-amber-400"><Syringe size={11} />{c.access}</span>}
         {n.exited && <span title={`exited ${when(n.exited)}`}>✕</span>}
       </span>
     </button>
@@ -123,11 +125,14 @@ function Row({ n, selected, onSelect, indent, last }: {
 
 function EventLine({ e }: { e: TreeEvent }) {
   const icon = e.kind === 'file' ? <FileText size={11} /> : e.kind === 'dns' ? <Globe size={11} />
-    : e.kind === 'malware' ? <ShieldX size={11} className="text-red-400" /> : <Network size={11} />
+    : e.kind === 'malware' ? <ShieldX size={11} className="text-red-400" />
+      : e.kind === 'access' ? <Syringe size={11} className="text-amber-400" /> : <Network size={11} />
   const text = e.kind === 'file' ? `${e.action || 'file'} ${e.path}`
     : e.kind === 'dns' ? `${e.query}${e.answers ? ` → ${e.answers}` : ''}`
       : e.kind === 'malware' ? `known malware ${e.label} (${e.action}) ${e.path ?? ''}`
-        : `${e.direction === 'inbound' ? '←' : '→'} ${e.destination}${e.port ? `:${e.port}` : ''}`
+        : e.kind === 'access' ? (e.action === 'remote_thread' ? `started a thread in ${e.target}`
+          : `opened ${e.target} (${e.action})`)
+          : `${e.direction === 'inbound' ? '←' : '→'} ${e.destination}${e.port ? `:${e.port}` : ''}`
   return (
     <div className="flex gap-2 text-xs">
       <span className="shrink-0 text-muted-foreground font-mono">{when(e.time).split(' ').pop()}</span>

@@ -29,6 +29,22 @@ Like the Linux sensor, one process ships at most 30 file lines a minute; the res
 
 Every DLL load would bury everything else, so a (process image, DLL) pair is reported once a day: after warm-up only loads not seen before arrive (a new tool, or a known process loading something it never did). Driver loads are reported once a day per path. ETW carries no signature or hashes, so `Signed`, `Signature` and `Hashes` are empty: rules that need them do not fire on these lines. Driver classification (PID 0/4) follows the provider's documentation; the runner loaded no driver during the tests, so it is not measured.
 
+## Process access, remote threads and registry persistence (agent 1.13)
+
+| Log type | Sysmon lookalike | Source | Sent when |
+|---|---|---|---|
+| `windows_etw_access` EventID 10 (process_access) | Sysmon 10 | Microsoft-Windows-Kernel-Audit-API-Calls, OpenProcess (caller = source) | a program reads lsass's memory (`VM_READ`), or opens another process with `VM_WRITE` or `CREATE_THREAD` (what injection needs); successful opens only |
+| `windows_etw_access` EventID 8 (create_remote_thread) | Sysmon 8 | Kernel-Process ThreadStart, in the process session | the creating process is not the one the thread runs in; a new process's first thread (created by its parent) is left out, as Sysmon does |
+| `windows_etw_registry` EventID 12 / 13 (registry_add / _delete / _set) | Sysmon 12 / 13 | the agent watches persistence keys (`RegNotifyChangeKeyValue`) and compares their values | a value is added, changed or removed, or a subkey (a service, an IFEO entry) appears or goes |
+
+Watched keys: HKLM and each signed-in user's Run, RunOnce, Policies\Explorer\Run (and WOW6432Node); Winlogon Shell / Userinit / Taskman; AppInit_DLLs; Image File Execution Options `Debugger` / `GlobalFlag`; SilentProcessExit `MonitorProcess`; Active Setup `StubPath`; every service's `ImagePath` and `Parameters\ServiceDll`; Session Manager `BootExecute`; user `Environment\UserInitMprLogonScript`, `Windows\Load` / `Run`. What is there when the agent starts is the baseline (no lines); new users' hives are added within 2 minutes; everything is rescanned every 10 minutes in case a notification was missed. The registry lines carry no `Image`: the agent sees the change, not the writer.
+
+The same source, target and access (or source and target for threads) is sent once per 10 minutes. Process access and remote threads also appear in the alert's Process tree.
+
+Rules (`rules/win_proc_access_*`, `win_remote_thread_untrusted`, `win_registry_*`, `win_proc_office_child_shell`, `win_proc_lolbin_download`): LSASS memory read by an untrusted program or LOLBin (critical), injection rights into a system process from a user folder, remote thread from outside Windows / Program Files, Run key to a script or user folder (high) and any Run key set (low), IFEO debugger / silent exit monitor, Winlogon shell, service from a user folder or script, AppInit DLLs, logon script, Office starting a shell, built-in tools downloading. SigmaHQ rules for these categories apply too once imported.
+
+`etw.disabled_events`: `access` turns off process access and remote threads, `thread` only remote threads, `registry` the watcher. Not measured yet: ThreadStart volume on a busy desktop (it is filtered in the agent, not the kernel); the sensor reports drops as `windows_etw_status`.
+
 ## Shipped rules on this telemetry
 
 Written against the Sigma categories, so they also fire on Sysmon's events (`tests/worker/test_windows_rules.py` runs each on both):
@@ -53,7 +69,7 @@ Written against the Sigma categories, so they also fire on Sysmon's events (`tes
 ```yaml
 etw:
   mode: auto               # auto: off when Sysmon is installed; on; off
-  disabled_events: []      # file, image
+  disabled_events: []      # file, image, access, thread, registry
 ```
 
 ## Testing

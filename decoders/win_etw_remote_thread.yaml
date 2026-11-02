@@ -1,0 +1,29 @@
+# ETW remote thread (agent/internal/winsensor, Kernel-Process ThreadStart in
+# another process; a new process's first thread is left out). Sysmon 8 field
+# names, so windows/create_remote_thread rules apply.
+name: win_etw_remote_thread
+log_type: windows_etw_access
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=8 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  SourceProcessId: SourceProcessId
+  SourceImage: SourceImage
+  SourceUser: SourceUser
+  TargetProcessId: TargetProcessId
+  TargetImage: TargetImage
+  StartAddress: StartAddress
+  NewThreadId: NewThreadId
+  process.pid: SourceProcessId
+  process.executable: SourceImage
+  user.name: SourceUser
+  process.target.pid: TargetProcessId
+  process.target.executable: TargetImage
+static_fields:
+  event.category: process
+  event.action: create_remote_thread

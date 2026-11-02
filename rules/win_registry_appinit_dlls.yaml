@@ -1,0 +1,18 @@
+title: AppInit DLLs Set
+id: rule-win-registry-appinit-dlls
+description: >-
+  AppInit_DLLs now names a DLL: it is loaded into every program that loads
+  user32.dll, a persistence and injection technique (T1546.010).
+logsource:
+  product: windows
+  category: registry_set
+detection:
+  appinit:
+    TargetObject|endswith: '\Windows\AppInit_DLLs'
+  named:
+    Details|contains: '.dll'
+  condition: appinit and named
+level: high
+tags:
+  - attack.persistence
+  - attack.t1546.010
