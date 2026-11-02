@@ -29,6 +29,25 @@ Like the Linux sensor, one process ships at most 30 file lines a minute; the res
 
 Every DLL load would bury everything else, so a (process image, DLL) pair is reported once a day: after warm-up only loads not seen before arrive (a new tool, or a known process loading something it never did). Driver loads are reported once a day per path. ETW carries no signature or hashes, so `Signed`, `Signature` and `Hashes` are empty: rules that need them do not fire on these lines. Driver classification (PID 0/4) follows the provider's documentation; the runner loaded no driver during the tests, so it is not measured.
 
+## Shipped rules on this telemetry
+
+Written against the Sigma categories, so they also fire on Sysmon's events (`tests/worker/test_windows_rules.py` runs each on both):
+
+| Category | Rule | Level |
+|---|---|---|
+| file_event | Ransom Note Dropped | high |
+| file_event | Executable Or Script Dropped In Startup Folder (`.lnk` left out) | high |
+| file_event | Office Application Drops Executable Or Script | high |
+| file_event | LSASS Memory Dump File Created | critical |
+| file_delete | Windows Event Log File Deleted | high |
+| image_load | System Binary Loads DLL From User-Writable Folder (ProgramData and Roaming left out) | medium |
+| image_load | .NET Runtime Loaded Into Office Application | medium |
+| driver_load | Kernel Driver Loaded From User-Writable Folder | high |
+| driver_load | Known Vulnerable Driver Loaded (BYOVD) | high |
+| process_creation | Shadow Copies Or Backups Deleted | critical |
+| process_creation | Defender Protection Disabled Via PowerShell | high |
+| process_creation | Event Log Cleared With Wevtutil | high |
+
 ## Configuration
 
 ```yaml

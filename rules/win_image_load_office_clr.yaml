@@ -1,0 +1,27 @@
+title: .NET Runtime Loaded Into Office Application
+id: rule-win-image-load-office-clr
+description: >-
+  An Office application loaded the .NET runtime (clr.dll): a macro or
+  add-in running .NET code, as DotNetToJScript and many macro loaders do.
+  Some legitimate add-ins do it too; a first sighting on a host is worth a
+  look (T1204.002, T1059.005).
+logsource:
+  product: windows
+  category: image_load
+detection:
+  office:
+    Image|endswith:
+      - '\WINWORD.EXE'
+      - '\EXCEL.EXE'
+      - '\POWERPNT.EXE'
+      - '\OUTLOOK.EXE'
+      - '\MSACCESS.EXE'
+      - '\MSPUB.EXE'
+  clr:
+    ImageLoaded|endswith: '\clr.dll'
+  condition: office and clr
+level: medium
+tags:
+  - attack.execution
+  - attack.t1204.002
+  - attack.t1059.005

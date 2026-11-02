@@ -1,0 +1,26 @@
+title: Kernel Driver Loaded From User-Writable Folder
+id: rule-win-driver-load-user-writable-path
+description: >-
+  A kernel driver was loaded from AppData, Temp, Downloads, C:\Users\Public
+  or ProgramData. Real drivers live under System32\drivers or DriverStore;
+  a driver dropped and loaded from a user folder is how rootkits and
+  bring-your-own-vulnerable-driver attacks get kernel access (T1543.003,
+  T1068).
+logsource:
+  product: windows
+  category: driver_load
+detection:
+  user_dir:
+    ImageLoaded|contains:
+      - '\AppData\'
+      - '\Temp\'
+      - '\Downloads\'
+      - '\Users\Public\'
+      - '\ProgramData\'
+  condition: user_dir
+level: high
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1543.003
+  - attack.t1068

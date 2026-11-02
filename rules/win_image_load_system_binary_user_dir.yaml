@@ -1,0 +1,31 @@
+title: System Binary Loads DLL From User-Writable Folder
+id: rule-win-image-load-system-binary-user-dir
+description: >-
+  A program from System32 or SysWOW64 loaded a DLL from Temp, Downloads,
+  C:\Users\Public or C:\Windows\Temp: DLL search-order hijacking or
+  sideloading, where a signed Windows binary is copied next to a malicious
+  DLL, or a payload is injected as a DLL (T1574.001, T1574.002).
+  ProgramData and AppData\Roaming are left out: Defender and many shell
+  extensions load from there.
+logsource:
+  product: windows
+  category: image_load
+detection:
+  system_binary:
+    Image|startswith:
+      - 'C:\Windows\System32\'
+      - 'C:\Windows\SysWOW64\'
+  user_dir:
+    ImageLoaded|contains:
+      - '\AppData\Local\Temp\'
+      - '\Downloads\'
+      - '\Users\Public\'
+      - '\Windows\Temp\'
+  condition: system_binary and user_dir
+level: medium
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.defense_evasion
+  - attack.t1574.001
+  - attack.t1574.002

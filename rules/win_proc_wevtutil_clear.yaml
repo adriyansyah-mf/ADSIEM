@@ -1,0 +1,20 @@
+title: Event Log Cleared With Wevtutil
+id: rule-win-proc-wevtutil-clear
+description: >-
+  wevtutil cleared an event log (cl / clear-log). Windows Event Log Cleared
+  (1102/104) sees the result when the Security or System log goes; this
+  sees the command for any log, with the process that ran it (T1070.001).
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  wevtutil:
+    Image|endswith: '\wevtutil.exe'
+    CommandLine|contains:
+      - ' cl '
+      - ' clear-log '
+  condition: wevtutil
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1070.001
