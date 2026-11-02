@@ -41,8 +41,9 @@ async def api(evidence_api, monkeypatch):
         return ([start] if "linux_process_exec" in text and "'ProcessId'" in text.replace("decoded_fields.", "'") else
                 []), 0, None
 
-    monkeypatch.setattr(alerts, "es_get_log", get_log)
-    monkeypatch.setattr(alerts, "es_search", search)
+    from app.core import es_client
+    monkeypatch.setattr(es_client, "get_log", get_log)
+    monkeypatch.setattr(es_client, "search", search)
     app = FastAPI()
     app.include_router(alerts.router)
     app.dependency_overrides[get_db] = database

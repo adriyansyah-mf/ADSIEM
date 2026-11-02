@@ -98,6 +98,26 @@ TOOLS: list[dict] = [
         "parameters": {"query": "keyword to search rule titles/descriptions", "limit": "default 10, max 25"},
     },
     {
+        "name": "process_tree",
+        "description": (
+            "The process an endpoint alert is about, its parent chain, its children and grandchildren, "
+            "with each process's command line, file writes, network connections, DNS queries, "
+            "known-malware hits and exit, from the agent's process telemetry. Use it to see how the "
+            "process started and what it did."
+        ),
+        "parameters": {"alert_id": "UUID of the alert, required"},
+    },
+    {
+        "name": "known_malware_lookup",
+        "description": (
+            "Check SHA-256 hashes against this platform's own known-malware set (MalwareBazaar feed, "
+            "analysts, files that matched critical YARA rules on any host): whether each is known, its "
+            "family label, where it came from, and whether analysts marked it not malware. Nothing is "
+            "sent outside the platform."
+        ),
+        "parameters": {"hashes": "one or more SHA-256 hashes, comma separated (max 20), required"},
+    },
+    {
         "name": "yara_rule_status",
         "description": "List YARA rules and whether each is enabled.",
         "parameters": {"limit": "default 20, max 50"},
@@ -1068,5 +1088,41 @@ async def run_tool(name: str, args: dict, db: AsyncSession, group_filter: str | 
             ],
             "count": len(rows),
         }
+
+    if name == "process_tree":
+        from app.services import process_tree
+        try:
+            a = await db.get(Alert, UUID(str(args.get("alert_id"))))
+        except (ValueError, TypeError):
+            return {"error": "invalid alert_id"}
+        if not a or (group_filter and a.group_id != group_filter):
+            return {"error": "not found"}
+        return process_tree.compact(await process_tree.for_alert(db, a))
+
+    if name == "known_malware_lookup":
+        from app.models.models import MalwareHash
+        raw = args.get("hashes") or ""
+        items = raw if isinstance(raw, list) else str(raw).replace(";", ",").split(",")
+        hashes = []
+        for h in items:
+            h = str(h).strip().lower()
+            if len(h) == 64 and all(c in "0123456789abcdef" for c in h) and h not in hashes:
+                hashes.append(h)
+        if not hashes:
+            return {"error": "give SHA-256 hashes (64 hex characters)"}
+        hashes = hashes[:20]
+        rows = {r.sha256: r for r in (await db.execute(
+            select(MalwareHash).where(MalwareHash.sha256.in_(hashes)))).scalars().all()}
+        out = []
+        for h in hashes:
+            r = rows.get(h)
+            if not r:
+                out.append({"sha256": h, "known": False})
+                continue
+            out.append({"sha256": h, "known": r.status == "active", "status": r.status, "label": r.label,
+                        "source": r.source, "file_type": r.file_type, "reference": r.reference,
+                        "first_seen": r.first_seen.isoformat(), "last_seen": r.last_seen.isoformat()})
+        return {"results": out, "note": "status allowed = an analyst marked it not malware; "
+                                        "not known is not a clean verdict"}
 
     return {"error": f"unknown tool: {name}"}
