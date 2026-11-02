@@ -24,6 +24,7 @@ import (
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
 	"github.com/siem-platform/agent/internal/linsensor"
+	"github.com/siem-platform/agent/internal/malhash"
 	"github.com/siem-platform/agent/internal/memscan"
 	"github.com/siem-platform/agent/internal/netwatch"
 	"github.com/siem-platform/agent/internal/prevent"
@@ -359,11 +360,28 @@ func run(configPath string, stop <-chan struct{}) {
 		go sweeper.Run(flowCtx)
 	}
 
+	// Known-malware hashes (server: MalwareBazaar feed, analysts, critical
+	// YARA matches): checked on every exec by the prevention engine and on
+	// every file the on-access scanner reads; block mode kills / quarantines.
+	push := func(logType, line string) { buf.Push(tailer.Encode(logType, line)) }
+	malStore := malhash.Open(filepath.Join(task.StateDir(cfg), malhash.FileName))
+	malFiles := &malhash.FileChecker{Store: malStore, Push: push, Quarantine: task.QuarantineFile}
+	malStore.OnChange = func(set *malhash.Set) {
+		if preventer != nil {
+			preventer.SetKnownMalware(set, malStore.File())
+		}
+	}
+	if preventer != nil && malStore.Current().Active() {
+		preventer.SetKnownMalware(malStore.Current(), malStore.File())
+	}
+	go malStore.SyncLoop(flowCtx, c)
+
 	// On-access YARA scanning of risky directories with the server's rules
 	yaraScanner := yarascan.New(yarascan.Options{
 		Roots:       cfg.Yara.WatchPaths,
 		MaxFileSize: cfg.Yara.MaxFileSizeMB << 20,
-		Push:        func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		Push:        push,
+		OnHash:      malFiles.Check,
 	})
 	go yaraScanner.SyncLoop(flowCtx, c)
 	if !cfg.Yara.Disabled {
@@ -380,6 +398,7 @@ func run(configPath string, stop <-chan struct{}) {
 			mgr.Update(resp.LogSources)
 			fimWatcher.UpdatePaths(resp.FimPaths)
 			yaraScanner.Want(resp.YaraRulesHash)
+			malStore.Want(resp.MalwareHashesVersion)
 			fwEngine.RefreshGuard(cfg.Server.URL)
 
 			if len(resp.Firewall) > 0 || fwEngine.BlockedEntries() > 0 {

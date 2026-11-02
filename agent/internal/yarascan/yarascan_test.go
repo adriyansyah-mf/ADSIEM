@@ -121,6 +121,27 @@ func TestScanPathCachesUnchangedFiles(t *testing.T) {
 	}
 }
 
+func TestOnHashSeesFilesWithoutRules(t *testing.T) {
+	type seen struct {
+		path, sum string
+		size      int64
+	}
+	var got []seen
+	s := New(Options{Roots: []string{t.TempDir()}, Push: func(string, string) { t.Fatal("no rules, no lines") },
+		OnHash: func(path, sum string, size int64) { got = append(got, seen{path, sum, size}) }})
+	p := filepath.Join(t.TempDir(), "dropper.bin")
+	os.WriteFile(p, []byte("abc"), 0o644)
+	for i := 0; i < 2; i++ {
+		if _, err := s.ScanPath(context.Background(), p, "on_access"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+	if len(got) != 1 || got[0].sum != want || got[0].size != 3 || got[0].path != p {
+		t.Fatalf("an unchanged file is hashed once: %+v", got)
+	}
+}
+
 func TestScanPathLimits(t *testing.T) {
 	var out lines
 	s := New(Options{MaxFileSize: 10, Push: out.push})

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/siem-platform/agent/internal/malhash"
 )
 
 // LogType of decision lines on Linux (decoders/linux_exec_prevention.yaml);
@@ -73,6 +75,19 @@ func (d Decision) line() string {
 	return sb.String()
 }
 
+// malwareEvent is a known-malware decision as a malhash line.
+func (d Decision) malwareEvent() malhash.Event {
+	action := "detected"
+	switch {
+	case d.Blocked:
+		action = "blocked"
+	case d.Terminated:
+		action = "terminated"
+	}
+	return malhash.Event{Action: action, Trigger: "exec", Label: d.Rule.Name, SHA256: d.SHA256, Path: d.Path,
+		Parent: d.Parent, Engine: d.Engine, PID: d.PID, PPID: d.PPID, UID: d.UID, Error: d.Error}
+}
+
 // engines is the platform part: the BPF LSM and fanotify engines on Linux.
 type engines interface {
 	apply(p *Policy)
@@ -92,8 +107,11 @@ type Manager struct {
 	mu     sync.Mutex
 	hash   string
 	policy *Policy
-	last   map[string]time.Time // decision dedupe
-	lastMu sync.Mutex
+	// known-malware set (internal/malhash) every policy also checks
+	malware     *malhash.Set
+	malwareFile string
+	last        map[string]time.Time // decision dedupe
+	lastMu      sync.Mutex
 }
 
 // Start starts the platform engines; it fails where there are none.
@@ -143,6 +161,7 @@ func (m *Manager) Apply(hash string, rules []Rule) {
 		slog.Warn("prevent: rule", "err", e)
 	}
 	m.mu.Lock()
+	p = p.withMalware(m.malware, m.malwareFile)
 	m.hash, m.policy = hash, p
 	m.mu.Unlock()
 	m.eng.apply(p)
@@ -155,10 +174,27 @@ func (m *Manager) Apply(hash string, rules []Rule) {
 	slog.Info("prevent: rules applied", "rules", len(p.Rules), "blocking", blocking, "errors", len(errs))
 }
 
+// SetKnownMalware makes every exec also be checked against set (saved in
+// file, where the Linux fanotify helper loads it). Detect or block comes
+// from the set's action; nothing is checked when it is off or empty.
+func (m *Manager) SetKnownMalware(set *malhash.Set, file string) {
+	m.mu.Lock()
+	m.malware, m.malwareFile = set, file
+	p := m.policy
+	if p == nil {
+		p, _ = Compile(nil) // no rules fetched yet
+	}
+	p = p.withMalware(set, file)
+	m.policy = p
+	m.mu.Unlock()
+	m.eng.apply(p)
+	slog.Info("prevent: known-malware hashes applied", "hashes", set.Len(), "action", set.Action)
+}
+
 // report pushes a decision line; the same rule, image and parent are
 // reported at most once a minute (a blocked loop would flood otherwise).
 func (m *Manager) report(d Decision) {
-	key := fmt.Sprintf("%d|%s|%s|%t|%t", d.Rule.index, d.Path, d.Parent, d.Blocked, d.Terminated)
+	key := fmt.Sprintf("%d|%s|%s|%s|%t|%t", d.Rule.index, d.Rule.ID, d.Path, d.Parent, d.Blocked, d.Terminated)
 	m.lastMu.Lock()
 	now := time.Now()
 	if t, ok := m.last[key]; ok && now.Sub(t) < time.Minute {
@@ -170,6 +206,10 @@ func (m *Manager) report(d Decision) {
 	}
 	m.last[key] = now
 	m.lastMu.Unlock()
+	if d.Rule.RuleType == TypeKnownMalware {
+		m.opts.Push(malhash.LogType, d.malwareEvent().Line())
+		return
+	}
 	m.opts.Push(decisionLogType, d.line())
 }
 

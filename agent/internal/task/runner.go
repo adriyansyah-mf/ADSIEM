@@ -37,6 +37,16 @@ func NewRunner(cfg *config.Config, c *client.Client, fw *firewall.Engine) *Runne
 	return &Runner{cfg: cfg, client: c, fw: fw}
 }
 
+// StateDir is the agent's state directory (quarantine records, saved sets).
+func StateDir(cfg *config.Config) string { return stateDirFor(cfg) }
+
+// QuarantineFile locks a file as the quarantine_file task does (restorable
+// with restore_file); the known-malware check uses it in block mode.
+func QuarantineFile(path string) error {
+	_, err := quarantineFile(path)
+	return err
+}
+
 func stateDirFor(cfg *config.Config) string {
 	if cfg != nil && cfg.Agent.StateDir != "" {
 		return cfg.Agent.StateDir

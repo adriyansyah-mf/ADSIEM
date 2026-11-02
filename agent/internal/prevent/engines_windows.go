@@ -57,7 +57,7 @@ func (e *windowsEngine) observe(ps ProcessStart) {
 	e.mu.RLock()
 	p := e.policy
 	e.mu.RUnlock()
-	if p == nil || len(p.Rules) == 0 || ps.Image == "" || ps.PID == e.self || ps.PID <= 4 {
+	if p == nil || !p.active() || ps.Image == "" || ps.PID == e.self || ps.PID <= 4 {
 		return
 	}
 	go func() {

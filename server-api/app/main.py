@@ -28,6 +28,7 @@ from app.api.routes.flows import router as flows_router, artifact_router as flow
 from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.yara_rules import capability_router as yara_capability_router
 from app.api.routes.prevention_rules import router as prevention_router, agent_router as prevention_agent_router
+from app.api.routes.malware_hashes import router as malware_hashes_router, agent_router as malware_hashes_agent_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
 from app.api.routes.export import router as export_router
@@ -78,7 +79,12 @@ _DEFAULT_SETTINGS = [
     ("searxng_url",        "http://searxng:8080",        False, "Internal URL of SearXNG instance used for threat intel search"),
     ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),
     ("malwarebazaar_enabled", "false",                  False, "Allow AI case investigations to send observed file hashes to MalwareBazaar (true/false). Metadata only: no file uploads or sample downloads"),
-    ("malwarebazaar_api_key", "",                       True,  "MalwareBazaar Auth-Key from auth.abuse.ch; requires malwarebazaar_enabled=true. Check abuse.ch fair-use/commercial terms before enabling"),
+    ("malwarebazaar_api_key", "",                       True,  "MalwareBazaar Auth-Key from auth.abuse.ch (free): downloads new malware hashes for the known-malware set (malware_feed_enabled) and, with malwarebazaar_enabled=true, lets AI investigations look hashes up. Check abuse.ch fair-use/commercial terms"),
+    ("malware_feed_enabled", "true",                   False, "Download new malware hashes from MalwareBazaar every 30 minutes into the known-malware set agents check (needs malwarebazaar_api_key; only downloads, nothing is sent) (true/false)"),
+    ("malware_feed_retention_days", "180",             False, "Feed hashes not seen again for this many days stop being checked (0 = keep forever)"),
+    ("malware_hash_learn_yara", "true",                False, "Add the SHA-256 of every file that matches a critical YARA rule to the known-malware set, so every agent knows it (true/false)"),
+    ("malware_hash_action", "detect",                  False, "What agents do with a known-malware hash: off, detect (critical alert), or block (also kill the process at start and quarantine the file written in a watched directory)"),
+    ("malware_hash_block_groups", "",                  False, "With malware_hash_action=block: agent groups that block (comma separated; empty = all); agents in other groups detect"),
     ("yara_ai_generation", "draft_only",                False, "AI YARA drafting from investigation evidence: off, draft_only (collect file features and save disabled drafts), or full (adds validation, test scans and activation; falls back to draft_only until the full-YARA capability exists)"),
     ("abuseipdb_api_key",  "",                          True,  "AbuseIPDB API key — free tier: 1000 req/day (abuseipdb.com)"),
     ("otx_api_key",        "",                          True,  "AlienVault OTX API key — free (otx.alienvault.com)"),
@@ -525,6 +531,6 @@ for router in [
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, yara_drafts_router, knowledge_router, evidence_router,
-    prevention_router, prevention_agent_router, agent_updates_router,
+    prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, agent_updates_router,
 ]:
     app.include_router(router)

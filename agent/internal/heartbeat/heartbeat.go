@@ -227,6 +227,9 @@ type HeartbeatResponse struct {
 	// Version of the enabled YARA rule set ("" when there is none); the
 	// rules themselves are fetched from /api/ingest/yara-rules on change.
 	YaraRulesHash string `json:"yara_rules_hash"`
+	// "<seq>:<action>" of the known-malware hash set, "" when it is off (or
+	// the server is older); changes are fetched from /api/ingest/malware-hashes.
+	MalwareHashesVersion string `json:"malware_hashes_version"`
 	// Set while this agent's group rollout wants it on another version.
 	Update *update.Offer `json:"update"`
 }

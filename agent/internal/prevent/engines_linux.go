@@ -40,7 +40,7 @@ func (e *linuxEngines) apply(p *Policy) {
 			slog.Warn("prevent: could not load rules into the BPF LSM engine", "err", err)
 		}
 	}
-	needFan := len(p.Rules) > 0 && (e.lsm == nil || p.HasHashRules())
+	needFan := (len(p.Rules) > 0 && (e.lsm == nil || p.HasHashRules())) || p.checksMalware()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	switch {

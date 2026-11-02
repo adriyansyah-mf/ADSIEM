@@ -23,6 +23,7 @@ from app.services import agent_update
 from app.schemas.schemas import EvidenceEnvelope, EvidenceReceipt, AgentTaskDef, HeartbeatRequest, HeartbeatResponse, LogIngestRequest, LogSourceOut
 from app.services.agent_tamper import check_integrity, heartbeat_anomaly, uninstall_token_sha256
 from app.services import yara_ruleset
+from app.api.routes import malware_hashes
 from app.services.ingest import enqueue_log
 from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
                                         accept_evidence, accept_evidence_batch, check_evidence_durability)
@@ -270,6 +271,7 @@ async def heartbeat(
         firewall=firewall_data,
         uninstall_token_sha256=uninstall_token_sha256(agent.id),
         yara_rules_hash=yara_hash,
+        malware_hashes_version=await malware_hashes.agent_version(db, agent),
     )
 
 
