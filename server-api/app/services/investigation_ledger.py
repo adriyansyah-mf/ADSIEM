@@ -35,7 +35,7 @@ MAX_ATTEMPTS = 2              # an endpoint action that failed may be tried once
 SIEM_TOOLS = {
     "get_alert", "search_alerts", "get_case", "correlate_entity", "reconstruct_timeline", "pivot_ioc",
     "search_events", "aggregate_events", "event_timeline", "recent_fim_changes", "agent_hygiene",
-    "ueba_top_risky_entities", "search_sop", "search_knowledge",
+    "ueba_top_risky_entities", "search_sop", "search_knowledge", "process_tree", "known_malware_lookup",
 }
 TIER0_TOOLS = SIEM_TOOLS | {"list_hosts", "list_artifacts", "get_flow_rows", "lookup_malwarebazaar",
                             "create_artifact", "record_hypothesis"}

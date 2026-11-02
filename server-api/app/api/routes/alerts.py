@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission, fetch_scoped
-from app.core.es_client import get_log as es_get_log, search as es_search
+from app.core.es_client import get_log as es_get_log
 from app.core.geoip import lookup_country
 from app.core.mitre_names import technique_info
 from app.models.models import Agent, AiFeedback, Alert, AlertNote, Rule, UebaAnomaly, User
@@ -188,13 +188,7 @@ async def get_alert_process_tree(
     alert = await db.get(Alert, alert_id)
     if not alert or (group_filter and alert.group_id != group_filter):
         raise HTTPException(status_code=404, detail="Alert not found")
-    doc = await es_get_log(str(alert.event_id)) if alert.event_id else None
-    agent_id = str(alert.agent_id) if alert.agent_id else (doc or {}).get("agent_id")
-    tree = await process_tree.build(es_search, agent_id, doc, alert.created_at or datetime.now(timezone.utc))
-    agent = await db.get(Agent, UUID(agent_id)) if agent_id else None
-    tree["agent"] = ({"id": str(agent.id), "hostname": agent.hostname, "status": agent.status,
-                      "is_isolated": agent.is_isolated, "version": agent.version} if agent else None)
-    return tree
+    return await process_tree.for_alert(db, alert)
 
 
 @router.get("/{alert_id}/source-log", response_model=AlertSourceLogOut)

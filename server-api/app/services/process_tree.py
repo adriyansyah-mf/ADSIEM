@@ -185,6 +185,41 @@ def _assign(nodes: list[dict], events: list[dict]) -> None:
             n["events"].append(e)
 
 
+async def for_alert(db, alert) -> dict:
+    """build() for an alert: its event from the logs index, its agent, and
+    the agent's details (the API route and the AI tool use this)."""
+    from uuid import UUID
+    from datetime import timezone
+
+    from app.core.es_client import get_log, search
+    from app.models.models import Agent
+
+    doc = await get_log(str(alert.event_id)) if alert.event_id else None
+    agent_id = str(alert.agent_id) if alert.agent_id else (doc or {}).get("agent_id")
+    tree = await build(search, agent_id, doc, alert.created_at or datetime.now(timezone.utc))
+    agent = await db.get(Agent, UUID(agent_id)) if agent_id else None
+    tree["agent"] = ({"id": str(agent.id), "hostname": agent.hostname, "status": agent.status,
+                      "is_isolated": agent.is_isolated, "version": agent.version} if agent else None)
+    return tree
+
+
+def compact(tree: dict, events_per_process: int = 8, max_nodes: int = 40) -> dict:
+    """The tree for a language model: short command lines, a few events each."""
+    nodes = []
+    for n in tree.get("nodes", [])[:max_nodes]:
+        nodes.append({k: v for k, v in {
+            "id": n["id"], "pid": n["pid"], "image": n["image"], "command_line": (n.get("command_line") or "")[:300],
+            "parent_id": n.get("parent_id"), "depth": n["depth"], "alert_process": bool(n.get("anchor")),
+            "user": n.get("user"), "start": n.get("start"), "exited": n.get("exited"), "sha256": n.get("sha256"),
+            "no_start_recorded": bool(n.get("synthetic")), "event_counts": n.get("counts") or {},
+            "events": [{k: v for k, v in e.items() if k not in ("id", "pid") and v}
+                       for e in (n.get("events") or [])[:events_per_process]],
+        }.items() if v not in (None, "", [], {}, False) or k in ("depth", "pid", "image")})
+    return {"hostname": (tree.get("agent") or {}).get("hostname"), "nodes": nodes,
+            "notes": tree.get("notes", []) + ([f"{len(tree['nodes']) - max_nodes} more processes not shown"]
+                                               if len(tree.get("nodes", [])) > max_nodes else [])}
+
+
 async def build(search: Search, agent_id: str | None, event: dict | None, at: datetime) -> dict:
     """{anchor, nodes, notes}: nodes carry parent_id (None at the top) and depth (0 = anchor)."""
     notes: list[str] = []
