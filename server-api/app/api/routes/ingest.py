@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,6 +93,41 @@ async def ingest_log(
     except Exception as exc:  # noqa: BLE001
         log.warning("last_log_mark_failed", agent_id=str(agent.id), error=str(exc))
     return {"status": "queued"}
+
+LOG_BATCH_MAX = 500  # advertised in heartbeats as log_batch_max
+
+
+class LogBatchRequest(BaseModel):
+    entries: list[LogIngestRequest] = Field(min_length=1, max_length=LOG_BATCH_MAX)
+
+
+@router.post("/logs", status_code=202)
+async def ingest_logs(
+    body: LogBatchRequest,
+    agent: Annotated[Agent, Depends(get_agent)],
+    redis: Annotated[aioredis.Redis, Depends(get_redis)],
+):
+    """Many log lines in one request (agents >= 1.13 on the legacy queue):
+    one line per POST /log could not keep up over a slow link, and a
+    detection waited behind hours of telemetry."""
+    if not agent.approved:
+        return {"status": "pending_approval", "accepted": 0}
+    for e in body.entries:
+        await enqueue_log(redis, {
+            "agent_id": str(agent.id),
+            "group_id": agent.group_id,
+            "hostname": agent.hostname,
+            "log_type": e.log_type,
+            "raw_message": e.raw_message,
+            "received_at": e.received_at.isoformat(),
+            "location": e.location or "",
+        })
+    try:
+        await redis.set(LAST_LOG_KEY.format(agent.id), int(time.time()), ex=30 * 86400)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("last_log_mark_failed", agent_id=str(agent.id), error=str(exc))
+    return {"status": "queued", "accepted": len(body.entries)}
+
 
 @router.post("/v2/log", status_code=202, response_model=EvidenceReceipt)
 async def ingest_evidence(
@@ -271,6 +306,7 @@ async def heartbeat(
         firewall=firewall_data,
         uninstall_token_sha256=uninstall_token_sha256(agent.id),
         yara_rules_hash=yara_hash,
+        log_batch_max=LOG_BATCH_MAX,
         malware_hashes_version=await malware_hashes.agent_version(db, agent),
     )
 

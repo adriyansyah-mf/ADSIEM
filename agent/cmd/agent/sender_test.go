@@ -133,3 +133,76 @@ func TestFlushDeadlineKeepsUnsentEntriesInTheSpill(t *testing.T) {
 		t.Fatalf("spill = %q", kept)
 	}
 }
+
+// With a server that takes batches, the backlog goes in a few requests and a
+// detection queued last is in the first one.
+func TestSenderBatchesWithDetectionsFirst(t *testing.T) {
+	old := logBatchMax
+	logBatchMax = func() int { return 3 }
+	defer func() { logBatchMax = old }()
+	type entry struct {
+		LogType    string `json:"log_type"`
+		RawMessage string `json:"raw_message"`
+	}
+	batches := make(chan []entry, 10)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Entries []entry `json:"entries"`
+		}
+		if r.URL.Path != "/api/ingest/logs" || json.NewDecoder(r.Body).Decode(&body) != nil {
+			t.Errorf("request %s", r.URL.Path)
+		}
+		batches <- body.Entries
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+	buf := buffer.New(100)
+	buf.SetUrgent(isUrgentEntry)
+	for _, m := range []string{"one", "two", "three", "four"} {
+		buf.Push("windows_etw_image\x00" + m)
+	}
+	buf.Push("known_malware\x00event=known_malware action=detected")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		senderLoop(ctx, buf, client.New(server.URL, "token"), &config.Config{}, nil, nil)
+	}()
+	var got [][]entry
+	for len(got) < 2 {
+		select {
+		case b := <-batches:
+			got = append(got, b)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("batches: %v", got)
+		}
+	}
+	cancel()
+	<-done
+	if len(got[0]) != 3 || got[0][0].LogType != "known_malware" || got[0][1].RawMessage != "one" || len(got[1]) != 2 {
+		t.Fatalf("batches: %+v", got)
+	}
+}
+
+// A refused token is retried with a backoff and nothing is dropped (it used
+// to drop every entry and send the next at once: thousands of requests a second).
+func TestSenderBacksOffOnARefusedToken(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	buf := buffer.New(10)
+	buf.Push("syslog\x00one")
+	buf.Push("syslog\x00two")
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	senderLoop(ctx, buf, client.New(server.URL, "bad"), &config.Config{}, nil, nil)
+	if n := requests.Load(); n < 1 || n > 2 {
+		t.Fatalf("requests=%d, want a backoff between tries", n)
+	}
+	if buf.Len() != 2 {
+		t.Fatalf("entries dropped: %d left", buf.Len())
+	}
+}

@@ -493,6 +493,11 @@ async def lifespan(app: FastAPI):
         from app.api.routes.yara_rules import legacy_contents
         from app.services.yara_builtin import sync_builtin_rules
         await sync_builtin_rules(legacy_contents())
+        # feed hashes labelled "exe" etc. before the feed skipped format tags
+        from app.core.database import AsyncSessionLocal
+        from worker import malware_hashes as _mh
+        async with AsyncSessionLocal() as _db:
+            await _mh.clear_generic_labels(_db)
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
