@@ -1,0 +1,20 @@
+title: SIEM Agent Sensor Exclusion Tampered
+id: rule-siem-agent-sensor-self-map-overwritten
+description: >-
+  The Linux eBPF sensor's "self" map, which tells the kernel which process is
+  the agent (its events are not reported), held another process
+  (sensor.found_tgid). Writing it takes root and a BPF tool (bpftool map
+  update), and hides that process's process, file, module and privilege
+  events. The agent restored the map (sensor.restored); investigate the
+  process with that tgid and how root was obtained (T1562.001).
+logsource:
+  product: linux
+  service: sensor_health
+detection:
+  overwritten:
+    event.action: self_map_overwritten
+  condition: overwritten
+level: critical
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

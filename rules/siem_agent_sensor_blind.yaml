@@ -1,0 +1,21 @@
+title: SIEM Agent Sensor Blind
+id: rule-siem-agent-sensor-blind
+description: >-
+  The agent still runs and heartbeats, but its eBPF sensor did not see the
+  canary file a child of the agent created and removed: the sensor's
+  programs were detached (bpftool link detach, prog unloaded) or its
+  tracepoints stopped firing. Process, file and module telemetry from this
+  host is missing until event=sensor_recovered. A kernel update or a
+  tracing outage can do this too (T1562.001, T1562.006).
+logsource:
+  product: linux
+  service: sensor_health
+detection:
+  blind:
+    event.action: sensor_blind
+  condition: blind
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+  - attack.t1562.006

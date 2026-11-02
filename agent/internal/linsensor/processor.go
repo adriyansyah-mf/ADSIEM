@@ -69,6 +69,10 @@ type processor struct {
 	images map[uint32]string
 	files  map[uint32]*fileWindowState
 	seen   map[string]time.Time
+
+	// canary, when set, claims the sensor's own end-to-end check file: it
+	// returns true for that path and the event goes no further.
+	canary func(path string) bool
 }
 
 func newProcessor(push func(string, string), onFile func(FileEvent), disabled map[string]bool, proc procFS) *processor {
@@ -200,6 +204,9 @@ func (p *processor) handleFile(ev rawEvent) {
 	case kindUnlink:
 		fe.Action = "delete"
 		fe.Dir = ev.arg0&atRemovDir != 0
+	}
+	if p.canary != nil && (p.canary(fe.Path) || (fe.From != "" && p.canary(fe.From))) {
+		return
 	}
 	if skipPath(fe.Path) && (fe.From == "" || skipPath(fe.From)) {
 		return

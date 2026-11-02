@@ -4,11 +4,13 @@ package linsensor
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -46,9 +48,12 @@ type Sensor struct {
 	links   []link.Link
 	reader  *ringbuf.Reader
 	proc    *processor
-	mu      sync.Mutex // guards proc between the reader and the ticker
+	mu      sync.Mutex // guards proc and health between the reader and the ticker
 	stop    chan struct{}
 	stopped sync.WaitGroup
+
+	self   uint32         // the agent's tgid, as announced to the kernel
+	health *healthChecker // nil when file events are disabled (no canary to see)
 }
 
 // Start loads and attaches the sensor. Like procexec it needs CAP_BPF (or
@@ -104,6 +109,11 @@ func Start(opts Options) (*Sensor, error) {
 		disabled[g] = true
 	}
 	s.proc = newProcessor(opts.Push, opts.OnFile, disabled, linuxProc{})
+	s.self = self
+	if !disabled[GroupFile] {
+		s.health = newHealthChecker(fmt.Sprintf("/var/tmp/.siem-sensor-canary-%d", os.Getpid()))
+		s.proc.canary = s.health.claim
+	}
 	s.stopped.Add(2)
 	go s.read()
 	go s.ticker()
@@ -171,6 +181,8 @@ func (s *Sensor) ticker() {
 	defer t.Stop()
 	var lastDrops uint64
 	report := 0
+	selfEvery := int(selfCheckEvery / (10 * time.Second))
+	canaryTicks := int(canaryEvery / (10 * time.Second))
 	for {
 		select {
 		case <-s.stop:
@@ -178,7 +190,21 @@ func (s *Sensor) ticker() {
 		case <-t.C:
 			s.mu.Lock()
 			s.proc.tick()
+			var verdict string
+			if s.health != nil {
+				verdict = s.health.verdict()
+			}
 			s.mu.Unlock()
+			if verdict != "" {
+				s.proc.push(LogHealth, verdict)
+				slog.Warn("linsensor: health", "check", verdict)
+			}
+			if report%selfEvery == selfEvery-1 {
+				s.checkSelf()
+			}
+			if s.health != nil && report%canaryTicks == 2 { // first one 30 s after start
+				s.runCanary()
+			}
 			if report++; report%6 == 0 {
 				if d := s.drops(); d > lastDrops {
 					slog.Warn("linsensor: ring buffer full, events lost", "lost", d-lastDrops)
@@ -186,6 +212,37 @@ func (s *Sensor) ticker() {
 				}
 			}
 		}
+	}
+}
+
+// checkSelf re-reads the self map: another tgid there hides that process.
+// It is restored and reported.
+func (s *Sensor) checkSelf() {
+	var tgid uint32
+	m := s.coll.Maps["self"]
+	if err := m.Lookup(uint32(0), &tgid); err == nil && tgid == s.self {
+		return
+	}
+	err := m.Update(uint32(0), s.self, ebpf.UpdateAny)
+	s.proc.push(LogHealth, selfLine(s.self, tgid, err == nil, err))
+	slog.Warn("linsensor: self map overwritten", "expected", s.self, "found", tgid, "restore_err", err)
+}
+
+// runCanary creates and removes the canary file from a child process (the
+// agent's own events are skipped in the kernel), for verdict to judge.
+func (s *Sensor) runCanary() {
+	s.mu.Lock()
+	s.health.start()
+	path := s.health.canaryPath
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := exec.CommandContext(ctx, "/bin/sh", "-c", `: > "$1" && rm -f "$1"`, "sh", path).Run()
+	if err != nil { // no shell (a minimal container) or no /var/tmp: nothing to judge
+		s.mu.Lock()
+		s.health.abort()
+		s.mu.Unlock()
+		slog.Debug("linsensor: canary not run", "err", err)
 	}
 }
 

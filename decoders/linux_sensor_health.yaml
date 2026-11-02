@@ -1,0 +1,22 @@
+# The Linux eBPF sensor's own tamper checks (agent/internal/linsensor/health.go):
+#   event=self_map_overwritten expected_tgid=… found_tgid=… restored=true|false [error=…]
+#   event=sensor_blind check=canary waited_seconds=15 last_seen=<RFC3339|never> canary=…
+#   event=sensor_recovered check=canary canary=…
+name: linux_sensor_health
+log_type: linux_sensor_health
+type: kv
+priority: 10
+enabled: true
+fields:
+  event.action: event
+  sensor.check: check
+  sensor.expected_tgid: expected_tgid
+  sensor.found_tgid: found_tgid
+  sensor.restored: restored
+  sensor.error: error
+  sensor.waited_seconds: waited_seconds
+  sensor.last_seen: last_seen
+  file.path: canary
+static_fields:
+  event.category: host
+  event.module: linsensor
