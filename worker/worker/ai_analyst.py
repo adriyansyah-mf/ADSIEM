@@ -431,10 +431,27 @@ async def _find_campaign_case(keys: list[str], hostname: Optional[str], group_id
         hits = sorted((c for c in cases if _case_keys(c) & set(keys)), key=lambda c: c.created_at)
         return (str(hits[0].id), [str(c.id) for c in hits[1:]]) if hits else (None, [])
     if hostname:
-        hits = sorted((c for c in cases if hostname in _case_hosts(c)), key=lambda c: c.updated_at, reverse=True)
+        # A host-only join has no attacker IOC behind it, so it is bounded by
+        # the case's age too: every joined alert refreshes updated_at, and
+        # without this a case opened weeks ago kept swallowing every alert on
+        # its host. Later alerts start a new case, linked to this one.
+        opened_after = datetime.now(timezone.utc) - timedelta(days=await _host_campaign_days())
+        hits = sorted((c for c in cases if hostname in _case_hosts(c) and _aware(c.created_at) >= opened_after),
+                      key=lambda c: c.updated_at, reverse=True)
         if hits:
             return str(hits[0].id), []
     return None, []
+
+
+async def _host_campaign_days() -> int:
+    try:
+        return max(1, int(await get_setting("case_host_campaign_days", "3") or 3))
+    except ValueError:
+        return 3
+
+
+def _aware(t: datetime) -> datetime:
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
 async def _related_open_cases(source_ip: Optional[str], hostname: Optional[str], group_id: str) -> list[dict]:

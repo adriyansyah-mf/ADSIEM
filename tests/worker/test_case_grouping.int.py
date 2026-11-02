@@ -185,3 +185,40 @@ def test_cases_from_before_campaign_keys_still_match(db):
     by_host = _run(legacy({"source_ip": "10.0.0.9", "hostname": "web09", "threat_type": "brute_force"}))
     assert _run(ai_analyst._find_campaign_case(["ip:80.94.92.99"], "web01", "g3")) == (by_ip, [])
     assert _run(ai_analyst._find_campaign_case([], "web09", "g3")) == (by_host, [])
+
+
+def _age(cid, days):
+    """Make a case look opened `days` ago while still touched just now."""
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from worker.database import AsyncSessionLocal
+    from worker.models import Case
+
+    async def go():
+        async with AsyncSessionLocal() as s:
+            c = await s.get(Case, uuid.UUID(cid))
+            c.created_at = datetime.now(timezone.utc) - timedelta(days=days)
+            c.updated_at = datetime.now(timezone.utc)
+            await s.commit()
+    _run(go())
+
+
+def test_a_host_only_case_stops_collecting_once_it_is_old(db):
+    # A case kept alive only by local alerts on its host (no attacker IOC)
+    # used to collect every later alert there forever: each join refreshed
+    # updated_at. Past case_host_campaign_days (3) a local alert starts a new
+    # case, linked to the old one; an alert sharing its IOC still joins it.
+    from worker import ai_analyst
+
+    old = _new(ai_analyst, "Ransomware Canary File Changed", "impact", "demo-siem", [ATTACKER], "g6")
+    _age(old, 5)
+    assert _run(ai_analyst._find_campaign_case([], "demo-siem", "g6")) == (None, [])
+    related = _run(ai_analyst._related_open_cases(None, "demo-siem", "g6"))
+    assert [r["case_id"] for r in related] == [old]
+    assert _run(ai_analyst._find_campaign_case([ATTACKER], "demo-siem", "g6")) == (old, [])
+
+    fresh = _new(ai_analyst, "Execution Of Non-Existing File", "execution", "demo-siem", [], "g6", related=related)
+    assert _run(ai_analyst._find_campaign_case([], "demo-siem", "g6")) == (fresh, [])
+    case, _ = _case(fresh)
+    assert case.ioc_data["related_cases"] == [old]
