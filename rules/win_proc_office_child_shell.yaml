@@ -1,0 +1,40 @@
+title: Office Application Started A Shell Or Script Host
+id: rule-win-proc-office-child-shell
+description: >-
+  Word, Excel, PowerPoint, Outlook or OneNote started a shell, script host
+  or LOLBin: a malicious document or macro running code (T1204.002,
+  T1566.001). Look at the document the user opened just before.
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  office:
+    ParentImage|endswith:
+      - '\WINWORD.EXE'
+      - '\EXCEL.EXE'
+      - '\POWERPNT.EXE'
+      - '\OUTLOOK.EXE'
+      - '\ONENOTE.EXE'
+      - '\MSACCESS.EXE'
+      - '\MSPUB.EXE'
+  child:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+      - '\rundll32.exe'
+      - '\regsvr32.exe'
+      - '\certutil.exe'
+      - '\bitsadmin.exe'
+      - '\msiexec.exe'
+      - '\wmic.exe'
+  condition: office and child
+level: high
+tags:
+  - attack.execution
+  - attack.t1204.002
+  - attack.initial_access
+  - attack.t1566.001

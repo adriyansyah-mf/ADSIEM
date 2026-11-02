@@ -24,3 +24,12 @@ func (*Sensor) Dropped() uint64 { return 0 }
 
 // Stop is a no-op off Windows.
 func (*Sensor) Stop() {}
+
+// RegistryWatcher is the Windows persistence-key watcher; nothing off Windows.
+type RegistryWatcher struct{}
+
+// StartRegistry does nothing off Windows.
+func StartRegistry(*buffer.Buffer) *RegistryWatcher { return &RegistryWatcher{} }
+
+// Close is a no-op off Windows.
+func (*RegistryWatcher) Close() {}

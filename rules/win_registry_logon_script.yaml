@@ -1,0 +1,16 @@
+title: User Logon Script Set
+id: rule-win-registry-logon-script
+description: >-
+  UserInitMprLogonScript was set in a user's Environment key: Details runs
+  at every logon of that user (T1037.001).
+logsource:
+  product: windows
+  category: registry_set
+detection:
+  script:
+    TargetObject|endswith: '\Environment\UserInitMprLogonScript'
+  condition: script
+level: high
+tags:
+  - attack.persistence
+  - attack.t1037.001

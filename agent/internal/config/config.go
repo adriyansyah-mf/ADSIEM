@@ -53,7 +53,9 @@ type NetwatchConfig struct {
 type ETWConfig struct {
 	Mode string `yaml:"mode"`
 	// DisabledEvents switches event groups off: "file" (Kernel-File creates,
-	// renames, deletes), "image" (DLL and driver loads).
+	// renames, deletes), "image" (DLL and driver loads), "access" (process
+	// access and remote threads), "thread" (remote threads only), "registry"
+	// (persistence-key watcher).
 	DisabledEvents []string `yaml:"disabled_events"`
 }
 

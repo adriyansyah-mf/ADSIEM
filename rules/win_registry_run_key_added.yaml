@@ -1,0 +1,17 @@
+title: Run Key Value Set
+id: rule-win-registry-run-key-added
+description: >-
+  A program was added to (or changed in) a Run / RunOnce key and will start
+  at every logon. Often legitimate (updaters, sync clients); check that
+  Details is software you expect (T1547.001).
+logsource:
+  product: windows
+  category: registry_set
+detection:
+  run_key:
+    TargetObject|contains: '\CurrentVersion\Run'
+  condition: run_key
+level: low
+tags:
+  - attack.persistence
+  - attack.t1547.001

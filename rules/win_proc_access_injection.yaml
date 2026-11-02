@@ -1,0 +1,37 @@
+title: Process Injection Rights Into A System Process From A User Folder
+id: rule-win-proc-access-injection
+description: >-
+  A program running from a user-writable folder (AppData, Temp, Downloads,
+  Public, ProgramData) opened a system process (explorer, svchost,
+  winlogon, services, spoolsv, dllhost) with the rights to write its memory
+  or start a thread in it: the first step of process injection, used by
+  loaders to hide in a trusted process (T1055). Reads of lsass are the
+  credential-dumping rule's.
+logsource:
+  product: windows
+  category: process_access
+detection:
+  source:
+    SourceImage|contains:
+      - '\AppData\'
+      - '\Temp\'
+      - '\Downloads\'
+      - '\Users\Public\'
+      - '\ProgramData\'
+  target:
+    TargetImage|endswith:
+      - '\explorer.exe'
+      - '\svchost.exe'
+      - '\winlogon.exe'
+      - '\services.exe'
+      - '\spoolsv.exe'
+      - '\dllhost.exe'
+      - '\RuntimeBroker.exe'
+  defender:
+    SourceImage|startswith: 'C:\ProgramData\Microsoft\Windows Defender\'
+  condition: source and target and not defender
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.privilege_escalation
+  - attack.t1055

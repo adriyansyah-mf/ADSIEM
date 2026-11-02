@@ -37,6 +37,7 @@ const (
 	dnsEvent
 	fileEvent
 	imageEvent
+	accessEvent
 )
 
 type source struct {
@@ -74,13 +75,19 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 			}
 		}
 	}
+	// Remote threads come in the process session: one session keeps a new
+	// process's start ahead of its first thread, which its parent creates.
+	procKeywords, procEvents := uint64(0x10), []uint16{1} // WINEVENT_KEYWORD_PROCESS, ProcessStart
+	if !off[GroupAccess] && !off[GroupThread] {
+		procKeywords, procEvents = procKeywords|threadKeyword, append(procEvents, threadStartEvent)
+	}
 	configs := []struct {
 		cfg etw.Config
 		k   kind
 	}{
 		{etw.Config{Name: "SIEMAgent-Kernel", KernelFlags: etw.KernelProcess}, kernelProcess},
 		{etw.Config{Name: "SIEMAgent-Process", Providers: []etw.Provider{{GUID: kernelProcessProvider,
-			Keywords: 0x10, EventIDs: []uint16{1}}}}, providerProcess}, // WINEVENT_KEYWORD_PROCESS, ProcessStart
+			Keywords: procKeywords, EventIDs: procEvents}}}, providerProcess},
 		{etw.Config{Name: "SIEMAgent-Network", Providers: []etw.Provider{{GUID: kernelNetworkProvider,
 			Keywords: 0x10 | 0x20, EventIDs: networkEventIDs}}}, networkEvent}, // IPv4 | IPv6
 		{etw.Config{Name: "SIEMAgent-DNS", Providers: []etw.Provider{{GUID: dnsClientProvider,
@@ -110,17 +117,28 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 		}
 		s.sessions = append(s.sessions, ses)
 	}
+	// Process access is optional: without it the rest still runs.
+	if !off[GroupAccess] {
+		ses, err := etw.Start(etw.Config{Name: "SIEMAgent-Access", Providers: []etw.Provider{{GUID: auditAPIProvider,
+			EventIDs: []uint16{auditOpenProcess}}}}, push(accessEvent))
+		if err != nil {
+			slog.Warn("etw: process access telemetry unavailable", "err", err)
+		} else {
+			s.sessions = append(s.sessions, ses)
+		}
+	}
 
 	devices := newDeviceMap()
 	j := newProcessJoiner(processImagePath, devices.dosPath)
 	j.onStart = opts.OnProcess
 	files := newFileTracker(j, uint32(windows.GetCurrentProcessId()), longPathName)
 	files.onFile = opts.OnFile
-	go s.run(j, files, buf)
+	access := newAccessTracker(j, uint32(windows.GetCurrentProcessId()))
+	go s.run(j, files, access, buf)
 	return s, nil
 }
 
-func (s *Sensor) run(j *processJoiner, files *fileTracker, buf *buffer.Buffer) {
+func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker, buf *buffer.Buffer) {
 	defer close(s.done)
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
@@ -146,7 +164,13 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, buf *buffer.Buffer) {
 			case kernelProcess:
 				emit(LogTypeProcess, j.kernel(src.ev, now)...)
 			case providerProcess:
-				emit(LogTypeProcess, j.provider(src.ev, now)...)
+				if src.ev.ID == threadStartEvent {
+					emit(LogTypeAccess, access.threadStart(src.ev, now))
+				} else {
+					emit(LogTypeProcess, j.provider(src.ev, now)...)
+				}
+			case accessEvent:
+				emit(LogTypeAccess, access.openProcess(src.ev, now))
 			case networkEvent:
 				emit(LogTypeNetwork, j.network(src.ev))
 			case dnsEvent:

@@ -1,0 +1,28 @@
+# ETW process access (agent/internal/winsensor, Microsoft-Windows-Kernel-Audit-API-Calls
+# OpenProcess): only memory reads of lsass and rights that allow injection.
+# Sysmon 10 field names, so windows/process_access rules apply (no CallTrace).
+name: win_etw_process_access
+log_type: windows_etw_access
+type: kv
+priority: 3
+enabled: true
+match: 'EventID=10 '
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  SourceProcessId: SourceProcessId
+  SourceImage: SourceImage
+  SourceUser: SourceUser
+  TargetProcessId: TargetProcessId
+  TargetImage: TargetImage
+  GrantedAccess: GrantedAccess
+  process.pid: SourceProcessId
+  process.executable: SourceImage
+  user.name: SourceUser
+  process.target.pid: TargetProcessId
+  process.target.executable: TargetImage
+static_fields:
+  event.category: process
+  event.action: process_access

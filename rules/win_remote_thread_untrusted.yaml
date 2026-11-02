@@ -1,0 +1,26 @@
+title: Remote Thread Created By Untrusted Program
+id: rule-win-remote-thread-untrusted
+description: >-
+  A program outside the Windows and Program Files folders started a thread
+  inside another process (CreateRemoteThread and the like): classic code
+  injection (T1055.002). SourceImage injected into TargetImage; StartAddress
+  is where the new thread began.
+logsource:
+  product: windows
+  category: create_remote_thread
+detection:
+  trusted:
+    SourceImage|startswith:
+      - 'C:\Windows\System32\'
+      - 'C:\Windows\SysWOW64\'
+      - 'C:\Program Files\'
+      - 'C:\Program Files (x86)\'
+      - 'C:\ProgramData\Microsoft\Windows Defender\'
+  known:
+    SourceImage|contains: '\'
+  condition: known and not trusted
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.privilege_escalation
+  - attack.t1055.002

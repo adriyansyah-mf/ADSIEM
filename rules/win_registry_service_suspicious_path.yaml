@@ -1,0 +1,34 @@
+title: Service Points To A Script Or User Folder
+id: rule-win-registry-service-suspicious-path
+description: >-
+  A service's ImagePath or ServiceDll now runs something from a
+  user-writable folder or through a shell or script host: a service
+  created or hijacked for persistence and SYSTEM rights (T1543.003).
+logsource:
+  product: windows
+  category: registry_set
+detection:
+  service:
+    TargetObject|contains: '\Services\'
+    TargetObject|endswith:
+      - '\ImagePath'
+      - '\ServiceDll'
+  suspicious:
+    Details|contains:
+      - '\Users\'
+      - '\AppData\'
+      - '\Temp\'
+      - '\ProgramData\'
+      - 'powershell'
+      - 'cmd /c'
+      - 'cmd.exe /c'
+      - 'rundll32'
+      - 'mshta'
+      - 'wscript'
+      - 'cscript'
+  condition: service and suspicious
+level: high
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1543.003

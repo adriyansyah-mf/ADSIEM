@@ -90,6 +90,10 @@ def docs():
         activity("exit", 30, "linux_process_exit", 1200, **{"process.exit_code": "0"}),
         activity("km", 5, "known_malware", 1300, **{"malware.label": "CoinMiner", "malware.action": "detected",
                                                     "file.hash.sha256": "ab" * 32}),
+        activity("inj", 6, "windows_etw_access", 1300, **{"TargetImage": "C:\\Windows\\explorer.exe",
+                                                          "GrantedAccess": "0x1F0FFF", "event.action": "process_access"}),
+        activity("rt", 7, "windows_etw_access", 1300, **{"TargetImage": "C:\\Windows\\explorer.exe",
+                                                         "event.action": "create_remote_thread"}),
     ]
 
 
@@ -116,6 +120,10 @@ def test_tree_around_alert_process():
     assert by["curl"]["events"][1]["destination"] == "203.0.113.7" and by["curl"]["counts"] == {"dns": 1, "network": 1}
     assert by["sh"]["events"][0]["path"] == "/tmp/xmrig" and by["sh"]["exited"] == at(30)
     assert by["xmrig"]["events"][0]["label"] == "CoinMiner"
+    access = [e for e in by["xmrig"]["events"] if e["kind"] == "access"]
+    assert [(e["target"], e["action"]) for e in access] == [("C:\\Windows\\explorer.exe", "0x1F0FFF"),
+                                                            ("C:\\Windows\\explorer.exe", "remote_thread")]
+    assert by["xmrig"]["counts"]["access"] == 2
     assert [n["depth"] for n in tree["nodes"]] == sorted(n["depth"] for n in tree["nodes"])
     assert tree["notes"] == []
 
