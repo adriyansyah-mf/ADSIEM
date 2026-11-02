@@ -28,6 +28,7 @@ import (
 	"github.com/siem-platform/agent/internal/malhash"
 	"github.com/siem-platform/agent/internal/memscan"
 	"github.com/siem-platform/agent/internal/netwatch"
+	"github.com/siem-platform/agent/internal/notify"
 	"github.com/siem-platform/agent/internal/prevent"
 	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/ransomguard"
@@ -190,6 +191,14 @@ func run(configPath string, stop <-chan struct{}) {
 		} else {
 			defer spill.Close()
 		}
+	}
+	// Windows: pop-ups for signed-in users when malware is found or stopped
+	// (after the legacy import above, so old entries do not pop up again).
+	if n := notify.New(); n != nil && !cfg.Notify.Disabled {
+		buf.SetObserver(func(entry string) {
+			logType, _, line := tailer.Decode(entry)
+			n.Observe(logType, line)
+		})
 	}
 	mgr := tailer.NewManager(buf)
 	if durable != nil && durable.journal != nil {
@@ -606,7 +615,7 @@ func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *
 		}
 		if !sent {
 			for _, entry := range entries {
-				buf.Push(entry) // re-queue (also when shutdown cancelled the request)
+				buf.Requeue(entry) // also when shutdown cancelled the request
 			}
 			if ctx.Err() != nil {
 				return
@@ -642,7 +651,7 @@ func replaySpill(buf *buffer.Buffer, spill *buffer.Spill) {
 	}
 	undelivered := spill.Drain()
 	for _, entry := range undelivered {
-		buf.Push(entry)
+		buf.Requeue(entry) // seen (and notified) before the restart
 	}
 	if n := len(undelivered); n > 0 {
 		slog.Info("replayed undelivered entries", "count", n)
@@ -664,7 +673,7 @@ func flushBuffer(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg 
 			backoff = 200 * time.Millisecond
 			continue
 		}
-		buf.Push(entry)
+		buf.Requeue(entry)
 		if !wait(ctx, backoff) {
 			break
 		}

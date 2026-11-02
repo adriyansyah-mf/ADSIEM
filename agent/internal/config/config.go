@@ -130,6 +130,12 @@ type PreventionConfig struct {
 	Disabled bool `yaml:"disabled"`
 }
 
+type NotifyConfig struct {
+	// Disabled stops the pop-ups the agent shows signed-in users (Windows)
+	// when it finds or stops malware.
+	Disabled bool `yaml:"disabled"`
+}
+
 type AntiTamperConfig struct {
 	// Windows: the agent service is locked so only SYSTEM (the MSI, an
 	// upgrade) can stop, reconfigure or delete it. true restores the default
@@ -162,6 +168,7 @@ type Config struct {
 	LiveResponse LiveResponseConfig `yaml:"live_response"`
 	AntiTamper   AntiTamperConfig   `yaml:"anti_tamper"`
 	Prevention   PreventionConfig   `yaml:"prevention"`
+	Notify       NotifyConfig       `yaml:"notify"`
 	Update       UpdateConfig       `yaml:"update"`
 }
 
