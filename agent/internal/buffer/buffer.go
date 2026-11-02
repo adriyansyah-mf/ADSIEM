@@ -11,6 +11,7 @@ type Buffer struct {
 	items    []string
 	urgent   []string
 	isUrgent func(string) bool
+	observe  func(string)
 	cap      int
 	sink     func(string) error
 	dropped  int64
@@ -35,7 +36,27 @@ func (b *Buffer) SetUrgent(f func(entry string) bool) {
 	b.mu.Unlock()
 }
 
+// SetObserver sees every new entry once (Push, not Requeue), outside the
+// lock: user notifications.
+func (b *Buffer) SetObserver(f func(entry string)) {
+	b.mu.Lock()
+	b.observe = f
+	b.mu.Unlock()
+}
+
 func (b *Buffer) Push(item string) {
+	b.mu.Lock()
+	observe := b.observe
+	b.mu.Unlock()
+	if observe != nil {
+		observe(item)
+	}
+	b.Requeue(item)
+}
+
+// Requeue puts back an entry that was already pushed once (a failed send,
+// a spill replayed at start): queued like Push, not observed again.
+func (b *Buffer) Requeue(item string) {
 	if b.sink != nil {
 		// A detector invoked by the sink may reenter Push.
 		err := b.sink(item)
