@@ -461,11 +461,6 @@ async def lifespan(app: FastAPI):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         await _seed_settings()
-        # The built-in YARA pack (yara/builtin, copied into the image): new
-        # rules added enabled, changed ones updated, analysts' toggles kept.
-        from app.api.routes.yara_rules import legacy_contents
-        from app.services.yara_builtin import sync_builtin_rules
-        await sync_builtin_rules(legacy_contents())
         await _migrate_ueba_columns()
         await _migrate_alerts_columns()
         from app.services.soar_schema import migrate_soar
@@ -485,6 +480,13 @@ async def lifespan(app: FastAPI):
         await _migrate_investigation_ledger_columns()
         from app.services.knowledge_schema import migrate_knowledge
         await migrate_knowledge()
+        # The built-in YARA pack (yara/builtin, copied into the image): new
+        # rules added enabled, changed ones updated, analysts' toggles kept.
+        # After every migration: it needs yara_rules.origin, which an upgraded
+        # database only gets from _migrate_investigation_ledger_columns.
+        from app.api.routes.yara_rules import legacy_contents
+        from app.services.yara_builtin import sync_builtin_rules
+        await sync_builtin_rules(legacy_contents())
     finally:
         await lock_conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": _STARTUP_LOCK_KEY})
         await lock_conn.close()
