@@ -11,12 +11,15 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
 from app.models.models import Agent, AgentTask, User, YaraRule
 from app.schemas.schemas import YaraRuleCreate, YaraRuleOut, YaraScanRequest, AgentTaskOut
-from app.services import yara_ruleset
+from app.services import yara_builtin, yara_ruleset
 from app.services.audit import audit_log
 
 router = APIRouter(prefix="/api/yara-rules", tags=["yara"])
 
-BUILTIN_RULES = [
+# The rules the server used to keep here and seed on request; replaced by the
+# built-in pack (yara/builtin/, services/yara_builtin.py). Kept only so a row
+# still holding exactly this content can be recognised and removed.
+LEGACY_BUILTIN_RULES = [
     {
         "name": "eicar_test",
         "description": "EICAR antivirus test signature",
@@ -240,6 +243,9 @@ async def update_rule(
     r = (await db.execute(select(YaraRule).where(YaraRule.id == rule_id))).scalar_one_or_none()
     if not r:
         raise HTTPException(404, "Rule not found")
+    if r.origin == yara_builtin.ORIGIN and (body.content != r.content or body.name != r.name):
+        raise HTTPException(409, "Built-in rules are replaced on every upgrade: save a copy under another "
+                                 "name to change it, and disable the built-in one")
     if r.origin == "ai_draft" and r.is_enabled and body.content != r.content:
         raise HTTPException(409, "Disable this AI-drafted rule before changing it: the new content must be "
                                  "validated and tested again before it reaches the agents")
@@ -278,6 +284,8 @@ async def delete_rule(
     r = (await db.execute(select(YaraRule).where(YaraRule.id == rule_id))).scalar_one_or_none()
     if not r:
         raise HTTPException(404, "Rule not found")
+    if r.origin == yara_builtin.ORIGIN:
+        raise HTTPException(409, "Built-in rules come back on every start: disable it instead")
     await db.delete(r)
     await db.commit()
     yara_ruleset.invalidate()
@@ -351,23 +359,17 @@ async def trigger_memory_scan(
 
 @router.get("/builtins", response_model=list[dict])
 async def list_builtins(_=Depends(get_current_user)):
-    return BUILTIN_RULES
+    return yara_builtin.load_pack()
 
 
 @router.post("/seed-builtins", status_code=201)
-async def seed_builtins(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    _=Depends(require_permission("rules:create")),
-):
-    added = 0
-    for r in BUILTIN_RULES:
-        existing = (await db.execute(select(YaraRule).where(YaraRule.name == r["name"]))).scalar_one_or_none()
-        if not existing:
-            db.add(YaraRule(**r))
-            added += 1
-    await db.commit()
-    yara_ruleset.invalidate()
-    return {"added": added}
+async def seed_builtins(_=Depends(require_permission("rules:create"))):
+    """Sync the built-in pack now (it also syncs at every start)."""
+    return await yara_builtin.sync_builtin_rules(legacy_contents())
+
+
+def legacy_contents() -> dict[str, str]:
+    return {r["name"]: r["content"] for r in LEGACY_BUILTIN_RULES}
 
 
 # last: "/{rule_id}" would otherwise catch GET /builtins
