@@ -295,7 +295,7 @@ func (e *fanEngine) hashFD(fd int32) (string, bool) {
 // decide returns whether the exec may go ahead.
 func (e *fanEngine) decide(ev fanEvent) bool {
 	pol := e.policy.Load()
-	if pol == nil || len(pol.p.Rules) == 0 {
+	if pol == nil || !pol.p.active() {
 		return true
 	}
 	path, err := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", ev.fd))

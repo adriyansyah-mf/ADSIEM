@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/siem-platform/agent/internal/malhash"
 )
 
 // Rule types and actions as the server sends them.
@@ -23,6 +25,9 @@ const (
 	TypePath   = "path"   // Value: absolute path of the executable
 	TypeDir    = "dir"    // Value: directory; anything below it
 	TypeParent = "parent" // Parent: parent basenames, Value: child basenames (comma separated)
+	// TypeKnownMalware is not a server rule: a hash in the known-malware set
+	// (internal/malhash) matched; Name is its label.
+	TypeKnownMalware = "known_malware"
 
 	ActionDetect = "detect"
 	ActionBlock  = "block"
@@ -61,6 +66,41 @@ type Policy struct {
 	paths   map[string]*compiled
 	dirs    []*compiled
 	parents []*compiled
+
+	// the known-malware set (checked after hash rules), the file it is saved
+	// in (the fanotify helper loads it from there) and the guard's protected
+	// hashes, which a known-malware match never blocks
+	malware     *malhash.Set
+	malwareFile string
+	guardHashes map[string]string
+}
+
+// withMalware returns a copy of p that also checks the known-malware set.
+func (p *Policy) withMalware(set *malhash.Set, file string) *Policy {
+	q := *p
+	q.malware, q.malwareFile = set, file
+	return &q
+}
+
+// checksMalware reports whether execs are checked against the known-malware set.
+func (p *Policy) checksMalware() bool { return p.malware.Active() }
+
+// active reports whether there is anything to decide.
+func (p *Policy) active() bool { return len(p.Rules) > 0 || p.checksMalware() }
+
+// malwareRule is what a known-malware match reports: index -1, blocking
+// when the server says block and the file is not one the guard protects.
+func (p *Policy) malwareRule(label, sha string) *compiled {
+	action := ActionDetect
+	block := p.malware.Block() && p.guardHashes[sha] == ""
+	if block {
+		action = ActionBlock
+	}
+	if label == "" {
+		label = "unknown"
+	}
+	return &compiled{Rule: Rule{ID: sha, Name: label, RuleType: TypeKnownMalware, Value: sha, Action: action},
+		index: -1, block: block}
 }
 
 func splitNames(s string) []string {
@@ -173,7 +213,7 @@ func Compile(rules []Rule) (*Policy, []error) {
 }
 
 func compileWith(rules []Rule, g *guard) (*Policy, []error) {
-	p := &Policy{hashes: map[string]*compiled{}, paths: map[string]*compiled{}}
+	p := &Policy{hashes: map[string]*compiled{}, paths: map[string]*compiled{}, guardHashes: g.hashes}
 	var errs []error
 	for _, r := range rules {
 		c := &compiled{Rule: r, block: r.Action == ActionBlock}
@@ -267,9 +307,14 @@ func (p *Policy) Match(e Exec, kernelDecides bool) *compiled {
 			}
 		}
 	}
-	if len(p.hashes) > 0 && e.Hash != nil {
+	if (len(p.hashes) > 0 || p.checksMalware()) && e.Hash != nil {
 		if h, ok := e.Hash(); ok {
-			return p.hashes[h]
+			if c := p.hashes[h]; c != nil {
+				return c
+			}
+			if label, known := p.malware.Lookup(h); known {
+				return p.malwareRule(label, h)
+			}
 		}
 	}
 	return nil

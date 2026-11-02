@@ -18,6 +18,7 @@ from worker.alert_manager import create_alert
 from worker.ueba.scorer import score_event as ueba_score_event
 from worker.es_client import index_log
 from worker import evidence_inbox
+from worker.malware_feed import learn_from_event
 
 log = structlog.get_logger()
 CONSUMER_NAME = f"worker-{socket.gethostname()}"
@@ -143,6 +144,12 @@ async def process_message(
         if alert_id is not None:
             log.info("alert_handled", title=match["title"], severity=match["level"],
                      source_ip=decoded.get("source.ip"), alert_id=str(alert_id))
+
+    # a file matching a critical YARA rule becomes a known-malware hash for every agent
+    try:
+        await learn_from_event(decoded, hostname)
+    except Exception as _learn_exc:  # noqa: BLE001 — never block the pipeline
+        log.warning("malware_hash_learn_failed", error=str(_learn_exc))
 
     # UEBA scoring — best-effort, never block main pipeline
     try:

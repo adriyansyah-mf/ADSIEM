@@ -23,6 +23,11 @@ const SETTING_LABELS: Record<string, string> = {
   virustotal_api_key: 'VirusTotal API Key',
   malwarebazaar_enabled: 'MalwareBazaar Hash Enrichment',
   malwarebazaar_api_key: 'MalwareBazaar Auth-Key',
+  malware_feed_enabled: 'Known Malware: MalwareBazaar Feed',
+  malware_feed_retention_days: 'Known Malware: Feed Retention (days)',
+  malware_hash_learn_yara: 'Known Malware: Learn From Critical YARA Matches',
+  malware_hash_action: 'Known Malware: Agent Action',
+  malware_hash_block_groups: 'Known Malware: Block Only In Groups',
   abuseipdb_api_key: 'AbuseIPDB API Key',
   otx_api_key: 'AlienVault OTX API Key',
   greynoise_api_key: 'GreyNoise API Key',
@@ -59,7 +64,12 @@ const SETTING_HINTS: Record<string, string> = {
   ai_min_severity: 'Only run AI triage for alerts at this severity or above (low / medium / high / critical)',
   virustotal_api_key: 'Free tier: 500 req/day — virustotal.com/gui/my-apikey',
   malwarebazaar_enabled: 'true / false (default off). Let AI investigations send observed file hashes to MalwareBazaar when relevant. No file upload or sample download. Check your external-intelligence policy and abuse.ch fair-use/commercial terms.',
-  malwarebazaar_api_key: 'Auth-Key from auth.abuse.ch. Stored server-side and masked. Requires MalwareBazaar Hash Enrichment enabled.',
+  malwarebazaar_api_key: 'Auth-Key from auth.abuse.ch (free). Stored server-side and masked. Used to download new malware hashes for the known-malware set (only downloads) and, with MalwareBazaar Hash Enrichment on, for AI investigation lookups.',
+  malware_feed_enabled: 'true / false. Every 30 minutes, add MalwareBazaar\'s new samples to the hashes agents check (Malware Hashes page). Needs the Auth-Key above.',
+  malware_feed_retention_days: 'Feed hashes not seen again for this many days stop being checked (0 = keep forever). Analyst and YARA hashes never expire.',
+  malware_hash_learn_yara: 'true / false. A file that matches a critical YARA rule on one host becomes a known-malware hash for every agent.',
+  malware_hash_action: 'off, detect (critical alert) or block (kill the program at start and quarantine the dropped file). Also on the Malware Hashes page.',
+  malware_hash_block_groups: 'With block: agent groups that block, comma separated (empty = all). Other groups detect.',
   abuseipdb_api_key: 'Free tier: 1000 req/day — abuseipdb.com/account/api',
   otx_api_key: 'Free — otx.alienvault.com/api',
   greynoise_api_key: 'Optional — community endpoint used if empty (greynoise.io)',
@@ -84,7 +94,7 @@ const MASKED = '••••••••'
 // settings whose value is a 9router model or combo: offer what 9router lists
 const MODEL_KEYS = new Set(['ninerouter_model', 'investigation_model'])
 // settings where an empty value means something (none auto-approved)
-const EMPTY_OK_KEYS = new Set(['ai_command_autoapprove', 'case_ioc_exclusions'])
+const EMPTY_OK_KEYS = new Set(['ai_command_autoapprove', 'case_ioc_exclusions', 'malware_hash_block_groups'])
 
 function SettingRow({ setting }: { setting: Setting }) {
   const [value, setValue] = useState(setting.is_secret ? '' : setting.value)

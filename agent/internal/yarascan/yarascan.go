@@ -52,6 +52,10 @@ type Options struct {
 	MaxFileSize int64
 	// Push receives one encoded log line per match.
 	Push func(logType, line string)
+	// OnHash, when set, gets every file read for scanning with its SHA-256
+	// (the known-malware check, internal/malhash); files are then read even
+	// with no YARA rules loaded.
+	OnHash func(path, sha256 string, size int64)
 }
 
 // Scanner owns the rule set and the on-access watcher.
@@ -279,7 +283,8 @@ func (s *Scanner) worker(ctx context.Context) {
 // skipped.
 func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.RuleMatch, error) {
 	rules, hash := s.current()
-	if rules == nil || rules.Len() == 0 {
+	haveRules := rules != nil && rules.Len() > 0
+	if !haveRules && s.opts.OnHash == nil {
 		return nil, nil
 	}
 	info, err := os.Lstat(path)
@@ -299,6 +304,12 @@ func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.Ru
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
 	if !s.markScanned(path, digest+hash) {
+		return nil, nil
+	}
+	if s.opts.OnHash != nil {
+		s.opts.OnHash(path, digest, int64(len(data)))
+	}
+	if !haveRules {
 		return nil, nil
 	}
 	sctx, cancel := context.WithTimeout(ctx, scanTimeout)

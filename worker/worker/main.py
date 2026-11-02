@@ -28,6 +28,7 @@ from worker.rag_indexer import rag_index_loop, sop_index_loop
 from worker.stream_maintenance import stream_maintenance_loop
 from worker.evidence_inbox import evidence_dispatch_loop, evidence_retention_loop
 from worker.knowledge import knowledge_loop
+from worker.malware_feed import malware_feed_loop
 from worker.soar.engine import soar_loop
 from worker.es_client import ensure_index as ensure_es_index
 
@@ -183,6 +184,7 @@ async def main():
         _supervise("rag_index", rag_index_loop),
         _supervise("sop_index", sop_index_loop),
         _supervise("knowledge", knowledge_loop),
+        _supervise("malware_feed", malware_feed_loop),
         _supervise("health_probe", health_probe_loop),
         return_exceptions=True,
     )

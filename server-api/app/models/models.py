@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
     BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer,
-    String, Text, ARRAY, UniqueConstraint, CheckConstraint, Index, text
+    String, Text, ARRAY, UniqueConstraint, CheckConstraint, Index, Sequence, text
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
@@ -936,6 +936,31 @@ class EvidenceGroupUsage(Base):
     __table_args__ = (CheckConstraint("payload_bytes >= 0", name="ck_evidence_usage_bytes"),)
     group_id = Column(String(100), primary_key=True)
     payload_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")
+
+
+_malware_hashes_seq = Sequence("malware_hashes_seq")
+
+
+class MalwareHash(Base):
+    """Known-malware SHA-256 set agents check on exec and on file writes
+    (worker/worker/malware_hashes.py: every change takes the next seq, so
+    agents sync deltas). source: malwarebazaar, analyst, yara. status:
+    active, allowed (analyst verdict: not malware), expired."""
+    __tablename__ = "malware_hashes"
+    sha256     = Column(String(64), primary_key=True)
+    source     = Column(String(20), nullable=False)
+    label      = Column(String(64), nullable=False, default="", server_default="")
+    file_type  = Column(String(32), nullable=False, default="", server_default="")
+    reference  = Column(String(255), nullable=False, default="", server_default="")
+    status     = Column(String(10), nullable=False, default="active", server_default="active")
+    seq        = Column(BigInteger, _malware_hashes_seq, server_default=_malware_hashes_seq.next_value(),
+                        nullable=False, index=True)
+    added_by   = Column(String(255))
+    first_seen = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    added_at   = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    last_seen  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    __table_args__ = (Index("ix_malware_hashes_source_status", "source", "status"),)
 
 
 class ExecPreventionRule(Base):

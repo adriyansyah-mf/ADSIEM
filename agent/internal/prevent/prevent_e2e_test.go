@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/siem-platform/agent/internal/malhash"
 )
 
 // End-to-end against the running kernel: needs root and, for the LSM
@@ -152,6 +154,82 @@ func e2e(t *testing.T, fanotifyOnly bool) {
 	m.Apply("empty", nil)
 	if o, err := run(inDir); err != nil || !strings.Contains(o, "ran-in-dir-"+tag) {
 		t.Errorf("still blocked after the rules were removed: %v %s", err, o)
+	}
+}
+
+// TestKnownMalwareE2E: a hash in the known-malware set is refused at exec
+// by the fanotify helper (which loads the saved set), reported as a
+// known_malware line, and runs again in detect mode.
+func TestKnownMalwareE2E(t *testing.T) {
+	if os.Getenv("PREVENT_E2E") != "1" {
+		t.Skip("set PREVENT_E2E=1 (needs root)")
+	}
+	rnd := make([]byte, 6)
+	rand.Read(rnd)
+	tag := hex.EncodeToString(rnd)
+	dir := t.TempDir()
+	bad := filepath.Join(dir, "dropper.sh")
+	clean := filepath.Join(dir, "clean.sh")
+	writeScript(t, bad, "ran-bad-"+tag)
+	writeScript(t, clean, "ran-clean-"+tag)
+	sum, err := hashFile(bad, maxHashBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setFile := filepath.Join(dir, malhash.FileName)
+	var m *Manager
+	install := func(action, version string) {
+		s := malhash.New(action, map[string]string{sum: "E2EFamily"})
+		s.Version = version
+		if err := s.Save(setFile); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := malhash.Load(setFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.SetKnownMalware(loaded, setFile)
+	}
+
+	var out lines
+	m, err = Start(Options{Push: out.push})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+
+	install(malhash.ActionBlock, "1:block")
+	if o, err := run(bad); err == nil || strings.Contains(o, "ran-bad-"+tag) {
+		t.Errorf("known malware ran: %v %s", err, o)
+	}
+	if o, err := run(clean); err != nil || !strings.Contains(o, "ran-clean-"+tag) {
+		t.Errorf("a clean program was stopped: %v %s", err, o)
+	}
+	waitLine(t, &out, "event=known_malware", "action=blocked", "trigger=exec", `label="E2EFamily"`, "sha256="+sum,
+		"engine=fanotify")
+
+	install(malhash.ActionDetect, "1:detect")
+	if o, err := run(bad); err != nil || !strings.Contains(o, "ran-bad-"+tag) {
+		t.Errorf("detect mode must not stop it: %v %s", err, o)
+	}
+	waitLine(t, &out, "event=known_malware", "action=detected", `path="`+bad+`"`)
+
+	install(malhash.ActionOff, "")
+	if o, err := run(bad); err != nil || !strings.Contains(o, "ran-bad-"+tag) {
+		t.Errorf("off: %v %s", err, o)
+	}
+}
+
+func waitLine(t *testing.T, out *lines, parts ...string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !out.has(parts...) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !out.has(parts...) {
+		out.mu.Lock()
+		t.Errorf("no line with %q; got:\n%s", parts, strings.Join(out.got, "\n"))
+		out.mu.Unlock()
 	}
 }
 

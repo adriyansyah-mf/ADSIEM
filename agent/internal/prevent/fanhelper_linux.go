@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/siem-platform/agent/internal/malhash"
 )
 
 // The fanotify engine runs in a helper process (the agent binary started
@@ -37,13 +39,18 @@ func IsHelper() bool { return os.Getenv(HelperEnv) == "1" }
 type helperPolicy struct {
 	Rules         []Rule `json:"rules"`
 	KernelDecides bool   `json:"kernel_decides"`
+	// the saved known-malware set (internal/malhash), loaded again when the
+	// version changes; empty when execs are not checked against it
+	MalwareFile    string `json:"malware_file,omitempty"`
+	MalwareVersion string `json:"malware_version,omitempty"`
 }
 
 // helperDecision is a decision, or with Applied set the acknowledgement
 // that a policy is in force.
 type helperDecision struct {
 	Applied int    `json:"applied,omitempty"`
-	Index   int    `json:"index"`
+	Index   int    `json:"index"` // -1: a known-malware hash, Label names it
+	Label   string `json:"label,omitempty"`
 	Blocked bool   `json:"blocked"`
 	Path    string `json:"path"`
 	Parent  string `json:"parent"`
@@ -70,8 +77,12 @@ func RunHelper() int {
 		outMu.Unlock()
 	}
 	eng, err := startFanotifyLocal(func(d Decision) {
+		label := ""
+		if d.Rule.RuleType == TypeKnownMalware {
+			label = d.Rule.Name
+		}
 		write(helperDecision{
-			Index: d.Rule.index, Blocked: d.Blocked, Path: d.Path, Parent: d.Parent, SHA256: d.SHA256,
+			Index: d.Rule.index, Label: label, Blocked: d.Blocked, Path: d.Path, Parent: d.Parent, SHA256: d.SHA256,
 			Comm: d.Comm, PID: d.PID, PPID: d.PPID, UID: d.UID,
 		})
 	})
@@ -82,12 +93,29 @@ func RunHelper() int {
 	write(helperHello{Ready: true, Mounts: len(eng.marked)})
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 1<<20), 64<<20)
+	var malware *malhash.Set
+	var malwareVersion string
 	for in.Scan() {
 		var msg helperPolicy
 		if err := json.Unmarshal(in.Bytes(), &msg); err != nil {
 			continue
 		}
 		p, _ := Compile(msg.Rules)
+		switch {
+		case msg.MalwareFile == "":
+			malware, malwareVersion = nil, ""
+		case msg.MalwareVersion != malwareVersion:
+			set, err := malhash.Load(msg.MalwareFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "prevent helper: known-malware hashes not loaded: %v\n", err)
+				malware, malwareVersion = nil, ""
+			} else {
+				malware, malwareVersion = set, msg.MalwareVersion
+			}
+		}
+		if malware != nil {
+			p = p.withMalware(malware, msg.MalwareFile)
+		}
 		eng.setPolicy(p, msg.KernelDecides)
 		write(helperDecision{Applied: len(p.Rules) + 1})
 	}
@@ -160,11 +188,17 @@ func (c *fanClient) read(dec *json.Decoder) {
 		c.mu.Lock()
 		p := c.policy
 		c.mu.Unlock()
-		if p == nil || d.Index < 0 || d.Index >= len(p.Rules) {
+		if p == nil || d.Index < -1 || d.Index >= len(p.Rules) {
 			continue
 		}
+		var rule *compiled
+		if d.Index == -1 {
+			rule = p.malwareRule(d.Label, d.SHA256)
+		} else {
+			rule = p.Rules[d.Index]
+		}
 		c.report(Decision{
-			Rule: p.Rules[d.Index], Blocked: d.Blocked, Engine: "fanotify", Path: d.Path, Parent: d.Parent,
+			Rule: rule, Blocked: d.Blocked, Engine: "fanotify", Path: d.Path, Parent: d.Parent,
 			SHA256: d.SHA256, Comm: d.Comm, PID: d.PID, PPID: d.PPID, UID: d.UID,
 		})
 	}
@@ -181,7 +215,12 @@ func (c *fanClient) setPolicy(p *Policy, kernelDecides bool) {
 		}
 		rules = append(rules, rr)
 	}
-	b, _ := json.Marshal(helperPolicy{Rules: rules, KernelDecides: kernelDecides})
+	msg := helperPolicy{Rules: rules, KernelDecides: kernelDecides}
+	if p.checksMalware() && p.malwareFile != "" {
+		msg.MalwareFile = p.malwareFile
+		msg.MalwareVersion = fmt.Sprintf("%s|%s|%d|%d", p.malware.Version, p.malware.Action, p.malware.Seq, p.malware.Len())
+	}
+	b, _ := json.Marshal(msg)
 	c.mu.Lock()
 	c.policy = p
 	c.mu.Unlock()

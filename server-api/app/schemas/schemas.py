@@ -279,6 +279,7 @@ class HeartbeatResponse(BaseModel):
     firewall: list[dict] = []
     uninstall_token_sha256: str = ""  # agents >= 1.8.0 refuse removal without the token
     yara_rules_hash: str = ""  # enabled YARA rule set; agents fetch it from /api/ingest/yara-rules
+    malware_hashes_version: str = ""  # "<seq>:<action>"; agents sync from /api/ingest/malware-hashes ("" = off)
     update: dict | None = None  # services.agent_update.offer_for: version, revision, url, signed
 
 # ─── Ingest ──────────────────────────────────────────────────────
