@@ -27,6 +27,9 @@ agent_router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
 _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 _NAME = re.compile(r"^[^/\s,]{1,31}$")
+# A Windows absolute path: drive letter, colon, backslash (Windows agents
+# enforce these; Linux agents skip them, and the other way round).
+_WINDOWS_ABS = re.compile(r"^[A-Za-z]:\\")
 
 
 def _names(s: str) -> list[str]:
@@ -46,8 +49,8 @@ class PreventionRuleIn(BaseModel):
         v = self.value.strip()
         if self.rule_type == "hash" and not _SHA256.match(v):
             raise ValueError("hash rules need a SHA-256 (64 hex characters)")
-        if self.rule_type in ("path", "dir") and not v.startswith("/"):
-            raise ValueError(f"{self.rule_type} rules need an absolute path")
+        if self.rule_type in ("path", "dir") and not (v.startswith("/") or _WINDOWS_ABS.match(v)):
+            raise ValueError(f"{self.rule_type} rules need an absolute path (/usr/bin/nc or C:\\Tools\\nc.exe)")
         if self.rule_type == "parent":
             parents, children = _names(self.parent), _names(v)
             if not parents or not children:

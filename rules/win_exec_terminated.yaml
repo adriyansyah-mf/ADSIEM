@@ -1,0 +1,20 @@
+title: Execution Terminated By Prevention Rule On Windows
+id: rule-win-exec-terminated
+description: >-
+  A program matched a block rule on the Prevention page (rule.name) and the
+  agent terminated it right after it started. On Windows the agent has no
+  driver to refuse the start, so the program ran for a moment: check what it
+  did in that time (file and network events of process.pid) and what started
+  it (ParentImage).
+logsource:
+  product: windows
+  service: exec_prevention
+detection:
+  selection:
+    event.action: exec_prevention
+    prevention.action: terminated
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.defense_evasion

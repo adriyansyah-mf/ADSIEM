@@ -12,8 +12,15 @@ import (
 	"time"
 )
 
-// LogType of decision lines (decoders/linux_exec_prevention.yaml).
-const LogType = "linux_exec_prevention"
+// LogType of decision lines on Linux (decoders/linux_exec_prevention.yaml);
+// WindowsLogType on Windows (decoders/windows_exec_prevention.yaml).
+const (
+	LogType        = "linux_exec_prevention"
+	WindowsLogType = "windows_exec_prevention"
+)
+
+// decisionLogType is LogType, or WindowsLogType where the Windows engine runs.
+var decisionLogType = LogType
 
 // RulesPath is the agent endpoint that returns the enabled rules.
 const RulesPath = "/api/ingest/prevention-rules"
@@ -24,14 +31,18 @@ const pollEvery = time.Minute
 type Decision struct {
 	Rule    *compiled
 	Blocked bool
-	Engine  string // lsm or fanotify
-	Path    string
-	Parent  string
-	SHA256  string
-	Comm    string
-	PID     uint32
-	PPID    uint32
-	UID     uint32
+	// Terminated: the program started and was stopped right after (Windows:
+	// no driver, so no veto before it runs). Error says why a block failed.
+	Terminated bool
+	Error      string
+	Engine     string // lsm, fanotify or etw
+	Path       string
+	Parent     string
+	SHA256     string
+	Comm       string
+	PID        uint32
+	PPID       uint32
+	UID        uint32
 }
 
 func kv(s string) string {
@@ -43,8 +54,11 @@ func kv(s string) string {
 
 func (d Decision) line() string {
 	action := "detected"
-	if d.Blocked {
+	switch {
+	case d.Blocked:
 		action = "blocked"
+	case d.Terminated:
+		action = "terminated"
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `action=%s rule=%s rule_id=%s rule_type=%s engine=%s Image=%s ParentImage=%s`,
@@ -53,6 +67,9 @@ func (d Decision) line() string {
 		fmt.Fprintf(&sb, ` SHA256=%s`, d.SHA256)
 	}
 	fmt.Fprintf(&sb, ` Comm=%s PID=%d PPID=%d User=%d`, kv(d.Comm), d.PID, d.PPID, d.UID)
+	if d.Error != "" {
+		fmt.Fprintf(&sb, ` Error=%s`, kv(d.Error))
+	}
 	return sb.String()
 }
 
@@ -92,6 +109,26 @@ func Start(opts Options) (*Manager, error) {
 
 func (m *Manager) Close() { m.eng.close() }
 
+// ProcessStart is a new process as a process sensor reports it (Windows ETW).
+type ProcessStart struct {
+	PID, PPID   uint32
+	Image       string // full path
+	ParentImage string
+}
+
+// execObserver is an engine fed by a process sensor rather than the kernel.
+type execObserver interface {
+	observe(ProcessStart)
+}
+
+// ObserveExec hands a process start to an engine that decides after the
+// fact (Windows); a no-op where the kernel decides (Linux).
+func (m *Manager) ObserveExec(p ProcessStart) {
+	if o, ok := m.eng.(execObserver); ok {
+		o.observe(p)
+	}
+}
+
 // Hash is the version of the applied rule set.
 func (m *Manager) Hash() string {
 	m.mu.Lock()
@@ -121,7 +158,7 @@ func (m *Manager) Apply(hash string, rules []Rule) {
 // report pushes a decision line; the same rule, image and parent are
 // reported at most once a minute (a blocked loop would flood otherwise).
 func (m *Manager) report(d Decision) {
-	key := fmt.Sprintf("%d|%s|%s|%t", d.Rule.index, d.Path, d.Parent, d.Blocked)
+	key := fmt.Sprintf("%d|%s|%s|%t|%t", d.Rule.index, d.Path, d.Parent, d.Blocked, d.Terminated)
 	m.lastMu.Lock()
 	now := time.Now()
 	if t, ok := m.last[key]; ok && now.Sub(t) < time.Minute {
@@ -133,7 +170,7 @@ func (m *Manager) report(d Decision) {
 	}
 	m.last[key] = now
 	m.lastMu.Unlock()
-	m.opts.Push(LogType, d.line())
+	m.opts.Push(decisionLogType, d.line())
 }
 
 // Poster is the part of client.Client the poll loop needs.

@@ -82,6 +82,8 @@ type Options struct {
 	Disabled []string
 	// OnFile, if set, sees every file event before rate limiting.
 	OnFile func(FileEvent)
+	// OnProcess, if set, sees every process start (execution prevention).
+	OnProcess func(ProcessStart)
 }
 
 // FileEvent is one file create, rename or delete, before rate limiting: the

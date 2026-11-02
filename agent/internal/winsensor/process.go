@@ -56,6 +56,20 @@ type processJoiner struct {
 	pending map[uint32]*process
 	known   map[uint32]*process
 	order   []uint32 // known, oldest first, for eviction
+
+	// onStart, when set, sees every process start as it is emitted (the
+	// Windows execution prevention engine).
+	onStart func(ProcessStart)
+}
+
+// ProcessStart is one process start, joined: Image is the full path when the
+// Kernel-Process half arrived in time.
+type ProcessStart struct {
+	PID, PPID   uint32
+	Image       string
+	ParentImage string
+	CommandLine string
+	User        string
 }
 
 func newProcessJoiner(fullImage func(uint32) string, dosPath func(string) string) *processJoiner {
@@ -169,6 +183,13 @@ func (j *processJoiner) emit(pid uint32) []string {
 		if full := j.fullImage(p.ppid); full != "" {
 			parent.image = full
 		}
+	}
+	if j.onStart != nil {
+		ps := ProcessStart{PID: p.pid, PPID: p.ppid, Image: p.image, CommandLine: p.commandLine, User: p.user}
+		if parent != nil {
+			ps.ParentImage = parent.image
+		}
+		j.onStart(ps)
 	}
 	return []string{processLine(p, parent)}
 }

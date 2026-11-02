@@ -34,7 +34,7 @@ func (s *fakeServer) PostContext(_ context.Context, path string, payload any) (*
 func TestSyncAppliesOnlyChanges(t *testing.T) {
 	eng := &fakeEngines{}
 	m := &Manager{eng: eng, last: map[string]time.Time{}}
-	srv := &fakeServer{hash: "h1", rules: []Rule{{Name: "shm", RuleType: TypeDir, Value: "/dev/shm", Action: ActionDetect}}}
+	srv := &fakeServer{hash: "h1", rules: []Rule{{Name: "tmp", RuleType: TypeDir, Value: t.TempDir(), Action: ActionDetect}}} // absolute on every OS
 	ctx := context.Background()
 	for i := 0; i < 3; i++ {
 		if err := m.Sync(ctx, srv); err != nil {
