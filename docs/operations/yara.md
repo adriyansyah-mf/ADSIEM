@@ -28,6 +28,22 @@ yara:
 
 Limits: a file is scanned 2 s after its last write, once per (content, rule set); the queue holds 512 files and drops the rest (logged every 10 minutes); one scan stops after 30 s. Symlinks are not followed.
 
+## Built-in rule pack
+
+`yara/builtin/*.yar` ships with the server (copied into the server-api image) and is synced into the YARA rules at every start (`server-api/app/services/yara_builtin.py`): one rule per file, origin `builtin`, named `builtin/<file>`, **enabled by default**, so agents scan new and changed files in the watched directories with no rule written by hand. An upgrade updates their content; an analyst's enable/disable is kept. They cannot be edited or deleted in place (they would come back on the next start): disable one, or save a copy under another name and change that. The 7 rules the server used to keep inline (seeded with *Seed built-ins*) are removed when still unchanged.
+
+| File | Rules |
+|---|---|
+| `test_eicar.yar` | EICAR test file (prove on-access scanning end to end) |
+| `hacktool_credential_theft.yar` | Mimikatz, LaZagne, LSASS dump scripts (comsvcs MiniDump, procdump) |
+| `hacktool_c2_frameworks.yar` | Cobalt Strike beacon strings, Meterpreter, Sliver |
+| `webshells.yar` | PHP eval/exec of request input, known PHP shells (c99, r57, b374k, WSO), ASPX China Chopper style, JSP Runtime.exec |
+| `ransomware.yar` | ransom notes, scripts deleting shadow copies, backups and boot recovery |
+| `coinminers.yar` | XMRig and its configs, miner dropper scripts |
+| `scripts_loaders.yar` | PowerShell download cradles, AMSI bypass, reverse shell one-liners |
+
+All are written for ADSIEM (no third-party rules) and use only plain strings and regexes. `agent/internal/yara/builtin_test.go` compiles every file with the agent's engine, requires a match on a sample for each rule, and no match on benign look-alikes or system binaries (`sh`, `bash`, `python3`, `curl`, `ssh`, `openssl`, …). To try it on a host: create the EICAR file in a watched directory and look for the `yara_match` alert.
+
 ## Alerts
 
 Each match is a `yara_match` line decoded by `decoders/yara_match.yaml` (`yara.rule`, `yara.namespace`, `yara.severity`, `yara.tags`, `yara.strings`, `file.path`, `file.hash.sha256`, `file.size`). Four Sigma rules (`rules/yara_match_{critical,high,medium,low}.yaml`) raise the alert. Severity comes from the YARA rule's meta:

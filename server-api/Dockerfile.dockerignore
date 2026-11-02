@@ -14,6 +14,8 @@
 !worker/worker/soar/graph.py
 !worker/worker/soar/template.py
 !worker/worker/soar/curl.py
+# built-in YARA rule pack, synced into yara_rules at start (services/yara_builtin.py)
+!yara/builtin
 # yaracheck build stage: the agent module's YARA engine and the CLI, not its test fixtures
 !agent/go.mod
 !agent/go.sum
