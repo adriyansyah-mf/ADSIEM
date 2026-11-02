@@ -1,0 +1,36 @@
+title: LibreOffice Started A Shell Or Interpreter
+id: rule-linux-office-child-shell
+description: >-
+  LibreOffice started a shell, an interpreter or a download tool: a
+  malicious document or macro running code, the Linux side of an Office
+  application starting a shell (T1204.002, T1566.001).
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  office:
+    ParentImage|endswith:
+      - /soffice.bin
+      - /soffice
+      - /libreoffice
+      - /oosplash
+  child:
+    Image|endswith:
+      - /sh
+      - /bash
+      - /dash
+      - /zsh
+      - /python
+      - /python3
+      - /perl
+      - /curl
+      - /wget
+      - /nc
+      - /ncat
+  condition: office and child
+level: high
+tags:
+  - attack.execution
+  - attack.t1204.002
+  - attack.initial_access
+  - attack.t1566.001

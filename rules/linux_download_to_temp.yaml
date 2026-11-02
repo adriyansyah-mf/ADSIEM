@@ -1,0 +1,41 @@
+title: File Downloaded Into A Temporary Folder On Linux
+id: rule-linux-download-to-temp
+description: >-
+  curl, wget or a Python / Perl one-liner downloaded a file into /tmp,
+  /var/tmp or /dev/shm, where droppers stage payloads before running them
+  (T1105). The Linux side of Windows built-in tools downloading a file.
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  fetcher:
+    Image|endswith:
+      - /curl
+      - /wget
+  into_temp:
+    CommandLine|contains:
+      - ' /tmp/'
+      - ' /var/tmp/'
+      - ' /dev/shm/'
+      - '=/tmp/'
+      - '=/dev/shm/'
+  script:
+    Image|endswith:
+      - /python
+      - /python2
+      - /python3
+      - /perl
+  script_download:
+    CommandLine|contains:
+      - urllib
+      - urlopen
+      - requests.get
+      - urlretrieve
+      - LWP::Simple
+      - HTTP::Tiny
+      - getstore
+  condition: (fetcher and into_temp) or (script and script_download)
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1105

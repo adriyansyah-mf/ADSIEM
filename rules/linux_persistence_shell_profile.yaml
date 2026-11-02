@@ -1,0 +1,53 @@
+title: Shell Startup File Changed By A Non-Editor On Linux
+id: rule-linux-persistence-shell-profile
+description: >-
+  A shell startup file (/etc/profile, profile.d, bash.bashrc, a user's
+  .bashrc / .profile / .zshrc) was changed by a program that is not an
+  editor or package manager: commands added there run at every login or new
+  shell (T1546.004). Users editing their own .bashrc are left out.
+logsource:
+  product: linux
+  category: file_event
+detection:
+  system:
+    TargetFilename|startswith:
+      - /etc/profile
+      - /etc/bash.bashrc
+      - /etc/bashrc
+      - /etc/zsh/
+  user:
+    TargetFilename|endswith:
+      - /.bashrc
+      - /.bash_profile
+      - /.bash_login
+      - /.bash_logout
+      - /.profile
+      - /.zshrc
+      - /.zprofile
+  editor:
+    Image|endswith:
+      - /vim
+      - /vim.basic
+      - /vim.tiny
+      - /nvim
+      - /vi
+      - /nano
+      - /emacs
+      - /code
+      - /gedit
+      - /kate
+      - /mousepad
+      - /micro
+      - /dpkg
+      - /apt
+      - /rpm
+      - /yum
+      - /dnf
+      - /cp
+      - /useradd
+      - /adduser
+  condition: (system or user) and not editor
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1546.004

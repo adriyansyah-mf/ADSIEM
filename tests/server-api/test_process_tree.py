@@ -124,6 +124,19 @@ def test_tree_around_alert_process():
     assert [(e["target"], e["action"]) for e in access] == [("C:\\Windows\\explorer.exe", "0x1F0FFF"),
                                                             ("C:\\Windows\\explorer.exe", "remote_thread")]
     assert by["xmrig"]["counts"]["access"] == 2
+
+
+def test_linux_memory_access_and_ptrace_in_tree():
+    start = exec_("dumper", -5, 2000, 1, "/tmp/dumper")
+    idx = Index([start,
+                 activity("vm", 1, "linux_process_access", 2000, **{"TargetImage": "/usr/sbin/sshd",
+                                                                     "access.action": "vm_read"}),
+                 activity("pt", 2, "linux_ptrace", 2000, **{"ptrace.target.executable": "/usr/sbin/nginx",
+                                                             "ptrace.request": "poketext"})])
+    tree = run(process_tree.build(idx.search, AGENT, activity("ev", 3, "linux_process_access", 2000), T0))
+    events = {e["id"]: e for e in tree["nodes"][-1]["events"]}
+    assert (events["vm"]["kind"], events["vm"]["target"], events["vm"]["action"]) == ("access", "/usr/sbin/sshd", "vm_read")
+    assert (events["pt"]["target"], events["pt"]["action"]) == ("/usr/sbin/nginx", "ptrace poketext")
     assert [n["depth"] for n in tree["nodes"]] == sorted(n["depth"] for n in tree["nodes"])
     assert tree["notes"] == []
 

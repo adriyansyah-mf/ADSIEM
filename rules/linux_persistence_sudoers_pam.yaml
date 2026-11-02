@@ -1,0 +1,47 @@
+title: Sudoers Or PAM Configuration Written On Linux
+id: rule-linux-persistence-sudoers-pam
+description: >-
+  sudoers, a sudoers.d file, a PAM configuration or a PAM module was created
+  or changed outside a package manager and visudo: passwordless root for an
+  account, or a PAM backdoor that accepts a fixed password or logs every
+  password typed (T1548.003, T1556.003).
+logsource:
+  product: linux
+  category: file_event
+detection:
+  auth:
+    TargetFilename|startswith:
+      - /etc/sudoers
+      - /etc/pam.d/
+      - /lib/security/
+      - /lib64/security/
+      - /usr/lib/security/
+      - /usr/lib64/security/
+      - /lib/x86_64-linux-gnu/security/
+      - /usr/lib/x86_64-linux-gnu/security/
+      - /lib/aarch64-linux-gnu/security/
+      - /usr/lib/aarch64-linux-gnu/security/
+  package:
+    Image|endswith:
+      - /dpkg
+      - /apt
+      - /apt-get
+      - /rpm
+      - /yum
+      - /dnf
+      - /zypper
+      - /pacman
+      - /apk
+      - /microdnf
+      - /visudo
+      - /pam-auth-update
+      - /authselect
+      - /authconfig
+  condition: auth and not package
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.003
+  - attack.credential_access
+  - attack.persistence
+  - attack.t1556.003

@@ -1,0 +1,24 @@
+# Another process's memory read or written (agent/internal/linsensor):
+# process_vm_readv / process_vm_writev (vm_read / vm_write) and opens of
+# /proc/<pid>/mem (mem_read / mem_write). The Linux side of Windows process
+# access (Sysmon 10): credential dumping (sshd, keyrings) and injection.
+name: linux_process_access
+log_type: linux_process_access
+type: kv
+priority: 10
+enabled: true
+fields:
+  access.action: action
+  TargetPID: TargetPID
+  TargetImage: TargetImage
+  Image: Image
+  process.executable: Image
+  process.name: Comm
+  process.pid: PID
+  process.parent.pid: PPID
+  user.id: User
+  process.target.pid: TargetPID
+  process.target.executable: TargetImage
+static_fields:
+  event.category: process
+  event.action: process_access
