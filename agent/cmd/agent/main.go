@@ -413,10 +413,17 @@ func run(configPath string, stop <-chan struct{}) {
 		},
 	)
 
+	senderCtx, stopSender := context.WithCancel(context.Background())
+	defer stopSender()
+	senderDone := make(chan struct{})
 	if durable != nil {
 		durable.startSender(c, heartbeat.SupportsEvidenceV2, heartbeat.EvidenceBatchMax)
+		close(senderDone)
 	} else {
-		go senderLoop(buf, c, cfg, spill, detector)
+		go func() {
+			defer close(senderDone)
+			senderLoop(senderCtx, buf, c, cfg, spill, detector)
+		}()
 	}
 
 	// periodic buffer diagnostics
@@ -439,23 +446,75 @@ func run(configPath string, stop <-chan struct{}) {
 	if durable != nil {
 		durable.shutdown() // the journal keeps what was not acknowledged
 	} else {
-		flushBuffer(buf, c, cfg)
+		// The sender stops first (an in-flight entry goes back to the
+		// buffer), then one bounded flush: systemd kills the agent after
+		// TimeoutStopSec (30 s), and what is left goes to the disk spill
+		// for the next start instead of being lost.
+		stopSender()
+		<-senderDone
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownFlush)
+		flushBuffer(ctx, buf, c, cfg, spill)
+		cancel()
 	}
 }
 
-func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill *buffer.Spill, detector *detect.Engine) {
+// shutdownFlush bounds the last flush, inside systemd's 30 s stop timeout.
+const shutdownFlush = 15 * time.Second
+
+// sendEntry posts one buffered entry. ok is false when it should be retried
+// (network error, 5xx, or ctx ended mid-request); a 4xx rejection is
+// dropped and logged, which counts as sent.
+func sendEntry(ctx context.Context, entry string, c *client.Client, cfg *config.Config) (ok bool, err error) {
+	logType, location, rawMessage := tailer.Decode(entry)
+	payload := map[string]interface{}{
+		"agent_id":    cfg.Agent.ID,
+		"agent_token": cfg.Agent.Token,
+		"log_type":    logType,
+		"raw_message": rawMessage,
+		"location":    location,
+		"received_at": time.Now().UTC().Format(time.RFC3339Nano),
+		"hostname":    mustHostname(),
+	}
+	resp, err := c.PostContext(ctx, "/api/ingest/log", payload)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 500 {
+		return false, fmt.Errorf("server status %d", resp.StatusCode)
+	}
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		slog.Error("log rejected by server, dropping entry", "status", resp.StatusCode, "body", string(body), "log_type", logType)
+	}
+	return true, nil
+}
+
+// wait sleeps d or until ctx ends; false when ctx ended.
+func wait(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill *buffer.Spill, detector *detect.Engine) {
 	backoff := time.Second
 	wasOffline := false
 	replaySpill(buf, spill)
 
-	for {
+	for ctx.Err() == nil {
 		entry, ok := buf.Pop()
 		if !ok {
 			backoff = time.Second
-			time.Sleep(100 * time.Millisecond)
+			wait(ctx, 100*time.Millisecond)
 			continue
 		}
-		logType, location, rawMessage := tailer.Decode(entry)
+		logType, _, rawMessage := tailer.Decode(entry)
 
 		// Local detection observes every event exactly once, before delivery:
 		// it must keep working while the server is unreachable.
@@ -463,35 +522,23 @@ func senderLoop(buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill 
 			detector.Emit(detector.Observe(logType, rawMessage))
 		}
 
-		payload := map[string]interface{}{
-			"agent_id":    cfg.Agent.ID,
-			"agent_token": cfg.Agent.Token,
-			"log_type":    logType,
-			"raw_message": rawMessage,
-			"location":    location,
-			"received_at": time.Now().UTC().Format(time.RFC3339Nano),
-			"hostname":    mustHostname(),
-		}
-		resp, err := c.Post("/api/ingest/log", payload)
-		if err != nil || (resp != nil && resp.StatusCode >= 500) {
-			if resp != nil {
-				resp.Body.Close()
+		sent, err := sendEntry(ctx, entry, c, cfg)
+		if !sent {
+			buf.Push(entry) // re-queue (also when shutdown cancelled the request)
+			if ctx.Err() != nil {
+				return
 			}
-			buf.Push(entry) // re-queue
 			spill.Append(entry)
 			wasOffline = true
 			slog.Warn("send failed, backing off", "backoff", backoff, "err", err)
-			time.Sleep(backoff)
+			if !wait(ctx, backoff) {
+				return
+			}
 			if backoff < 60*time.Second {
 				backoff *= 2
 			}
 			continue
 		}
-		if resp.StatusCode >= 300 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-			slog.Error("log rejected by server, dropping entry", "status", resp.StatusCode, "body", string(body), "log_type", logType)
-		}
-		resp.Body.Close()
 
 		// A successful delivery after a failure means connectivity is back:
 		// drain the disk spill so offline events are not stranded until the
@@ -517,24 +564,44 @@ func replaySpill(buf *buffer.Buffer, spill *buffer.Spill) {
 	}
 }
 
-func flushBuffer(buf *buffer.Buffer, c *client.Client, cfg *config.Config) {
+// flushBuffer sends what is buffered until ctx ends, retrying failures with
+// a backoff; whatever is left then goes to the spill (when there is one), so
+// the next start sends it.
+func flushBuffer(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *config.Config, spill *buffer.Spill) {
 	slog.Info("flushing buffer", "len", buf.Len())
+	backoff := 200 * time.Millisecond
+	for ctx.Err() == nil {
+		entry, ok := buf.Pop()
+		if !ok {
+			return
+		}
+		if sent, _ := sendEntry(ctx, entry, c, cfg); sent {
+			backoff = 200 * time.Millisecond
+			continue
+		}
+		buf.Push(entry)
+		if !wait(ctx, backoff) {
+			break
+		}
+		if backoff < 2*time.Second {
+			backoff *= 2
+		}
+	}
+	kept := 0
 	for {
 		entry, ok := buf.Pop()
 		if !ok {
 			break
 		}
-		logType, location, rawMessage := tailer.Decode(entry)
-		payload := map[string]interface{}{
-			"agent_id":    cfg.Agent.ID,
-			"agent_token": cfg.Agent.Token,
-			"log_type":    logType,
-			"raw_message": rawMessage,
-			"location":    location,
-			"received_at": time.Now().UTC().Format(time.RFC3339Nano),
-			"hostname":    mustHostname(),
+		spill.Append(entry)
+		kept++
+	}
+	if kept > 0 {
+		if spill == nil {
+			slog.Warn("shutdown flush ran out of time; no spill configured, buffered entries are lost", "lost", kept)
+		} else {
+			slog.Warn("shutdown flush ran out of time; buffered entries kept in the spill for the next start", "kept", kept)
 		}
-		c.Post("/api/ingest/log", payload) //nolint:errcheck
 	}
 }
 
