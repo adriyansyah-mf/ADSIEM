@@ -1,0 +1,33 @@
+title: Ransom Note Dropped
+id: rule-win-file-ransom-note
+description: >-
+  A file named like a ransomware ransom note was created (Djvu/STOP
+  _readme.txt, LockBit Restore-My-Files, the HOW_TO_DECRYPT / RESTORE_FILES
+  families). Notes are written into many folders right after encryption:
+  look at the process (Image) and the files it renamed or rewrote in the
+  same minute (T1486, T1491.001).
+logsource:
+  product: windows
+  category: file_event
+detection:
+  note:
+    TargetFilename|contains:
+      - '\HOW_TO_DECRYPT'
+      - '\HOW_TO_RECOVER'
+      - '\HOW-TO-DECRYPT'
+      - '\DECRYPT_INSTRUCTIONS'
+      - '\DECRYPT-FILES'
+      - '\DECRYPT_FILES'
+      - '\RESTORE_FILES'
+      - '\RESTORE-MY-FILES'
+      - '\README_FOR_DECRYPT'
+      - '\!!!READ_ME'
+      - '\READ_ME_NOW'
+      - '\RECOVER-FILES'
+      - '\_readme.txt'
+  condition: note
+level: high
+tags:
+  - attack.impact
+  - attack.t1486
+  - attack.t1491.001

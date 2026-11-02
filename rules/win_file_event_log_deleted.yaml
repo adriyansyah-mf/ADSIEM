@@ -1,0 +1,18 @@
+title: Windows Event Log File Deleted
+id: rule-win-file-event-log-deleted
+description: >-
+  A .evtx file under winevt\Logs was deleted: event logs removed to hide
+  activity, a step past clearing them (which Windows Event Log Cleared
+  catches) (T1070.001).
+logsource:
+  product: windows
+  category: file_delete
+detection:
+  evtx:
+    TargetFilename|contains: '\winevt\Logs\'
+    TargetFilename|endswith: '.evtx'
+  condition: evtx
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1070.001

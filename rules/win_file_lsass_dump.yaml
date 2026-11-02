@@ -1,0 +1,19 @@
+title: LSASS Memory Dump File Created
+id: rule-win-file-lsass-dump
+description: >-
+  A .dmp file with lsass in its name was created: LSASS memory dumped to
+  disk (procdump, comsvcs.dll MiniDump, Task Manager) to extract
+  credentials offline. Treat the host's cached credentials as stolen
+  (T1003.001).
+logsource:
+  product: windows
+  category: file_event
+detection:
+  dump:
+    TargetFilename|contains: 'lsass'
+    TargetFilename|endswith: '.dmp'
+  condition: dump
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.001

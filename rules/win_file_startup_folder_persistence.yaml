@@ -1,0 +1,32 @@
+title: Executable Or Script Dropped In Startup Folder
+id: rule-win-file-startup-folder-persistence
+description: >-
+  An executable or script was written to a Startup folder (per user or
+  all users), so it runs at every logon. Installers usually place shortcuts
+  (.lnk) there, which this rule leaves out; a dropped .exe, .vbs, .ps1, .bat
+  or .hta is a classic persistence step (T1547.001).
+logsource:
+  product: windows
+  category: file_event
+detection:
+  startup:
+    TargetFilename|contains: '\Start Menu\Programs\Startup\'
+  payload:
+    TargetFilename|endswith:
+      - '.exe'
+      - '.dll'
+      - '.scr'
+      - '.bat'
+      - '.cmd'
+      - '.vbs'
+      - '.vbe'
+      - '.js'
+      - '.jse'
+      - '.wsf'
+      - '.ps1'
+      - '.hta'
+  condition: startup and payload
+level: high
+tags:
+  - attack.persistence
+  - attack.t1547.001

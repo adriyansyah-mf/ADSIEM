@@ -1,0 +1,30 @@
+title: Known Vulnerable Driver Loaded
+id: rule-win-driver-load-vulnerable-driver
+description: >-
+  A driver known to be abused to reach the kernel was loaded:
+  bring-your-own-vulnerable-driver, used by ransomware and EDR killers to
+  terminate security products or disable kernel protections (MSI
+  Afterburner RTCore64, Dell dbutil, Gigabyte gdrv, Intel iqvw64e, Genshin
+  mhyprot2, Process Hacker kprocesshacker, Avast aswArPot). A few have
+  legitimate users (overclocking tools, Process Hacker) (T1068, T1562.001).
+logsource:
+  product: windows
+  category: driver_load
+detection:
+  driver:
+    ImageLoaded|endswith:
+      - '\RTCore64.sys'
+      - '\dbutil_2_3.sys'
+      - '\gdrv.sys'
+      - '\iqvw64e.sys'
+      - '\mhyprot2.sys'
+      - '\kprocesshacker.sys'
+      - '\aswArPot.sys'
+      - '\WinRing0x64.sys'
+  condition: driver
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1068
+  - attack.defense_evasion
+  - attack.t1562.001

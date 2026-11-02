@@ -1,0 +1,38 @@
+title: Office Application Drops Executable Or Script
+id: rule-win-file-office-drops-executable
+description: >-
+  Word, Excel, PowerPoint, Outlook, Access, Publisher or OneNote wrote an
+  executable or script: a macro or exploit document staging its payload
+  (T1566.001, T1204.002). An executable saved from an Outlook attachment
+  matches too, and deserves the same look.
+logsource:
+  product: windows
+  category: file_event
+detection:
+  office:
+    Image|endswith:
+      - '\WINWORD.EXE'
+      - '\EXCEL.EXE'
+      - '\POWERPNT.EXE'
+      - '\OUTLOOK.EXE'
+      - '\MSACCESS.EXE'
+      - '\MSPUB.EXE'
+      - '\ONENOTE.EXE'
+  payload:
+    TargetFilename|endswith:
+      - '.exe'
+      - '.dll'
+      - '.scr'
+      - '.ps1'
+      - '.vbs'
+      - '.js'
+      - '.hta'
+      - '.bat'
+      - '.cmd'
+  condition: office and payload
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1566.001
+  - attack.execution
+  - attack.t1204.002

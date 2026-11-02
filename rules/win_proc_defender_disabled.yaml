@@ -1,0 +1,25 @@
+title: Defender Protection Disabled Via PowerShell
+id: rule-win-proc-defender-disabled
+description: >-
+  Set-MpPreference turned off one of Microsoft Defender's protections
+  (real-time, behavior, on-access or script scanning), a usual step before
+  dropping a payload (T1562.001). Tamper Protection blocks this when it is
+  on; the attempt is still worth an alert.
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  cmdlet:
+    CommandLine|contains: 'Set-MpPreference'
+  switch:
+    CommandLine|contains:
+      - '-DisableRealtimeMonitoring'
+      - '-DisableBehaviorMonitoring'
+      - '-DisableIOAVProtection'
+      - '-DisableScriptScanning'
+      - '-DisableBlockAtFirstSeen'
+  condition: cmdlet and switch
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001

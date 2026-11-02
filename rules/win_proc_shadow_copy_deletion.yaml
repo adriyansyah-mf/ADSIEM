@@ -1,0 +1,41 @@
+title: Shadow Copies Or Backups Deleted
+id: rule-win-proc-shadow-copy-deletion
+description: >-
+  Volume shadow copies, the backup catalog or boot recovery were removed
+  (vssadmin delete shadows, wmic shadowcopy delete, Win32_ShadowCopy
+  Delete, wbadmin delete catalog, bcdedit recoveryenabled no): ransomware
+  does this right before or after encrypting, so files cannot be restored
+  (T1490).
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  selection_vssadmin:
+    Image|endswith: '\vssadmin.exe'
+    CommandLine|contains|all:
+      - 'delete'
+      - 'shadows'
+  selection_wmic:
+    Image|endswith: '\WMIC.exe'
+    CommandLine|contains|all:
+      - 'shadowcopy'
+      - 'delete'
+  selection_powershell:
+    CommandLine|contains|all:
+      - 'Win32_ShadowCopy'
+      - 'Delete'
+  selection_wbadmin:
+    Image|endswith: '\wbadmin.exe'
+    CommandLine|contains|all:
+      - 'delete'
+      - 'catalog'
+  selection_bcdedit:
+    Image|endswith: '\bcdedit.exe'
+    CommandLine|contains|all:
+      - 'recoveryenabled'
+      - 'no'
+  condition: 1 of selection_*
+level: critical
+tags:
+  - attack.impact
+  - attack.t1490
