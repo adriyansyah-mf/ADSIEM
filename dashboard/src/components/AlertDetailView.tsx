@@ -8,8 +8,9 @@ import { useAlertCases, useCreateCase } from '@/hooks/useCases'
 import { format, formatDistanceStrict } from 'date-fns'
 import {
   X, ShieldOff, CheckCircle, Copy, Search, Server, Activity, Link2, FileText, Target, LayoutList, Braces, Info,
-  ArrowLeft, Maximize2, FolderPlus, Briefcase,
+  ArrowLeft, Maximize2, FolderPlus, Briefcase, GitBranch,
 } from 'lucide-react'
+import ProcessTree from './ProcessTree'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import MarkdownNote from './MarkdownNote'
@@ -22,7 +23,7 @@ interface Props {
   onClose?: () => void       // modal only
 }
 
-type Tab = 'overview' | 'table' | 'json'
+type Tab = 'overview' | 'process' | 'table' | 'json'
 type DocValue = string | number | boolean | null | undefined | string[]
 
 const STATUS_OPTIONS = ['new', 'in_progress', 'resolved', 'false_positive']
@@ -449,6 +450,7 @@ function AlertDetailBody({ alert, detail, variant, onClose }: {
 
   const tabs: Array<[Tab, string, ReactNode]> = [
     ['overview', 'Overview', <Info size={13} />],
+    ['process', 'Process tree', <GitBranch size={13} />],
     ['table', 'Table', <LayoutList size={13} />],
     ['json', 'JSON', <Braces size={13} />],
   ]
@@ -512,6 +514,7 @@ function AlertDetailBody({ alert, detail, variant, onClose }: {
           : 'grid min-h-0 flex-1 gap-4 overflow-auto p-4 lg:grid-cols-[minmax(0,1fr)_260px]'}>
           <div className="min-w-0">
             {tab === 'overview' && <Overview a={alert} d={detail} onPivot={pivot} wide={isPage} />}
+            {tab === 'process' && <ProcessTree alertId={alert.id} />}
             {tab === 'table' && <DocumentTable doc={doc} onPivot={pivot} />}
             {tab === 'json' && (
               <pre className="max-h-[65vh] overflow-auto rounded border border-border bg-muted/20 p-3 font-mono text-xs">{JSON.stringify(doc, null, 2)}</pre>
