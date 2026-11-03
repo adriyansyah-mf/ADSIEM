@@ -39,6 +39,7 @@ import (
 	"github.com/siem-platform/agent/internal/scriptscan"
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
+	"github.com/siem-platform/agent/internal/unpack"
 	"github.com/siem-platform/agent/internal/winsensor"
 	"github.com/siem-platform/agent/internal/yarascan"
 )
@@ -414,7 +415,9 @@ func run(configPath string, stop <-chan struct{}) {
 	// every file the on-access scanner reads; block mode kills / quarantines.
 	push := func(logType, line string) { buf.Push(tailer.Encode(logType, line)) }
 	malStore := malhash.Open(filepath.Join(task.StateDir(cfg), malhash.FileName))
-	malFiles := &malhash.FileChecker{Store: malStore, Push: push, Quarantine: task.QuarantineFile}
+	// a file found inside an archive ("outer|inner") quarantines the archive
+	quarantine := func(path string) error { return task.QuarantineFile(unpack.Outer(path)) }
+	malFiles := &malhash.FileChecker{Store: malStore, Push: push, Quarantine: quarantine}
 	malStore.OnChange = func(set *malhash.Set) {
 		if preventer != nil {
 			preventer.SetKnownMalware(set, malStore.File())
@@ -436,7 +439,7 @@ func run(configPath string, stop <-chan struct{}) {
 	if model, err := mlscore.Default(); err != nil {
 		slog.Warn("static ML model unavailable", "err", err)
 	} else {
-		ml := &mlscan.Checker{Model: model, Push: push, Quarantine: task.QuarantineFile,
+		ml := &mlscan.Checker{Model: model, Push: push, Quarantine: quarantine,
 			Mode: func(path, sha string) string {
 				s := polStore.Current().Settings
 				if s.Excluded(policy.ScopeML, policy.Match{Path: path, Image: path, SHA256: sha}) {

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/siem-platform/agent/internal/unpack"
 	"github.com/siem-platform/agent/internal/yara"
 )
 
@@ -64,6 +65,10 @@ type Options struct {
 	// group policy turned on-access YARA off, or excludes the path); the
 	// file still goes to OnHash.
 	Skip func(path string) bool
+	// NoUnpack leaves containers closed: by default what is inside an
+	// archive, disk image, shortcut or smuggling page (internal/unpack) is
+	// hashed, handed to OnData and scanned too, as "outer|inner" paths.
+	NoUnpack bool
 }
 
 // Scanner owns the rule set and the on-access watcher.
@@ -314,13 +319,41 @@ func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.Ru
 	if !s.markScanned(path, digest+hash) {
 		return nil, nil
 	}
+	yaraOn := haveRules && (s.opts.Skip == nil || !s.opts.Skip(path))
+	matches, err := s.scanContent(ctx, rules, yaraOn, path, digest, data, trigger)
+	if err != nil {
+		return matches, err
+	}
+	// what is inside: archives, disk images, shortcuts, smuggled blobs
+	if !s.opts.NoUnpack {
+		res := unpack.Open(data, unpack.DefaultLimits)
+		for _, n := range res.Notes {
+			slog.Debug("unpack: left out", "path", path, "note", n)
+		}
+		for _, it := range res.Items {
+			sum := sha256.Sum256(it.Data)
+			inner := path + unpack.Sep + it.Path
+			m, err := s.scanContent(ctx, rules, yaraOn, inner, hex.EncodeToString(sum[:]), it.Data, trigger)
+			if err != nil {
+				slog.Debug("yara: inner scan failed", "path", inner, "err", err)
+			}
+			matches = append(matches, m...)
+		}
+	}
+	return matches, nil
+}
+
+// scanContent hands one file, or one file inside a container (path
+// "outer|inner"), to the hash and data hooks and the YARA rules.
+func (s *Scanner) scanContent(ctx context.Context, rules *yara.Rules, yaraOn bool, path, digest string, data []byte,
+	trigger string) ([]yara.RuleMatch, error) {
 	if s.opts.OnHash != nil {
 		s.opts.OnHash(path, digest, int64(len(data)))
 	}
 	if s.opts.OnData != nil {
 		s.opts.OnData(path, digest, data)
 	}
-	if !haveRules || (s.opts.Skip != nil && s.opts.Skip(path)) {
+	if !yaraOn {
 		return nil, nil
 	}
 	sctx, cancel := context.WithTimeout(ctx, scanTimeout)
