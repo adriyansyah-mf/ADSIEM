@@ -119,6 +119,16 @@ func Message(logType, line string) string {
 			return fmt.Sprintf("A suspicious file was found:\n%s\n(rule %s)\n\nDo not open it. Your security team has been alerted.",
 				shorten(f["file"]), f["rule"])
 		}
+	case "ml_detection":
+		// suspicious scores stay with the analysts: too many false alarms
+		// for a pop-up
+		if f["level"] == "malicious" {
+			if f["action"] == "quarantined" {
+				return "A file that looks malicious was found and locked so it cannot run:\n" + shorten(f["path"])
+			}
+			return "A file that looks malicious was found:\n" + shorten(f["path"]) +
+				"\n\nDo not open it. Your security team has been alerted."
+		}
 	case "windows_exec_prevention", "linux_exec_prevention":
 		switch f["action"] {
 		case "terminated", "blocked":

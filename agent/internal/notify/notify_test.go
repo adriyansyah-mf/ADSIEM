@@ -31,6 +31,11 @@ func TestMessages(t *testing.T) {
 			"detected and the program was stopped:\nC:\\r.exe"},
 		{"ransomware_activity", `detection=canary confirmed=false response=none`, ""},
 		{"windows_etw_image", `EventID=7 Image="C:\\x.exe"`, ""},
+		{"ml_detection", `event=ml_detection action=quarantined level=malicious kind=pe path="C:\\d.exe"`,
+			"looks malicious was found and locked so it cannot run:\nC:\\d.exe"},
+		{"ml_detection", `event=ml_detection action=detected level=malicious kind=elf path="/tmp/m"`,
+			"security team has been alerted"},
+		{"ml_detection", `event=ml_detection action=detected level=suspicious kind=pe path="C:\\s.exe"`, ""},
 	}
 	for _, c := range cases {
 		got := Message(c.logType, c.line)

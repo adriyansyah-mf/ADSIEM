@@ -1,0 +1,19 @@
+title: Static ML Suspicious File
+id: rule-ml-suspicious-file
+description: >-
+  A program in a watched folder scored between the suspicious and malicious
+  thresholds of the agent's static ML check (for Windows PE, where 1% and
+  0.1% of benign files score). Never quarantined; worth a look with other
+  signals from the same host (process tree, network, YARA).
+logsource:
+  product: ml
+  service: detection
+detection:
+  selection:
+    event.action: ml_detection
+    ml.level: suspicious
+  condition: selection
+level: low
+tags:
+  - attack.execution
+  - attack.t1204

@@ -22,7 +22,7 @@ DEFAULT_GROUP = "default"
 CACHE_SECONDS = 30.0
 MAX_EXCLUSIONS = 500
 
-Scope = Literal["prevention", "malware", "yara", "ransomware", "script", "alerts"]
+Scope = Literal["prevention", "malware", "yara", "ransomware", "script", "ml", "alerts"]
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ABS = re.compile(r"^(/|[A-Za-z]:\\)")
 
@@ -62,6 +62,9 @@ class PolicySettings(BaseModel):
     # scripts scanned with the YARA rules as they run (Windows: AMSI content; Linux: interpreters'
     # code); block stops the process on a high or critical match
     script_scan: Literal["off", "detect", "block"] = "detect"
+    # static ML on scanned files (EMBER model for PE, heuristic for ELF):
+    # block quarantines files over the malicious threshold
+    ml_action: Literal["off", "detect", "block"] = "detect"
     exclusions: list[Exclusion] = Field(default_factory=list, max_length=MAX_EXCLUSIONS)
 
     @field_validator("exclusions")
