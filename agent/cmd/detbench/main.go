@@ -30,6 +30,7 @@ import (
 
 	"github.com/siem-platform/agent/internal/mlscan"
 	"github.com/siem-platform/agent/internal/mlscore"
+	"github.com/siem-platform/agent/internal/unpack"
 	"github.com/siem-platform/agent/internal/yara"
 	"github.com/siem-platform/agent/internal/yarascan"
 	"github.com/siem-platform/agent/internal/zipcrypto"
@@ -58,12 +59,38 @@ type Verdict struct {
 	ML       string   `json:"ml,omitempty"`        // malicious, suspicious, clean
 	MLScore  float64  `json:"ml_score,omitempty"`
 	Error    string   `json:"error,omitempty"`
+	Inner    int      `json:"inner_files,omitempty"` // files found inside (archives, images, shortcuts)
+	MLItem   string   `json:"ml_item,omitempty"`     // the inner file the ML verdict is about
 }
 
 type engines struct {
 	rules *yara.Rules
 	model *mlscore.Model
 }
+
+// judgeAll judges data and, unless noUnpack, every file inside it
+// (internal/unpack, as the agent's on-access scan does): the file counts as
+// detected when anything in it is.
+func (e engines) judgeAll(data []byte, noUnpack bool) Verdict {
+	v := e.judge(data)
+	if noUnpack {
+		return v
+	}
+	for _, it := range unpack.Open(data, unpack.DefaultLimits).Items {
+		iv := e.judge(it.Data)
+		v.Inner++
+		for _, y := range iv.YARA {
+			v.YARA = append(v.YARA, it.Path+": "+y)
+		}
+		v.YARAHigh = v.YARAHigh || iv.YARAHigh
+		if iv.Kind != "" && (v.Kind == "" || levelRank[iv.ML] > levelRank[v.ML]) {
+			v.Kind, v.ML, v.MLScore, v.MLItem = iv.Kind, iv.ML, iv.MLScore, it.Path
+		}
+	}
+	return v
+}
+
+var levelRank = map[string]int{"": 0, "clean": 1, "suspicious": 2, "malicious": 3}
 
 func (e engines) judge(data []byte) Verdict {
 	var v Verdict
@@ -212,6 +239,7 @@ func main() {
 	benign := flag.String("benign", "", "comma-separated directories of known-good files")
 	rulesDir := flag.String("rules", "../yara/builtin", "directory of .yar rules")
 	out := flag.String("out", "", "write the JSON report here")
+	noUnpack := flag.Bool("no-unpack", false, "do not look inside archives, disk images, shortcuts and HTML")
 	flag.Parse()
 	if *samples == "" && *benign == "" {
 		flag.Usage()
@@ -244,7 +272,7 @@ func main() {
 			if err != nil {
 				v.Error = err.Error()
 			} else {
-				v = e.judge(data)
+				v = e.judgeAll(data, *noUnpack)
 			}
 			v.SHA256, v.FileType, v.Family = sha, s.FileType, s.Family
 			rep.Samples = append(rep.Samples, v)
@@ -268,7 +296,7 @@ func main() {
 			if err != nil {
 				return nil
 			}
-			v := e.judge(data)
+			v := e.judgeAll(data, *noUnpack)
 			if v.Kind == "" && len(v.YARA) == 0 {
 				return nil // neither a program nor a YARA hit: not part of the benign set
 			}

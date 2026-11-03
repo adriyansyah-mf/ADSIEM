@@ -28,6 +28,22 @@ yara:
 
 Limits: a file is scanned 2 s after its last write, once per (content, rule set); the queue holds 512 files and drops the rest (logged every 10 minutes); one scan stops after 30 s. Symlinks are not followed.
 
+### Inside containers
+
+Most malware arrives wrapped, so on-access scanning also opens what a file contains (`agent/internal/unpack`), in memory, and checks every file inside with the same engines: known-malware hashes, the YARA rules and the static ML check.
+
+| Container | What is checked |
+|---|---|
+| ZIP (also docx, xlsx, jar, apk) | every entry; nested archives too |
+| ISO 9660 disk images | every file (ISO names; UDF-only images are not opened) |
+| gzip, tar | the content / every entry |
+| Windows shortcut (LNK) | its target, working directory and arguments, as text (`lnk-target.txt`): the command a malicious shortcut runs |
+| HTML smuggling | base64 blobs of 1 KB or more that decode to a program, an archive, a shortcut or an Office/MSI file (`html-blob-N`) |
+
+A file inside is reported as `outer|inner`, for example `C:\Users\bob\Downloads\invoice.zip|invoice.pdf.exe` (`file.path` in the alert). Blocking (known-malware block, `ml_action: block`) quarantines the outer file. Exclusions by path still match: `C:\Tools\` covers `C:\Tools\x.zip|a.exe`.
+
+Bounds: 3 levels of nesting, 1000 files, 64 MB per file, 256 MB per container, compression ratio 200 (archive bombs). Encrypted entries, 7z and RAR are not opened (logged at debug level). `yarascan.Options.NoUnpack` turns it off.
+
 ## Built-in rule pack
 
 `yara/builtin/*.yar` ships with the server (copied into the server-api image) and is synced into the YARA rules at every start (`server-api/app/services/yara_builtin.py`): one rule per file, origin `builtin`, named `builtin/<file>`, **enabled by default**, so agents scan new and changed files in the watched directories with no rule written by hand. An upgrade updates their content; an analyst's enable/disable is kept. They cannot be edited or deleted in place (they would come back on the next start): disable one, or save a copy under another name and change that. The 7 rules the server used to keep inline (seeded with *Seed built-ins*) are removed when still unchanged.
