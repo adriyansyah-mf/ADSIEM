@@ -38,8 +38,8 @@ For a fair before/after comparison keep the same sample set and benign directori
 | Date | Samples | Detected | Flagged | Benign flagged | Notes |
 |---|---|---|---|---|---|
 | 2026-11-03 | 83 URLhaus payloads (64 zip, 7 html, 5 exe, 3 js, 2 elf, lnk, msi) | 2.4% | 2.4% | 1 / 3,287 (ophcrack: Mimikatz rule) | built-in YARA 0%; ML: both ELF (Mozi), no PE: 3 SalatStealer (Go) scored 0.62–0.69 under the 0.76 suspicious threshold, RustyStealer 0.11, SnappyClient 0.16; zips are not opened. MalwareBazaar `get_file` answered 500 for every sample that day, so URLhaus only (`--source urlhaus`). |
-
 | 2026-11-03 | same 83, with container scanning (`agent/internal/unpack`) | 2.4% | 4.8% | 1 / 3,287 | ML now scores the programs inside the zips: 2 of 57 suspicious, none malicious. |
+| 2026-11-03 | same 83, with the EMBER2024 models (static ML v3) | 44.6% | 47.0% | - | every labelled stealer now `malicious` (SalatStealer 3/3, RustyStealer, SnappyClient, all > 0.99); 27 zips whose `zapret-discord.exe` (a 7 MB lure using zapret's name) scores malicious. Known-good survey: [static ML](static-ml.md#how-good-it-is). |
 
 **URLhaus labels are not a malware ground truth.** A URLhaus payload is a file a malware-distribution URL served. That day's 64 zips were mostly repackaged open-source tools (zapret DPI bypass with WinDivert, `winws.exe` and hundreds of `.bat` files), HWID spoofers and game-cheat lures, plus one `.scr`. Possibly trojanized, but mostly legitimate binaries, so a low rate on them does not mean missed malware. Use labelled MalwareBazaar samples for detection rates; use URLhaus to check what the engines say about what is actually being spread.
 

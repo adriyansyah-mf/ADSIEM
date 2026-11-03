@@ -433,13 +433,18 @@ func run(configPath string, stop <-chan struct{}) {
 	polStore.OnChange(func(p *policy.Policy) { applyPolicy(p.Settings, preventer, notifier, guard) })
 	go polStore.SyncLoop(flowCtx, c)
 
-	// Static ML on the files the on-access scanner reads: the EMBER-trained
-	// model for PE files, the heuristic for ELF (group policy ml_action).
+	// Static ML on the files the on-access scanner reads: models trained on
+	// EMBER2024 for PE and ELF files, plus ELF heuristics (group policy
+	// ml_action).
 	var mlFiles func(path, sha string, data []byte)
 	if model, err := mlscore.Default(); err != nil {
 		slog.Warn("static ML model unavailable", "err", err)
 	} else {
-		ml := &mlscan.Checker{Model: model, Push: push, Quarantine: quarantine,
+		elfModel, err := mlscore.DefaultELF()
+		if err != nil {
+			slog.Warn("static ML model for ELF unavailable: heuristics only", "err", err)
+		}
+		ml := &mlscan.Checker{Model: model, ELF: elfModel, Push: push, Quarantine: quarantine,
 			Mode: func(path, sha string) string {
 				s := polStore.Current().Settings
 				if s.Excluded(policy.ScopeML, policy.Match{Path: path, Image: path, SHA256: sha}) {
