@@ -13,11 +13,11 @@ func TestFileCheckerHonoursExclusions(t *testing.T) {
 	fc := &FileChecker{Store: st, Push: func(_, l string) { lines = append(lines, l) },
 		Quarantine: func(string) error { quarantined++; return nil },
 		Excluded:   func(path, s string) bool { return path == "/opt/lab/sample.bin" }}
-	fc.Check("/opt/lab/sample.bin", sha("1"), 10)
+	fc.Check("/opt/lab/sample.bin", sha("1"), 10, "")
 	if len(lines) != 0 || quarantined != 0 {
 		t.Fatalf("excluded file: %v quarantined=%d", lines, quarantined)
 	}
-	fc.Check("/tmp/sample.bin", sha("1"), 10)
+	fc.Check("/tmp/sample.bin", sha("1"), 10, "")
 	if len(lines) != 1 || quarantined != 1 {
 		t.Fatalf("not excluded: %v quarantined=%d", lines, quarantined)
 	}

@@ -52,6 +52,20 @@ type quarantineStore struct {
 
 var qStore = &quarantineStore{}
 
+// IsQuarantined reports whether path is a file the agent quarantined (it is
+// still readable by the agent: scans leave it out instead of finding it
+// again).
+func IsQuarantined(path string) bool {
+	abs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	qStore.mu.Lock()
+	defer qStore.mu.Unlock()
+	_, ok := qStore.load()[abs]
+	return ok
+}
+
 func setQuarantineStore(path string) {
 	qStore.mu.Lock()
 	defer qStore.mu.Unlock()

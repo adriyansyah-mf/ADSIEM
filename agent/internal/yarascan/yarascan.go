@@ -56,11 +56,13 @@ type Options struct {
 	// OnHash, when set, gets every file read for scanning with its SHA-256
 	// (the known-malware check, internal/malhash); files are then read even
 	// with no YARA rules loaded.
-	OnHash func(path, sha256 string, size int64)
+	// trigger is ScanPath's (on_access, quick_scan, full_scan, ...); the
+	// result says whether it reported the file (a detection).
+	OnHash func(path, sha256 string, size int64, trigger string) bool
 	// OnData, when set, gets the content of every file read for scanning,
 	// after OnHash (the static ML check, internal/mlscan); like OnHash it
 	// makes files be read with no YARA rules loaded. data must not be kept.
-	OnData func(path, sha256 string, data []byte)
+	OnData func(path, sha256 string, data []byte, trigger string) bool
 	// Skip, when set and true for a file, leaves the YARA scan out (the
 	// group policy turned on-access YARA off, or excludes the path); the
 	// file still goes to OnHash.
@@ -295,34 +297,48 @@ func (s *Scanner) worker(ctx context.Context) {
 // that has not changed since it was last scanned with the same rules is
 // skipped.
 func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.RuleMatch, error) {
+	matches, _, err := s.scan(ctx, path, trigger, false)
+	return matches, err
+}
+
+// Scan is ScanPath for scans run on request or on a schedule
+// (internal/fullscan): force checks the file even when it is unchanged
+// since the last check. It returns the number of detections: YARA matches
+// and files the hooks reported, inside containers included.
+func (s *Scanner) Scan(ctx context.Context, path, trigger string, force bool) (int, error) {
+	m, hits, err := s.scan(ctx, path, trigger, force)
+	return len(m) + hits, err
+}
+
+func (s *Scanner) scan(ctx context.Context, path, trigger string, force bool) ([]yara.RuleMatch, int, error) {
 	rules, hash := s.current()
 	haveRules := rules != nil && rules.Len() > 0
 	if !haveRules && s.opts.OnHash == nil && s.opts.OnData == nil {
-		return nil, nil
+		return nil, 0, nil
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if !info.Mode().IsRegular() || info.Size() == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if info.Size() > s.opts.MaxFileSize {
-		return nil, fmt.Errorf("larger than %d bytes", s.opts.MaxFileSize)
+		return nil, 0, fmt.Errorf("larger than %d bytes", s.opts.MaxFileSize)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
-	if !s.markScanned(path, digest+hash) {
-		return nil, nil
+	if !s.markScanned(path, digest+hash) && !force {
+		return nil, 0, nil
 	}
 	yaraOn := haveRules && (s.opts.Skip == nil || !s.opts.Skip(path))
-	matches, err := s.scanContent(ctx, rules, yaraOn, path, digest, data, trigger)
+	matches, hits, err := s.scanContent(ctx, rules, yaraOn, path, digest, data, trigger)
 	if err != nil {
-		return matches, err
+		return matches, hits, err
 	}
 	// what is inside: archives, disk images, shortcuts, smuggled blobs
 	if !s.opts.NoUnpack {
@@ -333,34 +349,36 @@ func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.Ru
 		for _, it := range res.Items {
 			sum := sha256.Sum256(it.Data)
 			inner := path + unpack.Sep + it.Path
-			m, err := s.scanContent(ctx, rules, yaraOn, inner, hex.EncodeToString(sum[:]), it.Data, trigger)
+			m, h, err := s.scanContent(ctx, rules, yaraOn, inner, hex.EncodeToString(sum[:]), it.Data, trigger)
 			if err != nil {
 				slog.Debug("yara: inner scan failed", "path", inner, "err", err)
 			}
 			matches = append(matches, m...)
+			hits += h
 		}
 	}
-	return matches, nil
+	return matches, hits, nil
 }
 
 // scanContent hands one file, or one file inside a container (path
 // "outer|inner"), to the hash and data hooks and the YARA rules.
 func (s *Scanner) scanContent(ctx context.Context, rules *yara.Rules, yaraOn bool, path, digest string, data []byte,
-	trigger string) ([]yara.RuleMatch, error) {
-	if s.opts.OnHash != nil {
-		s.opts.OnHash(path, digest, int64(len(data)))
+	trigger string) ([]yara.RuleMatch, int, error) {
+	hits := 0
+	if s.opts.OnHash != nil && s.opts.OnHash(path, digest, int64(len(data)), trigger) {
+		hits++
 	}
-	if s.opts.OnData != nil {
-		s.opts.OnData(path, digest, data)
+	if s.opts.OnData != nil && s.opts.OnData(path, digest, data, trigger) {
+		hits++
 	}
 	if !yaraOn {
-		return nil, nil
+		return nil, hits, nil
 	}
 	sctx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
 	res, err := rules.Scan(sctx, data)
 	if err != nil {
-		return nil, err
+		return nil, hits, err
 	}
 	s.scanned.Add(1)
 	for _, w := range res.Warnings {
@@ -370,7 +388,7 @@ func (s *Scanner) scanContent(ctx context.Context, rules *yara.Rules, yaraOn boo
 		s.opts.Push(LogType, MatchLine(m, s.ref(m.Namespace), path, digest, int64(len(data)), trigger))
 		slog.Warn("yara: match", "rule", m.Rule, "namespace", m.Namespace, "path", path)
 	}
-	return res.Matches, nil
+	return res.Matches, hits, nil
 }
 
 func (s *Scanner) markScanned(path, key string) bool {

@@ -109,11 +109,11 @@ func TestFileCheckerReportsVariants(t *testing.T) {
 
 	variant := append([]byte(nil), known...)
 	copy(variant[100:], "patched")
-	fc.CheckData("/tmp/v.exe", shaOf(variant), variant)
-	fc.CheckData("/tmp/v.exe", shaOf(variant), variant)                 // once a minute
-	fc.CheckData("/tmp/k.exe", shaOf(known), known)                     // the known file itself: Check's job
-	fc.CheckData("/tmp/o.exe", shaOf(noise(6, 30000)), noise(6, 30000)) // unrelated
-	fc.CheckData("/tmp/s.exe", shaOf(variant[:100]), variant[:100])     // too small
+	fc.CheckData("/tmp/v.exe", shaOf(variant), variant, "")
+	fc.CheckData("/tmp/v.exe", shaOf(variant), variant, "")                 // once a minute
+	fc.CheckData("/tmp/k.exe", shaOf(known), known, "")                     // the known file itself: Check's job
+	fc.CheckData("/tmp/o.exe", shaOf(noise(6, 30000)), noise(6, 30000), "") // unrelated
+	fc.CheckData("/tmp/s.exe", shaOf(variant[:100]), variant[:100], "")     // too small
 	if len(lines) != 1 {
 		t.Fatalf("lines %v", lines)
 	}

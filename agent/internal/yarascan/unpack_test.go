@@ -26,7 +26,7 @@ func TestScanPathLooksInsideArchives(t *testing.T) {
 		var out lines
 		var hashed []string
 		s := New(Options{Roots: []string{t.TempDir()}, Push: out.push, NoUnpack: off,
-			OnHash: func(path, _ string, _ int64) { hashed = append(hashed, path) }})
+			OnHash: func(path, _ string, _ int64, _ string) bool { hashed = append(hashed, path); return false }})
 		s.SetRules("h", []Rule{{Name: "pack", Content: evilRule}})
 		matches, err := s.ScanPath(context.Background(), p, "on_access")
 		if err != nil {

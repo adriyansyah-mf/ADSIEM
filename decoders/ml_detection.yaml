@@ -22,6 +22,7 @@ fields:
   file.path: path
   file.size: size
   error.message: error
+  ml.trigger: trigger
 static_fields:
   event.category: malware
   event.action: ml_detection

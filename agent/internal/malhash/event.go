@@ -84,20 +84,20 @@ type FileChecker struct {
 	last map[string]time.Time
 }
 
-// Check is the scanner's OnHash hook.
-func (f *FileChecker) Check(path, sha string, size int64) {
+// Check is the scanner's OnHash hook; true when it reported the file.
+func (f *FileChecker) Check(path, sha string, size int64, trigger string) bool {
 	set := f.Store.Current()
 	if !set.Active() {
-		return
+		return false
 	}
 	label, ok := set.Lookup(sha)
 	if !ok || (f.Excluded != nil && f.Excluded(path, sha)) {
-		return
+		return false
 	}
 	if !f.first(path + "|" + sha) {
-		return
+		return false
 	}
-	e := Event{Action: "detected", Trigger: "file", Label: label, SHA256: sha, Path: path, Engine: "on_access",
+	e := Event{Action: "detected", Trigger: "file", Label: label, SHA256: sha, Path: path, Engine: engineOf(trigger),
 		Size: size}
 	if set.Block() && f.Quarantine != nil {
 		if err := f.Quarantine(path); err != nil {
@@ -109,6 +109,16 @@ func (f *FileChecker) Check(path, sha string, size int64) {
 	}
 	slog.Warn("malhash: known malware", "path", path, "label", label, "action", e.Action)
 	f.Push(LogType, e.Line())
+	return true
+}
+
+// engineOf: the scanner's trigger names the engine in the line
+// (on_access, or the scan that found it: quick_scan, full_scan, custom_scan).
+func engineOf(trigger string) string {
+	if trigger == "" {
+		return "on_access"
+	}
+	return trigger
 }
 
 // VariantDistance: a file at most this TLSH distance from a known-malware
@@ -122,26 +132,27 @@ const variantMinSize = 512
 // CheckData is the scanner's OnData hook: a file whose SHA-256 is not known
 // but whose TLSH is close to a known-malware file's is reported as a
 // variant (detected only, never quarantined: similarity is not identity).
-func (f *FileChecker) CheckData(path, sha string, data []byte) {
+func (f *FileChecker) CheckData(path, sha string, data []byte, trigger string) bool {
 	set := f.Store.Current()
 	if !set.Active() || set.SimilarCount() == 0 || len(data) < variantMinSize {
-		return
+		return false
 	}
 	if _, known := set.Lookup(sha); known {
-		return // Check reports it
+		return false // Check reports it
 	}
 	h, err := tlsh.Sum(data)
 	if err != nil {
-		return
+		return false
 	}
 	label, similar, dist, ok := set.Similar(h, VariantDistance)
 	if !ok || (f.Excluded != nil && f.Excluded(path, sha)) || !f.first(path+"|"+sha) {
-		return
+		return false
 	}
-	e := Event{Action: "detected", Trigger: "file", Label: label, SHA256: sha, Path: path, Engine: "on_access",
+	e := Event{Action: "detected", Trigger: "file", Label: label, SHA256: sha, Path: path, Engine: engineOf(trigger),
 		Size: int64(len(data)), Match: "tlsh", SimilarTo: similar, Distance: dist}
 	slog.Warn("malhash: variant of known malware", "path", path, "label", label, "similar_to", similar, "distance", dist)
 	f.Push(LogType, e.Line())
+	return true
 }
 
 // first: the same file and content is reported once a minute at most.

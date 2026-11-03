@@ -30,6 +30,9 @@ type Runner struct {
 	client   *client.Client
 	fw       *firewall.Engine
 	inflight sync.Map
+	// FileScan runs a file_scan task (internal/fullscan, set by main): kind
+	// quick, full or custom, paths for custom; it returns the summary.
+	FileScan func(kind string, paths []string, requested string) (any, error)
 }
 
 func NewRunner(cfg *config.Config, c *client.Client, fw *firewall.Engine) *Runner {
@@ -120,6 +123,20 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 		recursive, _ := task.Params["recursive"].(bool)
 		rulesRaw, _ := task.Params["rules"].([]any)
 		return runYaraScan(path, recursive, rulesRaw)
+	case "file_scan":
+		if r.FileScan == nil {
+			return nil, fmt.Errorf("file scanning is not available on this agent")
+		}
+		kind, _ := task.Params["kind"].(string)
+		var paths []string
+		if raw, ok := task.Params["paths"].([]any); ok {
+			for _, p := range raw {
+				if s, ok := p.(string); ok {
+					paths = append(paths, s)
+				}
+			}
+		}
+		return r.FileScan(kind, paths, "task "+task.ID)
 	case "memory_scan":
 		pid, _ := task.Params["pid"].(float64) // 0: every process
 		rulesRaw, _ := task.Params["rules"].([]any)

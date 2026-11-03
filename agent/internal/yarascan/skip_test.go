@@ -14,7 +14,7 @@ func TestSkipLeavesYaraOutButNotTheHash(t *testing.T) {
 	hashed := 0
 	skip := true
 	s := New(Options{Roots: []string{t.TempDir()}, Push: out.push,
-		OnHash: func(string, string, int64) { hashed++ },
+		OnHash: func(string, string, int64, string) bool { hashed++; return false },
 		Skip:   func(string) bool { return skip }})
 	if errs := s.SetRules("h1", []Rule{{Name: "pack", Content: evilRule}}); len(errs) != 0 {
 		t.Fatal(errs)

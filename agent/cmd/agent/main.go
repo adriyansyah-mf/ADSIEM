@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/siem-platform/agent/internal/enrollment"
 	"github.com/siem-platform/agent/internal/fim"
 	"github.com/siem-platform/agent/internal/firewall"
+	"github.com/siem-platform/agent/internal/fullscan"
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
 	"github.com/siem-platform/agent/internal/linsensor"
@@ -435,7 +437,7 @@ func run(configPath string, stop <-chan struct{}) {
 
 	// Static ML on the files the on-access scanner reads: the EMBER-trained
 	// model for PE files, the heuristic for ELF (group policy ml_action).
-	var mlFiles func(path, sha string, data []byte)
+	var mlFiles func(path, sha string, data []byte, trigger string) bool
 	if model, err := mlscore.Default(); err != nil {
 		slog.Warn("static ML model unavailable", "err", err)
 	} else {
@@ -462,11 +464,12 @@ func run(configPath string, stop <-chan struct{}) {
 		Push:        push,
 		OnHash:      malFiles.Check,
 		// variants of known malware (TLSH), then the static ML check
-		OnData: func(path, sha string, data []byte) {
-			malFiles.CheckData(path, sha, data)
-			if mlFiles != nil {
-				mlFiles(path, sha, data)
+		OnData: func(path, sha string, data []byte, trigger string) bool {
+			hit := malFiles.CheckData(path, sha, data, trigger)
+			if mlFiles != nil && mlFiles(path, sha, data, trigger) {
+				hit = true
 			}
+			return hit
 		},
 		Skip: func(path string) bool {
 			s := polStore.Current().Settings
@@ -474,6 +477,33 @@ func run(configPath string, stop <-chan struct{}) {
 		},
 	})
 	go yaraScanner.SyncLoop(flowCtx, c)
+
+	// Quick / full / custom scans of the disk: on request (task file_scan)
+	// and on the group policy's schedule, through the same engines.
+	stateDir := task.StateDir(cfg)
+	scanOpts := func(kind string, paths []string, requested string) fullscan.Options {
+		return fullscan.Options{Kind: kind, Paths: paths, MaxFileSize: cfg.Yara.MaxFileSizeMB << 20, Push: push,
+			Requested: requested,
+			Skip: func(path string) bool {
+				if strings.HasPrefix(path, stateDir) || task.IsQuarantined(path) {
+					return true
+				}
+				return polStore.Current().Settings.Excluded(policy.ScopeYara, policy.Match{Path: path, Image: path})
+			}}
+	}
+	taskRunner.FileScan = func(kind string, paths []string, requested string) (any, error) {
+		return fullscan.Run(flowCtx, yaraScanner, scanOpts(kind, paths, requested))
+	}
+	go fullscan.Schedule(flowCtx, filepath.Join(stateDir, "file_scan_schedule.json"),
+		func() (string, string) {
+			s := polStore.Current().Settings
+			return s.QuickScanTime, s.FullScanSchedule
+		},
+		func(kind string) {
+			if _, err := fullscan.Run(flowCtx, yaraScanner, scanOpts(kind, nil, "schedule")); err != nil {
+				slog.Warn("scheduled file scan not run", "kind", kind, "err", err)
+			}
+		})
 	scripts.Yara = yaraScanner
 	go scripts.Run(flowCtx)
 	if !cfg.Yara.Disabled {

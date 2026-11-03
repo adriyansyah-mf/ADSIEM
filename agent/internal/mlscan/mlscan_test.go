@@ -97,7 +97,7 @@ func TestCheckerModes(t *testing.T) {
 				Quarantine: func(path string) error { q = append(q, path); return c.quarantine },
 				Mode:       func(string, string) string { return c.mode },
 				Known:      func(string) bool { return c.known }}
-			ch.Check(`C:\d.exe`, "abc", pe)
+			ch.Check(`C:\d.exe`, "abc", pe, "")
 			if c.wantLine == "" {
 				if len(p.lines) != 0 {
 					t.Fatalf("lines %q", p.lines)
@@ -118,9 +118,9 @@ func TestCheckerModes(t *testing.T) {
 func TestCheckerReportsOnce(t *testing.T) {
 	var p pushed
 	ch := &Checker{Model: constModel(t, -4), Push: p.push}
-	ch.Check("/tmp/m", "s1", miner)
-	ch.Check("/tmp/m", "s1", miner)
-	ch.Check("/tmp/m", "s2", miner)
+	ch.Check("/tmp/m", "s1", miner, "")
+	ch.Check("/tmp/m", "s1", miner, "")
+	ch.Check("/tmp/m", "s2", miner, "")
 	if len(p.lines) != 2 || !strings.Contains(p.lines[0], `reasons="`) {
 		t.Fatalf("lines %q", p.lines)
 	}
