@@ -20,8 +20,11 @@ const LogTypeProcess = "windows_etw_process"
 const (
 	// joinWindow bounds the wait for the second half of a process start: the
 	// kernel logger has the command line and user, Microsoft-Windows-Kernel-
-	// Process the full image path and integrity level.
-	joinWindow = 1500 * time.Millisecond
+	// Process the full image path and integrity level. The two come through
+	// different sessions and buffer flushes: 1.5 s was not always enough on
+	// CI (msi-smoke: Image="cmd.exe"). fileJoinWindow stays longer.
+	// Prevention does not wait for it (OnStart fires on the first half).
+	joinWindow = 3 * time.Second
 	maxKnown   = 8192 // processes remembered for ParentImage / ParentCommandLine
 	maxPending = 4096
 )

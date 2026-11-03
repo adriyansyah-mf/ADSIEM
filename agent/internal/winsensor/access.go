@@ -52,6 +52,10 @@ type accessTracker struct {
 	j    *processJoiner
 	self uint32
 	seen map[string]time.Time
+	// deferred opens wait for their source's start, which comes through
+	// another session: a short-lived opener's start and exit are often
+	// behind its open, and then nothing names its image.
+	deferred []deferredLine
 }
 
 func newAccessTracker(j *processJoiner, self uint32) *accessTracker {
@@ -96,22 +100,51 @@ func (a *accessTracker) openProcess(ev *etw.Event, now time.Time) string {
 	if !(lsass && access&accessVMRead != 0) && access&(accessVMWrite|accessCreateThread) == 0 {
 		return ""
 	}
-	srcImage, srcUser := a.j.owner(src)
-	// csrss opens every new process with full access (measured on the
-	// Windows runner): one line per program started, never an attack.
-	if strings.EqualFold(srcImage, csrssPath) {
-		return ""
-	}
 	granted := fmt.Sprintf("0x%X", access)
-	if !a.first("a|"+srcImage+"|"+targetImage+"|"+granted, now) {
+	build := func(srcImage, srcUser string) string {
+		// csrss opens every new process with full access (measured on the
+		// Windows runner): one line per program started, never an attack.
+		if strings.EqualFold(srcImage, csrssPath) {
+			return ""
+		}
+		if !a.first("a|"+srcImage+"|"+targetImage+"|"+granted, now) {
+			return ""
+		}
+		return line(10, [][2]string{
+			{"Channel", "ETW"}, {"Provider", "Microsoft-Windows-Kernel-Audit-API-Calls"},
+			{"SourceProcessId", strconv.FormatUint(uint64(src), 10)}, {"SourceImage", srcImage}, {"SourceUser", srcUser},
+			{"TargetProcessId", strconv.FormatUint(uint64(target), 10)}, {"TargetImage", targetImage},
+			{"GrantedAccess", granted},
+		})
+	}
+	if !a.j.knows(src) && len(a.deferred) < maxDeferred {
+		a.deferred = append(a.deferred, deferredLine{pid: src, at: now, logType: LogTypeAccess, build: build})
 		return ""
 	}
-	return line(10, [][2]string{
-		{"Channel", "ETW"}, {"Provider", "Microsoft-Windows-Kernel-Audit-API-Calls"},
-		{"SourceProcessId", strconv.FormatUint(uint64(src), 10)}, {"SourceImage", srcImage}, {"SourceUser", srcUser},
-		{"TargetProcessId", strconv.FormatUint(uint64(target), 10)}, {"TargetImage", targetImage},
-		{"GrantedAccess", granted},
-	})
+	return build(a.j.owner(src))
+}
+
+// tick returns the deferred opens whose source is now known or that waited
+// fileJoinWindow (then with whatever names it: the running process, or "").
+func (a *accessTracker) tick(now time.Time) []string {
+	var res []string
+	kept := a.deferred[:0]
+	for _, d := range a.deferred {
+		if a.j.knows(d.pid) || now.Sub(d.at) >= fileJoinWindow {
+			if l := d.build(a.j.owner(d.pid)); l != "" {
+				res = append(res, l)
+			}
+		} else {
+			kept = append(kept, d)
+		}
+	}
+	a.deferred = kept
+	return res
+}
+
+// flushAll returns every deferred open (the sensor is stopping).
+func (a *accessTracker) flushAll() []string {
+	return a.tick(time.Now().Add(fileJoinWindow))
 }
 
 // threadStart: a Sysmon 8 lookalike when a process starts a thread in

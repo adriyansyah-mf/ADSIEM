@@ -170,6 +170,7 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker
 		case <-s.stop:
 			emit(LogTypeProcess, j.flush(time.Now().Add(joinWindow))...)
 			emitOut(buf, files.flushAll())
+			emit(LogTypeAccess, access.flushAll()...)
 			return
 		case src := <-s.events:
 			now := time.Now()
@@ -200,6 +201,7 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker
 		case now := <-tick.C:
 			emit(LogTypeProcess, j.flush(now)...)
 			emitOut(buf, files.tick())
+			emit(LogTypeAccess, access.tick(now)...)
 		case <-report.C:
 			if d := s.dropped.Load(); d != reported {
 				slog.Warn("etw sensor dropped events: the agent fell behind", "dropped", d-reported)
