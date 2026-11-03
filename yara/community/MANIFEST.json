@@ -1,0 +1,146 @@
+{
+ "rules": 2845,
+ "sets": [
+  {
+   "set": "Signature Base",
+   "file": "signature_base.yar",
+   "repository": "https://github.com/Neo23x0/signature-base",
+   "commit": "36ab70428fc5b52701b7ee6107c853ff019ed759",
+   "licence": "DRL-1.1",
+   "rules": 1056,
+   "dropped_not_compiled": 11,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "SEKOIA",
+   "file": "sekoia.yar",
+   "repository": "https://github.com/SEKOIA-IO/Community",
+   "commit": "dc3e5baea48e6ddc3f9160182372fecfe518f036",
+   "licence": "DRL-1.1",
+   "rules": 661,
+   "dropped_not_compiled": 43,
+   "dropped_false_positive": 2
+  },
+  {
+   "set": "DitekSHen",
+   "file": "ditekshen.yar",
+   "repository": "https://github.com/ditekshen/detection",
+   "commit": "e76c93dcdedff04076380ffc60ea54e45b313635",
+   "licence": "BSD-2-Clause",
+   "rules": 599,
+   "dropped_not_compiled": 9,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "FireEye-RT",
+   "file": "fireeye_rt.yar",
+   "repository": "https://github.com/mandiant/red_team_tool_countermeasures/",
+   "commit": "3561b71724dbfa3e2bb78106aaa2d7f8b892c43b",
+   "licence": "BSD-2-Clause",
+   "rules": 148,
+   "dropped_not_compiled": 0,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "Volexity",
+   "file": "volexity.yar",
+   "repository": "https://github.com/volexity/threat-intel",
+   "commit": "683296427d8c7f08938ce6c587f618c938cf4c54",
+   "licence": "BSD-2-Clause",
+   "rules": 136,
+   "dropped_not_compiled": 1,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "GCTI",
+   "file": "gcti.yar",
+   "repository": "https://github.com/chronicle/GCTI",
+   "commit": "1c5fd42b1895098527fde00c2d9757edf6b303bb",
+   "licence": "Apache-2.0",
+   "rules": 89,
+   "dropped_not_compiled": 0,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "ESET",
+   "file": "eset.yar",
+   "repository": "https://github.com/eset/malware-ioc",
+   "commit": "59745502656e813f9f79fc8005243edbc04f9397",
+   "licence": "BSD-2-Clause",
+   "rules": 52,
+   "dropped_not_compiled": 5,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "Trellix ARC",
+   "file": "trellix_arc.yar",
+   "repository": "https://github.com/advanced-threat-research/Yara-Rules/",
+   "commit": "1919562a59f190bda60c982424f6a24c542ee3e0",
+   "licence": "Apache-2.0",
+   "rules": 46,
+   "dropped_not_compiled": 4,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "WithSecureLabs",
+   "file": "withsecurelabs.yar",
+   "repository": "https://github.com/WithSecureLabs/iocs",
+   "commit": "1a8384468dd292c6d2c5114c32e42dc0da1f5ae1",
+   "licence": "BSD-2-Clause",
+   "rules": 22,
+   "dropped_not_compiled": 2,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "Elceef",
+   "file": "elceef.yar",
+   "repository": "https://github.com/elceef/yara-rulz",
+   "commit": "5683b294a12cf0c875b624933586029ae43a852f",
+   "licence": "MIT",
+   "rules": 16,
+   "dropped_not_compiled": 0,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "Cod3nym",
+   "file": "cod3nym.yar",
+   "repository": "https://github.com/cod3nym/detection-rules/",
+   "commit": "a9f1cbab38406194d4451de021c0aeb309ac8baa",
+   "licence": "DRL-1.1",
+   "rules": 9,
+   "dropped_not_compiled": 1,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "Telekom Security",
+   "file": "telekom_security.yar",
+   "repository": "https://github.com/telekom-security/malware_analysis/",
+   "commit": "755efb66586f53fea34926f78a8d2054a8e8e74b",
+   "licence": "MIT",
+   "rules": 7,
+   "dropped_not_compiled": 0,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "Dr4k0nia",
+   "file": "dr4k0nia.yar",
+   "repository": "https://github.com/dr4k0nia/yara-rules",
+   "commit": "4b10f9b79a4cfb3ec9cb5675f32cc7ee6885fbd8",
+   "licence": "DRL-1.1",
+   "rules": 2,
+   "dropped_not_compiled": 2,
+   "dropped_false_positive": 0
+  },
+  {
+   "set": "Synacktiv",
+   "file": "synacktiv.yar",
+   "repository": "https://github.com/synacktiv/synacktiv-rules",
+   "commit": "d234cc4da0783db7dca56ae8dd5252afdc248df8",
+   "licence": "DRL-1.1",
+   "rules": 2,
+   "dropped_not_compiled": 1,
+   "dropped_false_positive": 0
+  }
+ ],
+ "source": "YARA-Forge 20261101"
+}

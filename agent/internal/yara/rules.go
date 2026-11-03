@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync"
 )
 
 // EngineVersion names the language subset this engine accepts. server-api's
@@ -49,6 +50,9 @@ func (e SourceError) Error() string { return e.Namespace + ": " + e.Err.Error() 
 type Rules struct {
 	rules   []*rule
 	maxVars int
+
+	pfOnce sync.Once
+	pf     *prefilter
 }
 
 // Compile compiles a single rule text.
@@ -218,16 +222,21 @@ type scanCtx struct {
 	curStr   []*stringDef // for..of stack
 	budget   int64
 	warnings []string
+	pf       *pfScan // prefilter result; nil: every string may match
 }
 
 func newScanCtx(ctx context.Context, r *Rules, data []byte) *scanCtx {
-	return &scanCtx{
+	sc := &scanCtx{
 		ctx: ctx, rules: r, data: data,
 		matches: map[*stringDef][]smatch{},
 		ruleRes: make([]int8, len(r.rules)),
 		mods:    map[*module]*modData{},
 		vars:    make([]value, r.maxVars),
 	}
+	if pf := r.prefilter(); pf.nStrings > 0 {
+		sc.pf = pf.scan(sc.lowered())
+	}
+	return sc
 }
 
 func (sc *scanCtx) warnf(format string, args ...any) {
@@ -311,6 +320,10 @@ func (sc *scanCtx) stringMatches(s *stringDef) []smatch {
 	if ms, ok := sc.matches[s]; ok {
 		return ms
 	}
+	if sc.pf != nil && !sc.pf.possible[s.gid] {
+		sc.matches[s] = nil // none of its atoms is in the data
+		return nil
+	}
 	var ms []smatch
 	full := false
 	addMatch := func(off, n int, wide bool) bool {
@@ -325,7 +338,12 @@ func (sc *scanCtx) stringMatches(s *stringDef) []smatch {
 		return true
 	}
 	if s.lits != nil {
-		for _, v := range s.lits {
+		for vi, v := range s.lits {
+			if sc.pf != nil && s.litAtom != nil && !sc.pf.dense[s.litAtom[vi]] {
+				// only where the atom is: an occurrence has it at litOff
+				sc.atHits(v, s.litLow[vi], sc.pf.pos[s.litAtom[vi]], s.litOff[vi], addMatch)
+				continue
+			}
 			switch {
 			case v.xor:
 				sc.findXor(v, s, addMatch)
@@ -338,8 +356,33 @@ func (sc *scanCtx) stringMatches(s *stringDef) []smatch {
 	} else {
 		sc.budget = stepBudget
 		exhausted := false
-		for p, wide := s.prog, s.wide && !s.ascii; p != nil; p, wide = p.alt, true {
+		form := 0
+		for p, wide := s.prog, s.wide && !s.ascii; p != nil; p, wide, form = p.alt, true, form+1 {
 			m := newMachine(p, &sc.budget)
+			if hits, span, ok := sc.progWindows(s, form); ok {
+				// a match contains the atom: it starts at most span bytes before a hit
+				done := 0
+				for _, h := range hits {
+					lo, hi := max(int(h)-span+1, done, 0), int(h)
+					// a candidate start is in [lo, hi]: search only that far
+					limit := sc.data[:min(len(sc.data), hi+1+len(p.prefix))]
+					for i := lo; i <= hi && !exhausted; i++ {
+						if i = p.nextCandidate(limit, i); i < 0 || i > hi {
+							break
+						}
+						end := m.matchAt(sc.data, i, s.regexWindow)
+						if end == -2 {
+							exhausted = true
+							break
+						}
+						if end >= i && !addMatch(i, end-i, wide) {
+							break
+						}
+					}
+					done = hi + 1
+				}
+				continue
+			}
 			for i := 0; i < len(sc.data) && !exhausted; i++ {
 				if i = p.nextCandidate(sc.data, i); i < 0 {
 					break
@@ -376,6 +419,37 @@ func (sc *scanCtx) stringMatches(s *stringDef) []smatch {
 	}
 	sc.matches[s] = out
 	return out
+}
+
+// progWindows returns the atom hits and longest match of a regex or hex
+// string's program form, when the search can be limited to them.
+func (sc *scanCtx) progWindows(s *stringDef, form int) ([]int32, int, bool) {
+	if sc.pf == nil || form >= len(s.progAtom) || form >= len(s.progSpan) || s.progSpan[form] <= 0 {
+		return nil, 0, false
+	}
+	idx := s.progAtom[form]
+	if sc.pf.dense[idx] {
+		return nil, 0, false
+	}
+	return sc.pf.pos[idx], s.progSpan[form], true
+}
+
+// atHits checks the variant at each atom hit (the atom sits off bytes into
+// the pattern), in the data or, for nocase, the lower-cased data.
+func (sc *scanCtx) atHits(v litVariant, low []byte, hits []int32, off int, add func(off, n int, wide bool) bool) {
+	data, pat := sc.data, v.pat
+	if v.nocase {
+		data, pat = sc.lowered(), low
+	}
+	for _, h := range hits {
+		start := int(h) - off
+		if start < 0 || start+len(pat) > len(data) || !bytes.Equal(data[start:start+len(pat)], pat) {
+			continue
+		}
+		if !add(start, len(pat), v.wide) {
+			return
+		}
+	}
 }
 
 // findAll calls fn for every (overlapping) occurrence of pat.

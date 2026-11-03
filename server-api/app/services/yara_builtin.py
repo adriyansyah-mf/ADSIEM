@@ -1,7 +1,8 @@
 # server-api/app/services/yara_builtin.py
-"""The built-in YARA rule pack (yara/builtin/*.yar in the repository, copied
-into the image): one yara_rules row per file, origin "builtin", named
-builtin/<file>. Synced at every start, so an upgrade updates the rules; an
+"""The built-in YARA rule packs, copied into the image: yara/builtin/*.yar
+(our own rules, named builtin/<file>) and yara/community/*.yar (YARA-Forge
+rule sets with permissive or DRL licences, built by agent/cmd/yarapack,
+named community/<file>). One yara_rules row per file, origin "builtin". Synced at every start, so an upgrade updates the rules; an
 analyst's enable/disable choice is kept. Analysts change a built-in rule by
 saving a copy under another name, never in place (the next start would
 overwrite it)."""
@@ -19,31 +20,40 @@ log = structlog.get_logger()
 ORIGIN = "builtin"
 
 
-def pack_dir() -> Path | None:
-    candidates = [os.environ.get("YARA_BUILTIN_DIR", ""), "/app/yara_builtin",
-                  str(Path(__file__).resolve().parents[3] / "yara" / "builtin")]
+def _find(env: str, image_dir: str, repo_dir: str) -> Path | None:
+    candidates = [os.environ.get(env, ""), image_dir, str(Path(__file__).resolve().parents[3] / "yara" / repo_dir)]
     for c in candidates:
         if c and Path(c).is_dir():
             return Path(c)
     return None
 
 
-def _description(text: str, stem: str) -> str:
+def pack_dir() -> Path | None:
+    return _find("YARA_BUILTIN_DIR", "/app/yara_builtin", "builtin")
+
+
+def community_dir() -> Path | None:
+    return _find("YARA_COMMUNITY_DIR", "/app/yara_community", "community")
+
+
+def _description(text: str, stem: str, community: bool = False) -> str:
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("//") and "rule pack:" in line:
-            return "Built-in: " + line.split("rule pack:", 1)[1].strip().rstrip(".")
+            prefix = "Community: " if community else "Built-in: "
+            return prefix + line.split("rule pack:", 1)[1].strip().rstrip(".")
     return f"Built-in rules: {stem.replace('_', ' ')}"
 
 
 def load_pack() -> list[dict]:
-    d = pack_dir()
-    if d is None:
-        return []
     out = []
-    for f in sorted(d.glob("*.yar")):
-        text = f.read_text(encoding="utf-8")
-        out.append({"name": f"builtin/{f.stem}", "description": _description(text, f.stem), "content": text})
+    for prefix, d in (("builtin", pack_dir()), ("community", community_dir())):
+        if d is None:
+            continue
+        for f in sorted(d.glob("*.yar")):
+            text = f.read_text(encoding="utf-8")
+            out.append({"name": f"{prefix}/{f.stem}", "description": _description(text, f.stem, prefix == "community"),
+                        "content": text})
     return out
 
 
@@ -79,5 +89,5 @@ async def sync_builtin_rules(legacy_contents: dict[str, str] | None = None, sess
         from app.services import yara_ruleset
         yara_ruleset.invalidate()
     log.info("yara_builtin_synced", rules=len(pack), added=added, updated=updated, removed=removed,
-             dir=str(pack_dir()))
+             dir=str(pack_dir()), community=str(community_dir()))
     return {"added": added, "updated": updated, "removed": removed, "rules": len(pack)}

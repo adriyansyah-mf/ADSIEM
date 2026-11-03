@@ -49,7 +49,12 @@ async def _rows(env):
 
 async def test_pack_syncs_and_keeps_toggles(api):
     pack = yara_builtin.load_pack()
-    assert len(pack) >= 7 and all(p["name"].startswith("builtin/") for p in pack)
+    names = [p["name"] for p in pack]
+    assert sum(n.startswith("builtin/") for n in names) >= 7
+    # the community pack (yara/community, YARA-Forge sets with allowed licences) loads next to it
+    community = [p for p in pack if p["name"].startswith("community/")]
+    assert community and all(p["description"].startswith("Community: ") for p in community)
+    assert all(n.startswith(("builtin/", "community/")) for n in names)
 
     legacy = yara_rules.legacy_contents()
     async with api.sessions() as db:  # the old inline seed: one untouched, one edited

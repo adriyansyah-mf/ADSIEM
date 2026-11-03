@@ -53,6 +53,17 @@ type stringDef struct {
 	// "at <fixedOff>"; matches elsewhere are then not recorded.
 	fixed    fixedState
 	fixedOff int64
+
+	gid int // index in the rule set, for the prefilter
+	// For literal strings with atoms: the atom index of each variant, its
+	// offset in the variant, and the lower-cased variants.
+	litAtom []int32
+	litOff  []int
+	litLow  [][]byte
+	// For regex and hex strings with atoms, per program (prog, then
+	// prog.alt): the atom index and the longest match (<= 0: unknown).
+	progAtom []int32
+	progSpan []int
 }
 
 type fixedState int8
