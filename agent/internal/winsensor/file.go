@@ -134,7 +134,7 @@ type fileTracker struct {
 // session's events arrive with ETW's buffer flushes, which on a busy host
 // took more than 1.5 s (Image="cmd.exe" on CI); a bare name misses
 // Image|endswith rules.
-const fileJoinWindow = 3 * time.Second
+const fileJoinWindow = 4 * time.Second
 
 // deferredLine is built once the process is known or fileJoinWindow has passed;
 // build returns "" for a line that is not to be sent (a repeated image load).

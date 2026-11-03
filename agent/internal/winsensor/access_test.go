@@ -73,6 +73,35 @@ func TestOnlyInjectionRightsOrLsassAreReported(t *testing.T) {
 	}
 }
 
+// A short-lived opener's start comes through the process session, often
+// after its open: the line waits for it, and goes out without it at the
+// latest after fileJoinWindow.
+func TestOpenWaitsForItsSourceProcess(t *testing.T) {
+	j, a := accessSetup()
+	now := time.Now()
+	if got := a.openProcess(openProc(7300, "4100", "0x1F0FFF", "0"), now); got != "" {
+		t.Fatalf("an unknown source is reported at once: %s", got)
+	}
+	if got := a.tick(now.Add(time.Second)); len(got) != 0 {
+		t.Fatalf("sent before its source was known: %q", got)
+	}
+	j.remember(&process{pid: 7300, image: `C:\Users\alice\inject.exe`, user: `WIN01\alice`})
+	got := a.tick(now.Add(2 * time.Second))
+	if len(got) != 1 || !strings.Contains(got[0], `SourceImage="C:\Users\alice\inject.exe"`) {
+		t.Fatalf("lines %q", got)
+	}
+	if got := a.openProcess(openProc(7400, "4100", "0x1F0FFF", "0"), now); got != "" {
+		t.Fatal(got)
+	}
+	got = a.tick(now.Add(fileJoinWindow))
+	if len(got) != 1 || !strings.Contains(got[0], `SourceProcessId="7400" TargetProcessId="4100"`) {
+		t.Fatalf("not sent after the window: %q", got)
+	}
+	if len(a.deferred) != 0 {
+		t.Fatalf("%d still deferred", len(a.deferred))
+	}
+}
+
 func TestRemoteThreadButNotAProcessesFirstThread(t *testing.T) {
 	j, a := accessSetup()
 	now := time.Now()
