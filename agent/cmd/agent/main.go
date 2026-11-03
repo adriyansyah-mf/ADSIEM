@@ -28,6 +28,8 @@ import (
 	"github.com/siem-platform/agent/internal/linsensor"
 	"github.com/siem-platform/agent/internal/malhash"
 	"github.com/siem-platform/agent/internal/memscan"
+	"github.com/siem-platform/agent/internal/mlscan"
+	"github.com/siem-platform/agent/internal/mlscore"
 	"github.com/siem-platform/agent/internal/netwatch"
 	"github.com/siem-platform/agent/internal/notify"
 	"github.com/siem-platform/agent/internal/policy"
@@ -428,12 +430,35 @@ func run(configPath string, stop <-chan struct{}) {
 	polStore.OnChange(func(p *policy.Policy) { applyPolicy(p.Settings, preventer, notifier, guard) })
 	go polStore.SyncLoop(flowCtx, c)
 
+	// Static ML on the files the on-access scanner reads: the EMBER-trained
+	// model for PE files, the heuristic for ELF (group policy ml_action).
+	var mlFiles func(path, sha string, data []byte)
+	if model, err := mlscore.Default(); err != nil {
+		slog.Warn("static ML model unavailable", "err", err)
+	} else {
+		ml := &mlscan.Checker{Model: model, Push: push, Quarantine: task.QuarantineFile,
+			Mode: func(path, sha string) string {
+				s := polStore.Current().Settings
+				if s.Excluded(policy.ScopeML, policy.Match{Path: path, Image: path, SHA256: sha}) {
+					return mlscan.ModeOff
+				}
+				return s.MLAction
+			},
+			Known: func(sha string) bool {
+				_, ok := malStore.Current().Lookup(sha)
+				return ok
+			},
+		}
+		mlFiles = ml.Check
+	}
+
 	// On-access YARA scanning of risky directories with the server's rules
 	yaraScanner := yarascan.New(yarascan.Options{
 		Roots:       cfg.Yara.WatchPaths,
 		MaxFileSize: cfg.Yara.MaxFileSizeMB << 20,
 		Push:        push,
 		OnHash:      malFiles.Check,
+		OnData:      mlFiles,
 		Skip: func(path string) bool {
 			s := polStore.Current().Settings
 			return !s.YaraOnAccess || s.Excluded(policy.ScopeYara, policy.Match{Path: path, Image: path})
@@ -613,7 +638,8 @@ func wait(ctx context.Context, d time.Duration) bool {
 // before the telemetry backlog ahead of it.
 var urgentLogTypes = map[string]bool{
 	malhash.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
-	ransomguard.LogType: true, "local_detection": true, "linux_sensor_health": true, scriptscan.LogType: true,
+	ransomguard.LogType: true, mlscan.LogType: true, "local_detection": true, "linux_sensor_health": true,
+	scriptscan.LogType: true,
 }
 
 func isUrgentEntry(entry string) bool {

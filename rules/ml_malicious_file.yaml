@@ -1,0 +1,23 @@
+title: Static ML Malicious File
+id: rule-ml-malicious-file
+description: >-
+  A program in a watched folder scored over the malicious threshold of the
+  agent's static ML check (ml.engine: ember_lgbm for Windows PE, where 0.1%
+  of benign files score this high; elf_heuristic for Linux ELF, ml.reasons
+  lists why) and was not quarantined: the policy is detect, or the
+  quarantine failed (error.message). A score is not a verdict: check the
+  hash (file.hash.sha256) in threat intelligence and how the file arrived;
+  exclude known-good software with the Static ML scope.
+logsource:
+  product: ml
+  service: detection
+detection:
+  selection:
+    event.action: ml_detection
+    ml.level: malicious
+    malware.action: detected
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.t1204

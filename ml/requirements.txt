@@ -1,0 +1,5 @@
+# ml/train.py (training) and ml/compare.py (feature checks); not used at runtime:
+# the agent evaluates the exported model in Go (agent/internal/mlscore).
+lightgbm==4.7.0
+numpy==2.5.4
+lief==1.0.0  # compare.py only

@@ -1,0 +1,20 @@
+title: Static ML Malicious File Quarantined
+id: rule-ml-malicious-file-quarantined
+description: >-
+  The agent quarantined a program its static ML check scored malicious
+  (policy ml_action block). Confirm the verdict (file.hash.sha256 in threat
+  intelligence, where the file came from); restore it from quarantine and
+  add a Static ML exclusion if it is legitimate software.
+logsource:
+  product: ml
+  service: detection
+detection:
+  selection:
+    event.action: ml_detection
+    ml.level: malicious
+    malware.action: quarantined
+  condition: selection
+level: medium
+tags:
+  - attack.execution
+  - attack.t1204

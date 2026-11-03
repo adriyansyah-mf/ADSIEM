@@ -68,6 +68,13 @@ def test_validation():
             agent_policy.PolicySettings.model_validate({"exclusions": [bad]})
     with pytest.raises(ValidationError):
         agent_policy.PolicySettings.model_validate({"ransomware_mode": "nuke"})
+    # static ML: detect unless set; its own exclusion scope
+    assert agent_policy.PolicySettings.model_validate({}).ml_action == "detect"
+    with pytest.raises(ValidationError):
+        agent_policy.PolicySettings.model_validate({"ml_action": "delete"})
+    p = agent_policy.PolicySettings.model_validate({"ml_action": "block", "exclusions": [
+        {"kind": "path_prefix", "value": "C:\\Build\\", "scopes": ["ml"]}]})
+    assert p.ml_action == "block" and p.exclusions[0].scopes == ["ml"]
 
 
 async def test_policy_api_scope_and_fallback(api):

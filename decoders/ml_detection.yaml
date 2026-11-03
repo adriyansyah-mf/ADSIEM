@@ -1,0 +1,27 @@
+# A file the agent's static ML check scored over a threshold
+# (agent/internal/mlscan): Windows programs (PE) with the EMBER-trained model
+# (ml.engine ember_lgbm), Linux programs (ELF) with heuristics
+# (elf_heuristic, ml.reasons lists the traits). ml.level: malicious (over
+# the threshold where 0.1% of EMBER's benign files score) or suspicious
+# (1%); action: detected or quarantined (policy ml_action block).
+name: ml_detection
+log_type: ml_detection
+type: kv
+priority: 3
+enabled: true
+match: 'event=ml_detection '
+fields:
+  malware.action: action
+  ml.level: level
+  ml.kind: kind
+  ml.engine: engine
+  ml.score: score
+  ml.threshold: threshold
+  ml.reasons: reasons
+  file.hash.sha256: sha256
+  file.path: path
+  file.size: size
+  error.message: error
+static_fields:
+  event.category: malware
+  event.action: ml_detection

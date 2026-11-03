@@ -32,6 +32,7 @@ const (
 	ScopeYara       = "yara"
 	ScopeRansomware = "ransomware"
 	ScopeScript     = "script"
+	ScopeML         = "ml"
 )
 
 // Exclusion: Kind path_prefix, image (full path, or a file name in any
@@ -44,13 +45,17 @@ type Exclusion struct {
 
 // Settings are the policy's switches and exclusions.
 type Settings struct {
-	PreventionEnabled bool        `json:"prevention_enabled"`
-	YaraOnAccess      bool        `json:"yara_on_access"`
-	RansomwareMode    string      `json:"ransomware_mode"` // off, report, stop
-	RansomwareIsolate bool        `json:"ransomware_isolate"`
-	NotifyUser        bool        `json:"notify_user"`
-	ScriptScan        string      `json:"script_scan"` // off, detect, block
-	Exclusions        []Exclusion `json:"exclusions"`
+	PreventionEnabled bool   `json:"prevention_enabled"`
+	YaraOnAccess      bool   `json:"yara_on_access"`
+	RansomwareMode    string `json:"ransomware_mode"` // off, report, stop
+	RansomwareIsolate bool   `json:"ransomware_isolate"`
+	NotifyUser        bool   `json:"notify_user"`
+	ScriptScan        string `json:"script_scan"` // off, detect, block
+	// MLAction: the static ML check of scanned files (internal/mlscan):
+	// off, detect or block (quarantine malicious files); empty (a server
+	// from before it) is detect.
+	MLAction   string      `json:"ml_action"`
+	Exclusions []Exclusion `json:"exclusions"`
 }
 
 // Policy is one version of the settings.
@@ -64,7 +69,7 @@ type Policy struct {
 // before policies existed.
 func Default() *Policy {
 	return &Policy{Group: "built-in", Settings: Settings{PreventionEnabled: true, YaraOnAccess: true,
-		RansomwareMode: "stop", NotifyUser: true, ScriptScan: "detect"}}
+		RansomwareMode: "stop", NotifyUser: true, ScriptScan: "detect", MLAction: "detect"}}
 }
 
 // fold: Windows paths compare case-insensitively.

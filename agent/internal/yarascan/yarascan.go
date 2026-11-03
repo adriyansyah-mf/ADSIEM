@@ -56,6 +56,10 @@ type Options struct {
 	// (the known-malware check, internal/malhash); files are then read even
 	// with no YARA rules loaded.
 	OnHash func(path, sha256 string, size int64)
+	// OnData, when set, gets the content of every file read for scanning,
+	// after OnHash (the static ML check, internal/mlscan); like OnHash it
+	// makes files be read with no YARA rules loaded. data must not be kept.
+	OnData func(path, sha256 string, data []byte)
 	// Skip, when set and true for a file, leaves the YARA scan out (the
 	// group policy turned on-access YARA off, or excludes the path); the
 	// file still goes to OnHash.
@@ -288,7 +292,7 @@ func (s *Scanner) worker(ctx context.Context) {
 func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.RuleMatch, error) {
 	rules, hash := s.current()
 	haveRules := rules != nil && rules.Len() > 0
-	if !haveRules && s.opts.OnHash == nil {
+	if !haveRules && s.opts.OnHash == nil && s.opts.OnData == nil {
 		return nil, nil
 	}
 	info, err := os.Lstat(path)
@@ -312,6 +316,9 @@ func (s *Scanner) ScanPath(ctx context.Context, path, trigger string) ([]yara.Ru
 	}
 	if s.opts.OnHash != nil {
 		s.opts.OnHash(path, digest, int64(len(data)))
+	}
+	if s.opts.OnData != nil {
+		s.opts.OnData(path, digest, data)
 	}
 	if !haveRules || (s.opts.Skip != nil && s.opts.Skip(path)) {
 		return nil, nil
