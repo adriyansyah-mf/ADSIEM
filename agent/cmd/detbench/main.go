@@ -66,6 +66,7 @@ type Verdict struct {
 type engines struct {
 	rules *yara.Rules
 	model *mlscore.Model
+	elf   *mlscore.Model
 }
 
 // judgeAll judges data and, unless noUnpack, every file inside it
@@ -106,7 +107,7 @@ func (e engines) judge(data []byte) Verdict {
 			}
 		}
 	}
-	if c, ok := mlscan.Classify(e.model, data); ok {
+	if c, ok := mlscan.Classify(e.model, e.elf, data); ok {
 		v.Kind, v.ML, v.MLScore = c.Kind, c.Level, c.Score
 	} else if mlscore.IsPE(data) {
 		// a PE the extractor refused: the ML check never sees it
@@ -253,7 +254,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	e := engines{rules: rules, model: model}
+	elf, err := mlscore.DefaultELF()
+	if err != nil {
+		log.Fatal(err)
+	}
+	e := engines{rules: rules, model: model, elf: elf}
 	rep := Report{Generated: time.Now().UTC(), Rules: *rulesDir, Model: model.Metrics,
 		ByFileType: map[string]*Tally{}, ByFamily: map[string]*Tally{}}
 

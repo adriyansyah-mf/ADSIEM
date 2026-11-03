@@ -22,6 +22,10 @@ func TestSurvey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	elf, err := mlscore.DefaultELF()
+	if err != nil {
+		t.Fatal(err)
+	}
 	counts := map[string]int{}
 	for _, d := range strings.Split(dirs, ",") {
 		filepath.WalkDir(d, func(p string, e fs.DirEntry, err error) error {
@@ -35,7 +39,7 @@ func TestSurvey(t *testing.T) {
 			if err != nil {
 				return nil
 			}
-			v, ok := Classify(m, b)
+			v, ok := Classify(m, elf, b)
 			if !ok {
 				return nil
 			}

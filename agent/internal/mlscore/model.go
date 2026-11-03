@@ -13,9 +13,15 @@ import (
 //go:embed model.json.gz
 var embeddedModel []byte
 
-// Model is a LightGBM binary model exported by ml/train.py.
+//go:embed model_elf.json.gz
+var embeddedELFModel []byte
+
+// Model is a LightGBM binary model exported by ml/train.py (format 1, the
+// EMBER 2018 vector) or ml/v3/train.py (format 2, features v3: EMBER2024).
 type Model struct {
 	Format     int    `json:"format"`
+	Features   string `json:"features"`
+	Kind       string `json:"kind"` // pe or elf (format 2)
 	Dim        int    `json:"dim"`
 	Trees      []tree `json:"trees"`
 	Thresholds struct {
@@ -83,10 +89,27 @@ func LoadModel(gz []byte) (*Model, error) {
 	if err := json.NewDecoder(r).Decode(&m); err != nil {
 		return nil, err
 	}
-	if m.Format != 1 || m.Dim != Dim {
-		return nil, fmt.Errorf("model format %d dim %d, want 1 and %d", m.Format, m.Dim, Dim)
+	switch {
+	case m.Format == 1 && m.Dim == Dim:
+	case m.Format == 2 && m.Features == "v3" && m.Dim == DimV3:
+	default:
+		return nil, fmt.Errorf("model format %d features %q dim %d not supported", m.Format, m.Features, m.Dim)
 	}
 	return &m, nil
+}
+
+// ScoreFile scores a file's bytes with the features the model was trained
+// on; ok is false when the file cannot be scored (format 1: not a PE the
+// extractor reads).
+func (m *Model) ScoreFile(b []byte) (float64, bool) {
+	if m.Format == 2 {
+		return m.Score(VectorV3(ExtractV3(b))), true
+	}
+	r, err := ExtractPE(b)
+	if err != nil {
+		return 0, false
+	}
+	return m.Score(Vector(r)), true
 }
 
 var (
@@ -95,8 +118,20 @@ var (
 	defaultErr   error
 )
 
-// Default is the embedded model (loaded once, on first use).
+// Default is the embedded PE model (loaded once, on first use).
 func Default() (*Model, error) {
 	defaultOnce.Do(func() { defaultModel, defaultErr = LoadModel(embeddedModel) })
 	return defaultModel, defaultErr
+}
+
+var (
+	elfOnce  sync.Once
+	elfModel *Model
+	elfErr   error
+)
+
+// DefaultELF is the embedded ELF model (EMBER2024's ELF files).
+func DefaultELF() (*Model, error) {
+	elfOnce.Do(func() { elfModel, elfErr = LoadModel(embeddedELFModel) })
+	return elfModel, elfErr
 }

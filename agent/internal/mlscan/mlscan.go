@@ -38,16 +38,32 @@ const (
 // Verdict is the score of one file.
 type Verdict struct {
 	Kind      string // pe or elf
-	Engine    string // ember_lgbm or elf_heuristic
+	Engine    string // ember2024_lgbm / ember_lgbm (PE), ember2024_elf_lgbm or elf_heuristic (ELF)
 	Level     string // malicious, suspicious or clean
 	Score     float64
 	Threshold float64 // the one Level crossed (malicious or suspicious)
 	Reasons   []string
 }
 
-// Classify scores data; ok is false when it is neither PE nor ELF (or the
-// PE headers cannot be read).
-func Classify(m *mlscore.Model, data []byte) (v Verdict, ok bool) {
+var levelRank = map[string]int{"clean": 0, "suspicious": 1, "malicious": 2}
+
+func byThresholds(m *mlscore.Model, score float64) (level string, threshold float64) {
+	// the thresholds are where 0.1% / 1% of the benign test files score
+	// higher (ml/v3/train.py)
+	switch {
+	case score > m.Thresholds.FPR01:
+		return "malicious", m.Thresholds.FPR01
+	case score > m.Thresholds.FPR1:
+		return "suspicious", m.Thresholds.FPR1
+	}
+	return "clean", 0
+}
+
+// Classify scores data with the PE model (files starting "MZ") or, for ELF
+// files, the ELF model and the heuristics (the higher level wins; the
+// heuristic reasons are kept). ok is false for anything else, or a PE a
+// format-1 model cannot read. elf may be nil.
+func Classify(m, elf *mlscore.Model, data []byte) (v Verdict, ok bool) {
 	// malware ships malformed headers on purpose: a parser panic must not
 	// take the agent down
 	defer func() {
@@ -56,22 +72,16 @@ func Classify(m *mlscore.Model, data []byte) (v Verdict, ok bool) {
 			v, ok = Verdict{}, false
 		}
 	}()
-	if m != nil && mlscore.IsPE(data) {
-		raw, err := mlscore.ExtractPE(data)
-		if err != nil {
+	if m != nil && len(data) >= 2 && data[0] == 'M' && data[1] == 'Z' {
+		score, scored := m.ScoreFile(data)
+		if !scored {
 			return Verdict{}, false
 		}
-		v := Verdict{Kind: "pe", Engine: "ember_lgbm", Score: m.Score(mlscore.Vector(raw))}
-		// the thresholds are where 0.1% / 1% of EMBER's benign test files
-		// score higher (ml/train.py)
-		switch {
-		case v.Score > m.Thresholds.FPR01:
-			v.Level, v.Threshold = "malicious", m.Thresholds.FPR01
-		case v.Score > m.Thresholds.FPR1:
-			v.Level, v.Threshold = "suspicious", m.Thresholds.FPR1
-		default:
-			v.Level = "clean"
+		v := Verdict{Kind: "pe", Engine: "ember_lgbm", Score: score}
+		if m.Format == 2 {
+			v.Engine = "ember2024_lgbm"
 		}
+		v.Level, v.Threshold = byThresholds(m, score)
 		return v, true
 	}
 	score, reasons, ok := mlscore.ScoreELF(data)
@@ -86,6 +96,13 @@ func Classify(m *mlscore.Model, data []byte) (v Verdict, ok bool) {
 		v.Level, v.Threshold = "suspicious", ELFSuspicious
 	default:
 		v.Level = "clean"
+	}
+	if elf != nil {
+		if s, scored := elf.ScoreFile(data); scored {
+			if level, th := byThresholds(elf, s); levelRank[level] >= levelRank[v.Level] {
+				v.Engine, v.Score, v.Level, v.Threshold = "ember2024_elf_lgbm", s, level, th
+			}
+		}
 	}
 	return v, true
 }
@@ -129,7 +146,8 @@ func (e Event) Line() string {
 
 // Checker is the on-access scanner's OnData hook.
 type Checker struct {
-	Model      *mlscore.Model
+	Model      *mlscore.Model // PE
+	ELF        *mlscore.Model // nil: the heuristics alone
 	Push       func(logType, line string)
 	Quarantine func(path string) error
 	// Mode, when set, is the policy's ml_action for the file (off when an
@@ -155,7 +173,7 @@ func (c *Checker) Check(path, sha string, data []byte, trigger string) bool {
 	if mode == ModeOff || (c.Known != nil && c.Known(sha)) {
 		return false
 	}
-	v, ok := Classify(c.Model, data)
+	v, ok := Classify(c.Model, c.ELF, data)
 	if !ok || v.Level == "clean" || !c.first(path+"|"+sha) {
 		return false
 	}
