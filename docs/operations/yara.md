@@ -60,6 +60,28 @@ Bounds: 3 levels of nesting, 1000 files, 64 MB per file, 256 MB per container, c
 
 All are written for ADSIEM (no third-party rules) and use only plain strings and regexes. `agent/internal/yara/builtin_test.go` compiles every file with the agent's engine, requires a match on a sample for each rule, and no match on benign look-alikes or system binaries (`sh`, `bash`, `python3`, `curl`, `ssh`, `openssl`, …). To try it on a host: create the EICAR file in a watched directory and look for the `yara_match` alert.
 
+## Community rule pack
+
+`yara/community/*.yar`: 2,845 rules from [YARA-Forge](https://github.com/YARAHQ/yara-forge) (release 20261101, core package), synced like the built-in pack (named `community/<set>`, enabled by default, not editable in place). Only rule sets whose licence allows use in a commercial product are packed:
+
+| Licence | Sets |
+|---|---|
+| MIT, Apache-2.0, BSD | DitekSHen, ESET, FireEye Red Team, GCTI, Trellix ARC, Volexity, WithSecure Labs, Telekom Security, Elceef |
+| Detection Rule License 1.1 (use in products allowed, attribution kept in each rule's meta and the file header) | Signature Base, SEKOIA, Synacktiv, Dr4k0nia, Cod3nym |
+
+Left out: sets with no licence (Malpedia among them), GPL sets (CAPE, craiu), and rules the agent's engine does not compile (modules `dotnet`, `magic`, `console`; 79 rules). `MANIFEST.json` lists every set with its source commit, licence and counts.
+
+False positives: the pack was run over 622,261 known-good files (`/usr/bin`, `/usr/sbin`, `/usr/lib`, Python packages, .NET SDK, PowerShell 7, mingw, Steam); 7 rules matched, all on offensive tools installed on the build machine (pypykatz, Masky, CrackMapExec, penelope, iodine, socat, nping). The `socat` and `nping` rules were dropped (common admin tools); the others are correct detections and kept.
+
+Regenerate (from `agent/`):
+
+```sh
+go run ./cmd/yarapack -forge yara-rules-core.yar -out ../yara/community -release <YARA-Forge release> \
+  -benign /usr/bin,/usr/lib,... -drop SEKOIA_Hacktool_Socat_Strings,SEKOIA_Tool_Nping_Strings
+```
+
+Scanning thousands of rules is made affordable by the engine's prefilter (`agent/internal/yara/prefilter.go`): every string gets a 2–4 byte "atom" it must contain; one pass over the data finds the atoms present, and only strings whose atom is there are searched, at the atom's positions. A string that matches always has its atom, so results do not change (differential tests against libyara, `TestPrefilterGivesTheSameMatches`). With the community pack, a 10 MB .NET DLL scans in about 1 s instead of 13.6 s.
+
 ## Alerts
 
 Each match is a `yara_match` line decoded by `decoders/yara_match.yaml` (`yara.rule`, `yara.namespace`, `yara.severity`, `yara.tags`, `yara.strings`, `file.path`, `file.hash.sha256`, `file.size`). Four Sigma rules (`rules/yara_match_{critical,high,medium,low}.yaml`) raise the alert. Severity comes from the YARA rule's meta:
