@@ -12,6 +12,7 @@ Dashboard → **Policies** (`/api/policies`, edit with `agents:manage`, inside y
 | Ransomware | stop (kill the encrypting process), report only, off | stop |
 | Isolate on ransomware | cut the host off the network when ransomware is confirmed | off |
 | Pop-ups | tell the signed-in Windows user when malware is found or stopped | on |
+| Script scanning | off / detect / block: YARA on scripts as they run (Windows AMSI, Linux interpreters; see script-scan.md) | detect |
 
 Agents get `policy_version` with every heartbeat and fetch the policy (`POST /api/ingest/policy`) when it changes: a change applies within a minute, no restart. The agent keeps the last policy in `<state_dir>/policy.json`. A protection turned off in the agent's local `config.yaml` (e.g. `ransomware.disabled`, `prevention.disabled`, `notify.disabled`, `ransomware.report_only`) stays off whatever the policy says.
 
@@ -32,6 +33,7 @@ Each exclusion has a kind, a value and the protections it applies to:
 | Known malware | the agent: exec checks and files written in watched folders |
 | YARA on-access | the agent: the file is not YARA-scanned |
 | Ransomware | the agent: no heuristics for that program, and no kill (canary hits are still reported) |
+| Script scanning | the agent: the host program, script file or content hash is not scanned |
 | Alerts | the worker: a rule match on an event about an excluded program, file, hash or command line raises no alert (logged as `alert_excluded_by_policy`) |
 
 Windows paths compare without case. Example: the Process Explorer driver flagged as "Kernel Driver Loaded From User-Writable Folder" → path `C:\Users\<user>\AppData\Local\Temp\PROCEXP152.SYS`, scope Alerts.

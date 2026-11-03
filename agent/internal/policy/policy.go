@@ -31,6 +31,7 @@ const (
 	ScopeMalware    = "malware"
 	ScopeYara       = "yara"
 	ScopeRansomware = "ransomware"
+	ScopeScript     = "script"
 )
 
 // Exclusion: Kind path_prefix, image (full path, or a file name in any
@@ -48,6 +49,7 @@ type Settings struct {
 	RansomwareMode    string      `json:"ransomware_mode"` // off, report, stop
 	RansomwareIsolate bool        `json:"ransomware_isolate"`
 	NotifyUser        bool        `json:"notify_user"`
+	ScriptScan        string      `json:"script_scan"` // off, detect, block
 	Exclusions        []Exclusion `json:"exclusions"`
 }
 
@@ -62,7 +64,7 @@ type Policy struct {
 // before policies existed.
 func Default() *Policy {
 	return &Policy{Group: "built-in", Settings: Settings{PreventionEnabled: true, YaraOnAccess: true,
-		RansomwareMode: "stop", NotifyUser: true}}
+		RansomwareMode: "stop", NotifyUser: true, ScriptScan: "detect"}}
 }
 
 // fold: Windows paths compare case-insensitively.

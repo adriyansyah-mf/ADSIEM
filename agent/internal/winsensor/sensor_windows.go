@@ -26,6 +26,7 @@ type Sensor struct {
 	done     chan struct{}
 	once     sync.Once
 	dropped  atomic.Uint64 // events lost because the agent was behind
+	onScript func(AMSIScript)
 }
 
 type kind int
@@ -38,6 +39,7 @@ const (
 	fileEvent
 	imageEvent
 	accessEvent
+	amsiEvent
 )
 
 type source struct {
@@ -117,6 +119,16 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 		}
 		s.sessions = append(s.sessions, ses)
 	}
+	// AMSI content for the script scanner: optional too.
+	if opts.OnScript != nil && !off[GroupAMSI] {
+		ses, err := etw.Start(etw.Config{Name: "SIEMAgent-AMSI", Providers: []etw.Provider{{GUID: amsiProvider,
+			EventIDs: []uint16{amsiScanEvent}}}}, push(amsiEvent))
+		if err != nil {
+			slog.Warn("etw: AMSI script content unavailable", "err", err)
+		} else {
+			s.sessions = append(s.sessions, ses)
+		}
+	}
 	// Process access is optional: without it the rest still runs.
 	if !off[GroupAccess] {
 		ses, err := etw.Start(etw.Config{Name: "SIEMAgent-Access", Providers: []etw.Provider{{GUID: auditAPIProvider,
@@ -134,6 +146,7 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 	files := newFileTracker(j, uint32(windows.GetCurrentProcessId()), longPathName)
 	files.onFile = opts.OnFile
 	access := newAccessTracker(j, uint32(windows.GetCurrentProcessId()))
+	s.onScript = opts.OnScript
 	go s.run(j, files, access, buf)
 	return s, nil
 }
@@ -171,6 +184,10 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker
 				}
 			case accessEvent:
 				emit(LogTypeAccess, access.openProcess(src.ev, now))
+			case amsiEvent:
+				if sc, ok := j.amsiScript(src.ev); ok && s.onScript != nil {
+					s.onScript(sc)
+				}
 			case networkEvent:
 				emit(LogTypeNetwork, j.network(src.ev))
 			case dnsEvent:

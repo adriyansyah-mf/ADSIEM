@@ -22,7 +22,7 @@ DEFAULT_GROUP = "default"
 CACHE_SECONDS = 30.0
 MAX_EXCLUSIONS = 500
 
-Scope = Literal["prevention", "malware", "yara", "ransomware", "alerts"]
+Scope = Literal["prevention", "malware", "yara", "ransomware", "script", "alerts"]
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ABS = re.compile(r"^(/|[A-Za-z]:\\)")
 
@@ -59,6 +59,9 @@ class PolicySettings(BaseModel):
     ransomware_mode: Literal["off", "report", "stop"] = "stop"
     ransomware_isolate: bool = False
     notify_user: bool = True                 # pop-ups for the signed-in user (Windows)
+    # scripts scanned with the YARA rules as they run (Windows: AMSI content; Linux: interpreters'
+    # code); block stops the process on a high or critical match
+    script_scan: Literal["off", "detect", "block"] = "detect"
     exclusions: list[Exclusion] = Field(default_factory=list, max_length=MAX_EXCLUSIONS)
 
     @field_validator("exclusions")

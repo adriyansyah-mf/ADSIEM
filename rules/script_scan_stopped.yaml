@@ -1,0 +1,18 @@
+title: Malicious Script Stopped
+id: rule-script-scan-stopped
+description: >-
+  The agent stopped a process running a script that matched a high or
+  critical YARA rule (script.rules). The process ran for a moment: check what
+  it did before (Process tree) and how the script got there (T1059).
+logsource:
+  product: script
+  service: scan
+detection:
+  selection:
+    event.action: script_scan
+    script.action: terminated
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.t1059

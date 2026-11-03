@@ -34,6 +34,7 @@ import (
 	"github.com/siem-platform/agent/internal/prevent"
 	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/ransomguard"
+	"github.com/siem-platform/agent/internal/scriptscan"
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/winsensor"
@@ -199,6 +200,23 @@ func run(configPath string, stop <-chan struct{}) {
 	// The group policy from the server (protections on/off, exclusions),
 	// applied to each protection as it starts and on every change.
 	polStore := policy.Open(filepath.Join(task.StateDir(cfg), policy.FileName))
+	// Script content (Windows: AMSI; Linux: interpreters' code) scanned with
+	// the YARA rules; its rules are attached once the YARA scanner exists.
+	scripts := &scriptscan.Scanner{
+		Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		Action: func() string {
+			if a := polStore.Current().Settings.ScriptScan; a != "" {
+				return a
+			}
+			return "detect"
+		},
+		Excluded: func(image, name, sha string) bool {
+			return polStore.Current().Settings.Excluded(policy.ScopeScript,
+				policy.Match{Image: image, Path: name, SHA256: sha})
+		},
+		Kill: scriptscan.KillProcess,
+		Self: uint32(os.Getpid()),
+	}
 	var notifier *notify.Notifier
 	if n := notify.New(); n != nil && !cfg.Notify.Disabled {
 		notifier = n
@@ -298,7 +316,7 @@ func run(configPath string, stop <-chan struct{}) {
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
 	// Producers are stopped explicitly at shutdown, before the durable journal closes.
 	var stopProducers []func()
-	if procMon, err := procexec.Start(buf); err != nil {
+	if procMon, err := procexec.StartWith(buf, func(ex procexec.Exec) { scripts.OfferExec(ex.PID, ex.Image, ex.Args) }); err != nil {
 		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
 	} else {
 		stopProducers = append(stopProducers, procMon.Stop)
@@ -363,7 +381,10 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Info("ETW sensor off: Sysmon is installed (set etw.mode: on to run both)")
 		} else if sensor, err := winsensor.StartWith(buf, winsensor.Options{
 			Disabled: cfg.ETW.DisabledEvents, OnFile: windowsFileFeed(onFile),
-			OnProcess: windowsProcessFeed(preventer)}); err != nil {
+			OnProcess: windowsProcessFeed(preventer),
+			OnScript: func(a winsensor.AMSIScript) {
+				scripts.Offer(scriptscan.Script{PID: a.PID, Image: a.Image, App: a.App, Name: a.Name, Content: a.Content})
+			}}); err != nil {
 			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
@@ -419,6 +440,8 @@ func run(configPath string, stop <-chan struct{}) {
 		},
 	})
 	go yaraScanner.SyncLoop(flowCtx, c)
+	scripts.Yara = yaraScanner
+	go scripts.Run(flowCtx)
 	if !cfg.Yara.Disabled {
 		go func() {
 			if err := yaraScanner.Run(flowCtx); err != nil {
@@ -590,7 +613,7 @@ func wait(ctx context.Context, d time.Duration) bool {
 // before the telemetry backlog ahead of it.
 var urgentLogTypes = map[string]bool{
 	malhash.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
-	ransomguard.LogType: true, "local_detection": true, "linux_sensor_health": true,
+	ransomguard.LogType: true, "local_detection": true, "linux_sensor_health": true, scriptscan.LogType: true,
 }
 
 func isUrgentEntry(entry string) bool {

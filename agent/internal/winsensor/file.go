@@ -84,6 +84,9 @@ type Options struct {
 	OnFile func(FileEvent)
 	// OnProcess, if set, sees every process start (execution prevention).
 	OnProcess func(ProcessStart)
+	// OnScript, if set, gets what AMSI scanned (the script scanner); the
+	// AMSI session only runs when it is set.
+	OnScript func(AMSIScript)
 }
 
 // FileEvent is one file create, rename or delete, before rate limiting: the

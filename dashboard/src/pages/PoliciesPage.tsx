@@ -4,7 +4,7 @@ import { Loader2, Plus, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-reac
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 
-type Scope = 'prevention' | 'malware' | 'yara' | 'ransomware' | 'alerts'
+type Scope = 'prevention' | 'malware' | 'yara' | 'ransomware' | 'script' | 'alerts'
 type Kind = 'path_prefix' | 'image' | 'sha256' | 'command_line'
 
 interface Exclusion { kind: Kind; value: string; scopes: Scope[]; comment: string }
@@ -16,6 +16,7 @@ interface Settings {
   ransomware_mode: 'off' | 'report' | 'stop'
   ransomware_isolate: boolean
   notify_user: boolean
+  script_scan: 'off' | 'detect' | 'block'
   exclusions: Exclusion[]
 }
 
@@ -35,6 +36,7 @@ const SCOPES: { value: Scope; label: string }[] = [
   { value: 'malware', label: 'Known malware' },
   { value: 'yara', label: 'YARA on-access' },
   { value: 'ransomware', label: 'Ransomware' },
+  { value: 'script', label: 'Script scanning' },
   { value: 'alerts', label: 'Alerts' },
 ]
 
@@ -142,6 +144,19 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
             <option value="detect">Detect: alert only</option>
             <option value="block">Block: stop and quarantine</option>
           </select>
+        </label>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">Script scanning</span>
+          <select value={s.script_scan} onChange={e => set({ script_scan: e.target.value as Settings['script_scan'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="detect">Detect: alert on malicious scripts</option>
+            <option value="block">Block: also stop the process (high and critical rules)</option>
+            <option value="off">Off</option>
+          </select>
+          <span className="block text-xs text-muted-foreground">
+            YARA rules on PowerShell, VBScript, JScript and Office macros (Windows, through AMSI) and on shell,
+            Python, Perl, PHP and Node code (Linux).
+          </span>
         </label>
         <label className="rounded border border-border p-3 space-y-1">
           <span className="block text-sm font-medium">Ransomware protection</span>
