@@ -1,6 +1,7 @@
 package mlscore
 
 import (
+	"encoding/binary"
 	"math/rand"
 	"os"
 	"testing"
@@ -41,6 +42,26 @@ func TestExtractPEDoesNotPanicOnBrokenFiles(t *testing.T) {
 			}
 			try("corrupted", b)
 		}
+	}
+}
+
+// A COFF symbol table pointing past the end of the file (packed Go stealers
+// on URLhaus, 2026-11) made debug/pe refuse the whole file, so the model
+// never scored it. It is parsed without the table, keeping the header's count.
+func TestSymbolTablePastTheEnd(t *testing.T) {
+	b, err := os.ReadFile(robustFixtures[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	coff := peOffset(b) + 4
+	binary.LittleEndian.PutUint32(b[coff+8:], uint32(len(b)+4096))
+	binary.LittleEndian.PutUint32(b[coff+12:], 7)
+	r, err := ExtractPE(b)
+	if err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if r.General.Symbols != 7 {
+		t.Errorf("symbols %v, want the header's 7", r.General.Symbols)
 	}
 }
 

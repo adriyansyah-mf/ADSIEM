@@ -5,6 +5,7 @@ import (
 	"debug/pe"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"regexp"
 	"strings"
@@ -191,7 +192,13 @@ func ExtractPE(b []byte) (*Raw, error) {
 	}
 	f, err := pe.NewFile(bytes.NewReader(b))
 	if err != nil {
-		return nil, ErrNotPE
+		// debug/pe refuses a COFF symbol table pointing past the end of the
+		// file, which packed and obfuscated programs (Go ones especially)
+		// have; LIEF, which EMBER used, ignores it. Parse a copy without it.
+		f, err = pe.NewFile(bytes.NewReader(withoutSymbolTable(b)))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrNotPE, err)
+		}
 	}
 	defer f.Close()
 	r := &Raw{Histogram: histogram(b), ByteEntropy: byteEntropy(b), Strings: stringFeatures(b)}
@@ -312,12 +319,28 @@ func ExtractPE(b []byte) (*Raw, error) {
 	g.HasResources = boolf(dir(2).Size > 0)
 	g.HasSignature = boolf(dir(4).Size > 0)
 	g.HasTLS = boolf(dir(9).Size > 0)
-	g.Symbols = float64(f.NumberOfSymbols)
+	if o := peOffset(b) + 4 + 12; o+4 <= len(b) {
+		g.Symbols = float64(binary.LittleEndian.Uint32(b[o:])) // the header's, even when parsed without it
+	}
 	return r, nil
 }
 
 // sectionHeaderNames reads each section header's 8-byte name as stored
 // (debug/pe resolves "/4" long names through the COFF string table).
+func peOffset(b []byte) int { return int(binary.LittleEndian.Uint32(b[0x3c:])) }
+
+// withoutSymbolTable: a copy of b with the COFF header's symbol table pointer
+// and count zeroed (b passed IsPE, so the header is inside b).
+func withoutSymbolTable(b []byte) []byte {
+	c := append([]byte(nil), b...)
+	coff := peOffset(c) + 4
+	if coff+20 <= len(c) {
+		binary.LittleEndian.PutUint32(c[coff+8:], 0)
+		binary.LittleEndian.PutUint32(c[coff+12:], 0)
+	}
+	return c
+}
+
 func sectionHeaderNames(b []byte, n int) []string {
 	pe := int(binary.LittleEndian.Uint32(b[0x3c:]))
 	if pe+24 > len(b) {

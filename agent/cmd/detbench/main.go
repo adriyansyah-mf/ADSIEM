@@ -81,6 +81,11 @@ func (e engines) judge(data []byte) Verdict {
 	}
 	if c, ok := mlscan.Classify(e.model, data); ok {
 		v.Kind, v.ML, v.MLScore = c.Kind, c.Level, c.Score
+	} else if mlscore.IsPE(data) {
+		// a PE the extractor refused: the ML check never sees it
+		if _, err := mlscore.ExtractPE(data); err != nil {
+			v.Error = "pe: " + err.Error()
+		}
 	}
 	return v
 }

@@ -37,4 +37,11 @@ For a fair before/after comparison keep the same sample set and benign directori
 
 | Date | Samples | Detected | Flagged | Benign flagged | Notes |
 |---|---|---|---|---|---|
-| | | | | | |
+| 2026-11-03 | 83 URLhaus payloads (64 zip, 7 html, 5 exe, 3 js, 2 elf, lnk, msi) | 2.4% | 2.4% | 1 / 3,287 (ophcrack: Mimikatz rule) | built-in YARA 0%; ML: both ELF (Mozi), no PE: 3 SalatStealer (Go) scored 0.62–0.69 under the 0.76 suspicious threshold, RustyStealer 0.11, SnappyClient 0.16; zips are not opened. MalwareBazaar `get_file` answered 500 for every sample that day, so URLhaus only (`--source urlhaus`). |
+
+What the first run showed:
+
+- Most payloads arrive in a container (zip, html, lnk): the engines see only the wrapper. Container scanning is the largest gap.
+- The 2018 model misses current Go / Rust stealers: a newer training set is needed.
+- The built-in YARA pack (18 rules: tools, miners, web shells, ransom notes) does not cover commodity stealers and loaders.
+- Fixed on the way: Go's `debug/pe` refused PE files whose COFF symbol table points past the end of the file (the SalatStealer samples), so the model never scored them; they are now parsed without the table, as LIEF does.
