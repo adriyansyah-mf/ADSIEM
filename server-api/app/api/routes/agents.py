@@ -21,9 +21,11 @@ from app.core.security import generate_agent_token, hash_token
 from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
                             EnrollmentToken, User)
 from app.schemas.schemas import (
-    AgentOut, AgentUpdate, EnrollRequest, EnrollResponse,
+    AgentOut, AgentTaskOut, AgentUpdate, EnrollRequest, EnrollResponse,
     FirewallRuleIn, FirewallRuleOut, LogSourceIn, LogSourceOut, PaginatedResponse
 )
+from pydantic import BaseModel, Field
+from typing import Literal
 from app.services.audit import audit_log
 
 router = APIRouter(tags=["agents"])
@@ -489,6 +491,37 @@ async def delete_firewall_rule(
     await db.commit()
     background.add_task(audit_log, db, current_user.id, "firewall_rule_deleted",
                         "agent_firewall_rule", str(rule_id))
+
+class FileScanRequest(BaseModel):
+    """quick: the folders malware is dropped in; full: every local disk;
+    custom: paths (agent/internal/fullscan)."""
+    kind: Literal["quick", "full", "custom"] = "quick"
+    paths: list[str] = Field(default_factory=list, max_length=20)
+
+
+@router.post("/api/agents/{agent_id}/file-scan", response_model=AgentTaskOut, status_code=201)
+async def file_scan(
+    agent_id: UUID,
+    body: FileScanRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    """Scan the agent's disk now with its file engines (task file_scan); the
+    detections arrive as alerts, the summary as the task result and a
+    file_scan log line."""
+    await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    paths = [p.strip() for p in body.paths if p.strip()]
+    if body.kind == "custom" and not paths:
+        raise HTTPException(400, "custom scans need at least one path")
+    task = AgentTask(agent_id=agent_id, task_type="file_scan",
+                     params={"kind": body.kind, "paths": paths if body.kind == "custom" else []},
+                     created_by=current_user.id)
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    return task
+
 
 @router.post("/api/agents/{agent_id}/isolate", response_model=AgentOut)
 async def isolate_agent(

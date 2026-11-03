@@ -1,0 +1,25 @@
+# A quick, full or custom file scan by the agent (agent/internal/fullscan):
+# started, a progress line a minute while it runs, then completed or
+# cancelled. Detections arrive as their own lines (known_malware,
+# yara_match, ml_detection) with the scan as engine / trigger.
+name: file_scan
+log_type: file_scan
+type: kv
+priority: 3
+enabled: true
+match: 'event=file_scan '
+fields:
+  scan.status: status
+  scan.id: scan_id
+  scan.kind: kind
+  scan.files: files
+  scan.bytes: bytes
+  scan.detections: detections
+  scan.errors: errors
+  scan.skipped: skipped
+  scan.duration: duration
+  scan.requested: requested
+  scan.roots: roots
+static_fields:
+  event.category: file
+  event.action: file_scan

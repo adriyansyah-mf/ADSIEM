@@ -162,11 +162,11 @@ func TestFileCheckerReportsAndQuarantines(t *testing.T) {
 		lines = append(lines, l)
 	}, Quarantine: func(p string) error { quarantined = append(quarantined, p); return nil }}
 
-	fc.Check("/tmp/x", sha("1"), 10) // nothing loaded yet
+	fc.Check("/tmp/x", sha("1"), 10, "") // nothing loaded yet
 	st.cur.Store(New(ActionDetect, map[string]string{sha("1"): "Mirai"}))
-	fc.Check("/tmp/x", sha("1"), 10)
-	fc.Check("/tmp/x", sha("1"), 10) // same file and content: once a minute
-	fc.Check("/tmp/y", sha("2"), 10) // not known
+	fc.Check("/tmp/x", sha("1"), 10, "")
+	fc.Check("/tmp/x", sha("1"), 10, "") // same file and content: once a minute
+	fc.Check("/tmp/y", sha("2"), 10, "") // not known
 	if len(lines) != 1 || len(quarantined) != 0 {
 		t.Fatalf("detect: lines=%v quarantined=%v", lines, quarantined)
 	}
@@ -177,12 +177,12 @@ func TestFileCheckerReportsAndQuarantines(t *testing.T) {
 	}
 
 	st.cur.Store(New(ActionBlock, map[string]string{sha("2"): ""}))
-	fc.Check("/tmp/y", sha("2"), 5)
+	fc.Check("/tmp/y", sha("2"), 5, "")
 	if len(quarantined) != 1 || !strings.Contains(lines[1], "action=quarantined") || !strings.Contains(lines[1], `label="unknown"`) {
 		t.Fatalf("block: %v %v", lines, quarantined)
 	}
 	fc.Quarantine = func(string) error { return errors.New("read-only") }
-	fc.Check("/tmp/z", sha("2"), 5)
+	fc.Check("/tmp/z", sha("2"), 5, "")
 	if !strings.Contains(lines[2], `action=detected`) || !strings.Contains(lines[2], `error="read-only"`) {
 		t.Fatalf("failed quarantine: %s", lines[2])
 	}

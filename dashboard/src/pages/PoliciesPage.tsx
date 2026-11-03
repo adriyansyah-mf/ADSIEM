@@ -18,6 +18,8 @@ interface Settings {
   notify_user: boolean
   script_scan: 'off' | 'detect' | 'block'
   ml_action: 'off' | 'detect' | 'block'
+  quick_scan_time: string
+  full_scan_schedule: string
   exclusions: Exclusion[]
 }
 
@@ -180,6 +182,18 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
           <span className="block text-xs text-muted-foreground">
             Scores Windows programs (PE) with a model trained on EMBER and Linux programs (ELF) with heuristics, in the YARA watched folders. Exclude false positives with the Static ML scope.
           </span>
+        </label>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">Scheduled quick scan</span>
+          <input value={s.quick_scan_time ?? ''} onChange={e => set({ quick_scan_time: e.target.value })} placeholder="12:30 (empty: off)"
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm font-mono" />
+          <span className="block text-xs text-muted-foreground">Every day at this time (the endpoint's local time): downloads, temp, startup and autostart folders, web roots.</span>
+        </label>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">Scheduled full scan</span>
+          <input value={s.full_scan_schedule ?? ''} onChange={e => set({ full_scan_schedule: e.target.value })} placeholder="sun 02:00 (or daily 02:00; empty: off)"
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm font-mono" />
+          <span className="block text-xs text-muted-foreground">Every local disk, at low priority. A slot missed while the endpoint was off runs later the same day.</span>
         </label>
       </section>
 

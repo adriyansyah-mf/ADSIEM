@@ -115,6 +115,9 @@ type Event struct {
 	Path   string
 	Size   int64
 	Error  string
+	// Trigger: on_access, or the scan that found it (quick_scan, full_scan,
+	// custom_scan).
+	Trigger string
 }
 
 func kv(s string) string {
@@ -131,6 +134,9 @@ func (e Event) Line() string {
 		e.Action, e.Level, e.Kind, e.Engine, e.Score, e.Threshold, e.SHA256, kv(e.Path), e.Size)
 	if len(e.Reasons) > 0 {
 		fmt.Fprintf(&sb, " reasons=%s", kv(strings.Join(e.Reasons, "; ")))
+	}
+	if e.Trigger != "" {
+		fmt.Fprintf(&sb, " trigger=%s", e.Trigger)
 	}
 	if e.Error != "" {
 		fmt.Fprintf(&sb, " error=%s", kv(e.Error))
@@ -156,7 +162,8 @@ type Checker struct {
 }
 
 // Check scores one file the scanner read.
-func (c *Checker) Check(path, sha string, data []byte) {
+// Check is the scanner's OnData hook; true when it reported the file.
+func (c *Checker) Check(path, sha string, data []byte, trigger string) bool {
 	mode := ModeDetect
 	if c.Mode != nil {
 		if m := c.Mode(path, sha); m != "" {
@@ -164,13 +171,13 @@ func (c *Checker) Check(path, sha string, data []byte) {
 		}
 	}
 	if mode == ModeOff || (c.Known != nil && c.Known(sha)) {
-		return
+		return false
 	}
 	v, ok := Classify(c.Model, c.ELF, data)
 	if !ok || v.Level == "clean" || !c.first(path+"|"+sha) {
-		return
+		return false
 	}
-	e := Event{Verdict: v, Action: "detected", SHA256: sha, Path: path, Size: int64(len(data))}
+	e := Event{Verdict: v, Action: "detected", SHA256: sha, Path: path, Size: int64(len(data)), Trigger: trigger}
 	if mode == ModeBlock && v.Level == "malicious" && c.Quarantine != nil {
 		if err := c.Quarantine(path); err != nil {
 			e.Error = err.Error()
@@ -181,6 +188,7 @@ func (c *Checker) Check(path, sha string, data []byte) {
 	}
 	slog.Warn("mlscan: "+v.Level+" file", "path", path, "kind", v.Kind, "score", v.Score, "action", e.Action)
 	c.Push(LogType, e.Line())
+	return true
 }
 
 // first: the same file and content is reported once an hour at most (the

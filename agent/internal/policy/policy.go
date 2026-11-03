@@ -54,8 +54,12 @@ type Settings struct {
 	// MLAction: the static ML check of scanned files (internal/mlscan):
 	// off, detect or block (quarantine malicious files); empty (a server
 	// from before it) is detect.
-	MLAction   string      `json:"ml_action"`
-	Exclusions []Exclusion `json:"exclusions"`
+	MLAction string `json:"ml_action"`
+	// QuickScanTime "HH:MM" (every day) and FullScanSchedule "<day> HH:MM"
+	// or "daily HH:MM": scheduled file scans (internal/fullscan); "" is off.
+	QuickScanTime    string      `json:"quick_scan_time"`
+	FullScanSchedule string      `json:"full_scan_schedule"`
+	Exclusions       []Exclusion `json:"exclusions"`
 }
 
 // Policy is one version of the settings.

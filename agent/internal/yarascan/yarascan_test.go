@@ -128,7 +128,10 @@ func TestOnHashSeesFilesWithoutRules(t *testing.T) {
 	}
 	var got []seen
 	s := New(Options{Roots: []string{t.TempDir()}, Push: func(string, string) { t.Fatal("no rules, no lines") },
-		OnHash: func(path, sum string, size int64) { got = append(got, seen{path, sum, size}) }})
+		OnHash: func(path, sum string, size int64, _ string) bool {
+			got = append(got, seen{path, sum, size})
+			return false
+		}})
 	p := filepath.Join(t.TempDir(), "dropper.bin")
 	os.WriteFile(p, []byte("abc"), 0o644)
 	for i := 0; i < 2; i++ {

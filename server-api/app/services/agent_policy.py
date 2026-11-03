@@ -24,6 +24,8 @@ MAX_EXCLUSIONS = 500
 
 Scope = Literal["prevention", "malware", "yara", "ransomware", "script", "ml", "alerts"]
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_HHMM = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+_SCHEDULE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun|daily) ([01][0-9]|2[0-3]):[0-5][0-9]$")
 _ABS = re.compile(r"^(/|[A-Za-z]:\\)")
 
 
@@ -65,7 +67,27 @@ class PolicySettings(BaseModel):
     # static ML on scanned files (EMBER model for PE, heuristic for ELF):
     # block quarantines files over the malicious threshold
     ml_action: Literal["off", "detect", "block"] = "detect"
+    # scheduled file scans (agent local time): quick every day at HH:MM;
+    # full on "<mon..sun> HH:MM" or "daily HH:MM". "" is off.
+    quick_scan_time: str = Field(default="", max_length=32)
+    full_scan_schedule: str = Field(default="", max_length=32)
     exclusions: list[Exclusion] = Field(default_factory=list, max_length=MAX_EXCLUSIONS)
+
+    @field_validator("quick_scan_time")
+    @classmethod
+    def _quick(cls, v: str) -> str:
+        v = v.strip()
+        if v and not _HHMM.match(v):
+            raise ValueError("quick_scan_time: HH:MM (24 h) or empty")
+        return v
+
+    @field_validator("full_scan_schedule")
+    @classmethod
+    def _full(cls, v: str) -> str:
+        v = " ".join(v.lower().split())
+        if v and not _SCHEDULE.match(v):
+            raise ValueError("full_scan_schedule: '<mon..sun|daily> HH:MM' or empty")
+        return v
 
     @field_validator("exclusions")
     @classmethod
