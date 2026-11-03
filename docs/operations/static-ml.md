@@ -43,7 +43,7 @@ On known-good software from a Linux workstation (2026-11, `go test -run TestSurv
 | Files | malicious | suspicious |
 |---|---|---|
 | 9,865 PE (.NET SDK, PowerShell 7, NSIS, MariaDB, mingw, Steam, VS Code) | 0 | 1 (a Steam voice plug-in) |
-| 21,089 ELF (/usr/bin, /usr/sbin, /usr/lib, Steam runtimes) | 0 | 0 |
+| 20,999 ELF (/usr/bin, /usr/sbin, /usr/lib/x86_64-linux-gnu, gcc, Steam runtimes) | 0 | 0 |
 
 Read these honestly:
 
