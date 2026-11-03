@@ -46,20 +46,49 @@ func TestClassifyLevels(t *testing.T) {
 		logit float64
 		level string
 	}{{4, "malicious"}, {0.5, "suspicious"}, {-4, "clean"}} {
-		v, ok := Classify(constModel(t, c.logit), pe)
+		v, ok := Classify(constModel(t, c.logit), nil, pe)
 		if !ok || v.Kind != "pe" || v.Engine != "ember_lgbm" || v.Level != c.level {
 			t.Errorf("logit %v: %+v ok=%v, want level %s", c.logit, v, ok, c.level)
 		}
 	}
-	v, ok := Classify(constModel(t, -4), miner)
+	v, ok := Classify(constModel(t, -4), nil, miner)
 	if !ok || v.Kind != "elf" || v.Level != "malicious" || len(v.Reasons) < 2 {
 		t.Errorf("miner ELF: %+v ok=%v", v, ok)
 	}
-	if _, ok := Classify(constModel(t, 4), []byte("#!/bin/sh\necho hi\n")); ok {
+	if _, ok := Classify(constModel(t, 4), nil, []byte("#!/bin/sh\necho hi\n")); ok {
 		t.Error("a shell script was scored")
 	}
-	if _, ok := Classify(constModel(t, 4), append([]byte("MZ"), make([]byte, 200)...)); ok {
+	if _, ok := Classify(constModel(t, 4), nil, append([]byte("MZ"), make([]byte, 200)...)); ok {
 		t.Error("a broken PE was scored")
+	}
+}
+
+// With the embedded EMBER2024 models: a PE the parser refuses is still
+// scored (byte and string features), and ELF files go to the ELF model.
+func TestEmbeddedModels(t *testing.T) {
+	pe, err := mlscore.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	elf, err := mlscore.DefaultELF()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pe.Format != 2 || pe.Kind != "pe" || elf.Kind != "elf" {
+		t.Fatalf("models: pe format %d kind %q, elf kind %q", pe.Format, pe.Kind, elf.Kind)
+	}
+	broken := append([]byte("MZ"), make([]byte, 4000)...)
+	if v, ok := Classify(pe, elf, broken); !ok || v.Kind != "pe" || v.Engine != "ember2024_lgbm" {
+		t.Fatalf("broken PE: %+v %v", v, ok)
+	}
+	if b, err := os.ReadFile("/bin/true"); err == nil {
+		v, ok := Classify(pe, elf, b)
+		if !ok || v.Kind != "elf" || v.Level != "clean" {
+			t.Fatalf("/bin/true: %+v %v", v, ok)
+		}
+	}
+	if v, ok := Classify(pe, elf, readPE(t)); !ok || v.Engine != "ember2024_lgbm" {
+		t.Fatalf("pe64 fixture: %+v %v", v, ok)
 	}
 }
 
