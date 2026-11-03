@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/siem-platform/agent/internal/tlsh"
 )
 
 // LogType of known-malware lines (decoders/known_malware.yaml).
@@ -27,6 +29,11 @@ type Event struct {
 	UID     uint32
 	Size    int64
 	Error   string
+	// Match is "tlsh" for a file similar to a known one (a variant):
+	// SimilarTo is that file's SHA-256 and Distance the TLSH distance.
+	Match     string
+	SimilarTo string
+	Distance  int
 }
 
 func kv(s string) string {
@@ -53,6 +60,9 @@ func (e Event) Line() string {
 	}
 	if e.Size > 0 {
 		fmt.Fprintf(&sb, " size=%d", e.Size)
+	}
+	if e.Match != "" {
+		fmt.Fprintf(&sb, " match=%s similar_to=%s distance=%d", e.Match, e.SimilarTo, e.Distance)
 	}
 	if e.Error != "" {
 		fmt.Fprintf(&sb, " error=%s", kv(e.Error))
@@ -98,6 +108,39 @@ func (f *FileChecker) Check(path, sha string, size int64) {
 		}
 	}
 	slog.Warn("malhash: known malware", "path", path, "label", label, "action", e.Action)
+	f.Push(LogType, e.Line())
+}
+
+// VariantDistance: a file at most this TLSH distance from a known-malware
+// file is reported as a variant of it. 30 is the conservative end of TLSH's
+// published range (low false positives on executables).
+const VariantDistance = 30
+
+// variantMinSize: smaller files have too little content for TLSH to mean much.
+const variantMinSize = 512
+
+// CheckData is the scanner's OnData hook: a file whose SHA-256 is not known
+// but whose TLSH is close to a known-malware file's is reported as a
+// variant (detected only, never quarantined: similarity is not identity).
+func (f *FileChecker) CheckData(path, sha string, data []byte) {
+	set := f.Store.Current()
+	if !set.Active() || set.SimilarCount() == 0 || len(data) < variantMinSize {
+		return
+	}
+	if _, known := set.Lookup(sha); known {
+		return // Check reports it
+	}
+	h, err := tlsh.Sum(data)
+	if err != nil {
+		return
+	}
+	label, similar, dist, ok := set.Similar(h, VariantDistance)
+	if !ok || (f.Excluded != nil && f.Excluded(path, sha)) || !f.first(path+"|"+sha) {
+		return
+	}
+	e := Event{Action: "detected", Trigger: "file", Label: label, SHA256: sha, Path: path, Engine: "on_access",
+		Size: int64(len(data)), Match: "tlsh", SimilarTo: similar, Distance: dist}
+	slog.Warn("malhash: variant of known malware", "path", path, "label", label, "similar_to", similar, "distance", dist)
 	f.Push(LogType, e.Line())
 }
 

@@ -962,6 +962,9 @@ class MalwareHash(Base):
     label      = Column(String(64), nullable=False, default="", server_default="")
     file_type  = Column(String(32), nullable=False, default="", server_default="")
     reference  = Column(String(255), nullable=False, default="", server_default="")
+    # TLSH similarity digest ("T1" + 70 hex) when the source has one: agents
+    # report files close to it as variants (agent/internal/tlsh)
+    tlsh       = Column(String(72), nullable=False, default="", server_default="")
     status     = Column(String(10), nullable=False, default="active", server_default="active")
     seq        = Column(BigInteger, _malware_hashes_seq, server_default=_malware_hashes_seq.next_value(),
                         nullable=False, index=True)

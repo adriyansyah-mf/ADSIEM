@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/siem-platform/agent/internal/tlsh"
 )
 
 // Actions the server sends: off (nothing is checked), detect, block.
@@ -30,10 +32,44 @@ type Set struct {
 	keys    [][32]byte
 	labels  []uint16
 	table   []string
+	// TLSH digests of the hashes that have one (sim[i] belongs to
+	// keys[simKey[i]]), for Similar.
+	sim    []tlsh.Hash
+	simKey []int32
 }
+
+// entry is one hash's data while a set is built.
+type entry struct{ label, tlsh string }
 
 // Empty is the set before any sync (nothing is checked).
 func Empty() *Set { return &Set{Action: ActionOff} }
+
+// Similar returns the known-malware hash whose TLSH is closest to h, when
+// at most maxDist away (its label, SHA-256 and the distance).
+func (s *Set) Similar(h tlsh.Hash, maxDist int) (label, sha string, dist int, ok bool) {
+	if s == nil {
+		return "", "", 0, false
+	}
+	best, at := maxDist+1, -1
+	for i := range s.sim {
+		if d := tlsh.Distance(h, s.sim[i]); d < best {
+			best, at = d, i
+		}
+	}
+	if at < 0 {
+		return "", "", 0, false
+	}
+	k := s.simKey[at]
+	return s.table[s.labels[k]], hex.EncodeToString(s.keys[k][:]), best, true
+}
+
+// SimilarCount is the number of hashes with a TLSH digest.
+func (s *Set) SimilarCount() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.sim)
+}
 
 // New builds a set from sha256 -> label (malformed hashes are skipped).
 func New(action string, hashes map[string]string) *Set {
@@ -41,6 +77,13 @@ func New(action string, hashes map[string]string) *Set {
 	for h, l := range hashes {
 		changes = append(changes, []string{h, l})
 	}
+	return newFrom(action, changes)
+}
+
+// NewWithTLSH builds a set from [sha256, label, tlsh] rows.
+func NewWithTLSH(action string, rows [][]string) *Set { return newFrom(action, rows) }
+
+func newFrom(action string, changes [][]string) *Set {
 	s := Empty().apply(true, changes)
 	s.Action = action
 	return s
@@ -101,13 +144,18 @@ func cmp(a, b [32]byte) int {
 	return 0
 }
 
-// apply returns a new set with the server's changes: [sha256, label] adds,
-// [sha256] removes; reset starts from nothing. Malformed entries are skipped.
+// apply returns a new set with the server's changes: [sha256, label] or
+// [sha256, label, tlsh] adds, [sha256] removes; reset starts from nothing.
+// Malformed entries are skipped.
 func (s *Set) apply(reset bool, changes [][]string) *Set {
-	m := map[[32]byte]string{}
+	m := map[[32]byte]entry{}
 	if !reset && s != nil {
+		digests := map[int32]string{}
+		for i, k := range s.simKey {
+			digests[k] = s.sim[i].String()
+		}
 		for i, k := range s.keys {
-			m[k] = s.table[s.labels[i]]
+			m[k] = entry{label: s.table[s.labels[i]], tlsh: digests[int32(i)]}
 		}
 	}
 	for _, c := range changes {
@@ -119,7 +167,11 @@ func (s *Set) apply(reset bool, changes [][]string) *Set {
 			continue
 		}
 		if len(c) >= 2 {
-			m[k] = c[1]
+			e := entry{label: c[1]}
+			if len(c) >= 3 {
+				e.tlsh = c[2]
+			}
+			m[k] = e
 		} else {
 			delete(m, k)
 		}
@@ -127,7 +179,7 @@ func (s *Set) apply(reset bool, changes [][]string) *Set {
 	return build(m)
 }
 
-func build(m map[[32]byte]string) *Set {
+func build(m map[[32]byte]entry) *Set {
 	out := &Set{keys: make([][32]byte, 0, len(m))}
 	for k := range m {
 		out.keys = append(out.keys, k)
@@ -136,7 +188,13 @@ func build(m map[[32]byte]string) *Set {
 	idx := map[string]uint16{}
 	out.labels = make([]uint16, len(out.keys))
 	for i, k := range out.keys {
-		l := m[k]
+		l := m[k].label
+		if d := m[k].tlsh; d != "" {
+			if h, err := tlsh.Parse(d); err == nil {
+				out.sim = append(out.sim, h)
+				out.simKey = append(out.simKey, int32(i))
+			}
+		}
 		n, ok := idx[l]
 		if !ok {
 			if len(out.table) == 0xFFFF {
@@ -166,6 +224,11 @@ type onDisk struct {
 	Keys    []byte // 32 bytes each
 	Labels  []uint16
 	Table   []string
+	// TLSH digests by key index ("" none). TLSHAware: saved by an agent that
+	// keeps them; a set saved before is synced again in full once, so the
+	// digests of hashes it already has arrive.
+	TLSH      []string
+	TLSHAware bool
 }
 
 const format = 1
@@ -173,9 +236,15 @@ const format = 1
 // Save writes the set atomically (temp file, then rename).
 func (s *Set) Save(path string) error {
 	d := onDisk{Format: format, Seq: s.Seq, Action: s.Action, Version: s.Version, Labels: s.labels, Table: s.table,
-		Keys: make([]byte, 0, 32*len(s.keys))}
+		Keys: make([]byte, 0, 32*len(s.keys)), TLSHAware: true}
 	for _, k := range s.keys {
 		d.Keys = append(d.Keys, k[:]...)
+	}
+	if len(s.sim) > 0 {
+		d.TLSH = make([]string, len(s.keys))
+		for i, k := range s.simKey {
+			d.TLSH[k] = s.sim[i].String()
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
@@ -228,6 +297,18 @@ func Load(path string) (*Set, error) {
 		if cmp(s.keys[i-1], s.keys[i]) >= 0 {
 			return nil, fmt.Errorf("%s: keys not sorted", path)
 		}
+	}
+	if len(d.TLSH) == len(s.keys) {
+		for i, digest := range d.TLSH {
+			if h, err := tlsh.Parse(digest); digest != "" && err == nil {
+				s.sim = append(s.sim, h)
+				s.simKey = append(s.simKey, int32(i))
+			}
+		}
+	}
+	if !d.TLSHAware {
+		// from before TLSH: keep enforcing it, but sync everything again
+		s.Seq, s.Version = 0, ""
 	}
 	return s, nil
 }

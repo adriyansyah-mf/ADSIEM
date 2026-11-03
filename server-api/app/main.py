@@ -370,6 +370,11 @@ async def _migrate_agent_integrity() -> None:
                     "stop_reason VARCHAR(30)"):
             await conn.execute(text(f"ALTER TABLE agents ADD COLUMN IF NOT EXISTS {col}"))
 
+async def _migrate_malware_hashes_tlsh() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE malware_hashes ADD COLUMN IF NOT EXISTS tlsh VARCHAR(72) NOT NULL DEFAULT ''"))
+
 async def _migrate_agent_update_columns() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -480,6 +485,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_integrity()
         await _migrate_agent_evidence_health()
         await _migrate_agent_update_columns()
+        await _migrate_malware_hashes_tlsh()
         await _migrate_audit_log_group()
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()

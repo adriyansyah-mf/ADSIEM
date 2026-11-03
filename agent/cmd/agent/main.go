@@ -461,7 +461,13 @@ func run(configPath string, stop <-chan struct{}) {
 		MaxFileSize: cfg.Yara.MaxFileSizeMB << 20,
 		Push:        push,
 		OnHash:      malFiles.Check,
-		OnData:      mlFiles,
+		// variants of known malware (TLSH), then the static ML check
+		OnData: func(path, sha string, data []byte) {
+			malFiles.CheckData(path, sha, data)
+			if mlFiles != nil {
+				mlFiles(path, sha, data)
+			}
+		},
 		Skip: func(path string) bool {
 			s := polStore.Current().Settings
 			return !s.YaraOnAccess || s.Excluded(policy.ScopeYara, policy.Match{Path: path, Image: path})

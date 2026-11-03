@@ -102,6 +102,9 @@ func Message(logType, line string) string {
 	f := Fields(line)
 	switch logType {
 	case "known_malware":
+		if f["match"] == "tlsh" {
+			return "" // a variant by similarity: for the analysts, not a pop-up
+		}
 		what := shorten(f["path"])
 		if l := f["label"]; l != "" && l != "unknown" {
 			what += " (" + l + ")"
