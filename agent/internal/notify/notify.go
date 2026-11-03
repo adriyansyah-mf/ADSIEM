@@ -125,6 +125,18 @@ func Message(logType, line string) string {
 			return fmt.Sprintf("A program was stopped by your organization's security policy:\n%s\n(rule %s)",
 				shorten(f["Image"]), f["rule"])
 		}
+	case "script_scan":
+		app := f["app"]
+		if i := strings.IndexByte(app, '_'); i > 0 {
+			app = app[:i] // PowerShell_C:\...\powershell.exe_10.0... -> PowerShell
+		}
+		switch {
+		case f["action"] == "terminated":
+			return fmt.Sprintf("A malicious %s script was stopped:\n%s", app, shorten(f["rules"]))
+		case f["severity"] == "critical" || f["severity"] == "high":
+			return fmt.Sprintf("A malicious %s script was found:\n%s\n\nYour security team has been alerted.", app,
+				shorten(f["rules"]))
+		}
 	case "ransomware_activity":
 		if f["confirmed"] == "true" {
 			msg := "Ransomware-like activity (files being encrypted) was detected"

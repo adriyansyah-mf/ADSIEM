@@ -403,6 +403,30 @@ func kv(s string) string {
 	return `"` + s + `"`
 }
 
+// ScanBytes scans a buffer (a script's content) with the loaded rules:
+// nothing when there are none. The scan stops after timeout.
+func (s *Scanner) ScanBytes(ctx context.Context, data []byte) ([]yara.RuleMatch, error) {
+	rules, _ := s.current()
+	if rules == nil || rules.Len() == 0 || len(data) == 0 {
+		return nil, nil
+	}
+	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	res, err := rules.Scan(sctx, data)
+	if err != nil {
+		return nil, err
+	}
+	return res.Matches, nil
+}
+
+// RuleName is the server's name for a match's namespace (its YARA rule set).
+func (s *Scanner) RuleName(namespace string) string {
+	if r := s.ref(namespace); r.Name != "" {
+		return r.Name
+	}
+	return namespace
+}
+
 func (s *Scanner) ref(namespace string) Rule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

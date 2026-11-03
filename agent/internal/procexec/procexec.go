@@ -43,12 +43,17 @@ type Monitor struct {
 	reader  *ringbuf.Reader
 	stopped chan struct{}
 	done    chan struct{} // closed when loop returns
+	onExec  func(Exec)
 }
 
 // Start attaches the execve tracepoint program and begins pushing decoded
 // exec events into buf. Returns (nil, err) if eBPF isn't usable on this
 // host — callers should treat that as non-fatal.
-func Start(buf *buffer.Buffer) (*Monitor, error) {
+func Start(buf *buffer.Buffer) (*Monitor, error) { return StartWith(buf, nil) }
+
+// StartWith is Start with a hook that sees every exec after its line (the
+// script scanner).
+func StartWith(buf *buffer.Buffer, onExec func(Exec)) (*Monitor, error) {
 	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(execveObj))
 	if err != nil {
 		return nil, fmt.Errorf("load collection spec: %w", err)
@@ -85,7 +90,7 @@ func Start(buf *buffer.Buffer) (*Monitor, error) {
 		return nil, fmt.Errorf("open ringbuf reader: %w", err)
 	}
 
-	m := &Monitor{coll: coll, link: tp, reader: rd, stopped: make(chan struct{}), done: make(chan struct{})}
+	m := &Monitor{coll: coll, link: tp, reader: rd, stopped: make(chan struct{}), done: make(chan struct{}), onExec: onExec}
 	go m.loop(buf)
 	slog.Info("procexec: attached to tracepoint/syscalls/sys_enter_execve")
 	return m, nil
@@ -115,11 +120,14 @@ func (m *Monitor) loop(buf *buffer.Buffer) {
 			slog.Warn("procexec: ringbuf read error", "err", err)
 			continue
 		}
-		raw, ok := decodeEvent(record.RawSample)
+		raw, ex, ok := decodeExec(record.RawSample)
 		if !ok {
 			continue
 		}
 		buf.Push(LogType + "\x00" + raw)
+		if m.onExec != nil {
+			m.onExec(ex)
+		}
 	}
 }
 
@@ -127,8 +135,20 @@ func (m *Monitor) loop(buf *buffer.Buffer) {
 // execve.bpf.c (see bpf/execve.bpf.c for the authoritative field order/
 // offsets — this must be kept in sync with that struct).
 func decodeEvent(b []byte) (string, bool) {
+	line, _, ok := decodeExec(b)
+	return line, ok
+}
+
+// Exec is one program start as the script scanner needs it.
+type Exec struct {
+	PID, PPID uint32
+	Image     string
+	Args      []string
+}
+
+func decodeExec(b []byte) (string, Exec, bool) {
 	if len(b) < recordMinSize {
-		return "", false
+		return "", Exec{}, false
 	}
 	off := 0
 	_ = binary.LittleEndian.Uint64(b[off:]) // timestamp_ns, unused for now
@@ -156,9 +176,10 @@ func decodeEvent(b []byte) (string, bool) {
 	truncated := b[off] != 0
 
 	if filename == "" {
-		return "", false
+		return "", Exec{}, false
 	}
 
+	ex := Exec{PID: pid, PPID: ppid, Image: filename, Args: splitArgs(argsBuf, int(argsSize))}
 	commandLine := joinArgs(argsBuf, int(argsSize))
 	if commandLine == "" {
 		commandLine = filename
@@ -176,7 +197,24 @@ func decodeEvent(b []byte) (string, bool) {
 	if truncated {
 		sb.WriteString(` ArgsTruncated=true`)
 	}
-	return sb.String(), true
+	return sb.String(), ex, true
+}
+
+func splitArgs(buf []byte, size int) []string {
+	if size <= 0 || size > len(buf) {
+		size = len(buf)
+	}
+	var parts []string
+	start := 0
+	for i := 0; i < size; i++ {
+		if buf[i] == 0 {
+			if i > start {
+				parts = append(parts, string(buf[start:i]))
+			}
+			start = i + 1
+		}
+	}
+	return parts
 }
 
 // joinArgs reassembles the flat NUL-separated argv buffer (as written by

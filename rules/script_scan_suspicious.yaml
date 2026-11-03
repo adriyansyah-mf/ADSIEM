@@ -1,0 +1,20 @@
+title: Suspicious Script Content
+id: rule-script-scan-suspicious
+description: >-
+  A script that ran matched a low or medium YARA rule (script.rules): worth a
+  look, often admin tooling (T1059).
+logsource:
+  product: script
+  service: scan
+detection:
+  selection:
+    event.action: script_scan
+    script.action: detected
+    script.severity:
+      - low
+      - medium
+  condition: selection
+level: medium
+tags:
+  - attack.execution
+  - attack.t1059

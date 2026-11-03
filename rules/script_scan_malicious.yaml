@@ -1,0 +1,24 @@
+title: Malicious Script Content
+id: rule-script-scan-malicious
+description: >-
+  A script that ran on the endpoint matched a high or critical YARA rule
+  (script.rules) and was not stopped: on Windows what AMSI saw (PowerShell,
+  VBScript, JScript, Office macros, deobfuscated), on Linux the code given to
+  an interpreter. script.excerpt shows the part that matched; process.pid is
+  the host process. Set the group policy's script scanning to block to stop
+  such processes (T1059).
+logsource:
+  product: script
+  service: scan
+detection:
+  selection:
+    event.action: script_scan
+    script.action: detected
+    script.severity:
+      - critical
+      - high
+  condition: selection
+level: critical
+tags:
+  - attack.execution
+  - attack.t1059

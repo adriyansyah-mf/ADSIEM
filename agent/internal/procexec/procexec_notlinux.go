@@ -20,4 +20,14 @@ func Start(buf *buffer.Buffer) (*Monitor, error) {
 	return nil, errors.New("procexec: eBPF process-exec monitor is only supported on Linux")
 }
 
+// Exec is one program start (Linux only).
+type Exec struct {
+	PID, PPID uint32
+	Image     string
+	Args      []string
+}
+
+// StartWith is only available on Linux.
+func StartWith(buf *buffer.Buffer, _ func(Exec)) (*Monitor, error) { return Start(buf) }
+
 func (m *Monitor) Stop() {}

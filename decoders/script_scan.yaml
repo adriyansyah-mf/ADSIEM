@@ -1,0 +1,25 @@
+# Script content that matched a YARA rule as it ran (agent/internal/scriptscan):
+# Windows from AMSI (PowerShell, VBScript, JScript, Office VBA, .NET; after
+# deobfuscation), Linux from interpreters (-c / -e code, script files).
+# action: detected or terminated (group policy script_scan: block).
+name: script_scan
+log_type: script_scan
+type: kv
+priority: 3
+enabled: true
+match: 'event=script_scan '
+fields:
+  script.action: action
+  script.severity: severity
+  script.app: app
+  script.rules: rules
+  script.excerpt: excerpt
+  script.name: name
+  file.hash.sha256: sha256
+  process.executable: image
+  Image: image
+  process.pid: pid
+  error.message: error
+static_fields:
+  event.category: malware
+  event.action: script_scan
