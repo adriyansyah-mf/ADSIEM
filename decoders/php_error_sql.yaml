@@ -1,0 +1,18 @@
+# PHP error log: a database error surfaced by the application, the usual
+# result of a quote or other SQL fragment injected into a query.
+#   [04-Nov-2026 04:22:56 UTC] PHP Fatal error:  Uncaught mysqli_sql_exception: You have an error in your SQL syntax; ... near ''1''' at line 1 in /var/www/html/dvwa/vulnerabilities/sqli/source/low.php:11
+name: php_error_sql
+log_type: php_error
+type: regex
+priority: 20
+enabled: true
+match: _sql_exception
+pattern: '^\[(?P<ts>[^\]]+)\] PHP (?P<level>[A-Za-z ]+?):\s+Uncaught (?P<exception>\w*_sql_exception|PDOException): (?P<msg>.*?) in (?P<file>\S+?):(?P<line>\d+)\s*$'
+fields:
+  event.category: web
+  event.action: php_sql_error
+  log.level: level
+  error.type: exception
+  message: msg
+  file.path: file
+  log.origin.file.line: line

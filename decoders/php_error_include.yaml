@@ -1,0 +1,20 @@
+# PHP error log: include/require of a file that could not be opened. A
+# traversal path, an absolute system path or a stream wrapper here is the
+# trace a file-inclusion (LFI/RFI) attempt leaves.
+#   [04-Nov-2026 04:14:37 UTC] PHP Warning:  include(../../../../etc/passwd): Failed to open stream: No such file or directory in /var/www/html/dvwa/vulnerabilities/fi/index.php on line 36
+# Agent source: path /var/log/php/error.log, type php_error
+name: php_error_include
+log_type: php_error
+type: regex
+priority: 10
+enabled: true
+pattern: '^\[(?P<ts>[^\]]+)\] PHP (?P<level>[A-Za-z ]+?):\s+(?P<func>include|include_once|require|require_once)\((?P<target>[^)]+)\): (?P<msg>.*?) in (?P<file>\S+) on line (?P<line>\d+)\s*$'
+fields:
+  event.category: web
+  event.action: php_include_failed
+  log.level: level
+  php.function: func
+  php.include.target: target
+  message: msg
+  file.path: file
+  log.origin.file.line: line

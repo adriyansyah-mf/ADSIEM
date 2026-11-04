@@ -1,0 +1,14 @@
+# MySQL/MariaDB general query log: any other command (Quit, Init DB, ...).
+#   261104 11:22:57	    53 Quit
+name: mysql_general_command
+log_type: mysql_general
+type: regex
+priority: 100
+enabled: true
+pattern: '^(?:(?P<ts>\d{6}\s+\d{1,2}:\d\d:\d\d)\s+)?\s*(?P<thread>\d+)\s+(?P<command>[A-Z][A-Za-z]*(?: [A-Z][A-Za-z]*)?)(?:\s+(?P<argument>.*?))?\s*$'
+fields:
+  event.category: database
+  event.action: db_command
+  db.operation: command
+  db.statement: argument
+  db.connection_id: thread

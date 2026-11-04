@@ -1,0 +1,19 @@
+# MySQL/MariaDB general query log: failed login (DB credential brute force).
+#   		    61 Connect	Access denied for user 'dvwa'@'localhost' (using password: YES)
+# Agent source: path /var/log/mysql/mysql.log, type mysql_general
+# (needs general_log=1 / general_log_file in the server config).
+name: mysql_general_access_denied
+log_type: mysql_general
+type: regex
+priority: 10
+enabled: true
+match: Access denied for user
+pattern: '^(?:\d{6}\s+\d{1,2}:\d\d:\d\d\s+)?\s*(?P<thread>\d+)\s+Connect\s+Access denied for user ''(?P<user>[^'']*)''@''(?P<host>[^'']*)''(?: \(using password: (?P<with_password>YES|NO)\))?'
+fields:
+  event.category: database
+  event.action: db_login_failed
+  event.outcome: failure
+  user.name: user
+  source.address: host
+  db.connection_id: thread
+  db.auth.used_password: with_password

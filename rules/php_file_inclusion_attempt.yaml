@@ -1,0 +1,34 @@
+title: PHP File Inclusion Attempt
+id: rule-php-file-inclusion-attempt
+description: >-
+  PHP failed to include/require a target that is a path traversal, a system
+  file or a stream wrapper (http://, php://filter, data://, expect://, ...):
+  the trace a local or remote file inclusion attempt leaves in the PHP error
+  log (T1190). A successful inclusion logs nothing here, so pair it with the
+  web access log. Source: log_type php_error.
+logsource:
+  product: php
+detection:
+  include_failed:
+    event.action: php_include_failed
+  traversal:
+    php.include.target|contains:
+      - "../"
+      - "..\\"
+  system_path:
+    php.include.target|startswith:
+      - "/etc/"
+      - "/proc/"
+      - "/var/log/"
+      - "/root/"
+      - "c:\\windows"
+  wrapper:
+    php.include.target|re: '(?i)^(?:https?|ftp|php|data|expect|zip|phar|file|glob)://'
+  condition: include_failed and (traversal or system_path or wrapper)
+suppression:
+  timewindow: 300
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a03

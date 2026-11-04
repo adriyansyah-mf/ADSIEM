@@ -1,0 +1,20 @@
+# Apache 2.4 error.log
+#   [Wed Nov 04 11:23:58.046283 2026] [php:error] [pid 19163:tid 19163] [client 127.0.0.1:42742] script '/var/www/html/dvwa/x.php' not found or unable to stat
+#   [Wed Nov 04 11:12:24.095248 2026] [mpm_event:notice] [pid 15770:tid 15770] AH00489: Apache/2.4.66 (Ubuntu) configured -- resuming normal operations
+# Agent source: path /var/log/apache2/error.log (or /var/log/httpd/error_log), type apache_error
+name: apache_error
+log_type: apache_error
+type: regex
+priority: 20
+enabled: true
+pattern: '^\[(?P<ts>[^\]]+)\] \[(?P<module>[^:\]]*):(?P<level>[^\]]+)\] \[pid (?P<pid>\d+)(?::tid \d+)?\](?: \[client (?P<src_ip>[^\]]+?)(?::(?P<src_port>\d+))?\])?(?: (?P<code>AH\d+):)? ?(?P<msg>.*?)\s*$'
+fields:
+  event.category: web
+  event.action: web_error
+  log.level: level
+  log.logger: module
+  process.pid: pid
+  source.ip: src_ip
+  source.port: src_port
+  error.code: code
+  message: msg
