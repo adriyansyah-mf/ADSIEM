@@ -116,6 +116,10 @@ services:
       REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
       ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
       GEOIP_DIR: /app/mmdb
+      # Command-center attack map: where attack paths land (e.g. -6.2 / 106.82). Empty hides the paths.
+      SOC_HQ_LAT: ${SOC_HQ_LAT:-}
+      SOC_HQ_LON: ${SOC_HQ_LON:-}
+      SOC_HQ_LABEL: ${SOC_HQ_LABEL:-}
     volumes:
       - agent_packages:/app/packages:ro
       - ./mmdb:/app/mmdb:ro
