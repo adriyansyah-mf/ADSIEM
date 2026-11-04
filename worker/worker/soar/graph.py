@@ -24,8 +24,16 @@ ALERT_STATUSES = ("new", "acknowledged", "investigating", "resolved", "false_pos
 HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")
 BODY_TYPES = ("none", "json", "form", "text")
 NOTIFY_CHANNELS = ("webhook", "discord", "slack")
+SCAN_OPS = ("file_scan", "yara_scan", "memory_scan", "agent_integrity")
+FILE_SCAN_KINDS = ("quick", "full", "paths")
+HUNT_IOC_TYPES = ("ip", "hostname", "user", "hash")
+BLOCK_IOC_OPS = ("malware_hash", "prevention_rule")
+PREVENTION_RULE_TYPES = ("hash", "path", "dir")
+PREVENTION_ACTIONS = ("block", "detect")
+LOG_SEARCH_FIELDS = ("source_ip", "user_name", "hostname", "log_type", "agent_id", "text")
 
 MAX_NODES = 50
+MAX_SEARCH_MINUTES = 7 * 24 * 60
 MAX_RETRY = 3
 MAX_HTTP_TIMEOUT = 30
 MAX_APPROVAL_MINUTES = 7 * 24 * 60
@@ -40,6 +48,11 @@ NODE_TYPES: dict[str, dict[str, Any]] = {
     "case":      {"outputs": ["main", "error"], "label": "Case & Alert"},
     "notify":    {"outputs": ["main", "error"], "label": "Notify"},
     "http":      {"outputs": ["main", "error"], "label": "HTTP Request (curl)"},
+    "alert_event": {"outputs": ["main", "error"], "label": "Alert Event"},
+    "log_search":  {"outputs": ["main", "error"], "label": "Log Search"},
+    "scan":        {"outputs": ["main", "error"], "label": "Endpoint Scan"},
+    "hunt":        {"outputs": ["main", "error"], "label": "Threat Hunt"},
+    "block_ioc":   {"outputs": ["main", "error"], "label": "Block IOC"},
 }
 
 _ID = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -139,6 +152,43 @@ def _params_errors(node: dict) -> list[str]:
                 raise ValueError
         except (TypeError, ValueError):
             errs.append(f"{where}: timeout must be between 1 and {MAX_HTTP_TIMEOUT} seconds")
+    elif t == "log_search":
+        if p.get("field", "source_ip") not in LOG_SEARCH_FIELDS:
+            errs.append(f"{where}: field must be one of {', '.join(LOG_SEARCH_FIELDS)}")
+        if not str(p.get("value", "")).strip():
+            errs.append(f"{where}: value is required")
+        try:
+            if not 1 <= int(p.get("minutes", 60)) <= MAX_SEARCH_MINUTES:
+                raise ValueError
+        except (TypeError, ValueError):
+            errs.append(f"{where}: minutes must be between 1 and {MAX_SEARCH_MINUTES}")
+    elif t == "scan":
+        op = p.get("operation")
+        if op not in SCAN_OPS:
+            errs.append(f"{where}: operation must be one of {', '.join(SCAN_OPS)}")
+        if op == "file_scan":
+            if p.get("kind", "quick") not in FILE_SCAN_KINDS:
+                errs.append(f"{where}: kind must be one of {', '.join(FILE_SCAN_KINDS)}")
+            if p.get("kind") == "paths" and not str(p.get("paths", "")).strip():
+                errs.append(f"{where}: paths is required for a paths scan")
+        if op == "yara_scan" and not str(p.get("path", "")).strip():
+            errs.append(f"{where}: path is required for yara_scan")
+    elif t == "hunt":
+        if p.get("ioc_type", "ip") not in HUNT_IOC_TYPES:
+            errs.append(f"{where}: ioc_type must be one of {', '.join(HUNT_IOC_TYPES)}")
+        if not str(p.get("ioc_value", "")).strip():
+            errs.append(f"{where}: ioc_value is required")
+    elif t == "block_ioc":
+        op = p.get("operation")
+        if op not in BLOCK_IOC_OPS:
+            errs.append(f"{where}: operation must be one of {', '.join(BLOCK_IOC_OPS)}")
+        if not str(p.get("value", "")).strip():
+            errs.append(f"{where}: value is required")
+        if op == "prevention_rule":
+            if p.get("rule_type", "hash") not in PREVENTION_RULE_TYPES:
+                errs.append(f"{where}: rule_type must be one of {', '.join(PREVENTION_RULE_TYPES)}")
+            if p.get("action", "block") not in PREVENTION_ACTIONS:
+                errs.append(f"{where}: action must be block or detect")
     return errs
 
 

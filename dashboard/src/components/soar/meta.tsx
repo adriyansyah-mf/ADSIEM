@@ -1,5 +1,6 @@
 import {
-  Brain, Briefcase, Globe, GitBranch, Hand, Megaphone, Search, ShieldAlert, Zap,
+  Ban, Brain, Briefcase, Crosshair, FileSearch, Globe, GitBranch, Hand, Megaphone, ScanLine, Search, ShieldAlert,
+  TextSearch, Zap,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { Graph, NodeType, Params, WfNode } from '@/types/soar'
@@ -60,9 +61,35 @@ export const NODE_META: Record<NodeType, NodeMeta> = {
     defaults: () => ({ method: 'GET', url: 'https://', query: {}, headers: {}, body_type: 'none', body: null,
       timeout: 15, fail_on_status: true, extract: {} }),
   },
+  alert_event: {
+    label: 'Alert Event', color: '#60a5fa', icon: FileSearch, outputs: ['main', 'error'],
+    help: 'Load the log line that raised the alert with every decoded field: PID, process, command line, file path, hash. Feed them to Response, Scan or Block IOC.',
+    defaults: () => ({}),
+  },
+  log_search: {
+    label: 'Log Search', color: '#818cf8', icon: TextSearch, outputs: ['main', 'error'],
+    help: 'Count logs that match an IP, user, host, log type or text over the last N minutes. Branch on {{ steps.<id>.count }} with an If.',
+    defaults: () => ({ field: 'source_ip', value: '{{ trigger.source_ip }}', minutes: 60, log_type: '' }),
+  },
+  scan: {
+    label: 'Endpoint Scan', color: '#facc15', icon: ScanLine, outputs: ['main', 'error'],
+    help: 'Have the agent scan: malware file scan (quick, full or paths), YARA scan of a path, memory scan of a process, or an agent self-integrity check.',
+    defaults: () => ({ operation: 'file_scan', kind: 'quick' }),
+  },
+  hunt: {
+    label: 'Threat Hunt', color: '#34d399', icon: Crosshair, outputs: ['main', 'error'],
+    help: 'Start a fleet-wide hunt for an indicator across alerts, logs and file events; results appear under Threat hunting.',
+    defaults: () => ({ ioc_type: 'ip', ioc_value: '{{ trigger.source_ip }}' }),
+  },
+  block_ioc: {
+    label: 'Block IOC', color: '#f43f5e', icon: Ban, outputs: ['main', 'error'],
+    help: 'Fleet-wide containment: add a SHA-256 to known malware, or add an execution prevention rule (hash, path or folder). Every agent picks it up on its next sync.',
+    defaults: () => ({ operation: 'malware_hash', value: '{{ steps.alert_event_1.sha256 }}' }),
+  },
 }
 
-export const PALETTE: NodeType[] = ['if', 'enrich', 'ai_decide', 'approval', 'response', 'case', 'notify', 'http']
+export const PALETTE: NodeType[] = ['if', 'enrich', 'alert_event', 'log_search', 'ai_decide', 'approval', 'response',
+  'scan', 'block_ioc', 'hunt', 'case', 'notify', 'http']
 
 const str = (v: unknown) => (v === undefined || v === null ? '' : String(v))
 
@@ -86,6 +113,14 @@ export function summary(node: Pick<WfNode, 'type' | 'params'>): string {
     case 'case': return str(p.operation)
     case 'notify': return `${str(p.channel)} ${str(p.url).replace(/^https?:\/\//, '').slice(0, 30)}`
     case 'http': return `${str(p.method)} ${str(p.url).replace(/^https?:\/\//, '')}`
+    case 'alert_event': return 'source log of the alert'
+    case 'log_search': return `${str(p.field)} = ${str(p.value)} · ${str(p.minutes)} min`
+    case 'scan': return p.operation === 'file_scan' ? `file_scan ${str(p.kind)}`
+      : p.operation === 'yara_scan' ? `yara_scan ${str(p.path)}`
+      : p.operation === 'memory_scan' ? `memory_scan pid ${str(p.pid) || 'all'}` : str(p.operation)
+    case 'hunt': return `${str(p.ioc_type)} ${str(p.ioc_value)}`
+    case 'block_ioc': return p.operation === 'prevention_rule'
+      ? `${str(p.action || 'block')} ${str(p.rule_type || 'hash')} ${str(p.value)}` : `malware hash ${str(p.value)}`
   }
 }
 
@@ -130,4 +165,9 @@ export const OUTPUT_PATHS: Record<NodeType, string[]> = {
   case: ['case_id', 'created'],
   notify: ['status'],
   http: ['status', 'body', 'data.<extract name>', 'headers', 'error'],
+  alert_event: ['pid', 'process', 'command_line', 'file_path', 'sha256', 'fields.<field>', 'raw_message', 'log_type'],
+  log_search: ['count', 'hits', 'minutes'],
+  scan: ['task_id', 'hostname', 'operation'],
+  hunt: ['hunt_id', 'ioc_value'],
+  block_ioc: ['value', 'added', 'rule_id'],
 }

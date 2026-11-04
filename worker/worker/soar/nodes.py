@@ -163,6 +163,11 @@ async def run_response(node: dict, params: dict, ctx: dict) -> NodeResult:
             raise NodeError("path is required")
         task_params = {"path": path}
 
+    return await _queue_agent_task(ctx, hostname, group_id, op, task_params)
+
+
+async def _queue_agent_task(ctx: dict, hostname: str, group_id: str, op: str, task_params: dict) -> NodeResult:
+    """Queue a task for the newest online agent with this hostname in the run's group."""
     async with AsyncSessionLocal() as db:
         agent = (await db.execute(
             select(Agent)
@@ -390,8 +395,200 @@ async def run_notify(node: dict, params: dict, ctx: dict) -> NodeResult:
     return NodeResult("main", {"status": data["status"]})
 
 
+# ─── Investigation: Alert Event / Log Search ────────────────────────────────
+
+LOG_SEARCH_SAMPLE = 5
+
+
+async def _es_search(query: dict, size: int, sort: list | None = None) -> list[dict]:
+    from worker.es_client import search
+    try:
+        return await search(query, size=size, sort=sort)
+    except Exception as exc:  # ES down or query rejected: a node error, not a crash
+        raise NodeError(f"log search failed: {exc}") from None
+
+
+async def _es_count(query: dict) -> int:
+    from worker.es_client import LOGS_INDEX, _get_client
+    try:
+        resp = await _get_client().post(f"/{LOGS_INDEX}/_count", json={"query": query})
+        resp.raise_for_status()
+        return int(resp.json().get("count", 0))
+    except Exception as exc:
+        raise NodeError(f"log count failed: {exc}") from None
+
+
+async def run_alert_event(node: dict, params: dict, ctx: dict) -> NodeResult:
+    """The log line that raised the alert, with every decoded field, so later
+    nodes can act on what the rule saw: {{ steps.<id>.fields.ProcessId }}."""
+    alert_id = str(params.get("alert_id") or _trigger(ctx).get("alert_id") or "").strip()
+    if not alert_id:
+        raise NodeError("this run has no alert")
+    group_id = _trigger(ctx).get("group_id", "default")
+    async with AsyncSessionLocal() as db:
+        alert = (await db.execute(select(Alert).where(Alert.id == alert_id))).scalar_one_or_none()
+    if alert is None or (alert.group_id and alert.group_id != group_id):
+        raise NodeError(f"alert {alert_id} not found")
+    if not alert.event_id:
+        raise NodeError("the alert has no source event (correlation or UEBA alert)")
+    hits = await _es_search({"bool": {"filter": [{"ids": {"values": [str(alert.event_id)]}},
+                                                 {"term": {"group_id": group_id}}]}}, size=1)
+    if not hits:
+        raise NodeError(f"source event {alert.event_id} is no longer in the log index")
+    doc = hits[0]
+    fields = doc.get("decoded_fields") or {}
+    return NodeResult("main", {
+        "event_id": str(alert.event_id), "log_type": doc.get("log_type"), "agent_id": doc.get("agent_id"),
+        "created_at": doc.get("created_at"), "raw_message": str(doc.get("raw_message") or "")[:4000],
+        "fields": fields,
+        # the handful most playbooks need, whatever the source's field vocabulary
+        "pid": fields.get("ProcessId") or fields.get("process.pid"),
+        "process": fields.get("Image") or fields.get("process.executable") or fields.get("process.name"),
+        "command_line": fields.get("CommandLine") or fields.get("process.command_line"),
+        "file_path": fields.get("TargetFilename") or fields.get("file.path"),
+        "sha256": fields.get("sha256") or fields.get("file.hash.sha256") or fields.get("hash.sha256"),
+    })
+
+
+async def run_log_search(node: dict, params: dict, ctx: dict) -> NodeResult:
+    """Count logs in the run's group that match a value over the last N minutes."""
+    field = params.get("field", "source_ip")
+    value = str(params.get("value") or "").strip()
+    if not value:
+        raise NodeError("nothing to search for: value rendered empty")
+    minutes = max(1, min(int(params.get("minutes", 60)), 7 * 24 * 60))
+    group_id = _trigger(ctx).get("group_id", "default")
+    filters: list[dict] = [{"term": {"group_id": group_id}},
+                           {"range": {"created_at": {"gte": f"now-{minutes}m"}}}]
+    if field == "text":
+        filters.append({"match_phrase": {"raw_message": value}})
+    elif field == "hostname":
+        async with AsyncSessionLocal() as db:
+            ids = [str(i) for i in (await db.execute(
+                select(Agent.id).where(Agent.hostname == value, Agent.group_id == group_id))).scalars().all()]
+        if not ids:
+            return NodeResult("main", {"count": 0, "field": field, "value": value, "minutes": minutes, "hits": []})
+        filters.append({"terms": {"agent_id": ids}})
+    else:
+        filters.append({"term": {field: value}})
+    log_type = str(params.get("log_type") or "").strip()
+    if log_type:
+        filters.append({"term": {"log_type": log_type}})
+    query = {"bool": {"filter": filters}}
+    count = await _es_count(query)
+    sample = await _es_search(query, size=LOG_SEARCH_SAMPLE, sort=[{"created_at": "desc"}]) if count else []
+    return NodeResult("main", {
+        "count": count, "field": field, "value": value, "minutes": minutes,
+        "hits": [{"created_at": h.get("created_at"), "log_type": h.get("log_type"),
+                  "raw_message": str(h.get("raw_message") or "")[:500]} for h in sample],
+    })
+
+
+# ─── Endpoint Scan ──────────────────────────────────────────────────────────
+
+async def run_scan(node: dict, params: dict, ctx: dict) -> NodeResult:
+    op = params["operation"]
+    hostname = str(params.get("hostname") or _trigger(ctx).get("hostname") or "").strip()
+    if not hostname:
+        raise NodeError("no hostname: set one on the node or trigger from an alert that has a host")
+    task_params: dict[str, Any] = {}
+    if op == "file_scan":
+        kind = params.get("kind", "quick")
+        task_params = {"kind": kind}
+        if kind == "paths":
+            paths = [p.strip() for p in str(params.get("paths") or "").replace(",", "\n").splitlines() if p.strip()]
+            if not paths:
+                raise NodeError("paths rendered empty")
+            task_params["paths"] = paths
+    elif op == "yara_scan":
+        path = str(params.get("path") or "").strip()
+        if not path:
+            raise NodeError("path rendered empty")
+        task_params = {"path": path, "recursive": bool(params.get("recursive", True))}
+    elif op == "memory_scan":
+        raw = str(params.get("pid") or "").strip()
+        try:
+            task_params = {"pid": int(raw) if raw else 0}  # 0 = every process
+        except ValueError:
+            raise NodeError(f"pid must be a number, got {raw[:32]!r}") from None
+    return await _queue_agent_task(ctx, hostname, _trigger(ctx).get("group_id", "default"), op, task_params)
+
+
+# ─── Threat Hunt ────────────────────────────────────────────────────────────
+
+async def run_hunt(node: dict, params: dict, ctx: dict) -> NodeResult:
+    from worker.models import ThreatHunt
+    ioc_type = params.get("ioc_type", "ip")
+    value = str(params.get("ioc_value") or "").strip()
+    if not value:
+        raise NodeError("ioc_value rendered empty")
+    if ioc_type == "ip" and not _valid_ip(value):
+        raise NodeError(f"not a valid IP address: {value[:64]!r}")
+    group_id = _trigger(ctx).get("group_id", "default")
+    async with AsyncSessionLocal() as db:
+        hunt = ThreatHunt(ioc_type=ioc_type, ioc_value=value[:500], status="pending", group_id=group_id)
+        db.add(hunt)
+        await db.commit()
+        hunt_id = str(hunt.id)
+    await _note(ctx, f"**SOAR threat hunt** started for {ioc_type} `{value}` (hunt {hunt_id})")
+    return NodeResult("main", {"hunt_id": hunt_id, "ioc_type": ioc_type, "ioc_value": value})
+
+
+# ─── Block IOC (fleet-wide) ─────────────────────────────────────────────────
+
+async def run_block_ioc(node: dict, params: dict, ctx: dict) -> NodeResult:
+    """Fleet-wide, unlike Response: every agent gets the hash or rule on its next sync."""
+    from sqlalchemy import text
+    from worker import malware_hashes
+    op = params["operation"]
+    value = str(params.get("value") or "").strip()
+    if not value:
+        raise NodeError("value rendered empty")
+    run_id = str(ctx["run"]["id"])
+    label = str(params.get("label") or _trigger(ctx).get("rule_title") or "SOAR")[:64]
+
+    if op == "malware_hash":
+        sha = malware_hashes.clean_sha256(value)
+        if not sha:
+            raise NodeError(f"not a SHA-256: {value[:80]!r}")
+        async with AsyncSessionLocal() as db:
+            res = await malware_hashes.upsert(db, [{"sha256": sha, "label": label, "reference": f"SOAR run {run_id}"}],
+                                              source="analyst", revive_allowed=False)
+        await _note(ctx, f"**SOAR block IOC**: SHA-256 `{sha}` added to known malware")
+        return NodeResult("main", {"operation": op, "value": sha, "added": bool(res["added"])})
+
+    rule_type = params.get("rule_type", "hash")
+    action = params.get("action", "block")
+    if rule_type == "hash":
+        value = malware_hashes.clean_sha256(value) or ""
+        if not value:
+            raise NodeError("hash rules need a SHA-256")
+    elif not value.startswith("/"):
+        raise NodeError(f"{rule_type} rules need an absolute path")
+    name = f"SOAR {rule_type} {value}"[:255]
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(text("""
+            INSERT INTO exec_prevention_rules (id, name, description, rule_type, value, parent, action, is_enabled, created_at)
+            VALUES (gen_random_uuid(), :name, :desc, :rule_type, :value, '', :action, true, now())
+            ON CONFLICT (name) DO NOTHING
+            RETURNING id
+        """), {"name": name, "desc": f"Added by SOAR run {run_id}: {label}", "rule_type": rule_type,
+               "value": value, "action": action})
+        rule_id = res.scalar_one_or_none()
+        await db.commit()
+    await _note(ctx, f"**SOAR block IOC**: execution {action} rule for {rule_type} `{value}`"
+                     f"{'' if rule_id else ' (already existed)'}")
+    return NodeResult("main", {"operation": op, "value": value, "rule_type": rule_type, "action": action,
+                               "rule_id": str(rule_id) if rule_id else None, "added": rule_id is not None})
+
+
 HANDLERS = {
     "trigger": run_trigger,
+    "alert_event": run_alert_event,
+    "log_search": run_log_search,
+    "scan": run_scan,
+    "hunt": run_hunt,
+    "block_ioc": run_block_ioc,
     "if": run_if,
     "enrich": run_enrich,
     "ai_decide": run_ai_decide,

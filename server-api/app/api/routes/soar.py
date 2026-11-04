@@ -12,8 +12,9 @@ from app.core.deps import fetch_scoped, get_current_user, get_scoped_group, requ
 from app.models.models import Alert, SoarAction, SoarPlaybook, SoarRun, SoarRunStep, User
 from worker.soar.curl import CurlParseError, parse_curl
 from worker.soar.graph import (
-    ALERT_STATUSES, BODY_TYPES, CASE_OPS, EVENTS, HTTP_METHODS, NODE_TYPES, NOTIFY_CHANNELS, OPERATORS,
-    RESPONSE_OPS, GraphError, from_legacy, trigger_event, trigger_node, validate,
+    ALERT_STATUSES, BLOCK_IOC_OPS, BODY_TYPES, CASE_OPS, EVENTS, FILE_SCAN_KINDS, HTTP_METHODS, HUNT_IOC_TYPES,
+    LOG_SEARCH_FIELDS, NODE_TYPES, NOTIFY_CHANNELS, OPERATORS, PREVENTION_ACTIONS, PREVENTION_RULE_TYPES,
+    RESPONSE_OPS, SCAN_OPS, GraphError, from_legacy, trigger_event, trigger_node, validate,
 )
 
 router = APIRouter(prefix="/api/soar", tags=["soar"])
@@ -159,6 +160,13 @@ async def catalog(current_user: User = Depends(get_current_user)):
         "http_methods": HTTP_METHODS,
         "body_types": BODY_TYPES,
         "notify_channels": NOTIFY_CHANNELS,
+        "scan_operations": SCAN_OPS,
+        "file_scan_kinds": FILE_SCAN_KINDS,
+        "hunt_ioc_types": HUNT_IOC_TYPES,
+        "block_ioc_operations": BLOCK_IOC_OPS,
+        "prevention_rule_types": PREVENTION_RULE_TYPES,
+        "prevention_actions": PREVENTION_ACTIONS,
+        "log_search_fields": LOG_SEARCH_FIELDS,
         "trigger_fields": ["alert_id", "severity", "rule_title", "tags", "mitre_tags", "source_ip", "hostname",
                            "user_name", "group_id", "ai_verdict", "ai_confidence", "ti_risk_score", "event"],
     }
