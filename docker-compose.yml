@@ -100,6 +100,23 @@ services:
     networks:
       - siem-net
 
+  # One-shot: fetch GeoLite2 City/ASN into ./mmdb on first start, refresh when
+  # older than GEOIP_MAX_AGE_DAYS. Offline hosts still boot (soft fail).
+  geoip-init:
+    image: curlimages/curl:8.11.1
+    user: "0:0"
+    entrypoint: ["sh", "/update-geoip.sh", "/mmdb"]
+    environment:
+      GEOIP_MAX_AGE_DAYS: ${GEOIP_MAX_AGE_DAYS:-30}
+      GEOIP_SOFT_FAIL: "1"
+      GEOIP_MIRROR: ${GEOIP_MIRROR:-https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download}
+    volumes:
+      - ./scripts/update-geoip.sh:/update-geoip.sh:ro
+      - ./mmdb:/mmdb
+    restart: "no"
+    networks:
+      - siem-net
+
   server-api:
     build:
       context: .
@@ -116,11 +133,17 @@ services:
       REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
       ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
       GEOIP_DIR: /app/mmdb
+      # Command-center attack map: where attack paths land (e.g. -6.2 / 106.82). Empty hides the paths.
+      SOC_HQ_LAT: ${SOC_HQ_LAT:-}
+      SOC_HQ_LON: ${SOC_HQ_LON:-}
+      SOC_HQ_LABEL: ${SOC_HQ_LABEL:-}
     volumes:
       - agent_packages:/app/packages:ro
       - ./mmdb:/app/mmdb:ro
     depends_on:
       package-builder:
+        condition: service_completed_successfully
+      geoip-init:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy

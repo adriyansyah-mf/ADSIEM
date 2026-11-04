@@ -9,10 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, get_scoped_group, require_permission
+from app.core.geoip import geoip_available, lookup_location
 from app.core.http_client import get_http_client
-from app.models.models import Alert, Case, User
+from app.models.models import Agent, Alert, Case, User
+from app.services.soc_command import aggregate_geo, backlog_aging, hq_target, worst_severity
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
+
+# The attack map geolocates at most this many distinct source IPs per request
+# (the busiest ones); the response says when more exist.
+_GEO_IP_SCAN_LIMIT = 2000
 
 
 @router.get("/soc")
@@ -245,3 +251,133 @@ async def soc_mttr_trend(
             "avg_mttr_minutes": round(sum(slot["mttr"]) / len(slot["mttr"]), 1) if slot["mttr"] else None,
         })
     return {"period_days": days, "points": points}
+
+
+@router.get("/soc/geo")
+async def soc_geo(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(get_current_user),
+    days: int = Query(default=7, ge=1, le=90),
+    max_points: int = Query(default=300, ge=10, le=1000),
+):
+    """Attack-origin map: alerts in the window rolled up by geolocated source
+    IP and country, the latest geolocated detections for the live feed, and
+    the protected site that attack arcs point at (SOC_HQ_LAT/LON)."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    window = [Alert.created_at >= since, Alert.source_ip.isnot(None), Alert.source_ip != ""]
+    if group_filter:
+        window.append(Alert.group_id == group_filter)
+
+    top_ips = (
+        select(Alert.source_ip)
+        .where(*window)
+        .group_by(Alert.source_ip)
+        .order_by(func.count().desc())
+        .limit(_GEO_IP_SCAN_LIMIT)
+    ).scalar_subquery()
+    rows = (await db.execute(
+        select(Alert.source_ip, Alert.severity, func.count(), func.max(Alert.created_at))
+        .where(*window, Alert.source_ip.in_(top_ips))
+        .group_by(Alert.source_ip, Alert.severity)
+    )).all()
+    distinct_ips = (await db.execute(
+        select(func.count(func.distinct(Alert.source_ip))).where(*window)
+    )).scalar() or 0
+
+    geo = aggregate_geo(((ip, sev, n, last) for ip, sev, n, last in rows), lookup_location, max_points)
+
+    recent_rows = (await db.execute(
+        select(Alert.id, Alert.title, Alert.severity, Alert.status, Alert.source_ip, Alert.hostname, Alert.created_at)
+        .where(*window)
+        .order_by(Alert.created_at.desc())
+        .limit(80)
+    )).all()
+    recent = []
+    for aid, title, severity, status, ip, hostname, created_at in recent_rows:
+        loc = lookup_location(ip)
+        if not loc:
+            continue
+        recent.append({
+            "id": str(aid), "title": title, "severity": severity, "status": status,
+            "source_ip": ip, "hostname": hostname,
+            "created_at": created_at.isoformat() if created_at else None, **loc,
+        })
+        if len(recent) >= 25:
+            break
+
+    return {
+        "period_days": days,
+        "geoip_available": geoip_available(),
+        "target": hq_target(),
+        "distinct_source_ips": distinct_ips,
+        "ip_scan_truncated": distinct_ips > _GEO_IP_SCAN_LIMIT,
+        "recent": recent,
+        **geo,
+    }
+
+
+@router.get("/soc/posture")
+async def soc_posture(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(get_current_user),
+    days: int = Query(default=7, ge=1, le=90),
+):
+    """Triage posture for the command center: open-alert aging and SLA
+    breaches (all time, since a backlog ignores the chart window), plus the
+    most-targeted hosts, noisiest detections and agent fleet health."""
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+
+    open_q = select(Alert.severity, Alert.status, Alert.created_at, Alert.assignee_id.isnot(None)).where(
+        Alert.status.in_(["new", "in_progress"]))
+    if group_filter:
+        open_q = open_q.where(Alert.group_id == group_filter)
+    backlog = backlog_aging((await db.execute(open_q)).all(), now)
+
+    windowed = [Alert.created_at >= since]
+    if group_filter:
+        windowed.append(Alert.group_id == group_filter)
+
+    host_rows = (await db.execute(
+        select(Alert.hostname, Alert.severity, func.count())
+        .where(*windowed, Alert.hostname.isnot(None), Alert.hostname != "")
+        .group_by(Alert.hostname, Alert.severity)
+    )).all()
+    hosts: dict[str, dict] = {}
+    for hostname, severity, n in host_rows:
+        h = hosts.setdefault(hostname, {"hostname": hostname, "count": 0, "by_severity": {}})
+        h["count"] += n
+        h["by_severity"][severity] = h["by_severity"].get(severity, 0) + n
+    top_hosts = sorted(hosts.values(), key=lambda h: -h["count"])[:8]
+    for h in top_hosts:
+        h["max_severity"] = worst_severity(h["by_severity"])
+
+    rule_rows = (await db.execute(
+        select(Alert.title, func.count(), func.count().filter(Alert.status == "false_positive"))
+        .where(*windowed)
+        .group_by(Alert.title)
+        .order_by(func.count().desc())
+        .limit(8)
+    )).all()
+    top_detections = [{"title": t, "count": n, "false_positives": fp} for t, n, fp in rule_rows]
+
+    agent_q = select(Agent.status, Agent.is_isolated, func.count()).group_by(Agent.status, Agent.is_isolated)
+    if group_filter:
+        agent_q = agent_q.where(Agent.group_id == group_filter)
+    agents = {"total": 0, "online": 0, "offline": 0, "isolated": 0}
+    for status, isolated, n in (await db.execute(agent_q)).all():
+        agents["total"] += n
+        agents["online" if status == "online" else "offline"] += n
+        if isolated:
+            agents["isolated"] += n
+
+    return {
+        "period_days": days,
+        "generated_at": now.isoformat(),
+        "backlog": backlog,
+        "top_hosts": top_hosts,
+        "top_detections": top_detections,
+        "agents": agents,
+    }

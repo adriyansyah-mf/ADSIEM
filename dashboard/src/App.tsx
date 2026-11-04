@@ -7,6 +7,7 @@ import Layout from '@/components/Layout'
 import Toaster from '@/components/Toaster'
 import LoginPage from '@/pages/LoginPage'
 import DashboardPage from '@/pages/DashboardPage'
+import CommandCenterPage from '@/pages/CommandCenterPage'
 import AgentsPage from '@/pages/AgentsPage'
 import LogSourcesPage from '@/pages/LogSourcesPage'
 import FirewallPage from '@/pages/FirewallPage'
@@ -57,6 +58,7 @@ export default function App() {
         <Route element={<ProtectedRoute minRole="viewer" />}>
           <Route element={<Layout />}>
             <Route path="/" element={<DashboardPage />} />
+            <Route path="/command-center" element={<CommandCenterPage />} />
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/agents/:id/sources" element={<ProtectedRoute minRole="admin"><LogSourcesPage /></ProtectedRoute>} />
         <Route path="/agents/:id/firewall" element={<ProtectedRoute minRole="admin"><FirewallPage /></ProtectedRoute>} />
