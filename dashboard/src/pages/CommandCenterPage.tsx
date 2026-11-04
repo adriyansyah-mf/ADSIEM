@@ -171,7 +171,7 @@ export default function CommandCenterPage() {
     </div>
 
     {geo.data && !geo.data.geoip_available && <div className="state-banner cc-warning" role="note">
-      GeoIP database not found, so attacks can't be placed on the map. Put <code>GeoLite2-City.mmdb</code> in <code>./mmdb</code> and restart server-api.
+      GeoIP database not found, so attacks can't be placed on the map. Run <code>./scripts/update-geoip.sh</code> on the server, then restart server-api.
     </div>}
 
     <div className="cc-map-row">
