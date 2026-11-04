@@ -1,0 +1,17 @@
+# MySQL/MariaDB general query log: a statement the server executed. The query
+# text is what the application really sent, so injected SQL is visible
+# decoded, unlike the URL-encoded payload in the web access log.
+#   261104 11:22:57	    49 Query	SELECT first_name FROM users WHERE user_id = '1' UNION SELECT user,password FROM users-- -'
+# Continuation lines of a multi-line statement do not match and stay raw.
+name: mysql_general_query
+log_type: mysql_general
+type: regex
+priority: 30
+enabled: true
+pattern: '^(?:(?P<ts>\d{6}\s+\d{1,2}:\d\d:\d\d)\s+)?\s*(?P<thread>\d+)\s+(?P<command>Query|Execute|Prepare)\s+(?P<query>.+?)\s*$'
+fields:
+  event.category: database
+  event.action: db_query
+  db.operation: command
+  db.statement: query
+  db.connection_id: thread

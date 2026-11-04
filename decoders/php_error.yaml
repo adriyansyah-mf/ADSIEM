@@ -1,0 +1,16 @@
+# PHP error log: any other PHP error/warning/notice line.
+#   [04-Nov-2026 04:13:23 UTC] PHP Deprecated:  Directive 'allow_url_include' is deprecated in Unknown on line 0
+# Stack-trace continuation lines ("#0 ...", "thrown in ...") stay raw.
+name: php_error
+log_type: php_error
+type: regex
+priority: 100
+enabled: true
+pattern: '^\[(?P<ts>[^\]]+)\] PHP (?P<level>[A-Za-z ]+?):\s+(?P<msg>.*?)(?: in (?P<file>\S+?)(?: on line |:)(?P<line>\d+))?\s*$'
+fields:
+  event.category: web
+  event.action: php_error
+  log.level: level
+  message: msg
+  file.path: file
+  log.origin.file.line: line

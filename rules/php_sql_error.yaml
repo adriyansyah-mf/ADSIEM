@@ -1,0 +1,20 @@
+title: Web Application SQL Error
+id: rule-php-sql-error
+description: >-
+  The PHP application raised an uncaught SQL exception (syntax error, unknown
+  column, ...). Attackers probe for SQL injection with stray quotes and
+  comments exactly to provoke these, so a burst usually means an injection
+  scan (T1190). Source: log_type php_error.
+logsource:
+  product: php
+detection:
+  selection:
+    event.action: php_sql_error
+  condition: selection
+suppression:
+  timewindow: 300
+level: medium
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - owasp.a03
