@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { useUpdateCase, useEscalateCase } from '@/hooks/useCases'
 import { useAuthStore } from '@/stores/auth'
 import { WorkspaceDialog } from '@/components/WorkspaceDialog'
-import type { Case } from '@/types'
+import type { CaseSummary } from '@/types'
 
-export function CaseQuickActions({ caseData }: { readonly caseData: Case }) {
+export function CaseQuickActions({ caseData }: { readonly caseData: CaseSummary }) {
   const user = useAuthStore(state => state.user)
   const canManage = useAuthStore(state => state.hasRole('analyst'))
   const update = useUpdateCase(caseData.id)

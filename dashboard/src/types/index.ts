@@ -305,6 +305,11 @@ export interface Case {
   notes: CaseNote[]
 }
 
+export type CaseSummary = Pick<Case,
+  'id' | 'title' | 'description' | 'severity' | 'status' | 'alert_id' |
+  'assignee_id' | 'ai_reasoning' | 'created_by_ai' | 'group_id' | 'created_at' | 'updated_at'
+>
+
 export interface HygieneIssue {
   severity: 'critical' | 'high' | 'medium' | 'low'
   category: string

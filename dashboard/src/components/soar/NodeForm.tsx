@@ -305,6 +305,94 @@ export function NodeForm({ node, graph, catalog, disabled, onChange }: Props) {
 
       {node.type === 'http' && <HttpForm node={node} p={p} set={set} catalog={catalog} disabled={disabled} />}
 
+      {node.type === 'alert_event' && (
+        <Field label="Alert" hint="Empty = the alert that started this run.">
+          <Text mono value={p.alert_id} placeholder="{{ trigger.alert_id }}" onChange={v => set({ alert_id: v })} disabled={disabled} />
+        </Field>
+      )}
+
+      {node.type === 'log_search' && (
+        <>
+          <Field label="Search by">
+            <Select value={p.field ?? 'source_ip'} options={catalog.log_search_fields ?? ['source_ip', 'user_name', 'hostname', 'log_type', 'agent_id', 'text']}
+              onChange={v => set({ field: v })} disabled={disabled} />
+          </Field>
+          <Field label="Value" hint={p.field === 'text' ? 'Phrase searched in the raw log line.' : 'Exact match.'}>
+            <Text mono value={p.value} placeholder="{{ trigger.source_ip }}" onChange={v => set({ value: v })} disabled={disabled} />
+          </Field>
+          <Field label="Last (minutes)"><Num value={p.minutes ?? 60} min={1} max={10080} onChange={v => set({ minutes: v })} disabled={disabled} /></Field>
+          <Field label="Only log type" hint="Optional, e.g. apache_access, linux_auth.">
+            <Text mono value={p.log_type} onChange={v => set({ log_type: v })} disabled={disabled} />
+          </Field>
+        </>
+      )}
+
+      {node.type === 'scan' && (
+        <>
+          <Field label="Scan">
+            <Select value={op} options={catalog.scan_operations ?? ['file_scan', 'yara_scan', 'memory_scan', 'agent_integrity']}
+              onChange={v => set({ operation: v })} disabled={disabled} />
+          </Field>
+          <Field label="Agent hostname" hint="Empty = the alert’s host.">
+            <Text mono value={p.hostname} placeholder="{{ trigger.hostname }}" onChange={v => set({ hostname: v })} disabled={disabled} />
+          </Field>
+          {op === 'file_scan' && (
+            <>
+              <Field label="Scope" hint="quick = common drop locations; full = whole disk; paths = the list below.">
+                <Select value={p.kind ?? 'quick'} options={catalog.file_scan_kinds ?? ['quick', 'full', 'paths']} onChange={v => set({ kind: v })} disabled={disabled} />
+              </Field>
+              {p.kind === 'paths' && (
+                <Field label="Paths" hint="One per line.">
+                  <Area mono rows={3} value={p.paths} placeholder="{{ steps.alert_event_1.file_path }}" onChange={v => set({ paths: v })} disabled={disabled} />
+                </Field>
+              )}
+            </>
+          )}
+          {op === 'yara_scan' && (
+            <>
+              <Field label="Path"><Text mono value={p.path} placeholder="/var/www/html" onChange={v => set({ path: v })} disabled={disabled} /></Field>
+              <Check checked={p.recursive !== false} onChange={v => set({ recursive: v })} label="Include sub-folders" disabled={disabled} />
+            </>
+          )}
+          {op === 'memory_scan' && (
+            <Field label="PID" hint="Empty = every process.">
+              <Text mono value={p.pid} placeholder="{{ steps.alert_event_1.pid }}" onChange={v => set({ pid: v })} disabled={disabled} />
+            </Field>
+          )}
+        </>
+      )}
+
+      {node.type === 'hunt' && (
+        <>
+          <Field label="Indicator type">
+            <Select value={p.ioc_type ?? 'ip'} options={catalog.hunt_ioc_types ?? ['ip', 'hostname', 'user', 'hash']} onChange={v => set({ ioc_type: v })} disabled={disabled} />
+          </Field>
+          <Field label="Indicator"><Text mono value={p.ioc_value} placeholder="{{ trigger.source_ip }}" onChange={v => set({ ioc_value: v })} disabled={disabled} /></Field>
+        </>
+      )}
+
+      {node.type === 'block_ioc' && (
+        <>
+          <Field label="Block with">
+            <Select value={op} options={catalog.block_ioc_operations ?? ['malware_hash', 'prevention_rule']} onChange={v => set({ operation: v })} disabled={disabled} />
+          </Field>
+          {op === 'prevention_rule' && (
+            <>
+              <Field label="Rule type" hint="hash = SHA-256; path = one executable; dir = everything under a folder.">
+                <Select value={p.rule_type ?? 'hash'} options={catalog.prevention_rule_types ?? ['hash', 'path', 'dir']} onChange={v => set({ rule_type: v })} disabled={disabled} />
+              </Field>
+              <Field label="Action" hint="detect only reports; block stops the program from starting.">
+                <Select value={p.action ?? 'block'} options={catalog.prevention_actions ?? ['block', 'detect']} onChange={v => set({ action: v })} disabled={disabled} />
+              </Field>
+            </>
+          )}
+          <Field label={op === 'prevention_rule' && p.rule_type && p.rule_type !== 'hash' ? 'Path' : 'SHA-256'}>
+            <Text mono value={p.value} placeholder="{{ steps.alert_event_1.sha256 }}" onChange={v => set({ value: v })} disabled={disabled} />
+          </Field>
+          <Field label="Label" hint="Empty = the alert’s rule title."><Text value={p.label} onChange={v => set({ label: v })} disabled={disabled} /></Field>
+        </>
+      )}
+
       {meta.outputs.includes('error') && (
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
           <Field label="Retries on failure"><Num value={node.retry} min={0} max={3} onChange={v => onChange({ ...node, retry: v })} disabled={disabled} /></Field>

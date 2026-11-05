@@ -3,6 +3,7 @@
 export type NodeType =
   | 'trigger' | 'if' | 'enrich' | 'ai_decide' | 'approval'
   | 'response' | 'case' | 'notify' | 'http'
+  | 'alert_event' | 'log_search' | 'scan' | 'hunt' | 'block_ioc'
 
 export type Params = Record<string, unknown>
 
@@ -56,6 +57,14 @@ export interface Catalog {
   http_methods: string[]
   body_types: string[]
   notify_channels: string[]
+  /** Absent from servers older than the investigation/containment nodes. */
+  scan_operations?: string[]
+  file_scan_kinds?: string[]
+  hunt_ioc_types?: string[]
+  block_ioc_operations?: string[]
+  prevention_rule_types?: string[]
+  prevention_actions?: string[]
+  log_search_fields?: string[]
   trigger_fields: string[]
 }
 

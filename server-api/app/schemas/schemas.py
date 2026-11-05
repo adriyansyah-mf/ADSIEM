@@ -691,6 +691,21 @@ class CaseNoteOut(BaseModel):
 class CaseNoteCreate(BaseModel):
     content: str
 
+class CaseSummaryOut(BaseModel):
+    id: UUID
+    title: str
+    description: str | None
+    severity: str
+    status: str
+    alert_id: UUID | None
+    assignee_id: UUID | None
+    ai_reasoning: str | None
+    created_by_ai: bool
+    group_id: str
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
 class CaseOut(BaseModel):
     id: UUID
     title: str
