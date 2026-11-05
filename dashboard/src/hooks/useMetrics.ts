@@ -64,11 +64,13 @@ export function useQuickThreatLookup() {
   })
 }
 
-export function useSocMetrics(days = 7) {
+export function useSocMetrics(days = 7, live = true) {
   return useQuery<SocrMetrics>({
     queryKey: ['metrics', 'soc', days],
     queryFn: () => api.get('/api/metrics/soc', { params: { days } }).then(r => r.data),
-    refetchInterval: 30_000,
+    refetchInterval: live ? 30_000 : false,
+    refetchOnWindowFocus: live,
+    refetchOnReconnect: live,
   })
 }
 
@@ -162,6 +164,8 @@ export function useSocGeo(days = 7, live = true) {
     queryKey: ['metrics', 'soc-geo', days],
     queryFn: () => api.get('/api/metrics/soc/geo', { params: { days } }).then(r => r.data),
     refetchInterval: live ? 30_000 : false,
+    refetchOnWindowFocus: live,
+    refetchOnReconnect: live,
   })
 }
 
@@ -170,6 +174,8 @@ export function useSocPosture(days = 7, live = true) {
     queryKey: ['metrics', 'soc-posture', days],
     queryFn: () => api.get('/api/metrics/soc/posture', { params: { days } }).then(r => r.data),
     refetchInterval: live ? 30_000 : false,
+    refetchOnWindowFocus: live,
+    refetchOnReconnect: live,
   })
 }
 

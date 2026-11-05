@@ -5,6 +5,7 @@ import { ArrowRight, Copy, Maximize2, Minimize2, Pause, Play, RefreshCw, Search,
 import { format } from 'date-fns'
 import { PageHeader, Panel, QueryState } from '@/components/Workspace'
 import SeverityBadge from '@/components/SeverityBadge'
+import StatusBadge from '@/components/StatusBadge'
 import type { MapFocus } from '@/components/AttackMap'
 import { SEVERITY_COLOR } from '@/lib/severityColors'
 import { useQuickThreatLookup, useSocGeo, useSocMetrics, useSocPosture } from '@/hooks/useMetrics'
@@ -61,7 +62,7 @@ export default function CommandCenterPage() {
   const [focus, setFocus] = useState<MapFocus | null>(null)
   const geo = useSocGeo(days, live)
   const posture = useSocPosture(days, live)
-  const metrics = useSocMetrics(days)
+  const metrics = useSocMetrics(days, live)
   const since = useMemo(() => new Date(Date.now() - days * 86_400_000).toISOString(), [days, geo.dataUpdatedAt])
 
   // Alerts that appear between refreshes are "fresh": animated on the map and flagged in the feed.
@@ -137,7 +138,7 @@ export default function CommandCenterPage() {
           aria-label={live ? 'Pause live refresh' : 'Resume live refresh'} title={live ? 'Pause live refresh' : 'Resume live refresh'}>
           {live ? <Pause size={16} /> : <Play size={16} />}
         </button>
-        <button type="button" className="ui-icon-button" onClick={refresh} aria-label="Refresh now" title="Refresh now" disabled={geo.isFetching || posture.isFetching}>
+        <button type="button" className="ui-icon-button" onClick={refresh} aria-label="Refresh now" title="Refresh now" disabled={geo.isFetching || posture.isFetching || metrics.isFetching}>
           <RefreshCw size={16} className={geo.isFetching ? 'animate-spin' : undefined} />
         </button>
         <button type="button" className="ui-button" onClick={toggleWall} aria-pressed={wall}>
@@ -207,7 +208,7 @@ export default function CommandCenterPage() {
       </section>
 
       <aside className="panel cc-side" aria-label={selected ? `Source ${selected.ip}` : 'Top origin countries'}>
-        {selected ? <SourceDetail point={selected} since={since} onClose={() => setSelectedIp(null)} />
+        {selected ? <SourceDetail key={selected.ip} point={selected} since={since} onClose={() => setSelectedIp(null)} />
           : <>
             <header className="panel__header"><div><h2>Top origin countries</h2>
               <p className="panel__description">Select a country to zoom the map</p></div></header>
@@ -232,6 +233,46 @@ export default function CommandCenterPage() {
     </div>
 
     <div className="cc-grid">
+      <Panel title="Detection severity" description={`All alerts · ${windowLabel} · independent of map filters`}
+        actions={<Link className="ui-button ui-button--quiet" to={`/alerts?start_time=${encodeURIComponent(since)}`}>All alerts <ArrowRight size={14} /></Link>}>
+        {metrics.isPending ? <QueryState kind="loading" title="Loading severity breakdown…" />
+          : metrics.isError ? <QueryState kind="error" title="Severity breakdown unavailable" onRetry={() => { void metrics.refetch() }} />
+          : metrics.data && <>
+            <p className="cc-note">{metrics.data.total_alerts.toLocaleString()} detections in this window. Select a severity to investigate.</p>
+            <ul className="cc-bars">{SEVERITIES.map(severity => {
+              const count = metrics.data.by_severity[severity] ?? 0
+              const share = metrics.data.total_alerts ? Math.round(count / metrics.data.total_alerts * 100) : 0
+              return <li key={severity}>
+                <Link className="cc-bars__row" to={`/alerts?severity=${severity}&start_time=${encodeURIComponent(since)}`}>
+                  <SeverityBadge severity={severity} />
+                  <span className="cc-bars__value tabular-nums">{count.toLocaleString()} <small className="text-muted-foreground">· {share}%</small></span>
+                  <span className="cc-bars__track"><SeverityStack counts={{ [severity]: count }} total={metrics.data.total_alerts} /></span>
+                </Link>
+              </li>
+            })}</ul>
+          </>}
+      </Panel>
+
+      <Panel title="Response progress" description={`Status of alerts created in the ${windowLabel}`}>
+        {metrics.isPending ? <QueryState kind="loading" title="Loading response breakdown…" />
+          : metrics.isError ? <QueryState kind="error" title="Response breakdown unavailable" onRetry={() => { void metrics.refetch() }} />
+          : metrics.data && <>
+            <ul className="cc-bars">{['new', 'in_progress', 'resolved', 'false_positive'].map(status => <li key={status}>
+              <Link className="cc-bars__row" to={`/alerts?status=${status}&start_time=${encodeURIComponent(since)}`}>
+                <StatusBadge status={status} /><span className="cc-bars__value tabular-nums">{(metrics.data.by_status[status] ?? 0).toLocaleString()}</span>
+              </Link>
+            </li>)}</ul>
+            <dl className="cc-source__facts mt-4">
+              <div><dt>Active cases created in window</dt><dd>{metrics.data.open_cases.toLocaleString()}</dd></div>
+              <div><dt>False positives / all detections</dt><dd>{metrics.data.false_positive_rate_pct.toFixed(1)}%</dd></div>
+              <div><dt>Mean acknowledgment</dt><dd>{fmtMinutes(metrics.data.avg_ack_minutes)}</dd></div>
+              <div><dt>Mean resolution</dt><dd>{fmtMinutes(metrics.data.avg_mttr_minutes)}</dd></div>
+            </dl>
+            <p className="cc-note">Response times include only alerts with a recorded acknowledgment or resolution.</p>
+            <Link className="ui-button ui-button--quiet" to={`/cases?start_time=${encodeURIComponent(since)}`}>Cases created in window <ArrowRight size={14} /></Link>
+          </>}
+      </Panel>
+
       <Panel title="Live attack feed" description="Latest geolocated detections · newest first">
         {geo.isPending ? <QueryState kind="loading" title="Loading feed…" />
           : (geo.data?.recent.length ?? 0) === 0 ? <QueryState kind="empty" title="Quiet for now" description="No alerts with a public source IP in this window." />
