@@ -1,8 +1,8 @@
 # server-api/app/api/routes/cases.py
 from typing import Annotated
 from uuid import UUID
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select, or_
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from sqlalchemy import select, or_, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_scoped_group, fetch_scoped
 from app.models.models import AiFeedback, Alert, AlertNote, Case, CaseNote, User
 from app.schemas.schemas import (
-    AiFeedbackCreate, AiFeedbackOut, CaseOut, CaseCreate, CaseUpdate,
+    AiFeedbackCreate, AiFeedbackOut, CaseOut, CaseSummaryOut, CaseCreate, CaseUpdate,
     CaseNoteCreate, CaseNoteOut, PaginatedResponse,
 )
 from app.services.audit import audit_log
@@ -50,14 +50,17 @@ async def list_cases(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
-    page: int = 1, page_size: int = 25,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
     status: str | None = None, severity: str | None = None,
     hostname: str | None = None, search: str | None = None,
     start_time: datetime | None = None, end_time: datetime | None = None,
     alert_id: UUID | None = None,
+    summary: bool = False,
 ):
-    from sqlalchemy import func
-    q = _case_q(group_filter)
+    q = select(Case)
+    if group_filter:
+        q = q.where(Case.group_id == group_filter)
     if alert_id:
         q = q.where(Case.alert_id == alert_id)
     if status:
@@ -74,12 +77,22 @@ async def list_cases(
         q = q.where(Case.created_at >= start_time)
     if end_time:
         q = q.where(Case.created_at <= end_time)
-    q = q.order_by(Case.created_at.desc())
-    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
+    total = (await db.execute(q.with_only_columns(func.count(), maintain_column_froms=True))).scalar_one()
+    q = q.order_by(Case.created_at.desc(), Case.id.desc())
+    if summary:
+        # Bound previews in SQL so large investigation bodies never leave the DB.
+        q = q.with_only_columns(*(
+            func.substr(getattr(Case, name), 1, 500).label(name)
+            if name in {"description", "ai_reasoning"} else getattr(Case, name)
+            for name in CaseSummaryOut.model_fields
+        ))
+    else:
+        q = q.options(selectinload(Case.notes))
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
-    cases = result.scalars().all()
+    items = ([CaseSummaryOut.model_validate(row) for row in result.mappings()]
+             if summary else [CaseOut.model_validate(c) for c in result.scalars()])
     return PaginatedResponse(total=total, page=page, page_size=page_size,
-                             items=[CaseOut.model_validate(c) for c in cases])
+                             items=items)
 
 @router.post("/api/cases", response_model=CaseOut, status_code=201)
 async def create_case(

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
-import type { AiFeedback, Case, PaginatedResponse } from '@/types'
+import type { AiFeedback, Case, CaseSummary, PaginatedResponse } from '@/types'
 
 export interface CaseFilters {
   status?: string
@@ -14,10 +14,10 @@ export interface CaseFilters {
 
 export function useCases(page = 1, filters: CaseFilters = {}) {
   const { status, severity, hostname, search, start_time, end_time } = filters
-  return useQuery<PaginatedResponse<Case>>({
-    queryKey: ['cases', page, status, severity, hostname, search, start_time, end_time],
+  return useQuery<PaginatedResponse<CaseSummary>>({
+    queryKey: ['cases', 'summary', page, status, severity, hostname, search, start_time, end_time],
     queryFn: () => api.get('/api/cases', {
-      params: { page, page_size: 25, status, severity, hostname, search, start_time, end_time },
+      params: { page, page_size: 25, summary: true, status, severity, hostname, search, start_time, end_time },
     }).then(r => r.data),
     refetchInterval: 15_000,
   })

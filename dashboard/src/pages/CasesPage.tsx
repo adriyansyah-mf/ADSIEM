@@ -12,7 +12,7 @@ import { useCases } from '@/hooks/useCases'
 import { useWorkspaceFilters } from '@/hooks/useWorkspaceFilters'
 import { useAuthStore } from '@/stores/auth'
 import { CaseQuickActions } from '@/components/CaseQuickActions'
-import type { Case } from '@/types'
+import type { CaseSummary } from '@/types'
 
 export default function CasesPage() {
   const navigate = useNavigate()
@@ -28,7 +28,7 @@ export default function CasesPage() {
     hostname: value('hostname') || undefined, search: value('search') || undefined,
     start_time: value('start_time') || undefined, end_time: value('end_time') || undefined,
   })
-  const columns: readonly Column<Case>[] = [
+  const columns: readonly Column<CaseSummary>[] = [
     { key: 'severity', header: 'Severity', render: row => <SeverityBadge severity={row.severity} /> },
     { key: 'title', header: 'Case', render: row => <div className="table-primary">{row.title}
       <div className="table-secondary line-clamp-2">{row.description || row.ai_reasoning || 'No summary provided'}</div>
