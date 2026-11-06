@@ -692,6 +692,7 @@ class CaseNoteCreate(BaseModel):
     content: str
 
 class CaseSummaryOut(BaseModel):
+    alert_count: int = 0
     id: UUID
     title: str
     description: str | None
@@ -707,6 +708,7 @@ class CaseSummaryOut(BaseModel):
     model_config = {"from_attributes": True}
 
 class CaseOut(BaseModel):
+    alert_count: int = 0
     id: UUID
     title: str
     description: str | None

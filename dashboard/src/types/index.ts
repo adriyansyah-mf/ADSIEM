@@ -286,6 +286,7 @@ export interface CaseNote {
 }
 
 export interface Case {
+  alert_count: number
   id: string
   title: string
   description: string | null
@@ -307,7 +308,7 @@ export interface Case {
 
 export type CaseSummary = Pick<Case,
   'id' | 'title' | 'description' | 'severity' | 'status' | 'alert_id' |
-  'assignee_id' | 'ai_reasoning' | 'created_by_ai' | 'group_id' | 'created_at' | 'updated_at'
+  'assignee_id' | 'ai_reasoning' | 'created_by_ai' | 'group_id' | 'created_at' | 'updated_at' | 'alert_count'
 >
 
 export interface HygieneIssue {

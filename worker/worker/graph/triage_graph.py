@@ -304,6 +304,12 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         return {}
 
     async def finalize_node(state: TriageState):
+        if "grouping_lock" in deps:
+            async with deps["grouping_lock"](state.get("group_id", "default")):
+                return await finalize_locked(state)
+        return await finalize_locked(state)
+
+    async def finalize_locked(state: TriageState):
         verdict = state.get("verdict", "monitor")
         alert_id = state["alert_id"]
         group_id = state.get("group_id", "default")
@@ -339,8 +345,8 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                         getattr(state.get("enrichment"), "iocs", None),
                         parse_exclusions(await deps["get_setting"]("case_ioc_exclusions", "")))
 
-        # Failed-only password guessing from the internet: one digest case a day, not one per IP
-        if (verdict != "escalate" and "add_to_bruteforce_digest" in deps and is_public_ip(source_ip)
+        # Legacy graph adapters may still use the digest; AI routing evaluates each incident.
+        if ("choose_case" not in deps and verdict != "escalate" and "add_to_bruteforce_digest" in deps and is_public_ip(source_ip)
                 and is_failed_bruteforce(tags, state["title"], family)
                 and (await deps["get_setting"]("bruteforce_digest_enabled", "true")).lower() != "false"):
             digest_id = await deps["add_to_bruteforce_digest"](
@@ -350,11 +356,33 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             if digest_id:
                 return {"case_id": digest_id}
 
-        existing, merge = await deps["find_campaign_case"](keys, hostname, group_id)
+        from worker.case_correlation import CorrelationInput, Decision
+        fields = state.get("decoded_fields") or {}
+        accounts = sorted({str(fields[k]) for k in ("user.name", "TargetUserName", "user", "username")
+                           if fields.get(k) and isinstance(fields[k], str)})
+        evidence_keys = sorted(set(keys) | ({f"ip:{source_ip}"} if source_ip else set()))
+        for indicator in getattr(state.get("enrichment"), "iocs", []) or []:
+            kind = {"ipv4": "ip", "ipv6": "ip", "hash_md5": "hash", "hash_sha1": "hash",
+                    "hash_sha256": "hash"}.get(indicator.type.value, indicator.type.value)
+            evidence_keys.append(f"{kind}:{indicator.value}")
+        evidence_keys = sorted(set(evidence_keys))
+        incoming = CorrelationInput(alert_id=alert_id, group_id=group_id, title=state["title"],
+                                    hostname=hostname, keys=keys, indicators=evidence_keys, accounts=accounts,
+                                    triage_notes=state.get("triage_notes", "")[:3000])
+        decision = Decision()
+        if "choose_case" in deps:
+            decision = await deps["choose_case"](incoming)
+            existing, merge = None, []
+            if decision.action in ("join", "suggest"):
+                recorded = await deps["record_link"](incoming, decision)
+                if recorded and decision.action == "join":
+                    existing = str(decision.case_id)
+        else:
+            existing, merge = await deps["find_campaign_case"](keys, hostname, group_id)
         if existing:
             joined = await deps["join_campaign_case"](
                 case_id=existing, alert_id=alert_id, title=state["title"],
-                triage_notes=state.get("triage_notes", ""),
+                triage_notes=decision.reason + "\n\n" + (decision.summary or state.get("triage_notes", "")),
                 severity=state.get("effective_severity", state["severity"]),
                 family=family, keys=keys, hostname=hostname, merge=merge,
             ) or {}
@@ -394,6 +422,11 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         )
         if not case_id:
             return {}
+        if "record_link" in deps:
+            await deps["record_link"](incoming, Decision(
+                action="join", case_id=case_id, confidence=decision.confidence,
+                reason=decision.reason, method=decision.method,
+            ))
 
         asyncio.ensure_future(deps["analyze_campaign"](
             trigger_alert_id=alert_id, source_ip=source_ip, hostname=hostname,

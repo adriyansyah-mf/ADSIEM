@@ -153,18 +153,18 @@ def test_cases_sharing_an_ioc_are_merged_unless_an_analyst_is_on_them(db):
 
     # one alert ties all three together: the oldest case keeps it
     found, merge = _run(ai_analyst._find_campaign_case([ATTACKER, h, "domain:x9.top"], "db02", "g5"))
-    assert found == a and sorted(merge) == sorted([c, d])
+    assert found == a and merge == [c]  # non-open cases are never grouping targets
     _join(ai_analyst, a, "Download and Execute", "execution", "db02", [ATTACKER, h, "domain:x9.top"], merge)
 
     case, notes = _case(a)
     assert case.ioc_data["affected_hosts"] == ["db01", "db02"]
     assert set(case.ioc_data["ioc_keys"]) == {ATTACKER, h, "domain:x9.top"}
-    assert case.ioc_data["related_cases"] == [d]
+    assert case.ioc_data.get("related_cases", []) == []
     merged, merged_notes = _case(c)
     assert merged.status == "resolved" and merged.ioc_data["merged_into"] == a
     assert any("Merged" in n for n in merged_notes)
     kept, _ = _case(d)
-    assert kept.status == "in_progress" and kept.ioc_data["related_cases"] == [a]  # the analyst's case stays
+    assert kept.status == "in_progress" and kept.ioc_data.get("related_cases", []) == []
     # a merged case no longer collects alerts
     assert _run(ai_analyst._find_campaign_case([h], "db09", "g5")) == (a, [])
 
