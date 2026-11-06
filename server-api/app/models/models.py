@@ -431,6 +431,19 @@ class InvestigationHypothesis(Base):
     created_at                 = Column(DateTime(timezone=True), default=now_utc)
     updated_at                 = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
+class CaseAlert(Base):
+    __tablename__ = "case_alerts"
+    case_id = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), primary_key=True)
+    alert_id = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="CASCADE"), primary_key=True, index=True)
+    status = Column(String(20), nullable=False, default="linked")
+    method = Column(String(20), nullable=False, default="ai")
+    reason = Column(Text, nullable=False, default="")
+    confidence = Column(Float)
+    indicators = Column(JSONB, nullable=False, default=list)
+    accounts = Column(JSONB, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+
+
 class CaseNote(Base):
     __tablename__ = "case_notes"
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

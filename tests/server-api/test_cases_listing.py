@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.api.routes import cases
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.models import Alert, Case, CaseNote
+from app.models.models import Alert, Case, CaseAlert, CaseNote
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ async def listing():
     engine = create_async_engine('sqlite+aiosqlite://')
     metadata = MetaData()
     # Only these tables are queried; SQLite's default FK enforcement is off.
-    for model in (Alert, Case, CaseNote):
+    for model in (Alert, Case, CaseAlert, CaseNote):
         table = model.__table__.to_metadata(metadata)
         for column in table.columns:
             if isinstance(column.type, (JSONB, ARRAY)):

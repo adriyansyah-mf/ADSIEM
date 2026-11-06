@@ -8,16 +8,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_permission, get_scoped_group, fetch_scoped
-from app.models.models import AiFeedback, Alert, AlertNote, Case, CaseNote, User
+from app.models.models import AiFeedback, Alert, AlertNote, Case, CaseAlert, CaseNote, User
 from app.schemas.schemas import (
     AiFeedbackCreate, AiFeedbackOut, CaseOut, CaseSummaryOut, CaseCreate, CaseUpdate,
     CaseNoteCreate, CaseNoteOut, PaginatedResponse,
 )
 from app.services.audit import audit_log
 from app.core.config import settings
+from app.api.routes.case_evidence import router as evidence_router
 import redis.asyncio as aioredis
 
 router = APIRouter(tags=["cases"])
+router.include_router(evidence_router)
 
 async def _push_rag_reindex(case_id: str) -> None:
     """Push case_id to Redis reindex queue so worker indexes it immediately."""
@@ -62,15 +64,16 @@ async def list_cases(
     if group_filter:
         q = q.where(Case.group_id == group_filter)
     if alert_id:
-        q = q.where(Case.alert_id == alert_id)
+        q = q.where(or_(Case.alert_id == alert_id, Case.id.in_(
+            select(CaseAlert.case_id).where(CaseAlert.alert_id == alert_id, CaseAlert.status == "linked"))))
     if status:
         q = q.where(Case.status == status)
     if severity:
         q = q.where(Case.severity == severity)
     if hostname:
-        q = q.where(Case.alert_id.in_(
-            select(Alert.id).where(Alert.hostname.ilike(f"%{hostname}%"))
-        ))
+        matching_alerts = select(Alert.id).where(Alert.hostname.ilike(f"%{hostname}%"))
+        q = q.where(or_(Case.alert_id.in_(matching_alerts), Case.id.in_(
+            select(CaseAlert.case_id).where(CaseAlert.alert_id.in_(matching_alerts), CaseAlert.status == "linked"))))
     if search:
         q = q.where(or_(Case.title.ilike(f"%{search}%"), Case.description.ilike(f"%{search}%")))
     if start_time:
@@ -78,21 +81,43 @@ async def list_cases(
     if end_time:
         q = q.where(Case.created_at <= end_time)
     total = (await db.execute(q.with_only_columns(func.count(), maintain_column_froms=True))).scalar_one()
-    q = q.order_by(Case.created_at.desc(), Case.id.desc())
+    q = q.order_by(Case.updated_at.desc(), Case.id.desc())
     if summary:
         # Bound previews in SQL so large investigation bodies never leave the DB.
+        # alert_count is a correlated column — linked case_alerts UNION the primary
+        # alert, deduplicated — so the summary stays exactly two statements.
+        linked_count = select(func.count()).select_from(
+            select(CaseAlert.alert_id).where(
+                CaseAlert.case_id == Case.id, CaseAlert.status == "linked",
+            ).union(
+                select(Case.alert_id).where(Case.alert_id.is_not(None))
+            ).subquery()
+        ).correlate(Case).scalar_subquery()
         q = q.with_only_columns(*(
+            linked_count.label("alert_count") if name == "alert_count" else
             func.substr(getattr(Case, name), 1, 500).label(name)
             if name in {"description", "ai_reasoning"} else getattr(Case, name)
             for name in CaseSummaryOut.model_fields
         ))
+        result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
+        items = [CaseSummaryOut.model_validate(row) for row in result.mappings()]
     else:
         q = q.options(selectinload(Case.notes))
-    result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
-    items = ([CaseSummaryOut.model_validate(row) for row in result.mappings()]
-             if summary else [CaseOut.model_validate(c) for c in result.scalars()])
-    return PaginatedResponse(total=total, page=page, page_size=page_size,
-                             items=items)
+        result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
+        cases = result.scalars().all()
+        links = (await db.execute(select(CaseAlert.case_id, CaseAlert.alert_id).where(
+            CaseAlert.case_id.in_([c.id for c in cases]), CaseAlert.status == "linked",
+        ))).all()
+        counts: dict = {}
+        for cid, aid in links:
+            counts.setdefault(cid, set()).add(aid)
+        items = []
+        for c in cases:
+            linked = set(counts.get(c.id, ()))
+            if c.alert_id:
+                linked.add(c.alert_id)
+            items.append(CaseOut.model_validate(c).model_copy(update={"alert_count": len(linked)}))
+    return PaginatedResponse(total=total, page=page, page_size=page_size, items=items)
 
 @router.post("/api/cases", response_model=CaseOut, status_code=201)
 async def create_case(
@@ -258,59 +283,33 @@ async def case_timeline(
     _: User = Depends(get_current_user),
     group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    """Return chronological related alerts and notes for a case (A�24h window around case creation)."""
+    """Return explicitly linked alert evidence in chronological order."""
     import uuid as _uuid
-    from datetime import timedelta
 
     case = await fetch_scoped(db, Case, _uuid.UUID(case_id), group_filter, detail="Case not found")
 
     items = []
-    window_start = case.created_at - timedelta(hours=24)
-    window_end   = case.created_at + timedelta(hours=24)
-
-    # Resolve source_ip/hostname from the triggering alert if available
-    source_ip = None
-    hostname  = None
+    linked_ids = set((await db.execute(select(CaseAlert.alert_id).where(
+        CaseAlert.case_id == case.id, CaseAlert.status == "linked",
+    ))).scalars().all())
     if case.alert_id:
-        triggering = await fetch_scoped(db, Alert, case.alert_id, group_filter, detail="Alert not found")
-        source_ip = triggering.source_ip
-        hostname  = triggering.hostname
+        linked_ids.add(case.alert_id)
+    related_alerts = (await db.execute(select(Alert).where(
+        Alert.id.in_(linked_ids), Alert.group_id == case.group_id,
+    ).order_by(Alert.created_at.asc()))).scalars().all()
+    for a in related_alerts:
+        items.append({
+            "type": "alert", "id": str(a.id), "ts": a.created_at.isoformat(),
+            "title": a.title, "severity": a.severity, "source_ip": a.source_ip,
+            "hostname": a.hostname, "is_this_case": True,
+            "mitre_techniques": a.mitre_techniques or [], "kill_chain_stage": a.kill_chain_stage,
+        })
 
-    # Related alerts: same source_ip or hostname within A�24h
-    if source_ip or hostname:
-        filters = [Alert.created_at.between(window_start, window_end)]
-        if group_filter is not None:
-            filters.append(Alert.group_id == group_filter)
-        if source_ip and hostname:
-            filters.append(or_(Alert.source_ip == source_ip, Alert.hostname == hostname))
-        elif source_ip:
-            filters.append(Alert.source_ip == source_ip)
-        else:
-            filters.append(Alert.hostname == hostname)
-
-        related_alerts = (await db.execute(
-            select(Alert).where(*filters).order_by(Alert.created_at.asc()).limit(50)
-        )).scalars().all()
-
-        for a in related_alerts:
-            items.append({
-                "type": "alert",
-                "id": str(a.id),
-                "ts": a.created_at.isoformat(),
-                "title": a.title,
-                "severity": a.severity,
-                "source_ip": a.source_ip,
-                "hostname": a.hostname,
-                "is_this_case": bool(case.alert_id and str(a.id) == str(case.alert_id)),
-                "mitre_techniques": a.mitre_techniques or [],
-                "kill_chain_stage": a.kill_chain_stage,
-            })
-
-    # Case notes linked to the triggering alert
-    if case.alert_id:
+    # Alert notes follow the same explicitly linked, group-scoped evidence.
+    if related_alerts:
         notes = (await db.execute(
             select(AlertNote)
-            .where(AlertNote.alert_id == case.alert_id)
+            .where(AlertNote.alert_id.in_([a.id for a in related_alerts]))
             .order_by(AlertNote.created_at.asc())
         )).scalars().all()
         for n in notes:

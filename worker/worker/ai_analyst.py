@@ -380,10 +380,9 @@ def _case_family(case: Case) -> str:
 
 # ─── Campaign cases (worker/case_grouping.py) ────────────────────
 # A case is one attacker's campaign, keyed by the IOCs it uses; hosts are the
-# assets it touched. Cases stay joinable while active (not resolved/closed)
+# assets it touched. Cases stay joinable only while open
 # and touched within case_ioc_window_days.
 
-_CLOSED_STATUSES = ("resolved", "closed", "false_positive")
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 
 
@@ -413,8 +412,8 @@ async def _active_campaign_cases(group_id: str) -> list[Case]:
     since = datetime.now(timezone.utc) - timedelta(days=days)
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(select(Case).where(
-            Case.group_id == group_id, Case.created_by_ai == True,  # noqa: E712
-            Case.status.notin_(_CLOSED_STATUSES), Case.updated_at >= since,
+            Case.group_id == group_id,
+            Case.status == "open", Case.updated_at >= since,
         ))).scalars().all()
     return [c for c in rows if not (c.ioc_data or {}).get("digest") and not (c.ioc_data or {}).get("merged_into")]
 
@@ -473,9 +472,15 @@ async def _join_campaign_case(
     from worker.case_grouping import further_stage, raises_to_critical
 
     async with AsyncSessionLocal() as db:
-        case = await db.get(Case, uuid.UUID(case_id))
+        case = (await db.execute(select(Case).where(
+            Case.id == uuid.UUID(case_id), Case.status == "open",
+        ).with_for_update())).scalar_one_or_none()
         if case is None:
             return {"escalated": False, "new_host": False}
+        if alert_id:
+            incoming_alert = await db.get(Alert, uuid.UUID(alert_id))
+            if incoming_alert is None or incoming_alert.group_id != case.group_id:
+                return {"escalated": False, "new_host": False}
         ioc = dict(case.ioc_data or {})
         all_keys, hosts = _case_keys(case), _case_hosts(case)
         families = set(ioc.get("families_seen") or [_case_family(case)])
@@ -485,7 +490,7 @@ async def _join_campaign_case(
 
         for other_id in merge or []:
             other = await db.get(Case, uuid.UUID(other_id))
-            if other is None or str(other.id) == case_id:
+            if other is None or str(other.id) == case_id or other.group_id != case.group_id or other.status != "open":
                 continue
             shared = sorted(_case_keys(other) & set(keys))
             other_ioc = dict(other.ioc_data or {})
@@ -538,12 +543,13 @@ async def _join_campaign_case(
             ioc["related_cases"] = sorted(set(related))
         case.ioc_data = ioc
         case.severity = new_severity
+        case.ai_reasoning = triage_notes
         case.updated_at = datetime.now(timezone.utc)
         details = "\n".join(f"- {line}" for line in lines)
         db.add(CaseNote(
             case_id=case.id, author_id=None, is_ai_generated=True,
             content=(f"**[AI L1] New alert linked to this case**\n\n"
-                     f"Alert: {title} | Severity: {severity}" + (f" | Host: {hostname}" if hostname else "")
+                     f"Alert: [{title}](/alerts/{alert_id}) | Severity: {severity}" + (f" | Host: {hostname}" if hostname else "")
                      + (f"\n\n{details}" if details else "")
                      + f"\n\n**Triage notes:**\n{triage_notes}"),
         ))
@@ -574,7 +580,7 @@ async def _add_to_bruteforce_digest(
     day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     key = f"bruteforce:{day}"
     async with AsyncSessionLocal() as db:
-        q = select(Case).where(Case.group_id == group_id, Case.created_by_ai == True,
+        q = select(Case).where(Case.group_id == group_id, Case.created_by_ai == True, Case.status == "open",
                                Case.ioc_data["digest"].astext == key).with_for_update()
         case = (await db.execute(q)).scalars().first()
         if case is None:
@@ -835,11 +841,15 @@ async def analyze_and_maybe_create_case(
         return
     model = await get_setting("ninerouter_model", NINEROUTER_MODEL)
 
+    from worker.case_correlation import choose_case, grouping_lock, record_link
     graph = build_triage_graph(
         base_url=NINEROUTER_BASE_URL,
         api_key=api_key,
         model=model,
         deps={
+            "choose_case": choose_case,
+            "record_link": record_link,
+            "grouping_lock": grouping_lock,
             "enrich": _graph_enrich,
             "escalate_severity": _escalate_severity,
             "suggest_mitre": suggest_mitre,

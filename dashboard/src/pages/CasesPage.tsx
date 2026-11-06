@@ -31,12 +31,14 @@ export default function CasesPage() {
   const columns: readonly Column<CaseSummary>[] = [
     { key: 'severity', header: 'Severity', render: row => <SeverityBadge severity={row.severity} /> },
     { key: 'title', header: 'Case', render: row => <div className="table-primary">{row.title}
-      <div className="table-secondary line-clamp-2">{row.description || row.ai_reasoning || 'No summary provided'}</div>
+      <div className="table-secondary line-clamp-2">{row.ai_reasoning || row.description || 'No summary provided'}</div>
+      <span className="table-secondary">{row.alert_count ?? 0} linked alerts</span>
       {row.created_by_ai && <span className="control-cluster table-secondary mt-1"><Bot size={12} /> AI-created case</span>}
     </div> },
     { key: 'status', header: 'Status', render: row => <StatusBadge status={row.status} /> },
     { key: 'assignee_id', header: 'Assigned to', render: row => row.assignee_id === userId ? 'You' : row.assignee_id ? <span className="font-mono text-xs break-all">{row.assignee_id}</span> : <span className="text-muted-foreground">Unassigned</span> },
     { key: 'created_at', header: 'Created', render: row => <time dateTime={row.created_at} className="whitespace-nowrap">{format(new Date(row.created_at), 'dd MMM, HH:mm')}</time> },
+    { key: 'updated_at', header: 'Last activity', render: row => <time dateTime={row.updated_at}>{format(new Date(row.updated_at), 'dd MMM, HH:mm')}</time> },
     { key: 'group_id', header: 'Group', hiddenByDefault: true, render: row => row.group_id },
     { key: 'alert_id', header: 'Alert ID', hiddenByDefault: true, render: row => row.alert_id ?? '—' },
   ]

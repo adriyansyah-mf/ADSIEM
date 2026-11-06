@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ArrowLeft, Bot } from 'lucide-react'
@@ -6,7 +6,8 @@ import { PageHeader, Panel, QueryState } from '@/components/Workspace'
 import SeverityBadge from '@/components/SeverityBadge'
 import StatusBadge from '@/components/StatusBadge'
 import { useCase, useUpdateCase, useEscalateCase, useAddCaseNote, useCaseFeedback, useSubmitCaseFeedback } from '@/hooks/useCases'
-import { useBlockIp, useTasks } from '@/hooks/useTasks'
+import { CaseEvidencePanel } from '@/components/CaseEvidencePanel'
+import { CaseRemediations } from '@/components/CaseRemediations'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -100,8 +101,6 @@ export default function CaseDetailPage() {
   const [noteText, setNoteText] = useState('')
   const [timelineView, setTimelineView] = useState<'graph' | 'linear'>('graph')
   const [showLinkedAlert, setShowLinkedAlert] = useState(false)
-  const [blockIpValue, setBlockIpValue] = useState('')
-  const [blockDuration, setBlockDuration] = useState(3600)
 
   const { data: caseData, isLoading, isError, refetch } = useCase(id!)
   const update = useUpdateCase(id!)
@@ -109,32 +108,12 @@ export default function CaseDetailPage() {
   const addNote = useAddCaseNote(id!)
   const { data: caseFeedback, isLoading: caseFeedbackLoading } = useCaseFeedback(id!)
   const submitCaseFeedback = useSubmitCaseFeedback(id!)
-  const blockIp = useBlockIp()
 
   const { data: alertData } = useQuery<Alert>({
     queryKey: ['alert', caseData?.alert_id],
     queryFn: () => api.get(`/api/alerts/${caseData!.alert_id}`).then(r => r.data),
     enabled: !!caseData?.alert_id,
   })
-
-  const targetAgentId = alertData?.agent_id ?? null
-  const { data: agentTasks = [] } = useTasks(targetAgentId ?? undefined)
-  const recentBlocks = agentTasks
-    .filter(t => t.task_type === 'block_ip')
-    .slice(0, 3)
-
-  // Prefill the block-IP field with the linked alert's source IP once it loads
-  useEffect(() => {
-    if (alertData?.source_ip && !blockIpValue) {
-      setBlockIpValue(alertData.source_ip)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alertData?.source_ip])
-
-  const handleBlockIp = () => {
-    if (!targetAgentId || !blockIpValue.trim()) return
-    blockIp.mutate({ agent_id: targetAgentId, ip: blockIpValue.trim(), duration_seconds: blockDuration })
-  }
 
   const { data: timeline } = useQuery({
     queryKey: ['case-timeline', id],
@@ -403,6 +382,8 @@ export default function CaseDetailPage() {
             <AlertDetailModal alert={alertData} onClose={() => setShowLinkedAlert(false)} />
           )}
 
+          <CaseEvidencePanel caseId={caseData.id} status={caseData.status} />
+
           {/* Timeline / Notes */}
           <Box title="Timeline / Notes">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
@@ -578,93 +559,7 @@ export default function CaseDetailPage() {
             />
           </Box>
 
-          {/* Remediations */}
-          <Box title="Remediations">
-            {!targetAgentId ? (
-              <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.5 }}>
-                No agent linked to this case — remediation actions need a linked alert with a known host.
-              </div>
-            ) : (
-              <div>
-                <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', marginBottom: '4px' }}>
-                  TARGET HOST
-                </div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)', marginBottom: '10px' }}>
-                  {alertData?.hostname ?? targetAgentId.slice(0, 8)}
-                </div>
-
-                <label className="field mb-2"><span>IP address to block</span><input
-                  value={blockIpValue}
-                  onChange={e => setBlockIpValue(e.target.value)}
-                  placeholder="IP address to block"
-                  style={{
-                    width: '100%',
-                    background: 'var(--bg-panel)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '4px',
-                    color: 'var(--text-primary)',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '12px',
-                    padding: '7px 10px',
-                    marginBottom: '6px',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                /></label>
-                <label className="field mb-2"><span>Block duration</span><select
-                  value={blockDuration}
-                  onChange={e => setBlockDuration(Number(e.target.value))}
-                  style={{
-                    width: '100%',
-                    background: 'var(--bg-panel)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '4px',
-                    color: 'var(--text-primary)',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '12px',
-                    padding: '7px 10px',
-                    marginBottom: '8px',
-                    outline: 'none',
-                  }}
-                >
-                  <option value={3600}>1 hour</option>
-                  <option value={86400}>24 hours</option>
-                  <option value={604800}>7 days</option>
-                </select></label>
-
-                <ActionBtn
-                  label="Block IP on host"
-                  onClick={handleBlockIp}
-                  color="var(--accent-red)"
-                  loading={blockIp.isPending}
-                  disabled={!blockIpValue.trim()}
-                />
-
-                {recentBlocks.length > 0 && (
-                  <div style={{ marginTop: '10px' }}>
-                    <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', marginBottom: '6px' }}>
-                      RECENT BLOCKS
-                    </div>
-                    {recentBlocks.map(t => (
-                      <div key={t.id} style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '5px 0', borderBottom: '1px solid var(--border)',
-                        fontFamily: 'var(--font-mono)', fontSize: '12px',
-                      }}>
-                        <span style={{ color: 'var(--text-secondary)' }}>{String((t.params as Record<string, unknown>)?.ip ?? '')}</span>
-                        <span style={{
-                          color: t.status === 'done' ? 'var(--accent-green)' : t.status === 'failed' ? 'var(--accent-red)' : 'var(--accent-yellow)',
-                          textTransform: 'none',
-                        }}>
-                          {t.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </Box>
+          <CaseRemediations key={caseData.id} caseId={caseData.id} />
         </div>
       </div>
     </div>

@@ -233,6 +233,17 @@ func TestSensorEndToEnd(t *testing.T) {
 	}
 	defer func() { t.Log(c.diag()) }()
 
+	// CI runners may symlink coreutils (/usr/bin/mv → /usr/bin/gnumv); the
+	// sensor reports the kernel-resolved path, so file events match on Comm
+	// and "sleep" is resolved the same way before matching TargetImage.
+	sleepPath, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved, rerr := filepath.EvalSymlinks(sleepPath); rerr == nil {
+		sleepPath = resolved
+	}
+
 	dir := t.TempDir()
 	sh := exec.Command("sh", "-c", "cd "+dir+" && echo x > rel.txt && mv rel.txt moved.txt && rm moved.txt && mkdir d && rmdir d")
 	if out, err := sh.CombinedOutput(); err != nil {
@@ -241,8 +252,8 @@ func TestSensorEndToEnd(t *testing.T) {
 	rel := filepath.Join(dir, "rel.txt")
 	moved := filepath.Join(dir, "moved.txt")
 	c.wait(t, LogFile, "action=create", `TargetFilename="`+rel+`"`, `Comm="sh"`)
-	c.wait(t, LogFile, "action=rename", `TargetFilename="`+moved+`"`, `SourceFilename="`+rel+`"`, `Image="/usr/bin/mv"`)
-	c.wait(t, LogFile, "action=delete", `TargetFilename="`+moved+`"`, `Image="/usr/bin/rm"`)
+	c.wait(t, LogFile, "action=rename", `TargetFilename="`+moved+`"`, `SourceFilename="`+rel+`"`, `Comm="mv"`)
+	c.wait(t, LogFile, "action=delete", `TargetFilename="`+moved+`"`, `Comm="rm"`)
 	c.wait(t, LogFile, "action=delete", `TargetFilename="`+filepath.Join(dir, "d")+`"`, "IsDirectory=true")
 
 	if err := runHelper(t, "fileless").Run(); err != nil {
@@ -254,7 +265,7 @@ func TestSensorEndToEnd(t *testing.T) {
 	if err := runHelper(t, "ptrace").Run(); err != nil {
 		t.Fatalf("ptrace helper: %v", err)
 	}
-	c.wait(t, LogPtrace, "action=attach", `TargetImage="/usr/bin/sleep"`)
+	c.wait(t, LogPtrace, "action=attach", `TargetImage="`+sleepPath+`"`)
 
 	if err := runHelper(t, "setuid").Run(); err != nil {
 		t.Fatalf("setuid helper: %v", err)
@@ -265,8 +276,8 @@ func TestSensorEndToEnd(t *testing.T) {
 	if err := mem.Run(); err != nil {
 		t.Fatalf("memaccess helper: %v", err)
 	}
-	c.wait(t, LogProcessAccess, "action=vm_read", `TargetImage="/usr/bin/sleep"`)
-	c.wait(t, LogProcessAccess, "action=mem_read", `TargetImage="/usr/bin/sleep"`)
+	c.wait(t, LogProcessAccess, "action=vm_read", `TargetImage="`+sleepPath+`"`)
+	c.wait(t, LogProcessAccess, "action=mem_read", `TargetImage="`+sleepPath+`"`)
 	c.wait(t, LogFile, "action=read", `TargetFilename="/etc/shadow"`)
 
 	cmd := runHelper(t, "exit7")

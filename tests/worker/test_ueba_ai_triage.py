@@ -78,6 +78,56 @@ def _state(fields):
             "decoded_fields": fields, "group_id": "default"}
 
 
+async def test_ai_grouping_links_existing_case_without_creating_or_merging():
+    from worker.case_correlation import Decision
+    calls = []
+    deps = _deps(calls)
+    case_id = "22222222-2222-2222-2222-222222222222"
+
+    async def choose(incoming):
+        return Decision(action="join", case_id=case_id, confidence=0.95, reason="Shared evidence")
+
+    async def record(incoming, decision):
+        calls.append(("link", str(decision.case_id), incoming.alert_id))
+        return True
+
+    async def join(**kwargs):
+        calls.append(("join", kwargs["case_id"], kwargs["merge"]))
+        return {}
+
+    deps.update(choose_case=choose, record_link=record, join_campaign_case=join)
+    graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
+    final = await graph.ainvoke(_state({"user.name": "admin"}))
+    assert final["case_id"] == case_id
+    assert ("join", case_id, []) in calls
+    assert len([c for c in calls if c[0] == "link"]) == 1
+
+
+async def test_ambiguous_grouping_records_suggestion_and_creates_separate_case():
+    from worker.case_correlation import Decision
+    calls = []
+    deps = _deps(calls)
+    candidate_id = "22222222-2222-2222-2222-222222222222"
+    new_id = "33333333-3333-3333-3333-333333333333"
+
+    async def choose(incoming):
+        return Decision(action="suggest", case_id=candidate_id, confidence=0.6, reason="Uncertain evidence")
+
+    async def record(incoming, decision):
+        calls.append(("link", str(decision.case_id), decision.action))
+        return True
+
+    async def create(**kwargs):
+        return new_id
+
+    deps.update(choose_case=choose, record_link=record, create_case_from_verdict=create)
+    graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
+    final = await graph.ainvoke(_state({"user.name": "admin"}))
+    assert final["case_id"] == new_id
+    assert ("link", candidate_id, "suggest") in calls
+    assert ("link", new_id, "join") in calls
+
+
 @pytest.fixture(autouse=True)
 def fake_llm(monkeypatch):
     _FakeLLM.prompts = []
