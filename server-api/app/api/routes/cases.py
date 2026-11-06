@@ -84,31 +84,40 @@ async def list_cases(
     q = q.order_by(Case.updated_at.desc(), Case.id.desc())
     if summary:
         # Bound previews in SQL so large investigation bodies never leave the DB.
-        # alert_count is computed below, not a column on Case.
+        # alert_count is a correlated column — linked case_alerts UNION the primary
+        # alert, deduplicated — so the summary stays exactly two statements.
+        linked_count = select(func.count()).select_from(
+            select(CaseAlert.alert_id).where(
+                CaseAlert.case_id == Case.id, CaseAlert.status == "linked",
+            ).union(
+                select(Case.alert_id).where(Case.alert_id.is_not(None))
+            ).subquery()
+        ).correlate(Case).scalar_subquery()
         q = q.with_only_columns(*(
+            linked_count.label("alert_count") if name == "alert_count" else
             func.substr(getattr(Case, name), 1, 500).label(name)
             if name in {"description", "ai_reasoning"} else getattr(Case, name)
-            for name in CaseSummaryOut.model_fields if name != "alert_count"
+            for name in CaseSummaryOut.model_fields
         ))
+        result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
+        items = [CaseSummaryOut.model_validate(row) for row in result.mappings()]
     else:
         q = q.options(selectinload(Case.notes))
-    result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
-    rows = result.mappings() if summary else result.scalars().all()
-    links = (await db.execute(select(CaseAlert.case_id, CaseAlert.alert_id).where(
-        CaseAlert.case_id.in_([r.id for r in rows]), CaseAlert.status == "linked",
-    ))).all()
-    counts: dict = {}
-    for cid, aid in links:
-        counts.setdefault(cid, set()).add(aid)
-    items = []
-    for row in rows:
-        linked = set(counts.get(row.id, ()))
-        if row.alert_id:
-            linked.add(row.alert_id)
-        schema = CaseSummaryOut if summary else CaseOut
-        items.append(schema.model_validate(row).model_copy(update={"alert_count": len(linked)}))
-    return PaginatedResponse(total=total, page=page, page_size=page_size,
-                             items=items)
+        result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
+        cases = result.scalars().all()
+        links = (await db.execute(select(CaseAlert.case_id, CaseAlert.alert_id).where(
+            CaseAlert.case_id.in_([c.id for c in cases]), CaseAlert.status == "linked",
+        ))).all()
+        counts: dict = {}
+        for cid, aid in links:
+            counts.setdefault(cid, set()).add(aid)
+        items = []
+        for c in cases:
+            linked = set(counts.get(c.id, ()))
+            if c.alert_id:
+                linked.add(c.alert_id)
+            items.append(CaseOut.model_validate(c).model_copy(update={"alert_count": len(linked)}))
+    return PaginatedResponse(total=total, page=page, page_size=page_size, items=items)
 
 @router.post("/api/cases", response_model=CaseOut, status_code=201)
 async def create_case(
