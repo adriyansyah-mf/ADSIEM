@@ -199,7 +199,7 @@ def allow_match(domain: str, rules: Iterable[tuple[str, bool]]) -> str | None:
 
 Append ` worker/worker/web_domains.py` to the `COPY worker/worker/__init__.py … malware_hashes.py ./worker/` line in `server-api/Dockerfile`, and add `!worker/worker/web_domains.py` on the line after `!worker/worker/malware_hashes.py` in `server-api/Dockerfile.dockerignore`.
 
-- [ ] **Step 4: Verify** — `python3 -m pytest tests/worker/test_web_domains.py -q` → all pass (24).
+- [ ] **Step 4: Verify** — `python3 -m pytest tests/worker/test_web_domains.py -q` → all pass (23).
 
 - [ ] **Step 5: Commit** — `feat(webblock): domain normalisation and allowlist matching`.
 
@@ -739,16 +739,22 @@ async def _top_seq(db, group_id: str, policy: dict) -> int:
 
 
 async def agent_version(db, agent: Agent) -> str:
-    """For the heartbeat: "" when off, else the newest relevant seq (cached briefly)."""
+    """For the heartbeat: "" when off, else the newest relevant seq, "+" when an entry is due to expire (cached briefly)."""
     if not agent.approved:
         return ""
     group = agent.group_id or "default"
     hit = _version_cache.get(group)
     if hit and time.monotonic() - hit[0] < CACHE_SECONDS:
         return hit[1]
-    await expire(db)
     policy = await policy_for(db, group)
-    version = str(await _top_seq(db, group, policy)) if policy["enabled"] else ""
+    version = ""
+    if policy["enabled"]:
+        # Read-only here (the heartbeat's session must not commit): a due expiry
+        # changes the version so the agent syncs, and the sync endpoint expires it.
+        due = (await db.execute(select(func.count()).select_from(WebBlockEntry).where(
+            WebBlockEntry.group_id.in_(_groups(group, policy)), WebBlockEntry.status == "active",
+            WebBlockEntry.expires_at.is_not(None), WebBlockEntry.expires_at <= func.now()))).scalar_one()
+        version = str(await _top_seq(db, group, policy)) + ("+" if due else "")
     _version_cache[group] = (time.monotonic(), version)
     return version
 
@@ -1027,9 +1033,10 @@ async def test_allowlist_crud_and_builtin_protection(env):
     assert (await env.api.patch(f"/api/web-allowlist/{rule_id}", json={"enabled": False})).json()["enabled"] is False
     assert (await env.api.delete(f"/api/web-allowlist/{rule_id}")).status_code == 200
     builtin = next(i for i in (await env.api.get("/api/web-allowlist")).json()["items"] if i["domain"] == "github.com")
-    assert (await env.api.delete(f"/api/web-allowlist/{builtin['id']}")).status_code == 409
+    assert (await env.api.delete(f"/api/web-allowlist/{builtin['id']}")).status_code == 403
     assert (await env.api.patch(f"/api/web-allowlist/{builtin['id']}", json={"enabled": False})).status_code == 403
     env.user = env.make_user(role="superadmin")
+    assert (await env.api.delete(f"/api/web-allowlist/{builtin['id']}")).status_code == 409
     assert (await env.api.patch(f"/api/web-allowlist/{builtin['id']}", json={"enabled": False})).json()["enabled"] is False
 
 
@@ -1086,7 +1093,7 @@ from uuid import UUID
 
 from fastapi import Query, Response
 from pydantic import Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, true
 
 from app.core.deps import get_scoped_group, require_permission
 from app.models.models import User, WebAllowRule, WebBlockEntry, WebBlockPolicy
@@ -1109,7 +1116,7 @@ def _target_group(group_filter: Optional[str], requested: Optional[str]) -> str:
 
 
 def _visible(group_filter: Optional[str], column):
-    return True if group_filter is None else column.in_((group_filter, web_blocks.FEED_GROUP))
+    return true() if group_filter is None else column.in_((group_filter, web_blocks.FEED_GROUP))
 
 
 def _block_out(r: WebBlockEntry) -> dict:
