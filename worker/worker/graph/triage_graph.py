@@ -374,7 +374,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             decision = await deps["choose_case"](incoming)
             existing, merge = None, []
             if decision.action in ("join", "suggest"):
-                recorded = await deps["record_link"](incoming, decision)
+                recorded = await deps["record_link"](incoming, decision, emit_event=False)
                 if recorded and decision.action == "join":
                     existing = str(decision.case_id)
         else:

@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.core.deps import fetch_scoped, get_current_user, get_scoped_group, require_permission
 from app.models.models import Agent, AgentTask, Alert, Case, CaseAlert, CaseNote, User
 from app.schemas.schemas import AgentTaskOut
+from worker.soar.case_outbox import CaseEvent, enqueue_case_event
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 Database = Annotated[AsyncSession, Depends(get_db)]
@@ -95,6 +96,7 @@ async def update_membership(case_id: UUID, alert_id: UUID, body: MembershipUpdat
         link = CaseAlert(case_id=case.id, alert_id=alert.id,
                          indicators=[f"ip:{alert.source_ip}"] if alert.source_ip else [], accounts=[])
         db.add(link)
+    newly_linked = body.status == "linked" and link.status != "linked"
     link.status, link.method = body.status, "analyst"
     link.reason = f"Analyst {user.username} {'accepted' if body.status == 'linked' else 'removed'} this association."
     if body.status == "detached" and case.alert_id == alert.id:
@@ -112,6 +114,8 @@ async def update_membership(case_id: UUID, alert_id: UUID, body: MembershipUpdat
                          f"{len(ioc['ioc_keys'])} indicators. {link.reason} "
                          "See per-alert evidence and notes for the incident analysis.")
     case.updated_at = datetime.now(timezone.utc)
+    if newly_linked:
+        await enqueue_case_event(db, CaseEvent(case.id, case.group_id, "case.alert_linked", alert.id))
     db.add(CaseNote(case_id=case.id, author_id=user.id, content=f"{link.reason} Alert: {alert.id}"))
     await db.commit()
     return {"status": link.status}

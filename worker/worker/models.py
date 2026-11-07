@@ -55,6 +55,7 @@ class AgentTask(Base):
     params        = Column(JSONB, nullable=False, default=dict)
     status        = Column(String(20), nullable=False, default="pending")
     error         = Column(Text)
+    result        = Column(JSONB)
     created_at    = Column(DateTime(timezone=True), nullable=False, default=now_utc)
     completed_at  = Column(DateTime(timezone=True))
 
@@ -153,6 +154,18 @@ class CaseAlert(Base):
     indicators = Column(JSONB, nullable=False, default=list)
     accounts = Column(JSONB, nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), default=now_utc)
+
+
+class SoarCaseEvent(Base):
+    __tablename__ = "soar_case_events"
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    case_id = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    group_id = Column(String(100), nullable=False)
+    event = Column(String(40), nullable=False)
+    ready = Column(Boolean, nullable=False, default=True)
+    alert_id = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    processed_at = Column(DateTime(timezone=True), index=True)
 
 
 class CaseNote(Base):

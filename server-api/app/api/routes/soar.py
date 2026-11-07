@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import fetch_scoped, get_current_user, get_scoped_group, require_permission
-from app.models.models import Alert, SoarAction, SoarPlaybook, SoarRun, SoarRunStep, User
+from app.models.models import Alert, Case, SoarAction, SoarPlaybook, SoarRun, SoarRunStep, User
 from worker.soar.curl import CurlParseError, parse_curl
 from worker.soar.graph import (
     ALERT_STATUSES, BLOCK_IOC_OPS, BODY_TYPES, CASE_OPS, EVENTS, FILE_SCAN_KINDS, HTTP_METHODS, HUNT_IOC_TYPES,
@@ -47,6 +47,7 @@ class CurlIn(BaseModel):
 
 
 class RunIn(BaseModel):
+    case_id: Optional[uuid.UUID] = None
     alert_id: Optional[uuid.UUID] = None
     trigger: dict = {}
 
@@ -168,7 +169,8 @@ async def catalog(current_user: User = Depends(get_current_user)):
         "prevention_actions": PREVENTION_ACTIONS,
         "log_search_fields": LOG_SEARCH_FIELDS,
         "trigger_fields": ["alert_id", "severity", "rule_title", "tags", "mitre_tags", "source_ip", "hostname",
-                           "user_name", "group_id", "ai_verdict", "ai_confidence", "ti_risk_score", "event"],
+                           "user_name", "group_id", "ai_verdict", "ai_confidence", "ti_risk_score", "event",
+                           "case_id", "case_title", "case_status", "created_by_ai", "alert_count", "ioc_count", "event_id"],
     }
 
 
@@ -364,8 +366,13 @@ async def run_playbook(
     pb = await fetch_scoped(db, SoarPlaybook, playbook_id, group_filter, detail="Playbook not found")
     graph = _validated(_graph_of(pb, await _actions(db, pb)))
     trigger = {k: v for k, v in body.trigger.items() if isinstance(k, str)}
+    if body.case_id:
+        case = await fetch_scoped(db, Case, body.case_id, pb.group_id, detail="Case not found")
+        trigger.update({"case_id": str(case.id), "case_title": case.title, "case_status": case.status,
+                        "severity": case.severity, "rule_title": case.title, "created_by_ai": case.created_by_ai,
+                        "ai_confidence": case.ai_confidence})
     if body.alert_id:
-        alert = await fetch_scoped(db, Alert, body.alert_id, group_filter, detail="Alert not found")
+        alert = await fetch_scoped(db, Alert, body.alert_id, pb.group_id, detail="Alert not found")
         trigger = {
             "alert_id": str(alert.id), "severity": alert.severity, "rule_title": alert.title,
             "source_ip": alert.source_ip, "hostname": alert.hostname,
