@@ -216,8 +216,8 @@ Limit 256 KB. The agent's CSP (B2) is the second layer.
 
 ### Agent sync endpoint
 
-`POST /api/agent/web-blocklist {since}` (agent-token auth, like the malware
-hash sync) returns:
+`POST /api/ingest/web-blocklist {since}` (agent-token header `X-Agent-Token`,
+like the malware hash sync) returns:
 
 ```json
 {"seq": 123, "more": false,
@@ -229,7 +229,8 @@ hash sync) returns:
 - `changes` covers global (`*`) entries and the agent's group, after its group
   allowlist; expired and `suppressed` entries are sent as `remove`.
 - Pages of 5000 changes; `more=true` continues.
-- `since=0` returns the full active set.
+- `since=0` returns the full active set. The server sends the whole allowed set;
+  the agent applies `max_entries` and the manual > alert > feed priority (B2).
 - The heartbeat response carries `web_blocklist_version` (latest relevant seq
   including policy seq) so agents only fetch on change.
 

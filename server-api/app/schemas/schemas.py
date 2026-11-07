@@ -282,6 +282,7 @@ class HeartbeatResponse(BaseModel):
     yara_rules_hash: str = ""  # enabled YARA rule set; agents fetch it from /api/ingest/yara-rules
     policy_version: str = ""  # the group policy; agents fetch it from /api/ingest/policy
     malware_hashes_version: str = ""  # "<seq>:<action>"; agents sync from /api/ingest/malware-hashes ("" = off)
+    web_blocklist_version: str = ""  # "<seq>"; agents sync from /api/ingest/web-blocklist ("" = Web Protection off)
     update: dict | None = None  # services.agent_update.offer_for: version, revision, url, signed
 
 # ─── Ingest ──────────────────────────────────────────────────────
