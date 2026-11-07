@@ -236,3 +236,45 @@ async def test_persist_node_hands_triage_result_to_index_dependency(monkeypatch)
     await graph.ainvoke(state)
     await asyncio.sleep(0)
     assert calls == [(state["alert_id"], state["decoded_fields"], Enrichment.iocs, "monitor")]
+
+
+def test_case_indicators_become_extracted_items():
+    assert alert_iocs.indicators_to_extracted(
+        ["ip:45.33.32.156", "ip:2001:db8::1", "domain:c2.example", "url:http://x.example/a",
+         "hash:" + "a" * 64, "hash:" + "b" * 40, "hash:" + "c" * 32, "hash:zz", "account:admin"]
+    ) == [{"type": "ipv4", "value": "45.33.32.156"}, {"type": "ipv4", "value": "2001:db8::1"},
+          {"type": "domain", "value": "c2.example"}, {"type": "url", "value": "http://x.example/a"},
+          {"type": "hash_sha256", "value": "a" * 64}, {"type": "hash_sha1", "value": "b" * 40},
+          {"type": "hash_md5", "value": "c" * 32}]
+
+
+async def test_retention_deletes_indicator_docs_of_purged_alerts(monkeypatch):
+    from worker import maintenance
+    ids = [UUID(int=1), UUID(int=2)]
+    deleted = []
+
+    class Result:
+        def scalars(self):
+            return SimpleNamespace(all=lambda: ids)
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def execute(self, statement):
+            return Result()
+
+        async def commit(self):
+            pass
+
+    async def delete_for_alerts(alert_ids):
+        deleted.extend(alert_ids)
+
+    monkeypatch.setattr(maintenance, "AsyncSessionLocal", Session)
+    monkeypatch.setattr(alert_iocs, "delete_for_alerts", delete_for_alerts)
+    assert await maintenance._purge_alerts(180) == 2
+    assert deleted == [str(i) for i in ids]
+    assert await maintenance._purge_alerts(0) == 0

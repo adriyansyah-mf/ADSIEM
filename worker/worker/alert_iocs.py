@@ -235,3 +235,67 @@ async def index_triaged_alert(alert_id: str, fields: dict | None, extracted: lis
         log.exception("alert_iocs_collect_failed", alert_id=str(alert_id))
         return
     await index_docs(docs)
+
+
+BACKFILL_FLAG = "siem:alert_iocs:backfilled"
+_KEY_TYPES = {"ip": "ipv4", "domain": "domain", "url": "url"}
+_KEY_HASHES = {64: "hash_sha256", 40: "hash_sha1", 32: "hash_md5"}
+
+
+def indicators_to_extracted(keys: list[str]) -> list[dict]:
+    """case_alerts.indicators ("ip:…", "domain:…", "url:…", "hash:…") as extracted items."""
+    out = []
+    for key in keys or []:
+        kind, _, value = str(key).partition(":")
+        if not value:
+            continue
+        mapped = _KEY_HASHES.get(len(value)) if kind == "hash" else _KEY_TYPES.get(kind)
+        if mapped:
+            out.append({"type": mapped, "value": value})
+    return out
+
+
+async def backfill(batch: int = 500) -> int:
+    """Index alerts that predate alert_iocs, once (Redis flag). Returns documents written."""
+    from collections import defaultdict
+    from sqlalchemy import select, tuple_
+    from worker import database, redis_client
+    from worker.models import Alert, CaseAlert
+
+    redis = await redis_client.get_redis()
+    if await redis.get(BACKFILL_FLAG):
+        return 0
+    exclusions = await _exclusions()
+    total, cursor = 0, None
+    while True:
+        async with database.AsyncSessionLocal() as db:
+            query = select(Alert).order_by(Alert.created_at, Alert.id).limit(batch)
+            if cursor is not None:
+                query = query.where(tuple_(Alert.created_at, Alert.id) > cursor)
+            alerts = (await db.execute(query)).scalars().all()
+            if not alerts:
+                break
+            links = (await db.execute(
+                select(CaseAlert.alert_id, CaseAlert.indicators)
+                .where(CaseAlert.alert_id.in_([a.id for a in alerts]), CaseAlert.status == "linked")
+            )).all()
+        indicators: dict = defaultdict(list)
+        for alert_id, keys in links:
+            indicators[alert_id].extend(keys or [])
+        docs = []
+        for alert in alerts:
+            docs += collect(meta_of(alert), alert.source_ip, None, indicators_to_extracted(indicators[alert.id]),
+                            exclusions, extracted_origin="alert")
+        await index_docs(docs)
+        total += len(docs)
+        cursor = (alerts[-1].created_at, alerts[-1].id)
+    await redis.set(BACKFILL_FLAG, "1")
+    log.info("alert_iocs_backfilled", docs=total)
+    return total
+
+
+async def backfill_once() -> None:
+    try:
+        await backfill()
+    except Exception:
+        log.exception("alert_iocs_backfill_failed")
