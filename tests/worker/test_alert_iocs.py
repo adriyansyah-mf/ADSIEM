@@ -96,14 +96,20 @@ async def test_index_docs_skips_empty(es):
 
 async def test_ensure_index_creates_mapping_once(monkeypatch):
     calls = []
+    bodies = {}
 
     def handler(request):
         calls.append((request.method, request.url.path))
+        if request.content:
+            bodies[request.url.path] = json.loads(request.content)
         return httpx.Response(404 if request.method == "HEAD" else 200, json={})
 
     _fake_es(monkeypatch, handler)
     await alert_iocs.ensure_index()
-    assert calls == [("HEAD", "/alert_iocs"), ("PUT", "/alert_iocs")]
+    assert calls == [("PUT", "/_index_template/alert_iocs"), ("HEAD", "/alert_iocs"), ("PUT", "/alert_iocs")]
+    template = bodies["/_index_template/alert_iocs"]
+    assert template["index_patterns"] == ["alert_iocs"]
+    assert template["template"]["mappings"] == alert_iocs.MAPPING["mappings"]
 
 
 async def test_delete_for_alerts_batches_by_1000(es):
@@ -298,3 +304,41 @@ async def test_index_docs_counts_failed_items(monkeypatch):
     _fake_es(monkeypatch, lambda request: httpx.Response(200, json={"errors": True, "items": items}))
     docs = alert_iocs.collect(META, "45.33.32.156", {}, [{"type": "domain", "value": "c2.example"}], EXCL)
     assert await alert_iocs.index_docs(docs) == 1
+
+
+def test_domain_fields_never_record_ip_addresses():
+    fields = {"url.domain": "10.0.0.5", "dns.question.name": "45.33.32.156"}
+    assert alert_iocs.collect(META, None, fields, None, EXCL) == []
+
+
+def test_url_host_must_pass_ip_exclusions():
+    assert alert_iocs.collect(META, None, {"url.full": "http://192.168.1.10/a"}, None, EXCL) == []
+    docs = alert_iocs.collect(META, None, {"url.full": "http://45.33.32.156/a"}, None, EXCL)
+    assert pairs(docs) == {("url", "http://45.33.32.156/a", "event")}
+
+
+@pytest.mark.parametrize("url", ["http://user@evil.com/x", "http://evil.com:8080/x"])
+def test_url_with_userinfo_or_port_honours_owned_domains(url):
+    assert alert_iocs.collect(META, None, {"url.full": url}, None, parse_exclusions("evil.com")) == []
+
+
+def test_email_in_owned_domain_is_dropped():
+    fields = {"user.email": "bob@corp.example"}
+    assert alert_iocs.collect(META, None, fields, None, parse_exclusions("corp.example")) == []
+    assert pairs(alert_iocs.collect(META, None, fields, None, parse_exclusions(""))) == {
+        ("email", "bob@corp.example", "event")}
+
+
+def test_unicode_url_host_is_punycoded():
+    docs = alert_iocs.collect(META, None, {"url.full": "http://Bücher.example/A"}, None, EXCL)
+    assert pairs(docs) == {("url", "http://xn--bcher-kva.example/a", "event")}
+
+
+def test_sysmon_imphash_is_not_a_file_hash():
+    fields = {"Hashes": "MD5=" + "a" * 32 + ",SHA256=" + "b" * 64 + ",IMPHASH=" + "c" * 32}
+    assert pairs(alert_iocs.collect(META, None, fields, None, EXCL)) == {
+        ("md5", "a" * 32, "event"), ("sha256", "b" * 64, "event")}
+
+
+def test_overlong_values_are_dropped():
+    assert alert_iocs.collect(META, None, {"url.full": "http://45.33.32.156/" + "a" * 3000}, None, EXCL) == []

@@ -94,7 +94,7 @@ export default function ThreatIocsPage() {
   const [selected, setSelected] = useState<Ioc | null>(null)
   const [copied, setCopied] = useState('')
   const { data, isLoading, isError, isFetching } = useIocs(filter)
-  const update = (patch: Partial<IocFilter>) => setFilter(f => ({ ...f, offset: 0, ...patch }))
+  const update = (patch: Partial<IocFilter>) => { setFilter(f => ({ ...f, offset: 0, ...patch })); setSelected(null) }
   const counts = data?.type_counts ?? {}
   const all = Object.values(counts).reduce((sum, n) => sum + (n ?? 0), 0)
 

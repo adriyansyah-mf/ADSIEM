@@ -12,6 +12,7 @@ import hashlib
 import ipaddress
 import json
 import re
+from urllib.parse import urlsplit, urlunsplit
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -28,7 +29,8 @@ INDEX = "alert_iocs"
 SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 _EMAIL_FIELDS = ("user.email", "email.from.address", "email.to.address", "SenderAddress", "RecipientAddress")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-_URL_RE = re.compile(r"(?i)^[a-z][a-z0-9+.-]*://([^/:?#]+)")
+_URL_RE = re.compile(r"(?i)^[a-z][a-z0-9+.-]*://")
+_MAX_VALUE_LEN = 2048  # Lucene rejects keyword terms over 32 KB; one such document would fail every bulk
 _HASH_TYPES = {64: "sha256", 40: "sha1", 32: "md5"}
 _TI_TYPES = {"ipv4": "ip", "ipv6": "ip", "domain": "domain", "url": "url",
              "hash_md5": "md5", "hash_sha1": "sha1", "hash_sha256": "sha256"}
@@ -76,25 +78,50 @@ def _ip(value, nets) -> str | None:
 
 def _domain(value, domains) -> str | None:
     d = str(value or "").strip().lower().rstrip(".")
-    if not d or "." not in d or _ip(d, []) or _excluded_host(d, domains):
+    if not d or "." not in d or _excluded_host(d, domains):
         return None
+    try:
+        ipaddress.ip_address(d)
+        return None  # IPs are recorded by _ip only
+    except ValueError:
+        pass
     try:
         return d.encode("idna").decode("ascii")
     except UnicodeError:
         return None
 
 
-def _url(value, domains) -> str | None:
-    u = str(value or "").strip()
-    m = _URL_RE.match(u)
-    if not m or _excluded_host(m.group(1).lower(), domains):
+def _url(value, nets, domains) -> str | None:
+    u = str(value or "").strip().lower()
+    if not _URL_RE.match(u):
         return None
-    return u.lower()
+    try:
+        parts = urlsplit(u)
+        host = parts.hostname
+    except ValueError:
+        return None
+    if not host:
+        return None
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        if _excluded_host(host, domains):
+            return None
+        try:
+            ascii_host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            return None
+        if ascii_host != host:
+            return urlunsplit(parts._replace(netloc=parts.netloc.replace(host, ascii_host, 1)))
+        return u
+    return u if _ip(host, nets) else None
 
 
-def _email(value) -> str | None:
+def _email(value, domains) -> str | None:
     e = str(value or "").strip().lower()
-    return e if _EMAIL_RE.match(e) else None
+    if not _EMAIL_RE.match(e) or _excluded_host(e.rsplit("@", 1)[1], domains):
+        return None
+    return e
 
 
 def _extracted(item) -> tuple[str | None, str | None]:
@@ -114,7 +141,7 @@ def collect(meta: AlertMeta, source_ip: str | None, fields: dict | None, extract
     found: dict[tuple[str, str], str] = {}
 
     def add(kind: str, value: str | None, origin: str) -> None:
-        if value and (kind, value) not in found:
+        if value and len(value) <= _MAX_VALUE_LEN and (kind, value) not in found:
             found[(kind, value)] = origin
 
     add("ip", _ip(source_ip, nets), "alert")
@@ -123,12 +150,17 @@ def collect(meta: AlertMeta, source_ip: str | None, fields: dict | None, extract
     for name in _DOMAIN_FIELDS:
         add("domain", _domain(fields.get(name), domains), "event")
     for name in _URL_FIELDS:
-        add("url", _url(fields.get(name), domains), "event")
-    for name in (*_HASH_FIELDS, "Hashes"):
+        add("url", _url(fields.get(name), nets, domains), "event")
+    for name in _HASH_FIELDS:
         for h in _HASH_RE.findall(str(fields.get(name) or "")):
             add(_HASH_TYPES[len(h)], h.lower(), "event")
+    # Sysmon "MD5=..,SHA256=..,IMPHASH=..": the import hash identifies a build, not a file
+    sysmon = ",".join(pair.partition("=")[2] for pair in str(fields.get("Hashes") or "").split(",")
+                      if pair.partition("=")[0].strip().upper() != "IMPHASH")
+    for h in _HASH_RE.findall(sysmon):
+        add(_HASH_TYPES[len(h)], h.lower(), "event")
     for name in _EMAIL_FIELDS:
-        add("email", _email(fields.get(name)), "event")
+        add("email", _email(fields.get(name), domains), "event")
 
     for item in extracted or []:
         kind, value = _extracted(item)
@@ -138,7 +170,7 @@ def collect(meta: AlertMeta, source_ip: str | None, fields: dict | None, extract
         elif mapped == "domain":
             add("domain", _domain(value, domains), extracted_origin)
         elif mapped == "url":
-            add("url", _url(value, domains), extracted_origin)
+            add("url", _url(value, nets, domains), extracted_origin)
         elif mapped and value and len(value) == {"sha256": 64, "sha1": 40, "md5": 32}[mapped]:
             add(mapped, value.lower(), extracted_origin)
 
@@ -154,6 +186,13 @@ def collect(meta: AlertMeta, source_ip: str | None, fields: dict | None, extract
 async def ensure_index() -> None:
     """Idempotent: create `alert_iocs` with its mapping when missing."""
     client = es_client._get_client()
+    try:
+        resp = await client.put(f"/_index_template/{INDEX}", json={
+            "index_patterns": [INDEX], "template": {"mappings": MAPPING["mappings"]}, "priority": 100})
+        if resp.status_code not in (200, 201):
+            log.error("alert_iocs_template_failed", status=resp.status_code, body=resp.text[:500])
+    except Exception as exc:
+        log.error("alert_iocs_template_failed", error=str(exc))
     try:
         if (await client.head(f"/{INDEX}")).status_code == 200:
             return
@@ -221,7 +260,10 @@ async def index_new_alert(meta: AlertMeta, source_ip: str | None, fields: dict |
     except Exception:
         log.exception("alert_iocs_collect_failed", alert_id=meta.alert_id)
         return
-    await index_docs(docs)
+    try:
+        await index_docs(docs)
+    except Exception:
+        log.exception("alert_iocs_index_failed", alert_id=meta.alert_id)
 
 
 async def index_triaged_alert(alert_id: str, fields: dict | None, extracted: list | None, verdict: str) -> None:
