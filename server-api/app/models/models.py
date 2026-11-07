@@ -997,7 +997,12 @@ class WebBlockEntry(Base):
     group that enables feeds). Every change takes the next web_block_seq so
     agents sync deltas (app/services/web_blocks.py)."""
     __tablename__ = "web_block_entries"
-    __table_args__ = (UniqueConstraint("group_id", "domain", "source", name="uq_web_block_entry"),)
+    __table_args__ = (
+        UniqueConstraint("group_id", "domain", "source", name="uq_web_block_entry"),
+        Index("ix_web_block_entries_expiry", "expires_at",
+              postgresql_where=text("status = 'active' AND expires_at IS NOT NULL")),
+        Index("ix_web_block_entries_group_seq", "group_id", "seq"),
+    )
     id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     domain            = Column(String(253), nullable=False, index=True)
     group_id          = Column(String(100), nullable=False)

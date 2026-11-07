@@ -1,8 +1,9 @@
 # server-api/app/services/web_blocks.py
 """Web Protection lists (spec B1): per-group blocklist, allowlist and policy,
 and the agent delta sync. Entries and policies take the next web_block_seq on
-every change; allowlist changes bump the platform setting web_block_rules_seq,
-which forces every agent to resync (the allowlist filters the whole set)."""
+every change; allowlist changes bump the platform setting web_block_rules_seq:<group>
+("*" for a global rule), which forces that group's agents to resync (the
+allowlist filters the whole set)."""
 from __future__ import annotations
 
 import time
@@ -50,20 +51,25 @@ async def allow_rules(db, group_id: str) -> list[tuple[str, bool]]:
     return [(domain, include) for domain, include in rows]
 
 
-async def mark_rules_changed(db) -> None:
-    """Call in the same transaction as an allowlist change; the caller commits."""
+async def mark_rules_changed(db, group_id: str) -> None:
+    """Call in the same transaction as an allowlist change of `group_id` ("*" =
+    a global rule); the caller commits. Only that group's agents resync."""
     seq = (await db.execute(select(next_seq()))).scalar_one()
-    await db.merge(PlatformSetting(key=RULES_SEQ_KEY, value=str(seq), is_secret=False,
+    await db.merge(PlatformSetting(key=f"{RULES_SEQ_KEY}:{group_id}", value=str(seq), is_secret=False,
                                    description="Web Protection allowlist change marker"))
     invalidate()
 
 
-async def _rules_seq(db) -> int:
-    value = (await db.execute(select(PlatformSetting.value).where(PlatformSetting.key == RULES_SEQ_KEY))).scalar_one_or_none()
-    try:
-        return int(value or 0)
-    except ValueError:
-        return 0
+async def _rules_seq(db, group_id: str) -> int:
+    values = (await db.execute(select(PlatformSetting.value).where(
+        PlatformSetting.key.in_((f"{RULES_SEQ_KEY}:{group_id}", f"{RULES_SEQ_KEY}:{FEED_GROUP}"))))).scalars().all()
+    best = 0
+    for value in values:
+        try:
+            best = max(best, int(value or 0))
+        except ValueError:
+            pass
+    return best
 
 
 async def seed_builtin_allowlist(db) -> None:
@@ -75,7 +81,7 @@ async def seed_builtin_allowlist(db) -> None:
             "ON CONFLICT (group_id, domain) DO NOTHING"), {"g": FEED_GROUP, "d": domain, "inc": include})
         inserted += result.rowcount or 0
     if inserted:
-        await mark_rules_changed(db)
+        await mark_rules_changed(db, FEED_GROUP)
     await db.commit()
 
 
@@ -96,11 +102,11 @@ def _groups(group_id: str, policy: dict) -> list[str]:
 async def _top_seq(db, group_id: str, policy: dict) -> int:
     entries = (await db.execute(select(func.coalesce(func.max(WebBlockEntry.seq), 0)).where(
         WebBlockEntry.group_id.in_(_groups(group_id, policy))))).scalar_one()
-    return max(int(entries), await _rules_seq(db), policy["seq"])
+    return max(int(entries), await _rules_seq(db, group_id), policy["seq"])
 
 
 async def agent_version(db, agent: Agent) -> str:
-    """For the heartbeat: "" when off, else the newest relevant seq, "+" when an entry is due to expire (cached briefly)."""
+    """For the heartbeat: "" when off, else "<group>:<seq>", with "+" appended when an entry is due to expire (cached briefly)."""
     if not agent.approved:
         return ""
     group = agent.group_id or "default"
@@ -115,7 +121,7 @@ async def agent_version(db, agent: Agent) -> str:
         due = (await db.execute(select(func.count()).select_from(WebBlockEntry).where(
             WebBlockEntry.group_id.in_(_groups(group, policy)), WebBlockEntry.status == "active",
             WebBlockEntry.expires_at.is_not(None), WebBlockEntry.expires_at <= func.now()))).scalar_one()
-        version = str(await _top_seq(db, group, policy)) + ("+" if due else "")
+        version = f"{group}:{await _top_seq(db, group, policy)}" + ("+" if due else "")
     _version_cache[group] = (time.monotonic(), version)
     return version
 
@@ -152,7 +158,7 @@ async def delta(db, group_id: str, since: int, continuing: bool = False, limit: 
                 "changes": []}
     groups = _groups(group_id, policy)
     top = await _top_seq(db, group_id, policy)
-    marker = max(await _rules_seq(db), policy["seq"])
+    marker = max(await _rules_seq(db, group_id), policy["seq"])
     if continuing:
         # a rule/policy change between pages invalidates what was already delivered
         reset = rules != marker

@@ -1,13 +1,13 @@
 # server-api/app/api/routes/web_protection.py
 """Web Protection (spec B1): agents sync the blocklist here; the dashboard
 manages the blocklist, allowlist, policy and block page."""
-from datetime import datetime
-from typing import Annotated, Optional
+from datetime import datetime, timezone
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from pydantic import Field
+from pydantic import Field, field_validator
 from sqlalchemy import func, select, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,9 +38,10 @@ async def agent_web_blocklist(
         raise HTTPException(status_code=403, detail="agent not approved")
     out = await web_blocks.delta(db, agent.group_id or "default", max(body.since, 0), body.continuing,
                                   rules=body.rules)
-    # the version the agent stores once it has every page; equals the heartbeat's when caught up
-    version = str(out["seq"]) if out["policy"]["enabled"] and not out["more"] else ""
-    return {**out, "version": version}
+    group = agent.group_id or "default"
+    # opaque "<group>:<seq>" the agent stores once it has every page; equals the heartbeat's when caught up
+    version = f"{group}:{out['seq']}" if out["policy"]["enabled"] and not out["more"] else ""
+    return {**out, "group": group, "version": version}
 
 
 router = APIRouter(tags=["web-protection"])
@@ -92,11 +93,30 @@ def _rule_out(r: WebAllowRule) -> dict:
             "include_subdomains": r.include_subdomains, "builtin": r.builtin, "enabled": r.enabled}
 
 
+def _future(value: Optional[datetime]) -> Optional[datetime]:
+    if value is not None and (value if value.tzinfo else value.replace(tzinfo=timezone.utc)) <= datetime.now(timezone.utc):
+        raise ValueError("expires_at must be in the future")
+    return value
+
+
 class BlockIn(BaseModel):
     value: str = Field(..., max_length=2048)
     reason: str = Field("", max_length=500)
     expires_at: Optional[datetime] = None
     group_id: Optional[str] = Field(None, max_length=100)
+
+    _check_expiry = field_validator("expires_at")(_future)
+
+
+class BulkIn(BaseModel):
+    action: Literal["block", "unblock"]
+    values: list[Annotated[str, Field(max_length=2048)]] = Field(default_factory=list, max_length=500)
+    ids: list[UUID] = Field(default_factory=list, max_length=500)
+    reason: str = Field("", max_length=500)
+    expires_at: Optional[datetime] = None
+    group_id: Optional[str] = Field(None, max_length=100)
+
+    _check_expiry = field_validator("expires_at")(_future)
 
 
 @router.get("/api/web-blocks")
@@ -117,12 +137,10 @@ async def list_blocks(
     return {"total": total, "items": [_block_out(r) for r in rows]}
 
 
-@router.post("/api/web-blocks", status_code=201)
-async def add_block(body: BlockIn, db: AsyncSession = Depends(get_db), user: User = Manage,
-                    group: Optional[str] = Depends(get_scoped_group)):
-    target = _target_group(group, body.group_id)
+async def _block_one(db: AsyncSession, user: User, target: str, value: str, reason: str,
+                     expires_at: Optional[datetime]) -> WebBlockEntry:
     try:
-        domain = normalize(body.value)
+        domain = normalize(value)
     except DomainError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     rule = allow_match(domain, await web_blocks.allow_rules(db, target))
@@ -133,17 +151,15 @@ async def add_block(body: BlockIn, db: AsyncSession = Depends(get_db), user: Use
     if row is None:
         row = WebBlockEntry(domain=domain, group_id=target, source="manual", created_by=await _actor(db, user))
         db.add(row)
-    row.status, row.reason, row.expires_at, row.seq = "active", body.reason.strip(), body.expires_at, web_blocks.next_seq()
+    row.status, row.reason, row.expires_at, row.seq = "active", reason.strip(), expires_at, web_blocks.next_seq()
     await _commit(db)
     await db.refresh(row)
     web_blocks.invalidate()
     await audit_log(db, user.id, "web_block.add", "web_block", str(row.id), {"domain": domain, "group_id": target})
-    return _block_out(row)
+    return row
 
 
-@router.delete("/api/web-blocks/{entry_id}")
-async def remove_block(entry_id: UUID, db: AsyncSession = Depends(get_db), user: User = Manage,
-                       group: Optional[str] = Depends(get_scoped_group)):
+async def _unblock_one(db: AsyncSession, user: User, group: Optional[str], entry_id: UUID) -> dict:
     row = await db.get(WebBlockEntry, entry_id)
     if row is None or (group is not None and row.group_id not in (group, web_blocks.FEED_GROUP)):
         raise HTTPException(status_code=404, detail="Block not found")
@@ -155,7 +171,7 @@ async def remove_block(entry_id: UUID, db: AsyncSession = Depends(get_db), user:
             db.add(WebAllowRule(group_id=group, domain=row.domain, created_by=await _actor(db, user)))
         elif not exists.enabled:
             exists.enabled = True
-        await _commit(db, web_blocks.mark_rules_changed)
+        await _commit(db, lambda session: web_blocks.mark_rules_changed(session, group))
         await audit_log(db, user.id, "web_block.allowlist_feed", "web_block", str(row.id), {"domain": row.domain, "group_id": group})
         return {"status": "allowlisted"}
     row.status, row.seq = "removed", web_blocks.next_seq()
@@ -163,6 +179,42 @@ async def remove_block(entry_id: UUID, db: AsyncSession = Depends(get_db), user:
     web_blocks.invalidate()
     await audit_log(db, user.id, "web_block.remove", "web_block", str(row.id), {"domain": row.domain})
     return {"status": "removed"}
+
+
+@router.post("/api/web-blocks", status_code=201)
+async def add_block(body: BlockIn, db: AsyncSession = Depends(get_db), user: User = Manage,
+                    group: Optional[str] = Depends(get_scoped_group)):
+    target = _target_group(group, body.group_id)
+    return _block_out(await _block_one(db, user, target, body.value, body.reason, body.expires_at))
+
+
+@router.delete("/api/web-blocks/{entry_id}")
+async def remove_block(entry_id: UUID, db: AsyncSession = Depends(get_db), user: User = Manage,
+                       group: Optional[str] = Depends(get_scoped_group)):
+    return await _unblock_one(db, user, group, entry_id)
+
+
+@router.post("/api/web-blocks/bulk")
+async def bulk_blocks(body: BulkIn, db: AsyncSession = Depends(get_db), user: User = Manage,
+                      group: Optional[str] = Depends(get_scoped_group)):
+    """Block up to 500 values or unblock up to 500 ids; each item succeeds or reports its own error."""
+    done, errors = 0, []
+    if body.action == "block":
+        target = _target_group(group, body.group_id)
+        for value in body.values:
+            try:
+                await _block_one(db, user, target, value, body.reason, body.expires_at)
+                done += 1
+            except HTTPException as exc:
+                errors.append({"value": value, "detail": str(exc.detail)})
+    else:
+        for entry_id in body.ids:
+            try:
+                await _unblock_one(db, user, group, entry_id)
+                done += 1
+            except HTTPException as exc:
+                errors.append({"value": str(entry_id), "detail": str(exc.detail)})
+    return {"done": done, "errors": errors}
 
 
 class RuleIn(BaseModel):
@@ -197,7 +249,7 @@ async def add_rule(body: RuleIn, db: AsyncSession = Depends(get_db), user: User 
         row = WebAllowRule(group_id=target, domain=domain, created_by=await _actor(db, user))
         db.add(row)
     row.include_subdomains, row.enabled = body.include_subdomains, True
-    await _commit(db, web_blocks.mark_rules_changed)
+    await _commit(db, lambda session: web_blocks.mark_rules_changed(session, target))
     await db.refresh(row)
     await audit_log(db, user.id, "web_allowlist.add", "web_allowlist", str(row.id), {"domain": domain, "group_id": target})
     return _rule_out(row)
@@ -220,7 +272,7 @@ async def update_rule(rule_id: UUID, body: RulePatch, db: AsyncSession = Depends
         row.enabled = body.enabled
     if body.include_subdomains is not None:
         row.include_subdomains = body.include_subdomains
-    await web_blocks.mark_rules_changed(db)
+    await web_blocks.mark_rules_changed(db, row.group_id)
     await db.commit()
     await audit_log(db, user.id, "web_allowlist.update", "web_allowlist", str(row.id), body.model_dump(exclude_none=True))
     return _rule_out(row)
@@ -233,7 +285,7 @@ async def delete_rule(rule_id: UUID, db: AsyncSession = Depends(get_db), user: U
     if row.builtin:
         raise HTTPException(status_code=409, detail="Built-in rules can be disabled, not deleted")
     await db.delete(row)
-    await web_blocks.mark_rules_changed(db)
+    await web_blocks.mark_rules_changed(db, row.group_id)
     await db.commit()
     await audit_log(db, user.id, "web_allowlist.delete", "web_allowlist", str(rule_id), {"domain": row.domain})
     return {"status": "deleted"}

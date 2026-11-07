@@ -16,6 +16,8 @@ from worker.web_domains import BUILTIN_ALLOWLIST, DomainError, allow_match, norm
     ("  sub.evil.example  ", "sub.evil.example"),
     ("a1.example", "a1.example"),
     ("123.example", "123.example"),
+    ("http://evil.com\\@victim.com/", "evil.com"),
+    ("HTTPS://evil.com\\.victim.com/x", "evil.com"),
 ])
 def test_normalize(value, expected):
     assert normalize(value) == expected

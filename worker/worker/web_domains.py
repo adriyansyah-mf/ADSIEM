@@ -38,6 +38,8 @@ def normalize(value: str) -> str:
     if not raw:
         raise DomainError("Enter a domain or URL")
     if "://" in raw:
+        if raw[:8].lower().startswith(("http://", "https://")):
+            raw = raw.replace("\\", "/")  # browsers treat a backslash as a slash in http(s) URLs
         try:
             host = urlsplit(raw).hostname or ""
         except ValueError as exc:

@@ -115,10 +115,10 @@ async def test_allowlist_crud_and_builtin_protection(env):
 
 async def test_allowlist_change_bumps_the_rules_marker(env):
     async with env.sessions() as db:
-        before = await wb._rules_seq(db)
+        before = await wb._rules_seq(db, "blue")
     await env.api.post("/api/web-allowlist", json={"domain": "intranet.example"})
     async with env.sessions() as db:
-        assert await wb._rules_seq(db) > before
+        assert await wb._rules_seq(db, "blue") > before
 
 
 async def test_policy_defaults_save_sanitises_and_preview(env):
@@ -149,3 +149,70 @@ async def test_group_ids_are_bounded(env):
     env.user = env.make_user(role="superadmin")
     assert (await env.api.put("/api/web-block-policies/" + "g" * 101, json={"enabled": True})).status_code == 422
     assert (await env.api.post("/api/web-blocks", json={"value": "x.example", "group_id": "g" * 101})).status_code == 422
+
+
+async def test_bulk_block_reports_per_item_errors(env):
+    r = await env.api.post("/api/web-blocks/bulk", json={
+        "action": "block", "values": ["ok.example", "45.33.32.156", "raw.github.com"], "reason": "x"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["done"] == 1 and len(out["errors"]) == 2
+    errors = {e["value"]: e["detail"] for e in out["errors"]}
+    assert "IP addresses cannot be web-blocked" in errors["45.33.32.156"]
+    assert "allowlisted" in errors["raw.github.com"]
+    assert sum(1 for a, _ in env.audit_calls if a == "web_block.add") == 1
+
+
+async def test_bulk_unblock_skips_foreign_group(env):
+    async with env.sessions() as db:
+        mine = WebBlockEntry(domain="mine.example", group_id="blue", source="manual")
+        red = WebBlockEntry(domain="red.example", group_id="red", source="manual")
+        db.add_all([mine, red])
+        await db.commit()
+    r = await env.api.post("/api/web-blocks/bulk", json={"action": "unblock", "ids": [str(mine.id), str(red.id)]})
+    out = r.json()
+    assert out["done"] == 1 and len(out["errors"]) == 1 and "not found" in out["errors"][0]["detail"].lower()
+    async with env.sessions() as db:
+        assert (await db.get(WebBlockEntry, red.id)).status == "active"
+        assert (await db.get(WebBlockEntry, mine.id)).status == "removed"
+
+
+async def test_bulk_limits_and_permission(env):
+    r = await env.api.post("/api/web-blocks/bulk", json={"action": "block", "values": ["a.example"] * 501})
+    assert r.status_code == 422
+    env.user = env.make_user(perms=("alerts:read",))
+    assert (await env.api.post("/api/web-blocks/bulk", json={"action": "block", "values": ["a.example"]})).status_code == 403
+
+
+async def test_expiry_in_the_past_is_rejected(env):
+    r = await env.api.post("/api/web-blocks", json={"value": "x.example", "expires_at": "2020-01-01T00:00:00Z"})
+    assert r.status_code == 422 and "future" in r.text
+    r = await env.api.post("/api/web-blocks/bulk", json={"action": "block", "values": ["x.example"],
+                                                         "expires_at": "2020-01-01T00:00:00Z"})
+    assert r.status_code == 422
+
+
+async def test_allowlist_and_policy_changes_are_audited(env):
+    rule = (await env.api.post("/api/web-allowlist", json={"domain": "intranet.example"})).json()
+    assert ("web_allowlist.add", rule["id"]) in env.audit_calls
+    await env.api.put("/api/web-block-policies/blue", json={"enabled": True})
+    assert ("web_block_policy.update", "blue") in env.audit_calls
+
+
+async def test_settings_api_hides_rules_markers(env):
+    from fastapi import BackgroundTasks, HTTPException
+
+    from app.api.routes import settings as settings_routes
+    from app.models.models import PlatformSetting
+    from app.schemas.schemas import SettingUpdate
+    async with env.sessions() as db:
+        db.add_all([PlatformSetting(key="web_block_rules_seq:blue", value="5", is_secret=False),
+                    PlatformSetting(key="visible_setting", value="1", is_secret=False)])
+        await db.commit()
+        listed = await settings_routes.list_settings(db, env.user)
+        keys = {s.key for s in listed}
+        assert "visible_setting" in keys and not any(k.startswith("web_block_rules_seq") for k in keys)
+        with pytest.raises(HTTPException) as exc:
+            await settings_routes.update_setting("web_block_rules_seq:blue", SettingUpdate(value="9"),
+                                                 BackgroundTasks(), db, env.user)
+        assert exc.value.status_code == 404

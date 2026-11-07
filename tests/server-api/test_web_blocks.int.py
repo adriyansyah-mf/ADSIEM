@@ -99,7 +99,7 @@ async def test_delta_sync_scopes_groups_and_propagates_removals(env):
     await add(env, "feed.example", group="*", source="urlhaus")
     out = await sync(env)
     state = apply(set(), out)
-    assert state == {"evil.example"} and out["reset"] is True and out["version"] == str(out["seq"])
+    assert state == {"evil.example"} and out["reset"] is True and out["version"] == f"blue:{out['seq']}" and out["group"] == "blue"
     assert out["policy"]["page_html"].startswith("<style>")
     await add(env, "second.example")
     await set_status(env, evil, "removed")
@@ -118,7 +118,7 @@ async def test_allowlist_and_policy_changes_force_a_resync(env):
     out = await sync(env)
     async with env.sessions() as db:
         db.add(WebAllowRule(group_id="blue", domain="second.example"))
-        await wb.mark_rules_changed(db)
+        await wb.mark_rules_changed(db, "blue")
         await db.commit()
     out2 = await sync(env, out["seq"])
     assert out2["reset"] is True and apply(set(), out2) == set()
@@ -203,7 +203,7 @@ async def test_paged_sync_matches_heartbeat_version(env):
     wb.invalidate()
     async with env.sessions() as db:
         agent = await db.get(wb.Agent, env.agents["blue"])
-        assert await wb.agent_version(db, agent) == str(last["seq"])
+        assert await wb.agent_version(db, agent) == f"blue:{last['seq']}"
 
 
 async def test_rule_change_mid_paging_restarts_sync(env):
@@ -216,7 +216,7 @@ async def test_rule_change_mid_paging_restarts_sync(env):
     delivered = next(iter(state))
     async with env.sessions() as db:
         db.add(WebAllowRule(group_id="blue", domain=delivered))
-        await wb.mark_rules_changed(db)
+        await wb.mark_rules_changed(db, "blue")
         await db.commit()
     since, rules, saw_reset = p1["seq"], p1["rules"], False
     while True:
@@ -276,8 +276,44 @@ def test_heartbeat_response_field_defaults_empty():
 async def test_seed_bumps_rules_marker_only_when_inserting(env):
     async with env.sessions() as db:
         await wb.seed_builtin_allowlist(db)
-        first = await wb._rules_seq(db)
+        first = await wb._rules_seq(db, "blue")
     assert first > 0
     async with env.sessions() as db:
         await wb.seed_builtin_allowlist(db)
-        assert await wb._rules_seq(db) == first
+        assert await wb._rules_seq(db, "blue") == first
+
+
+async def test_rules_change_resets_only_its_group(env):
+    await set_policy(env, "blue", enabled=True)
+    await set_policy(env, "red", enabled=True)
+    await add(env, "b.example")
+    await add(env, "r.example", group="red")
+    red = {"X-Agent-Token": "red-token"}
+    blue_out, red_out = await sync(env), await sync(env, headers=red)
+    async with env.sessions() as db:
+        db.add(WebAllowRule(group_id="red", domain="intranet.example"))
+        await wb.mark_rules_changed(db, "red")
+        await db.commit()
+    wb.invalidate()
+    blue2 = await sync(env, blue_out["seq"])
+    assert blue2["reset"] is False
+    red2 = await sync(env, red_out["seq"], headers=red)
+    assert red2["reset"] is True
+    async with env.sessions() as db:
+        await wb.mark_rules_changed(db, "*")
+        await db.commit()
+    wb.invalidate()
+    assert (await sync(env, blue2["seq"]))["reset"] is True
+
+
+async def test_sync_reports_group_and_opaque_version(env):
+    await set_policy(env, "red", enabled=True)
+    out = await sync(env, headers={"X-Agent-Token": "red-token"})
+    assert out["group"] == "red" and out["version"] == f"red:{out['seq']}"
+    await set_policy(env, "blue", enabled=True)
+    await add(env, "old.example", expires=datetime.now(timezone.utc) - timedelta(minutes=1))
+    wb.invalidate()
+    async with env.sessions() as db:
+        agent = await db.get(wb.Agent, env.agents["blue"])
+        version = await wb.agent_version(db, agent)
+    assert version.startswith("blue:") and version.endswith("+")

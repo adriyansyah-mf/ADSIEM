@@ -395,6 +395,15 @@ async def _migrate_audit_log_group() -> None:
         await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS group_id VARCHAR(100) NOT NULL DEFAULT 'default'"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_group_created ON audit_logs(group_id, created_at DESC)"))
 
+async def _migrate_web_block_indexes() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_web_block_entries_expiry ON web_block_entries (expires_at) "
+            "WHERE status = 'active' AND expires_at IS NOT NULL"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_web_block_entries_group_seq ON web_block_entries (group_id, seq)"))
+
 async def _migrate_agent_enrollment_columns() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -494,6 +503,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_evidence_health()
         await _migrate_agent_update_columns()
         await _migrate_malware_hashes_tlsh()
+        await _migrate_web_block_indexes()
         await _seed_web_allowlist()
         await _migrate_audit_log_group()
         await _migrate_agent_enrollment_columns()
