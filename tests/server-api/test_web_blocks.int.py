@@ -175,3 +175,109 @@ async def test_blocked_domains_respects_group_policy_and_allowlist(env):
         assert await wb.blocked_domains(db, "blue", ["evil.example", "red.example", "github.com"]) == {"evil.example"}
         assert await wb.blocked_domains(db, "red", ["red.example"]) == set()  # red has Web Protection off
         assert await wb.blocked_domains(db, None, ["evil.example", "red.example"]) == {"evil.example", "red.example"}
+
+
+async def page_through(env, group, limit):
+    state, since, cont, rules = set(), 0, False, 0
+    pages = []
+    while True:
+        async with env.sessions() as db:
+            out = await wb.delta(db, group, since, cont, limit=limit, rules=rules)
+        pages.append(out)
+        state = apply(state, out)
+        if not cont or out["reset"]:
+            rules = out["rules"]
+        if not out["more"]:
+            return state, out, pages
+        since, cont = out["seq"], True
+
+
+async def test_paged_sync_matches_heartbeat_version(env):
+    await set_policy(env, "blue", enabled=True)
+    names = {f"d{i}.example" for i in range(5)}
+    for n in names:
+        await add(env, n)
+    state, last, pages = await page_through(env, "blue", 2)
+    assert pages[0]["reset"] is True and pages[0]["more"] is True and len(pages) == 3
+    assert state == names
+    wb.invalidate()
+    async with env.sessions() as db:
+        agent = await db.get(wb.Agent, env.agents["blue"])
+        assert await wb.agent_version(db, agent) == str(last["seq"])
+
+
+async def test_rule_change_mid_paging_restarts_sync(env):
+    await set_policy(env, "blue", enabled=True)
+    for i in range(5):
+        await add(env, f"d{i}.example")
+    async with env.sessions() as db:
+        p1 = await wb.delta(db, "blue", 0, False, limit=2)
+    state = apply(set(), p1)
+    delivered = next(iter(state))
+    async with env.sessions() as db:
+        db.add(WebAllowRule(group_id="blue", domain=delivered))
+        await wb.mark_rules_changed(db)
+        await db.commit()
+    since, rules, saw_reset = p1["seq"], p1["rules"], False
+    while True:
+        async with env.sessions() as db:
+            out = await wb.delta(db, "blue", since, True, limit=2, rules=rules)
+        saw_reset = saw_reset or out["reset"]
+        state = apply(state, out)
+        if not out["more"]:
+            break
+        since, rules = out["seq"], out["rules"]
+    assert saw_reset and delivered not in state and len(state) == 4
+
+
+async def test_due_expiry_marks_version_plus_read_only(env):
+    await set_policy(env, "blue", enabled=True)
+    entry = await add(env, "old.example", expires=datetime.now(timezone.utc) - timedelta(minutes=1))
+    wb.invalidate()
+    async with env.sessions() as db:
+        agent = await db.get(wb.Agent, env.agents["blue"])
+        assert (await wb.agent_version(db, agent)).endswith("+")
+        assert not db.new and not db.dirty
+        assert (await db.get(WebBlockEntry, entry)).status == "active"
+    await sync(env)
+    wb.invalidate()
+    async with env.sessions() as db:
+        agent = await db.get(wb.Agent, env.agents["blue"])
+        assert not (await wb.agent_version(db, agent)).endswith("+")
+        assert (await db.get(WebBlockEntry, entry)).status == "removed"
+
+
+async def test_agent_version_is_cached_until_invalidated(env):
+    await set_policy(env, "blue", enabled=True)
+    async with env.sessions() as db:
+        agent = await db.get(wb.Agent, env.agents["blue"])
+        first = await wb.agent_version(db, agent)
+        await add(env, "new.example")
+        assert await wb.agent_version(db, agent) == first
+        wb.invalidate()
+        assert await wb.agent_version(db, agent) != first
+
+
+async def test_feed_turned_off_resets_without_feed_domains(env):
+    await set_policy(env, "blue", enabled=True, feed_enabled=True)
+    await add(env, "feed.example", group="*", source="urlhaus")
+    out = await sync(env)
+    assert apply(set(), out) == {"feed.example"}
+    await set_policy(env, "blue", feed_enabled=False)
+    out2 = await sync(env, out["seq"])
+    assert out2["reset"] is True and apply({"feed.example"}, out2) == set()
+
+
+def test_heartbeat_response_field_defaults_empty():
+    from app.schemas.schemas import HeartbeatResponse
+    assert HeartbeatResponse.model_fields["web_blocklist_version"].default == ""
+
+
+async def test_seed_bumps_rules_marker_only_when_inserting(env):
+    async with env.sessions() as db:
+        await wb.seed_builtin_allowlist(db)
+        first = await wb._rules_seq(db)
+    assert first > 0
+    async with env.sessions() as db:
+        await wb.seed_builtin_allowlist(db)
+        assert await wb._rules_seq(db) == first

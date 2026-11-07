@@ -67,11 +67,15 @@ async def _rules_seq(db) -> int:
 
 
 async def seed_builtin_allowlist(db) -> None:
+    inserted = 0
     for domain, include in BUILTIN_ALLOWLIST:
-        await db.execute(text(
+        result = await db.execute(text(
             "INSERT INTO web_allowlist (id, group_id, domain, include_subdomains, builtin, enabled, created_at) "
             "VALUES (gen_random_uuid(), :g, :d, :inc, true, true, now()) "
             "ON CONFLICT (group_id, domain) DO NOTHING"), {"g": FEED_GROUP, "d": domain, "inc": include})
+        inserted += result.rowcount or 0
+    if inserted:
+        await mark_rules_changed(db)
     await db.commit()
 
 
@@ -136,17 +140,24 @@ async def _active(db, groups: list[str], domains: list[str] | None) -> dict[str,
     return best
 
 
-async def delta(db, group_id: str, since: int, continuing: bool = False, limit: int = SYNC_PAGE) -> dict:
+async def delta(db, group_id: str, since: int, continuing: bool = False, limit: int = SYNC_PAGE,
+                rules: int = 0) -> dict:
     """Changes above `since` for one group. reset: the agent drops its set first
     (first sync, allowlist/policy change, or a seq it cannot have); changes are
     then the active set. With more, the agent continues from seq with continuing=true."""
     await expire(db)
     policy = await policy_for(db, group_id)
     if not policy["enabled"]:
-        return {"policy": _policy_out(policy), "seq": 0, "reset": True, "more": False, "changes": []}
+        return {"policy": _policy_out(policy), "seq": 0, "reset": True, "more": False, "rules": 0,
+                "changes": []}
     groups = _groups(group_id, policy)
     top = await _top_seq(db, group_id, policy)
-    reset = not continuing and (since <= 0 or since > top or await _rules_seq(db) > since or policy["seq"] > since)
+    marker = max(await _rules_seq(db), policy["seq"])
+    if continuing:
+        # a rule/policy change between pages invalidates what was already delivered
+        reset = rules != marker
+    else:
+        reset = since <= 0 or since > top or marker > since
     if reset:
         since = 0
     rows = (await db.execute(select(WebBlockEntry.domain, WebBlockEntry.seq).where(
@@ -163,7 +174,7 @@ async def delta(db, group_id: str, since: int, continuing: bool = False, limit: 
         elif not reset:
             changes.append({"domain": domain, "action": "remove"})
     return {"policy": _policy_out(policy), "seq": rows[-1].seq if more else top, "reset": reset, "more": more,
-            "changes": changes}
+            "rules": marker, "changes": changes}
 
 
 async def blocked_domains(db, group_id: str | None, domains) -> set[str]:

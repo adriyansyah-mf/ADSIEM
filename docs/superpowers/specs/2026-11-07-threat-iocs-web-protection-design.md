@@ -216,11 +216,11 @@ Limit 256 KB. The agent's CSP (B2) is the second layer.
 
 ### Agent sync endpoint
 
-`POST /api/ingest/web-blocklist {since}` (agent-token header `X-Agent-Token`,
+`POST /api/ingest/web-blocklist {since, continuing, rules}` (agent-token header `X-Agent-Token`,
 like the malware hash sync) returns:
 
 ```json
-{"seq": 123, "more": false,
+{"seq": 123, "more": false, "reset": false, "rules": 77,
  "policy": {"enabled": true, "page_html": "...", "contact": "...", "max_entries": 50000},
  "changes": [{"domain": "evil.example", "action": "block", "source": "urlhaus", "reason": "..."},
              {"domain": "old.example", "action": "remove"}]}
@@ -228,7 +228,9 @@ like the malware hash sync) returns:
 
 - `changes` covers global (`*`) entries and the agent's group, after its group
   allowlist; expired and `suppressed` entries are sent as `remove`.
-- Pages of 5000 changes; `more=true` continues.
+- Pages of 5000 changes; `more=true` continues with `continuing=true`. The agent
+  stores `rules` from the first page (and from any reset page) and echoes it on continuing pages; a changed
+  marker restarts the sync with `reset=true` (full active set from the start).
 - `since=0` returns the full active set. The server sends the whole allowed set;
   the agent applies `max_entries` and the manual > alert > feed priority (B2).
 - The heartbeat response carries `web_blocklist_version` (latest relevant seq
