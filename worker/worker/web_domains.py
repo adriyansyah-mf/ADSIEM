@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 MAX_DOMAIN = 253
 _LABEL = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
+_HEX_LABEL = re.compile(r"^0x[0-9a-f]+$")
 
 # (domain, include_subdomains). Shared hosting whose subdomains belong to one
 # tenant protects only the apex, so evil.weebly.com stays blockable.
@@ -53,6 +54,10 @@ def normalize(value: str) -> str:
     except ValueError:
         pass
     else:
+        raise DomainError("IP addresses cannot be web-blocked; block the IP on the firewall instead")
+    # Browsers resolve numeric shorthands (10.1, 1.2.3, 0x7f.0.0.1) as IPv4; no real TLD is numeric.
+    last_label = host.rsplit(".", 1)[-1]
+    if last_label.isdigit() or _HEX_LABEL.match(last_label):
         raise DomainError("IP addresses cannot be web-blocked; block the IP on the firewall instead")
     if "." not in host:
         raise DomainError("A domain needs at least two labels, like example.com")

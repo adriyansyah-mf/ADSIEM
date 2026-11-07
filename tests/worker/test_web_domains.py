@@ -14,6 +14,8 @@ from worker.web_domains import BUILTIN_ALLOWLIST, DomainError, allow_match, norm
     ("bücher.example", "xn--bcher-kva.example"),
     ("http://bücher.example/a", "xn--bcher-kva.example"),
     ("  sub.evil.example  ", "sub.evil.example"),
+    ("a1.example", "a1.example"),
+    ("123.example", "123.example"),
 ])
 def test_normalize(value, expected):
     assert normalize(value) == expected
@@ -22,6 +24,7 @@ def test_normalize(value, expected):
 @pytest.mark.parametrize("value", [
     "", "   ", "localhost", "45.33.32.156", "http://45.33.32.156/a", "[2001:4860::8888]",
     "http://[2001:4860::8888]/", "-bad.example", "a..example", "x" * 64 + ".example", "ex ample.com", "http://",
+    "10.1", "1.2.3", "0x7f.0.0.1", "http://10.1/x",
 ])
 def test_normalize_rejects(value):
     with pytest.raises(DomainError):
