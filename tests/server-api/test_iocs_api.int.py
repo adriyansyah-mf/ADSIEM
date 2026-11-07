@@ -35,7 +35,10 @@ async def iocs_api(evidence_api, monkeypatch):
 
 
 BUCKETS = {"aggregations": {
-    "types": {"buckets": [{"key": "url", "doc_count": 3}, {"key": "ip", "doc_count": 5}]},
+    "types": {"buckets": [
+        {"key": "url", "doc_count": 3, "distinct": {"value": 1}},
+        {"key": "ip", "doc_count": 5, "distinct": {"value": 2}},
+    ]},
     "matched": {"count": {"value": 1}, "iocs": {"buckets": [{
         "key": "url:http://evil.example/a:b", "alerts": {"value": 2}, "hosts": {"value": 1},
         "first_seen": {"value_as_string": "2026-11-01T00:00:00.000Z"},
@@ -56,7 +59,8 @@ async def test_list_is_scoped_to_the_callers_group_and_parsed(iocs_api):
     assert {"term": {"group_id": "blue"}} in _filters(body)
     assert {"wildcard": {"value": {"value": "*evil*", "case_insensitive": True}}} in _filters(body)
     assert body["aggs"]["matched"]["filter"] == {"term": {"type": "url"}}
-    assert r.json() == {"total": 1, "type_counts": {"url": 3, "ip": 5}, "items": [{
+    assert body["aggs"]["types"]["aggs"]["distinct"] == {"cardinality": {"field": "ioc_key"}}
+    assert r.json() == {"total": 1, "type_counts": {"url": 1, "ip": 2}, "items": [{
         "type": "url", "value": "http://evil.example/a:b", "alerts": 2, "hosts": 1,
         "first_seen": "2026-11-01T00:00:00.000Z", "last_seen": "2026-11-02T00:00:00.000Z",
         "max_severity": "critical", "blocked": None}]}

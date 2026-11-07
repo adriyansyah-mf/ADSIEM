@@ -29,7 +29,7 @@ function huntType(type: IocType): 'ip' | 'hash' | null {
 }
 
 function Detail({ ioc, onClose }: { ioc: Ioc; onClose: () => void }) {
-  const { data, isLoading } = useIocAlerts(ioc)
+  const { data, isLoading, isError } = useIocAlerts(ioc)
   const hunt = useStartHunt()
   const addHash = useAddMalwareHashes()
   const navigate = useNavigate()
@@ -65,8 +65,11 @@ function Detail({ ioc, onClose }: { ioc: Ioc; onClose: () => void }) {
           </button>
         )}
       </div>
+      {hunt.isError && <p className="text-xs text-destructive">Hunt could not be started.</p>}
+      {addHash.isError && <p className="text-xs text-destructive">Could not add the hash.</p>}
       <div className="text-xs font-semibold">Alerts with this indicator</div>
-      {isLoading ? <Loader2 size={14} className="animate-spin" /> : !data?.items.length ? (
+      {isError ? <p className="text-xs text-destructive">Could not load alerts.</p> :
+        isLoading ? <Loader2 size={14} className="animate-spin" /> : !data?.items.length ? (
         <p className="text-xs text-muted-foreground">No alerts visible to you.</p>
       ) : (
         <ul className="space-y-1">
@@ -90,10 +93,12 @@ export default function ThreatIocsPage() {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Ioc | null>(null)
   const [copied, setCopied] = useState('')
-  const { data, isLoading, isFetching } = useIocs(filter)
+  const { data, isLoading, isError, isFetching } = useIocs(filter)
   const update = (patch: Partial<IocFilter>) => setFilter(f => ({ ...f, offset: 0, ...patch }))
   const counts = data?.type_counts ?? {}
   const all = Object.values(counts).reduce((sum, n) => sum + (n ?? 0), 0)
+
+  const isSelected = (ioc: Ioc) => selected?.type === ioc.type && selected.value === ioc.value
 
   const copy = (value: string) => {
     navigator.clipboard?.writeText(value)
@@ -141,7 +146,9 @@ export default function ThreatIocsPage() {
 
       <div className="flex flex-col lg:flex-row gap-4 items-start">
         <div className="flex-1 min-w-0 space-y-2">
-          {isLoading ? <Loader2 size={16} className="animate-spin" /> : !data?.items.length ? (
+          {isError ? (
+            <p className="text-sm text-destructive">Could not load indicators.</p>
+          ) : isLoading ? <Loader2 size={16} className="animate-spin" /> : !data?.items.length ? (
             <p className="text-sm text-muted-foreground">No indicators in this window.</p>
           ) : (
             <div className="rounded-lg border border-border overflow-x-auto">
@@ -152,16 +159,20 @@ export default function ThreatIocsPage() {
                     <th className="text-right px-3 py-2">Alerts</th>
                     <th className="text-right px-3 py-2">Hosts</th>
                     <th className="text-left px-3 py-2">Severity</th>
+                    <th className="text-left px-3 py-2">First seen</th>
                     <th className="text-left px-3 py-2">Last seen</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.items.map(ioc => (
-                    <tr key={`${ioc.type}:${ioc.value}`} onClick={() => setSelected(ioc)}
-                      className={`border-t border-border cursor-pointer hover:bg-muted/40 ${selected?.value === ioc.value && selected.type === ioc.type ? 'bg-muted/60' : ''}`}>
+                    <tr key={`${ioc.type}:${ioc.value}`} tabIndex={0} aria-selected={isSelected(ioc)}
+                      onClick={() => setSelected(ioc)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(ioc) } }}
+                      className={`border-t border-border cursor-pointer hover:bg-muted/40 ${isSelected(ioc) ? 'bg-muted/60' : ''}`}>
                       <td className="px-3 py-2 max-w-md">
                         <div className="text-xs text-muted-foreground">{TYPE_LABEL[ioc.type]}</div>
-                        <button onClick={e => { e.stopPropagation(); copy(ioc.value) }} title={ioc.value}
+                        <button onClick={e => { e.stopPropagation(); copy(ioc.value) }}
+                          onKeyDown={e => e.stopPropagation()} title={ioc.value}
                           className="font-mono text-xs inline-flex items-center gap-1 hover:underline max-w-full">
                           <span className="truncate">{ioc.value}</span>
                           {copied === ioc.value ? <Check size={11} className="text-primary shrink-0" /> : <Copy size={11} className="opacity-50 shrink-0" />}
@@ -170,6 +181,7 @@ export default function ThreatIocsPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{ioc.alerts}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{ioc.hosts}</td>
                       <td className={`px-3 py-2 text-xs ${SEVERITY_CLASS[ioc.max_severity ?? ''] ?? ''}`}>{ioc.max_severity ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{ago(ioc.first_seen)}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{ago(ioc.last_seen)}</td>
                     </tr>
                   ))}
@@ -192,7 +204,7 @@ export default function ThreatIocsPage() {
             <p className="text-xs text-muted-foreground">Showing the top 1,000 indicators of this window. Search or narrow the window to see others.</p>
           )}
         </div>
-        {selected && <Detail ioc={selected} onClose={() => setSelected(null)} />}
+        {selected && <Detail key={`${selected.type}:${selected.value}`} ioc={selected} onClose={() => setSelected(null)} />}
       </div>
     </div>
   )

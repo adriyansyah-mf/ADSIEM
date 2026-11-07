@@ -60,7 +60,8 @@ async def list_iocs(
         "size": 0,
         "query": {"bool": {"filter": _filters(group, q, since, until)}},
         "aggs": {
-            "types": {"terms": {"field": "type", "size": 10}},
+            "types": {"terms": {"field": "type", "size": 10},
+                      "aggs": {"distinct": {"cardinality": {"field": "ioc_key"}}}},
             "matched": {
                 "filter": {"term": {"type": type}} if type else {"match_all": {}},
                 "aggs": {
@@ -95,7 +96,7 @@ async def list_iocs(
         })
     return {
         "total": min(int((matched.get("count") or {}).get("value", 0)), MAX_BUCKETS),
-        "type_counts": {b["key"]: b["doc_count"] for b in (aggs.get("types") or {}).get("buckets", [])},
+        "type_counts": {b["key"]: int(b["distinct"]["value"]) for b in (aggs.get("types") or {}).get("buckets", [])},
         "items": items,
     }
 
