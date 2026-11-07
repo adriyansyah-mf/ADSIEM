@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 import structlog
 from sqlalchemy import delete
 
+from worker import alert_iocs
 from worker.database import AsyncSessionLocal
 from worker.models import Alert
 from worker.settings_cache import get_setting
@@ -23,6 +24,24 @@ async def _purge_logs(days: int) -> int:
     return await es_delete_by_query({"range": {"created_at": {"lt": cutoff.isoformat()}}})
 
 
+async def _purge_alerts(days: int) -> int:
+    """Closed/resolved alerts older than `days`, with their alert_iocs documents."""
+    if days <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            delete(Alert)
+            .where(Alert.status.in_(["closed", "resolved"]))
+            .where(Alert.created_at < cutoff)
+            .returning(Alert.id)
+        )
+        deleted = [str(i) for i in result.scalars().all()]
+        await db.commit()
+    await alert_iocs.delete_for_alerts(deleted)
+    return len(deleted)
+
+
 async def maintenance_loop() -> None:
     await asyncio.sleep(300)  # wait 5 min after startup before first run
     while True:
@@ -38,18 +57,7 @@ async def maintenance_loop() -> None:
             n_evt = await _purge_logs(log_days)
 
             # only delete closed/resolved alerts older than threshold
-            if alrt_days > 0:
-                cutoff = datetime.now(timezone.utc) - timedelta(days=alrt_days)
-                async with AsyncSessionLocal() as db:
-                    result = await db.execute(
-                        delete(Alert)
-                        .where(Alert.status.in_(["closed", "resolved"]))
-                        .where(Alert.created_at < cutoff)
-                    )
-                    await db.commit()
-                    n_alrt = result.rowcount or 0
-            else:
-                n_alrt = 0
+            n_alrt = await _purge_alerts(alrt_days)
 
             log.info("maintenance_done",
                      logs_deleted=n_evt,

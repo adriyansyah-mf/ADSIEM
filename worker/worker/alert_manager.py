@@ -173,6 +173,7 @@ async def create_alert(
 
         # capture id before commit so it's safe to use after session closes
         alert_id: uuid.UUID = alert.id
+        created_at = alert.created_at or datetime.now(timezone.utc)
 
         payload = {
             "alert_id": str(alert_id),
@@ -200,6 +201,14 @@ async def create_alert(
             ))
 
         await db.commit()
+
+    from worker import alert_iocs
+    await alert_iocs.index_new_alert(
+        alert_iocs.AlertMeta(alert_id=str(alert_id), group_id=group_id, severity=rule_match["level"],
+                             hostname=hostname, agent_id=str(agent_id) if agent_id else None,
+                             rule_title=rule_match["title"], created_at=created_at),
+        source_ip, rule_match.get("matched_fields"),
+    )
 
     # Publish to Redis for WebSocket broadcast (best-effort)
     try:
