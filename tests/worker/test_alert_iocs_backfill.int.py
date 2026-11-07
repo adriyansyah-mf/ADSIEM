@@ -71,6 +71,7 @@ async def test_backfill_indexes_old_alerts_once(sessions, monkeypatch):
 
     async def index_docs(batch):
         docs.extend(batch)
+        return 0
 
     async def get_setting(key, default=""):
         return default
@@ -87,3 +88,45 @@ async def test_backfill_indexes_old_alerts_once(sessions, monkeypatch):
         (str(alerts[2].id), "ip", "45.33.32.3", "alert"),
     }
     assert await alert_iocs.backfill(batch=2) == 0
+
+
+async def test_backfill_not_marked_done_when_indexing_fails(sessions, monkeypatch):
+    from worker import alert_iocs, database, redis_client, settings_cache
+    async with sessions() as db:
+        db.add_all([Alert(title=f"a{i}", severity="high", group_id="blue", source_ip=f"45.33.32.{i + 1}")
+                    for i in range(3)])
+        await db.commit()
+
+    flags, docs = {}, []
+
+    async def get(key):
+        return flags.get(key)
+
+    async def set_(key, value):
+        flags[key] = value
+
+    async def get_redis():
+        return SimpleNamespace(get=get, set=set_)
+
+    async def failing(batch):
+        return len(batch)
+
+    async def succeeding(batch):
+        docs.extend(batch)
+        return 0
+
+    async def get_setting(key, default=""):
+        return default
+
+    monkeypatch.setattr(database, "AsyncSessionLocal", sessions)
+    monkeypatch.setattr(redis_client, "get_redis", get_redis)
+    monkeypatch.setattr(settings_cache, "get_setting", get_setting)
+
+    monkeypatch.setattr(alert_iocs, "index_docs", failing)
+    assert await alert_iocs.backfill(batch=2) == 0
+    assert flags == {}
+
+    monkeypatch.setattr(alert_iocs, "index_docs", succeeding)
+    assert await alert_iocs.backfill(batch=2) == 3
+    assert len(docs) == 3
+    assert flags == {alert_iocs.BACKFILL_FLAG: "1"}

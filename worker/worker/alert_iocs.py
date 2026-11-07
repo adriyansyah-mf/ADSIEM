@@ -164,9 +164,10 @@ async def ensure_index() -> None:
         log.error("alert_iocs_index_create_failed", error=str(exc))
 
 
-async def index_docs(docs: list[tuple[str, dict]]) -> None:
+async def index_docs(docs: list[tuple[str, dict]]) -> int:
+    """Bulk-index documents. Returns how many failed (0 on success); never raises."""
     if not docs:
-        return
+        return 0
     lines = []
     for _id, doc in docs:
         lines.append(json.dumps({"index": {"_index": INDEX, "_id": _id}}))
@@ -180,8 +181,11 @@ async def index_docs(docs: list[tuple[str, dict]]) -> None:
         if result.get("errors"):
             failed = [i["index"]["error"] for i in result.get("items", []) if i.get("index", {}).get("error")]
             log.warning("alert_iocs_index_partial", failed=len(failed), first=str(failed[:1])[:300])
+            return len(failed)
+        return 0
     except Exception as exc:
         log.warning("alert_iocs_index_failed", docs=len(docs), error=str(exc))
+        return len(docs)
 
 
 async def delete_for_alerts(alert_ids: list[str]) -> None:
@@ -266,7 +270,7 @@ async def backfill(batch: int = 500) -> int:
     if await redis.get(BACKFILL_FLAG):
         return 0
     exclusions = await _exclusions()
-    total, cursor = 0, None
+    total, failed, cursor = 0, 0, None
     while True:
         async with database.AsyncSessionLocal() as db:
             query = select(Alert).order_by(Alert.created_at, Alert.id).limit(batch)
@@ -286,9 +290,13 @@ async def backfill(batch: int = 500) -> int:
         for alert in alerts:
             docs += collect(meta_of(alert), alert.source_ip, None, indicators_to_extracted(indicators[alert.id]),
                             exclusions, extracted_origin="alert")
-        await index_docs(docs)
-        total += len(docs)
+        lost = await index_docs(docs)
+        failed += lost
+        total += len(docs) - lost
         cursor = (alerts[-1].created_at, alerts[-1].id)
+    if failed:
+        log.error("alert_iocs_backfill_incomplete", failed=failed, written=total)
+        return total
     await redis.set(BACKFILL_FLAG, "1")
     log.info("alert_iocs_backfilled", docs=total)
     return total

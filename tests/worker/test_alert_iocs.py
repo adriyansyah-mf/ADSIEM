@@ -131,6 +131,7 @@ def captured(monkeypatch):
 
     async def index_docs(batch):
         docs.extend(batch)
+        return 0
 
     async def get_setting(key, default=""):
         return "151.101.0.0/16" if key == "case_ioc_exclusions" else default
@@ -278,3 +279,22 @@ async def test_retention_deletes_indicator_docs_of_purged_alerts(monkeypatch):
     assert await maintenance._purge_alerts(180) == 2
     assert deleted == [str(i) for i in ids]
     assert await maintenance._purge_alerts(0) == 0
+
+
+async def test_index_docs_returns_zero_on_success(es):
+    assert await alert_iocs.index_docs(alert_iocs.collect(META, "45.33.32.156", {}, [], EXCL)) == 0
+    assert await alert_iocs.index_docs([]) == 0
+
+
+async def test_index_docs_returns_all_failed_on_http_error(monkeypatch):
+    _fake_es(monkeypatch, lambda request: httpx.Response(500, text="boom"))
+    docs = alert_iocs.collect(META, "45.33.32.156", {}, [{"type": "domain", "value": "c2.example"}], EXCL)
+    assert len(docs) == 2
+    assert await alert_iocs.index_docs(docs) == 2
+
+
+async def test_index_docs_counts_failed_items(monkeypatch):
+    items = [{"index": {"status": 201}}, {"index": {"status": 400, "error": {"type": "bad"}}}]
+    _fake_es(monkeypatch, lambda request: httpx.Response(200, json={"errors": True, "items": items}))
+    docs = alert_iocs.collect(META, "45.33.32.156", {}, [{"type": "domain", "value": "c2.example"}], EXCL)
+    assert await alert_iocs.index_docs(docs) == 1
