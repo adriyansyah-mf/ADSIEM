@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Check, Copy, Crosshair, Loader2, Search, ShieldX, X } from 'lucide-react'
+import { Ban, Check, Copy, Crosshair, Loader2, Search, ShieldX, X } from 'lucide-react'
 import { IOC_PAGE, IOC_TYPES, type Ioc, type IocFilter, type IocType, useIocAlerts, useIocs } from '@/hooks/useIocs'
 import { useAddMalwareHashes } from '@/hooks/useMalwareHashes'
 import { useStartHunt } from '@/hooks/useHunts'
+import { apiError, useBlockWeb } from '@/hooks/useWebProtection'
 
 const TYPE_LABEL: Record<IocType, string> = {
   ip: 'IP', domain: 'Domain', url: 'URL', sha256: 'SHA-256', sha1: 'SHA-1', md5: 'MD5', email: 'Email',
@@ -32,6 +33,7 @@ function Detail({ ioc, onClose }: { ioc: Ioc; onClose: () => void }) {
   const { data, isLoading, isError } = useIocAlerts(ioc)
   const hunt = useStartHunt()
   const addHash = useAddMalwareHashes()
+  const block = useBlockWeb()
   const navigate = useNavigate()
   const kind = huntType(ioc.type)
   return (
@@ -64,9 +66,19 @@ function Detail({ ioc, onClose }: { ioc: Ioc; onClose: () => void }) {
             <ShieldX size={12} /> {addHash.isSuccess ? 'Added to malware hashes' : 'Add to malware hashes'}
           </button>
         )}
+        {(ioc.type === 'domain' || ioc.type === 'url') && (
+          ioc.blocked ? <span className="text-xs px-2 py-1 rounded border border-border text-muted-foreground">Blocked on endpoints</span> : (
+            <button disabled={block.isPending || block.isSuccess}
+              onClick={() => block.mutate({ value: ioc.value, reason: `Threat IoC seen in ${ioc.alerts} alert(s)` })}
+              className="text-xs px-2 py-1 rounded border border-border hover:bg-muted inline-flex items-center gap-1 disabled:opacity-40">
+              <Ban size={12} /> {block.isSuccess ? 'Blocked' : 'Block web'}
+            </button>
+          )
+        )}
       </div>
       {hunt.isError && <p className="text-xs text-destructive">Hunt could not be started.</p>}
       {addHash.isError && <p className="text-xs text-destructive">Could not add the hash.</p>}
+      {block.isError && <p className="text-xs text-destructive">{apiError(block.error, 'Could not block.')}</p>}
       <div className="text-xs font-semibold">Alerts with this indicator</div>
       {isError ? <p className="text-xs text-destructive">Could not load alerts.</p> :
         isLoading ? <Loader2 size={14} className="animate-spin" /> : !data?.items.length ? (
@@ -159,6 +171,7 @@ export default function ThreatIocsPage() {
                     <th className="text-right px-3 py-2">Alerts</th>
                     <th className="text-right px-3 py-2">Hosts</th>
                     <th className="text-left px-3 py-2">Severity</th>
+                    <th className="text-left px-3 py-2">Status</th>
                     <th className="text-left px-3 py-2">First seen</th>
                     <th className="text-left px-3 py-2">Last seen</th>
                   </tr>
@@ -181,6 +194,7 @@ export default function ThreatIocsPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{ioc.alerts}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{ioc.hosts}</td>
                       <td className={`px-3 py-2 text-xs ${SEVERITY_CLASS[ioc.max_severity ?? ''] ?? ''}`}>{ioc.max_severity ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs">{ioc.blocked ? 'Blocked' : ioc.blocked === false ? 'Not blocked' : '—'}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{ago(ioc.first_seen)}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{ago(ioc.last_seen)}</td>
                     </tr>
