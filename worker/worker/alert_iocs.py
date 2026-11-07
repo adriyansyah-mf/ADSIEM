@@ -195,3 +195,43 @@ async def delete_for_alerts(alert_ids: list[str]) -> None:
                 resp.raise_for_status()
         except Exception as exc:
             log.warning("alert_iocs_delete_failed", alerts=len(batch), error=str(exc))
+
+
+async def _exclusions() -> tuple[list, set[str]]:
+    from worker import settings_cache
+    return parse_exclusions(await settings_cache.get_setting("case_ioc_exclusions", ""))
+
+
+def meta_of(alert, verdict: str | None = None) -> AlertMeta:
+    """AlertMeta from an Alert row (worker.models.Alert or anything shaped like it)."""
+    return AlertMeta(alert_id=str(alert.id), group_id=alert.group_id, severity=alert.severity,
+                     hostname=alert.hostname, agent_id=str(alert.agent_id) if alert.agent_id else None,
+                     rule_title=alert.title, created_at=alert.created_at,
+                     ai_verdict=verdict if verdict is not None else alert.ai_verdict)
+
+
+async def index_new_alert(meta: AlertMeta, source_ip: str | None, fields: dict | None) -> None:
+    """Every alert, whether or not AI triage runs for it (ai_min_severity gates triage)."""
+    try:
+        docs = collect(meta, source_ip, fields, None, await _exclusions())
+    except Exception:
+        log.exception("alert_iocs_collect_failed", alert_id=meta.alert_id)
+        return
+    await index_docs(docs)
+
+
+async def index_triaged_alert(alert_id: str, fields: dict | None, extracted: list | None, verdict: str) -> None:
+    """Rewrite the alert's documents with TI-extracted indicators and the AI verdict."""
+    import uuid
+    from worker import database
+    from worker.models import Alert
+    try:
+        async with database.AsyncSessionLocal() as db:
+            alert = await db.get(Alert, uuid.UUID(str(alert_id)))
+        if alert is None:
+            return
+        docs = collect(meta_of(alert, verdict), alert.source_ip, fields, extracted, await _exclusions())
+    except Exception:
+        log.exception("alert_iocs_collect_failed", alert_id=str(alert_id))
+        return
+    await index_docs(docs)

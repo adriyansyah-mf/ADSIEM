@@ -65,12 +65,15 @@ The mapping is created idempotently at worker start, like `ensure_index()` for
 
 ### Writing
 
-The triage graph (`worker/worker/graph/triage_graph.py`) already computes
-indicators where it calls `case_grouping.ioc_keys`. A new function
-`alert_iocs.collect(alert, decoded_fields, extracted)` returns the documents.
-It differs from `ioc_keys` in one way: it records domains and URLs for **all**
-alert families, not only outbound ones. The existing exclusions still apply:
-private/excluded networks and owned domains are dropped.
+- `alert_manager.create_alert` indexes every new alert's indicators (`origin`
+  `alert`/`event`). This must happen there: AI triage only runs for alerts at or
+  above `ai_min_severity`.
+- After AI triage, `persist_node` rewrites the alert's documents (same ids) with
+  TI-extracted indicators (`origin=ti`) and `ai_verdict`.
+
+`alert_iocs.collect` differs from `ioc_keys` in one way: it records domains and
+URLs for **all** alert families, not only outbound ones. The existing exclusions
+still apply: private/excluded networks and owned domains are dropped.
 
 Documents are written with `bulk_index`. An Elasticsearch failure is logged
 (`alert_iocs_index_failed`) and never fails triage or loses the alert.

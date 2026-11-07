@@ -31,6 +31,7 @@ from worker.knowledge import knowledge_loop
 from worker.malware_feed import malware_feed_loop
 from worker.soar.engine import soar_loop
 from worker.es_client import ensure_index as ensure_es_index
+from worker.alert_iocs import ensure_index as ensure_alert_iocs_index
 
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
@@ -149,6 +150,7 @@ async def main():
 
     await seed_if_empty()
     await ensure_es_index()
+    await ensure_alert_iocs_index()
 
     async with AsyncSessionLocal() as db:
         dec_engine, sig_engine = await load_engines(db)

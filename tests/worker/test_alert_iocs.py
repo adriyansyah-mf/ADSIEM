@@ -117,3 +117,122 @@ async def test_elasticsearch_errors_are_logged_not_raised(monkeypatch):
     await alert_iocs.index_docs(alert_iocs.collect(META, "45.33.32.156", {}, [], EXCL))
     await alert_iocs.delete_for_alerts(["a1"])
     await alert_iocs.ensure_index()
+
+
+import asyncio
+import json as _json
+from types import SimpleNamespace
+from uuid import UUID
+
+
+@pytest.fixture
+def captured(monkeypatch):
+    docs = []
+
+    async def index_docs(batch):
+        docs.extend(batch)
+
+    async def get_setting(key, default=""):
+        return "151.101.0.0/16" if key == "case_ioc_exclusions" else default
+
+    from worker import settings_cache
+    monkeypatch.setattr(alert_iocs, "index_docs", index_docs)
+    monkeypatch.setattr(settings_cache, "get_setting", get_setting)
+    return docs
+
+
+async def test_new_alert_indexes_alert_and_event_indicators(captured):
+    await alert_iocs.index_new_alert(META, "45.33.32.156", {"destination.ip": "151.101.1.69", "url.full": "http://x.example/a"})
+    assert pairs(captured) == {("ip", "45.33.32.156", "alert"), ("url", "http://x.example/a", "event")}
+
+
+async def test_triaged_alert_is_rewritten_with_ti_indicators_and_verdict(captured, monkeypatch):
+    alert_id = "11111111-1111-1111-1111-111111111111"
+    row = SimpleNamespace(id=UUID(alert_id), group_id="blue", severity="critical", hostname="h1", agent_id=None,
+                          title="Beacon", created_at=datetime(2026, 11, 7, tzinfo=timezone.utc),
+                          source_ip="45.33.32.156", ai_verdict=None)
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, model, key):
+            return row if key == UUID(alert_id) else None
+
+    from worker import database
+    monkeypatch.setattr(database, "AsyncSessionLocal", Session)
+    await alert_iocs.index_triaged_alert(alert_id, {}, [{"type": "domain", "value": "c2.example"}], "escalate")
+    assert pairs(captured) == {("ip", "45.33.32.156", "alert"), ("domain", "c2.example", "ti")}
+    assert {d["ai_verdict"] for _, d in captured} == {"escalate"}
+    assert {d["severity_rank"] for _, d in captured} == {4}
+
+
+async def test_triaged_unknown_alert_indexes_nothing(captured, monkeypatch):
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, model, key):
+            return None
+
+    from worker import database
+    monkeypatch.setattr(database, "AsyncSessionLocal", Session)
+    await alert_iocs.index_triaged_alert("11111111-1111-1111-1111-111111111111", {}, [], "monitor")
+    assert captured == []
+
+
+async def test_persist_node_hands_triage_result_to_index_dependency(monkeypatch):
+    from worker.graph import triage_graph
+    calls = []
+
+    class FakeLLM:
+        def __init__(self, **kwargs):
+            pass
+
+        async def ainvoke(self, messages):
+            return SimpleNamespace(content=_json.dumps({
+                "verdict": "monitor", "confidence": 0.8, "triage_notes": "n", "mitre_techniques": [],
+                "immediate_actions": [], "false_positive_reason": None, "threat_type": "other",
+                "search_queries": [],
+            }))
+
+    class Enrichment:
+        provider_bullets, overall_risk, triage_hints = [], 0.0, []
+        iocs = [{"type": "domain", "value": "c2.example"}]
+
+    async def noop(*a, **k):
+        return None
+
+    async def empty(*a, **k):
+        return []
+
+    async def enrich(text_blob, title):
+        return Enrichment()
+
+    async def get_setting(key, default=""):
+        return default
+
+    async def index_alert_iocs(alert_id, fields, extracted, verdict):
+        calls.append((alert_id, fields, extracted, verdict))
+
+    monkeypatch.setattr(triage_graph, "NineRouterChatModel", FakeLLM)
+    deps = {
+        "enrich": enrich, "escalate_severity": lambda base, risk: base, "suggest_mitre": lambda text: [],
+        "retrieve_similar_cases": empty, "retrieve_sop_context": empty, "retrieve_feedback_context": empty,
+        "enqueue_hunt": noop, "get_setting": get_setting, "set_alert_verdict": noop, "write_alert_note": noop,
+        "tag_alert_with_mitre": noop, "run_soar_playbooks": noop, "update_alert_status": noop,
+        "run_searches": noop, "index_alert_iocs": index_alert_iocs,
+    }
+    graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
+    state = {"alert_id": "11111111-1111-1111-1111-111111111111", "title": "Beacon", "severity": "medium",
+             "source_ip": "45.33.32.156", "hostname": "h1", "decoded_fields": {"url.full": "http://x.example/a"},
+             "group_id": "blue"}
+    await graph.ainvoke(state)
+    await asyncio.sleep(0)
+    assert calls == [(state["alert_id"], state["decoded_fields"], Enrichment.iocs, "monitor")]

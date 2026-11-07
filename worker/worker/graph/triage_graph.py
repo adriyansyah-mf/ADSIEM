@@ -264,6 +264,10 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
 
         if alert_id:
             asyncio.ensure_future(deps["set_alert_verdict"](alert_id, verdict))
+        if alert_id and "index_alert_iocs" in deps:
+            asyncio.ensure_future(deps["index_alert_iocs"](
+                alert_id, state.get("decoded_fields"), getattr(state.get("enrichment"), "iocs", None), verdict,
+            ))
 
         actions_str = ("\n\n**Immediate Actions:**\n" + "\n".join(f"- {a}" for a in actions)) if actions else ""
         note = (
