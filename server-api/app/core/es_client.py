@@ -116,3 +116,15 @@ async def index_stats() -> dict:
         if row.get("index") == LOGS_INDEX:
             return {"docs": int(row.get("docs.count", 0) or 0), "size": row.get("store.size", "0b")}
     return {"docs": 0, "size": "0b"}
+
+
+IOCS_INDEX = "alert_iocs"
+
+
+async def search_iocs(body: dict) -> dict:
+    """Raw search on alert_iocs (written by worker/worker/alert_iocs.py). {} before the index exists."""
+    resp = await _get_client().post(f"/{IOCS_INDEX}/_search", json=body)
+    if resp.status_code == 404:
+        return {}
+    resp.raise_for_status()
+    return resp.json()

@@ -16,6 +16,7 @@ from app.api.routes.cases import router as cases_router
 from app.api.routes.investigations import router as investigations_router
 from app.api.routes.yara_drafts import router as yara_drafts_router
 from app.api.routes.evidence import router as evidence_router
+from app.api.routes.iocs import router as iocs_router
 from app.api.routes.agent_updates import router as agent_updates_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.hygiene import router as hygiene_router
@@ -543,6 +544,7 @@ for router in [
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, yara_drafts_router, knowledge_router, evidence_router,
+    iocs_router,
     prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, policies_router, policies_agent_router, agent_updates_router,
 ]:
     app.include_router(router)

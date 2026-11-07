@@ -89,7 +89,7 @@ Documents are written with `bulk_index`. An Elasticsearch failure is logged
 
 ### API (`server-api/app/api/routes/iocs.py`, permission `alerts:read`)
 
-- `GET /api/iocs?type=&q=&from=&to=&sort=last_seen|alerts&limit=&offset=`
+- `GET /api/iocs?type=&q=&since=&until=&sort=last_seen|alerts&limit=&offset=`
   - Elasticsearch `terms` aggregation on `ioc_key` (size 1000), sub-aggregations
     `cardinality(alert_id)`, `cardinality(hostname)`, `min/max(created_at)`,
     `max(severity_rank)`, then `bucket_sort` for the page.
@@ -99,7 +99,7 @@ Documents are written with `bulk_index`. An Elasticsearch failure is logged
     max_severity, blocked` (`blocked` filled from `web_block_entries` for the
     page's domains once B1 exists; `null` before).
   - `type_counts` from a `terms` aggregation on `type`.
-- `GET /api/iocs/{type}/{value}/alerts?limit=&offset=`: alert ids from
+- `GET /api/iocs/alerts?type=&value=&limit=&offset=` (query parameters: URL values contain `/`): alert ids from
   Elasticsearch, alert rows loaded from Postgres with the group filter.
 
 Limit: the list covers the top 1000 indicators of the chosen window and sort.
