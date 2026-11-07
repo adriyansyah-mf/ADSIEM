@@ -123,3 +123,21 @@ def test_rendered_values_cannot_become_urls_or_css():
 
 def test_inline_style_is_kept_when_harmless():
     assert 'style="color:red"' in wp.sanitize('<p style="color:red">x</p>')
+
+
+@pytest.mark.parametrize("scheme", ["ms-msdt:/id", "search-ms:query=a", "file:///c:/x", "ftp://x.example/f"])
+def test_scheme_revealed_by_placeholder_removal_is_dropped(scheme):
+    out = wp.sanitize(f'<a href="{{{{x}}}}{scheme}">x</a>')
+    assert "href=" not in out and scheme not in out
+
+
+@pytest.mark.parametrize("href", ["https://example.org/a?b=c:d", "http://example.org", "/relative:path",
+                                  "#anchor", "mailto:x@y.example", "page.html?u=a:b"])
+def test_ordinary_hrefs_are_kept(href):
+    assert f'href="{href}"' in wp.sanitize(f'<a href="{href}">x</a>')
+
+
+def test_unclosed_url_is_neutralised():
+    assert "url(http" not in wp.sanitize('<p style="background:url(http://x.example/i">x</p>')
+    assert "url(http" not in wp.sanitize('<style>a{background:url(http://x.example/i</style>'
+                                         '<style>)}</style>')

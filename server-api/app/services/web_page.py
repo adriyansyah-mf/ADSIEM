@@ -33,7 +33,7 @@ small{color:#94a3b8}
 
 _STYLE = re.compile(r"<style\b[^>]*>(.*?)</style\s*>", re.I | re.S)
 _IMPORT = re.compile(r"@import[^;]*;?", re.I)
-_CSS_URL = re.compile(r"url\(\s*(?!['\"]?data:image/)[^)]*\)", re.I)
+_CSS_URL = re.compile(r"url\(\s*(?!['\"]?data:image/)[^)]*(?:\)|\Z)", re.I)
 _COMMENT = re.compile(r"/\*.*?(?:\*/|$)", re.S)
 _IMAGE_SET = re.compile(r"(?:-webkit-)?image-set\s*\([^)]*\)?", re.I)
 _PLACEHOLDER = re.compile(r"\{\{.*?\}\}", re.S)
@@ -78,10 +78,14 @@ def _attribute_filter(tag: str, attr: str, value: str) -> str | None:
     normalized = re.sub(r"[\x00-\x20]", "", value).lower()
     if normalized.startswith(("javascript:", "vbscript:")):
         return None
+    # nh3 checks schemes before this filter runs, so "{{x}}ms-msdt:/id" got
+    # through as a relative URL; re-validate now that placeholders are gone.
     if tag == "img" and attr == "src":
         return value if normalized.startswith("data:image/") else None
-    if attr == "href" and normalized.startswith("data:"):
-        return None
+    if attr == "href":
+        scheme = re.match(r"[^/?#]*:", normalized)
+        if scheme and not normalized.startswith(("http:", "https:", "mailto:")):
+            return None
     return value
 
 
