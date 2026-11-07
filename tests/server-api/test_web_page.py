@@ -61,7 +61,6 @@ def test_document_wraps_a_full_page():
     '<p style="background:url(javascript:alert(1))">x</p>',
     '<p style="width:expression(alert(1))">x</p>',
     '<p style="background:image-set(\'http://x.example/i.png\' 1x)">x</p>',
-    '<style>@im/**/port "http://x.example/a.css";</style>',
     '<style>a{background:image-set("http://x.example/i.png" 1x)}</style>',
 ])
 def test_css_bypasses_are_neutralised(html):
@@ -78,7 +77,48 @@ def test_css_escapes_are_removed(html):
     # an escape could spell url( or @import for the browser; without the
     # backslash the leftover text is an inert unknown function / at-rule
     out = wp.sanitize(html)
-    assert "\\" not in out
+    assert "\\" not in out and "url(http" not in out and "@import" not in out
+
+
+@pytest.mark.parametrize("html", [
+    '<style>a{background:urexpression(l(http://x.example/i.png)}</style>',
+    '<style>@impexpression(ort "http://x.example/a.css";</style>',
+    '<style>@im/**/port "http://x.example/a.css";</style>',  # comment is a token break: inert "@im port"
+    '<style>a{background:image-sexpression(et("http://x.example/i.png" 1x)}</style>',
+    '<p style="background:urexpression(l(http://x.example/i.png)">x</p>',
+    '<p style="background:image-sexpression(et(\'http://x.example/i.png\' 1x)">x</p>',
+])
+def test_css_removals_cannot_splice_live_tokens(html):
+    out = wp.sanitize(html)
+    assert "url(http" not in out and "@import" not in out and "image-set" not in out
+
+
+@pytest.mark.parametrize("html", [
+    '<a href="da&#9;ta:text/html,x">x</a>',
+    '<a href="d&#10;ata:text/html,x">x</a>',
+    '<a href="&#1;data:text/html,x">x</a>',
+    '<a href="java&#13;script:alert(1)">x</a>',
+    '<img src="da&#9;ta:text/html,x">',
+])
+def test_control_characters_in_scheme_do_not_hide_it(html):
+    out = wp.sanitize(html)
+    assert "href=" not in out and "src=" not in out
+
+
+def test_placeholders_only_survive_in_text_title_and_alt():
+    out = wp.sanitize('<p title="{{domain}}">{{domain}}</p><img alt="{{domain}}">'
+                      '<a href="{{reason}}" class="{{reason}}">x</a><p style="color:red;{{reason}}">y</p>'
+                      '<style>a{color:{{reason}}}</style>')
+    assert 'title="{{domain}}"' in out and "<p" in out and ">{{domain}}</p>" in out and 'alt="{{domain}}"' in out
+    assert "{{reason}}" not in out
+
+
+def test_rendered_values_cannot_become_urls_or_css():
+    link = wp.render(wp.sanitize('<a href="{{reason}}">x</a>'), {"reason": "javascript:alert(1)"})
+    assert "javascript:" not in link
+    style = wp.render(wp.sanitize('<p style="color:red;{{reason}}">x</p>'),
+                      {"reason": "background:url(http://x.example/i.png)"})
+    assert "url(http" not in style
 
 
 def test_inline_style_is_kept_when_harmless():

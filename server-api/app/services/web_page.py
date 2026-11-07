@@ -36,7 +36,8 @@ _IMPORT = re.compile(r"@import[^;]*;?", re.I)
 _CSS_URL = re.compile(r"url\(\s*(?!['\"]?data:image/)[^)]*\)", re.I)
 _COMMENT = re.compile(r"/\*.*?(?:\*/|$)", re.S)
 _IMAGE_SET = re.compile(r"(?:-webkit-)?image-set\s*\([^)]*\)?", re.I)
-_EXPRESSION =re.compile(r"expression\s*\(", re.I)
+_PLACEHOLDER = re.compile(r"\{\{.*?\}\}", re.S)
+_EXPRESSION = re.compile(r"expression\s*\(", re.I)
 _VAR = re.compile(r"\{\{\s*(" + "|".join(VARIABLES) + r")\s*\}\}")
 _TAGS = set(nh3.ALLOWED_TAGS) | {"main", "section", "header", "footer", "article", "span", "div", "small", "img"}
 _ATTRIBUTES = {"*": {"class", "id", "style", "title", "lang", "dir"}, "a": {"href", "title"},
@@ -47,24 +48,39 @@ class PageError(ValueError):
     """Why a block page cannot be saved; shown to the analyst."""
 
 
-def _clean_css(css: str) -> str:
-    css = css.replace("<", "")
-    # Comments and backslash escapes could spell "@import", "url(" or
-    # "expression(" past the patterns below (u\72l(, @\69mport), so drop both.
-    css = _COMMENT.sub("", css).replace("\\", "")
-    css = _IMPORT.sub("", css)
+def _clean_css_once(css: str) -> str:
+    # Every removal leaves a space so the text around it cannot splice into a
+    # live token (urexpression(l( -> url(). Comments and backslash escapes could
+    # spell "@import", "url(" or "expression(" (u\72l(, @\69mport), so go too.
+    css = _PLACEHOLDER.sub(" ", css)
+    css = _COMMENT.sub(" ", css).replace("\\", " ").replace("<", " ")
+    css = _IMPORT.sub(" ", css)
     css = _CSS_URL.sub("none", css)
-    css = _IMAGE_SET.sub("none", css)
-    return _EXPRESSION.sub("", css).strip()
+    css = _IMAGE_SET.sub(" ", css)
+    return _EXPRESSION.sub(" ", css).strip()
+
+
+def _clean_css(css: str) -> str:
+    """Clean until stable: a removal may expose a new pattern."""
+    for _ in range(10):
+        cleaned = _clean_css_once(css)
+        if cleaned == css:
+            return css
+        css = cleaned
+    return ""
 
 
 def _attribute_filter(tag: str, attr: str, value: str) -> str | None:
     if attr == "style":  # inline styles get the same cleaning as <style> blocks
         return _clean_css(value) or None
-    lowered = value.strip().lower()
+    if attr not in ("title", "alt"):  # a rendered value must not reach a URL/class/id
+        value = _PLACEHOLDER.sub("", value)
+    normalized = re.sub(r"[\x00-\x20]", "", value).lower()
+    if normalized.startswith(("javascript:", "vbscript:")):
+        return None
     if tag == "img" and attr == "src":
-        return value if lowered.startswith("data:image/") else None
-    if attr == "href" and lowered.startswith("data:"):
+        return value if normalized.startswith("data:image/") else None
+    if attr == "href" and normalized.startswith("data:"):
         return None
     return value
 
