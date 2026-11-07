@@ -16,7 +16,7 @@ from typing import Any
 
 from worker.soar.template import TemplateError, parse_path, references
 
-EVENTS = ("alert.created", "alert.triaged", "manual")
+EVENTS = ("alert.created", "alert.triaged", "case.created", "case.alert_linked", "manual")
 OPERATORS = ("eq", "neq", "gte", "lte", "gt", "lt", "in", "contains", "not_null", "is_null", "regex")
 RESPONSE_OPS = ("isolate_host", "unisolate_host", "block_ip", "unblock_ip", "kill_process", "quarantine_file")
 CASE_OPS = ("create_case", "add_note", "set_alert_status", "suppress")
@@ -53,6 +53,8 @@ NODE_TYPES: dict[str, dict[str, Any]] = {
     "scan":        {"outputs": ["main", "error"], "label": "Endpoint Scan"},
     "hunt":        {"outputs": ["main", "error"], "label": "Threat Hunt"},
     "block_ioc":   {"outputs": ["main", "error"], "label": "Block IOC"},
+    "case_evidence": {"outputs": ["main", "error"], "label": "Case Evidence"},
+    "case_block_ips": {"outputs": ["queued", "error"], "label": "Block Case IPs"},
 }
 
 _ID = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -111,6 +113,16 @@ def _params_errors(node: dict) -> list[str]:
                 raise ValueError
         except (TypeError, ValueError):
             errs.append(f"{where}: timeout_minutes must be between 1 and {MAX_APPROVAL_MINUTES}")
+    elif t in ("case_evidence", "case_block_ips"):
+        if p.get("scope", "event_alert") not in ("event_alert", "case"):
+            errs.append(f"{where}: scope must be event_alert or case")
+        if t == "case_block_ips":
+            for key, default, low, high in (("duration_seconds", 3600, 60, 604800), ("max_pairs", 100, 1, 100)):
+                try:
+                    if not low <= int(p.get(key, default)) <= high:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    errs.append(f"{where}: {key} must be between {low} and {high}")
     elif t == "response":
         op = p.get("operation")
         if op not in RESPONSE_OPS:

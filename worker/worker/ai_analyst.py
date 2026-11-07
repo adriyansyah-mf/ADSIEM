@@ -38,6 +38,7 @@ from worker.fleet_correlation import check_fleet_spread, LOOKBACK_HOURS as FLEET
 from worker.rag import retrieve_similar_cases, retrieve_sop_context, retrieve_feedback_context
 from worker.knowledge import retrieve_for_alert
 from worker.soar_engine import run_soar_playbooks
+from worker.soar.case_outbox import CaseEvent, enqueue_case_event
 
 log = structlog.get_logger()
 
@@ -545,6 +546,8 @@ async def _join_campaign_case(
         case.severity = new_severity
         case.ai_reasoning = triage_notes
         case.updated_at = datetime.now(timezone.utc)
+        if alert_id and str(case.alert_id) != alert_id:
+            await enqueue_case_event(db, CaseEvent(case.id, case.group_id, "case.alert_linked", uuid.UUID(alert_id)))
         details = "\n".join(f"- {line}" for line in lines)
         db.add(CaseNote(
             case_id=case.id, author_id=None, is_ai_generated=True,
@@ -594,6 +597,7 @@ async def _add_to_bruteforce_digest(
             )
             db.add(case)
             await db.flush()
+            await enqueue_case_event(db, CaseEvent(case.id, case.group_id, "case.created", case.alert_id))
         ioc = dict(case.ioc_data or {})
         sources = dict(ioc.get("sources") or {})
         first_time = source_ip not in sources
@@ -726,6 +730,7 @@ async def _create_case_from_verdict(
         )
         db.add(case)
         await db.flush()
+        await enqueue_case_event(db, CaseEvent(case.id, case.group_id, "case.created", case.alert_id))
 
         # Bangun note lengkap dari perspektif L1 analyst
         ti_section = ""

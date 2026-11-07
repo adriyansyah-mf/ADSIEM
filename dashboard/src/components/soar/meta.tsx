@@ -17,7 +17,7 @@ export interface NodeMeta {
 export const NODE_META: Record<NodeType, NodeMeta> = {
   trigger: {
     label: 'Trigger', color: '#00d4ff', icon: Zap, outputs: ['main'],
-    help: 'When the workflow starts: on a new alert, after AI triage, or only when run by hand.',
+    help: 'Start on a new alert, AI triage, a new case, an alert linked to an open case, or a manual run.',
     defaults: () => ({ event: 'alert.triaged', match: 'all', conditions: [] }),
   },
   if: {
@@ -49,6 +49,16 @@ export const NODE_META: Record<NodeType, NodeMeta> = {
     label: 'Case & Alert', color: '#00ff88', icon: Briefcase, outputs: ['main', 'error'],
     help: 'Open a case, add a note, change the alert status, or suppress noise.',
     defaults: () => ({ operation: 'add_note', content: 'SOAR: {{ trigger.rule_title }}' }),
+  },
+  case_evidence: {
+    label: 'Case Evidence', color: '#38bdf8', icon: FileSearch, outputs: ['main', 'error'],
+    help: 'Read linked case alerts, indicators and their observed hosts. Suggestions and detached alerts are excluded.',
+    defaults: () => ({ case_id: '{{ trigger.case_id }}', scope: 'case' }),
+  },
+  case_block_ips: {
+    label: 'Block Case IPs', color: '#ff2244', icon: ShieldAlert, outputs: ['queued', 'error'],
+    help: 'Queue IP blocks on the hosts where each IP was observed. Requires an open case and online, approved agents. Active IP/host blocks are reused; queued does not mean enforced.',
+    defaults: () => ({ case_id: '{{ trigger.case_id }}', scope: 'event_alert', duration_seconds: 3600, max_pairs: 100 }),
   },
   notify: {
     label: 'Notify', color: '#ff6b00', icon: Megaphone, outputs: ['main', 'error'],
@@ -88,7 +98,7 @@ export const NODE_META: Record<NodeType, NodeMeta> = {
   },
 }
 
-export const PALETTE: NodeType[] = ['if', 'enrich', 'alert_event', 'log_search', 'ai_decide', 'approval', 'response',
+export const PALETTE: NodeType[] = ['if', 'enrich', 'alert_event', 'case_evidence', 'log_search', 'ai_decide', 'approval', 'response', 'case_block_ips',
   'scan', 'block_ioc', 'hunt', 'case', 'notify', 'http']
 
 const str = (v: unknown) => (v === undefined || v === null ? '' : String(v))
@@ -111,6 +121,8 @@ export function summary(node: Pick<WfNode, 'type' | 'params'>): string {
     case 'approval': return `${str(p.timeout_minutes)} min · ${str(p.message)}`
     case 'response': return `${str(p.operation)}${p.ip ? ` ${str(p.ip)}` : ''}${p.path ? ` ${str(p.path)}` : ''}`
     case 'case': return str(p.operation)
+    case 'case_evidence': return p.scope === 'case' ? 'all linked case evidence' : 'triggering alert evidence'
+    case 'case_block_ips': return `${p.scope === 'case' ? 'case IPs' : 'new alert IPs'} · ${str(p.duration_seconds)}s`
     case 'notify': return `${str(p.channel)} ${str(p.url).replace(/^https?:\/\//, '').slice(0, 30)}`
     case 'http': return `${str(p.method)} ${str(p.url).replace(/^https?:\/\//, '')}`
     case 'alert_event': return 'source log of the alert'
@@ -163,6 +175,8 @@ export const OUTPUT_PATHS: Record<NodeType, string[]> = {
   approval: ['decision', 'by_name', 'comment'],
   response: ['task_id', 'hostname', 'operation'],
   case: ['case_id', 'created'],
+  case_evidence: ['case_id', 'status', 'severity', 'alert_count', 'ips', 'indicators', 'hostnames', 'evidence'],
+  case_block_ips: ['case_id', 'task_ids', 'queued_count', 'reused_count'],
   notify: ['status'],
   http: ['status', 'body', 'data.<extract name>', 'headers', 'error'],
   alert_event: ['pid', 'process', 'command_line', 'file_path', 'sha256', 'fields.<field>', 'raw_message', 'log_type'],

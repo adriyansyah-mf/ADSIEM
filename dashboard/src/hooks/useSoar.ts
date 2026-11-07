@@ -104,8 +104,8 @@ export function useParseCurl() {
 export function useRunPlaybook() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, alert_id }: { id: string; alert_id?: string }) =>
-      api.post<Run>(`/api/soar/playbooks/${id}/run`, alert_id ? { alert_id } : {}).then(r => r.data),
+    mutationFn: ({ id, alert_id, case_id }: { id: string; alert_id?: string; case_id?: string }) =>
+      api.post<Run>(`/api/soar/playbooks/${id}/run`, { alert_id, case_id }).then(r => r.data),
     onSuccess: (run) => qc.invalidateQueries({ queryKey: ['soar', 'runs', run.playbook_id] }),
     onError: (e) => emitToast(apiErrors(e)[0], 'error'),
   })
