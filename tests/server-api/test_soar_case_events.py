@@ -2,6 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
+import asyncio
+
 import anyio
 import pytest
 from sqlalchemy import select
@@ -9,6 +11,13 @@ from sqlalchemy import select
 from app.models.models import AgentTask, Case, CaseAlert, SoarCaseEvent, SoarRun, SoarRunStep
 from worker.soar import case_events, case_nodes, engine, nodes
 from worker.soar.case_outbox import CaseEvent, enqueue_case_event
+
+
+@pytest.fixture(autouse=True)
+def _current_loop(event_loop):
+    # conftest's session event_loop is never made current; with pytest-asyncio
+    # 0.24 (CI) an earlier asyncio.run() leaves no current loop for these tests.
+    asyncio.set_event_loop(event_loop)
 
 
 @pytest.fixture
