@@ -59,7 +59,7 @@ export function useWebBlocks(f: BlockFilter) {
 export function useBlockWeb() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { value: string; reason?: string; expires_at?: string | null }) =>
+    mutationFn: (body: { value: string; reason?: string; expires_at?: string | null; group_id?: string }) =>
       api.post('/api/web-blocks', body).then(r => r.data as WebBlock),
     onSuccess: () => { qc.invalidateQueries({ queryKey: KEY }); qc.invalidateQueries({ queryKey: ['iocs'] }) },
   })
@@ -83,7 +83,7 @@ export function useAllowlist() {
 export function useAddAllowRule() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { domain: string; include_subdomains: boolean }) =>
+    mutationFn: (body: { domain: string; include_subdomains: boolean; group_id?: string }) =>
       api.post('/api/web-allowlist', body).then(r => r.data as AllowRule),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   })

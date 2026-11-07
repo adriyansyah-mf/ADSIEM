@@ -91,7 +91,7 @@ export default function App() {
             <Route path="/prevention" element={<PreventionPage />} />
             <Route path="/malware-hashes" element={<MalwareHashesPage />} />
             <Route path="/threat-iocs" element={<ThreatIocsPage />} />
-            <Route path="/web-protection" element={<WebProtectionPage />} />
+            <Route path="/web-protection" element={<ProtectedRoute minRole="analyst"><WebProtectionPage /></ProtectedRoute>} />
             <Route path="/policies" element={<PoliciesPage />} />
             <Route path="/agent-updates" element={<AgentUpdatesPage />} />
             <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />

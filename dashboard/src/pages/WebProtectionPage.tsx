@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import {
@@ -34,7 +34,7 @@ function PolicySwitch({ group }: { group: string }) {
   )
 }
 
-function Blocklist({ group }: { group: string }) {
+function Blocklist({ group, superadmin }: { group: string; superadmin: boolean }) {
   const [filter, setFilter] = useState<BlockFilter>({ q: '', source: '', status: 'active', offset: 0 })
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
@@ -42,11 +42,11 @@ function Blocklist({ group }: { group: string }) {
   const block = useBlockWeb()
   const unblock = useUnblockWeb()
   const update = (patch: Partial<BlockFilter>) => setFilter(f => ({ ...f, offset: 0, ...patch }))
-  const submit = () => block.mutate({ value: value.trim(), reason: reason.trim() }, { onSuccess: () => { setValue(''); setReason('') } })
+  const submit = () => block.mutate({ value: value.trim(), reason: reason.trim(), ...(superadmin ? { group_id: group } : {}) }, { onSuccess: () => { setValue(''); setReason('') } })
 
   return (
     <div className="space-y-3">
-      <PolicySwitch group={group} />
+      {group ? <PolicySwitch group={group} /> : <p className="text-sm text-muted-foreground">Enter a group to manage its policy and block page.</p>}
       <form onSubmit={e => { e.preventDefault(); submit() }} className="flex flex-wrap items-end gap-2">
         <label className="space-y-1">
           <span className="block text-xs text-muted-foreground">Domain or URL</span>
@@ -57,7 +57,7 @@ function Blocklist({ group }: { group: string }) {
           <span className="block text-xs text-muted-foreground">Reason</span>
           <input value={reason} onChange={e => setReason(e.target.value)} className={`${input} w-64 max-w-full`} />
         </label>
-        <button type="submit" disabled={!value.trim() || block.isPending}
+        <button type="submit" disabled={!value.trim() || block.isPending || (superadmin && !group)}
           className="px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm font-medium inline-flex items-center gap-1 disabled:opacity-50">
           <Plus size={14} /> Block
         </button>
@@ -87,6 +87,7 @@ function Blocklist({ group }: { group: string }) {
               <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
                 <tr>
                   <th className="text-left px-3 py-2">Domain</th>
+                  {superadmin && <th className="text-left px-3 py-2">Group</th>}
                   <th className="text-left px-3 py-2">Source</th>
                   <th className="text-left px-3 py-2">Reason</th>
                   <th className="text-left px-3 py-2">Expires</th>
@@ -98,6 +99,7 @@ function Blocklist({ group }: { group: string }) {
                   <tr key={b.id} className="border-t border-border">
                     <td className="px-3 py-2 font-mono text-xs break-all">{b.domain}
                       {b.group_id === '*' && <span className="ml-1 text-muted-foreground">(all groups)</span>}</td>
+                    {superadmin && <td className="px-3 py-2 text-xs">{b.group_id === '*' ? 'all groups' : b.group_id}</td>}
                     <td className="px-3 py-2 text-xs">{SOURCE_LABEL[b.source] ?? b.source}</td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">{b.reason || '—'}</td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">{b.expires_at ? new Date(b.expires_at).toLocaleString() : 'never'}</td>
@@ -128,7 +130,7 @@ function Blocklist({ group }: { group: string }) {
   )
 }
 
-function Allowlist({ superadmin }: { superadmin: boolean }) {
+function Allowlist({ group, superadmin }: { group: string; superadmin: boolean }) {
   const { data, isLoading, isError } = useAllowlist()
   const add = useAddAllowRule()
   const updateRule = useUpdateAllowRule()
@@ -138,14 +140,15 @@ function Allowlist({ superadmin }: { superadmin: boolean }) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">Domains on this list are never blocked, even when a feed or an alert lists them.</p>
-      <form onSubmit={e => { e.preventDefault(); add.mutate({ domain: domain.trim(), include_subdomains: subdomains }, { onSuccess: () => setDomain('') }) }}
+      <form onSubmit={e => { e.preventDefault(); updateRule.reset(); remove.reset()
+        add.mutate({ domain: domain.trim(), include_subdomains: subdomains, ...(superadmin ? { group_id: group } : {}) }, { onSuccess: () => setDomain('') }) }}
         className="flex flex-wrap items-center gap-2">
         <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="intranet.example" aria-label="Domain to allow"
           className={`${input} w-64 max-w-full font-mono`} />
         <label className="text-xs inline-flex items-center gap-1">
           <input type="checkbox" checked={subdomains} onChange={e => setSubdomains(e.target.checked)} /> Include subdomains
         </label>
-        <button type="submit" disabled={!domain.trim() || add.isPending} className={button}>Allow</button>
+        <button type="submit" disabled={!domain.trim() || add.isPending || (superadmin && !group)} className={button}>Allow</button>
       </form>
       {(add.isError || updateRule.isError || remove.isError) && (
         <p className="text-xs text-destructive">{apiError(add.error ?? updateRule.error ?? remove.error, 'Could not save.')}</p>
@@ -155,7 +158,7 @@ function Allowlist({ superadmin }: { superadmin: boolean }) {
           <div className="rounded-lg border border-border overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
-                <tr><th className="text-left px-3 py-2">Domain</th><th className="text-left px-3 py-2">Scope</th><th className="px-3 py-2" /></tr>
+                <tr><th className="text-left px-3 py-2">Domain</th>{superadmin && <th className="text-left px-3 py-2">Group</th>}<th className="text-left px-3 py-2">Scope</th><th className="px-3 py-2" /></tr>
               </thead>
               <tbody>
                 {data?.items.map(r => {
@@ -163,15 +166,16 @@ function Allowlist({ superadmin }: { superadmin: boolean }) {
                   return (
                     <tr key={r.id} className={`border-t border-border ${r.enabled ? '' : 'opacity-60'}`}>
                       <td className="px-3 py-2 font-mono text-xs">{r.domain}{r.include_subdomains ? ' + subdomains' : ''}</td>
+                      {superadmin && <td className="px-3 py-2 text-xs">{r.group_id === '*' ? 'all groups' : r.group_id}</td>}
                       <td className="px-3 py-2 text-xs text-muted-foreground">{r.builtin ? 'Built-in' : r.group_id === '*' ? 'All groups' : 'This group'}</td>
                       <td className="px-3 py-2 text-right space-x-1 whitespace-nowrap">
                         {editable && (
                           <button className={button} disabled={updateRule.isPending}
-                            onClick={() => updateRule.mutate({ id: r.id, enabled: !r.enabled })}>{r.enabled ? 'Disable' : 'Enable'}</button>
+                            onClick={() => { add.reset(); remove.reset(); updateRule.mutate({ id: r.id, enabled: !r.enabled }) }}>{r.enabled ? 'Disable' : 'Enable'}</button>
                         )}
                         {editable && !r.builtin && (
                           <button className={button} aria-label={`Delete ${r.domain}`} disabled={remove.isPending}
-                            onClick={() => remove.mutate(r.id)}><Trash2 size={12} /></button>
+                            onClick={() => { add.reset(); updateRule.reset(); remove.mutate(r.id) }}><Trash2 size={12} /></button>
                         )}
                       </td>
                     </tr>
@@ -191,9 +195,16 @@ function BlockPageEditor({ group }: { group: string }) {
   const preview = usePreviewPage(group)
   const [html, setHtml] = useState('')
   const [contact, setContact] = useState('')
+  const htmlRef = useRef('')
+  htmlRef.current = policy?.page_html ?? ''
   useEffect(() => {
     if (policy) { setHtml(policy.page_html); setContact(policy.contact) }
   }, [policy])
+  const loaded = !!policy
+  useEffect(() => {
+    if (loaded) preview.mutate(htmlRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, group])
   if (isError) return <p className="text-sm text-destructive">Could not load the policy.</p>
   if (!policy) return <Loader2 size={16} className="animate-spin" />
   const body = (page: string | null): Omit<WebPolicy, 'group_id' | 'custom_page' | 'page_html'> & { page_html: string | null } =>
@@ -232,8 +243,12 @@ function BlockPageEditor({ group }: { group: string }) {
 export default function WebProtectionPage() {
   const user = useAuthStore(s => s.user)
   const superadmin = user?.role === 'superadmin'
-  const [group, setGroup] = useState(superadmin ? 'default' : user?.group_id ?? 'default')
+  const initial = superadmin ? 'default' : user?.group_id ?? 'default'
+  const [group, setGroup] = useState(initial)
+  const [draft, setDraft] = useState(initial)
+  const applyGroup = () => { const g = draft.trim(); setDraft(g); setGroup(g) }
   const [tab, setTab] = useState<Tab>('blocklist')
+  const noGroup = <p className="text-sm text-muted-foreground">Enter a group to manage its policy and block page.</p>
   return (
     <div className="p-6 space-y-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -242,10 +257,12 @@ export default function WebProtectionPage() {
           <p className="text-sm text-muted-foreground">Block domains on your endpoints and choose the page users see.</p>
         </div>
         {superadmin && (
-          <label className="ml-auto text-xs space-y-1">
-            <span className="block text-muted-foreground">Group</span>
-            <input value={group} onChange={e => setGroup(e.target.value.trim())} className={`${input} w-40`} />
-          </label>
+          <form className="ml-auto text-xs space-y-1" onSubmit={e => { e.preventDefault(); applyGroup() }}>
+            <label className="block space-y-1">
+              <span className="block text-muted-foreground">Group</span>
+              <input value={draft} onChange={e => setDraft(e.target.value)} onBlur={applyGroup} className={`${input} w-40`} />
+            </label>
+          </form>
         )}
       </div>
       <div className="flex flex-wrap gap-1 border-b border-border">
@@ -256,9 +273,9 @@ export default function WebProtectionPage() {
           </button>
         ))}
       </div>
-      {tab === 'blocklist' && <Blocklist group={group} />}
-      {tab === 'allowlist' && <Allowlist superadmin={superadmin} />}
-      {tab === 'page' && <BlockPageEditor key={group} group={group} />}
+      {tab === 'blocklist' && <Blocklist group={group} superadmin={superadmin} />}
+      {tab === 'allowlist' && <Allowlist group={group} superadmin={superadmin} />}
+      {tab === 'page' && (group ? <BlockPageEditor key={group} group={group} /> : noGroup)}
     </div>
   )
 }
