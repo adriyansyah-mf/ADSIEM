@@ -5,6 +5,7 @@ Every query carries the caller's group filter."""
 import re
 from datetime import datetime
 from typing import Literal, Optional
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -15,6 +16,8 @@ from app.core import es_client
 from app.core.database import get_db
 from app.core.deps import get_scoped_group, require_permission
 from app.models.models import Alert
+from app.services import web_blocks
+from worker.web_domains import DomainError, normalize
 
 router = APIRouter(prefix="/api/iocs", tags=["iocs"])
 
@@ -53,6 +56,7 @@ async def list_iocs(
     sort: Literal["last_seen", "alerts"] = "last_seen",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0, le=MAX_BUCKETS - 1),
+    db: AsyncSession = Depends(get_db),
     _=Depends(require_permission("alerts:read")),
     group: Optional[str] = Depends(get_scoped_group),
 ):
@@ -92,8 +96,22 @@ async def list_iocs(
             "alerts": int(bucket["alerts"]["value"]), "hosts": int(bucket["hosts"]["value"]),
             "first_seen": _value_of(bucket.get("first_seen")), "last_seen": _value_of(bucket.get("last_seen")),
             "max_severity": SEVERITY_NAMES[int(rank)] if rank is not None and 0 <= int(rank) < 5 else None,
-            "blocked": None,  # Web Protection (stage B1) fills this
+            "blocked": None,
         })
+
+    def _host(item: dict) -> Optional[str]:
+        try:
+            return normalize(item["value"] if item["type"] == "domain" else (urlsplit(item["value"]).hostname or ""))
+        except (DomainError, ValueError):
+            return None
+
+    hosts = {id(i): _host(i) for i in items if i["type"] in ("domain", "url")}
+    blocked = await web_blocks.blocked_domains(db, group, [h for h in hosts.values() if h])
+    # a group without Web Protection enabled blocks nothing, so "blocked" is not applicable (None) for it
+    enforced = group is None or (await web_blocks.policy_for(db, group))["enabled"]
+    for item in items:
+        if enforced and id(item) in hosts:
+            item["blocked"] = hosts[id(item)] in blocked if hosts[id(item)] else False
     return {
         "total": min(int((matched.get("count") or {}).get("value", 0)), MAX_BUCKETS),
         "type_counts": {b["key"]: int(b["distinct"]["value"]) for b in (aggs.get("types") or {}).get("buckets", [])},
