@@ -326,6 +326,9 @@ async def soar_loop() -> None:
         try:
             from worker.soar.case_events import dispatch_case_events
             await dispatch_case_events()
+        except Exception as exc:  # case events must not stall reaping or claiming runs
+            log.error("soar_case_events_error", error=str(exc))
+        try:
             await _expire_and_reap()
             free = MAX_CONCURRENT_RUNS - len(running)
             for run_id in (await _claim(free) if free > 0 else []):

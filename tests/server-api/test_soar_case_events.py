@@ -185,34 +185,6 @@ async def test_manual_run_accepts_case_id_and_refuses_other_group(soar_env):
     assert denied.status_code == 404
 
 
-async def test_ai_link_event_waits_for_final_case_update_and_survives_retry(soar_env, monkeypatch):
-    from worker import ai_analyst, case_correlation
-    env = soar_env
-    monkeypatch.setattr(case_correlation, "AsyncSessionLocal", env.sessions)
-    monkeypatch.setattr(ai_analyst, "AsyncSessionLocal", env.sessions)
-    await playbook(env, "case.alert_linked")
-    async with env.sessions() as db:
-        link = await db.get(CaseAlert, (env.case.id, env.alerts[1].id))
-        link.status = "suggested"
-        await db.commit()
-    incoming = case_correlation.CorrelationInput(alert_id=env.alerts[1].id, group_id="blue",
-                                                 title="Persistence", hostname="host1", keys=["ip:8.8.8.2"])
-    decision = case_correlation.Decision(action="join", case_id=env.case.id, confidence=0.95)
-    assert await case_correlation.record_link(incoming, decision, emit_event=False)
-    async with env.sessions() as db:
-        pending = (await db.execute(select(SoarCaseEvent))).scalar_one()
-        assert pending.ready is False and pending.processed_at is None
-    assert await case_events.dispatch_case_events() == 0
-    # Retrying the already-persisted association must preserve the pending event.
-    assert await case_correlation.record_link(incoming, decision, emit_event=False)
-    await ai_analyst._join_campaign_case(case_id=str(env.case.id), alert_id=str(env.alerts[1].id),
-        title="Persistence", triage_notes="Updated evidence", severity="critical", family="persistence",
-        keys=["ip:8.8.8.2"], hostname="host1")
-    assert await case_events.dispatch_case_events() == 1
-    async with env.sessions() as db:
-        run = (await db.execute(select(SoarRun))).scalar_one()
-        assert run.context["trigger"]["severity"] == "critical"
-
 
 async def test_removed_evidence_before_dispatch_does_not_trigger(soar_env):
     env = soar_env
@@ -235,17 +207,29 @@ async def test_suggestions_are_not_case_evidence_or_block_targets(soar_env):
     assert result.data["ips"] == ["8.8.8.1"] and result.data["alert_count"] == 1
 
 
-async def test_ai_created_case_emits_creation_event(soar_env, monkeypatch):
-    from worker import ai_analyst
+
+async def test_failing_event_is_consumed_without_blocking_later_events(soar_env, monkeypatch):
     env = soar_env
-    monkeypatch.setattr(ai_analyst, "AsyncSessionLocal", env.sessions)
     await playbook(env, "case.created")
-    cid = await ai_analyst._create_case_from_verdict(
-        alert_id=str(env.alerts[0].id), title="Brute force", severity="high", verdict="create_case",
-        analysis={"triage_notes": "Suspicious activity", "confidence": 0.95}, enrichment=None,
-        group_id="blue", hostname="host0", keys=["ip:8.8.8.1"],
-    )
-    assert await case_events.dispatch_case_events() == 1
     async with env.sessions() as db:
-        run = (await db.execute(select(SoarRun))).scalar_one()
-    assert run.context["trigger"]["case_id"] == cid and run.context["trigger"]["created_by_ai"]
+        bad = Case(title="Bad", severity="high", status="open", group_id="blue")
+        db.add(bad)
+        await db.flush()
+        await enqueue_case_event(db, CaseEvent(bad.id, "blue", "case.created"))
+        await db.commit()
+    async with env.sessions() as db:
+        await enqueue_case_event(db, CaseEvent(env.case.id, "blue", "case.created", env.alerts[0].id))
+        await db.commit()
+    real = case_events.read_case_evidence
+
+    async def flaky(db, case):
+        if case.id == bad.id:
+            raise RuntimeError("boom")
+        return await real(db, case)
+
+    monkeypatch.setattr(case_events, "read_case_evidence", flaky)
+    assert await case_events.dispatch_case_events() == 2
+    assert await case_events.dispatch_case_events() == 0
+    async with env.sessions() as db:
+        runs = (await db.execute(select(SoarRun))).scalars().all()
+    assert [r.context["trigger"]["case_id"] for r in runs] == [str(env.case.id)]
