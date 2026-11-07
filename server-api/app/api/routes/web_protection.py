@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from pydantic import Field
 from sqlalchemy import func, select, true
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -56,6 +57,20 @@ def _target_group(group_filter: Optional[str], requested: Optional[str]) -> str:
     return requested or "default"
 
 
+async def _commit(db: AsyncSession, before_commit=None) -> None:
+    """Commit; a concurrent upsert of the same unique key loses with 409, never 500.
+
+    `before_commit` runs inside the guard after the pending inserts are flushed (a query would autoflush them)."""
+    try:
+        await db.flush()
+        if before_commit is not None:
+            await before_commit(db)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="This item was changed at the same time; try again")
+
+
 async def _actor(db: AsyncSession, user: User) -> Optional[UUID]:
     """created_by is a foreign key to users; tolerate a caller without a users row (the audit log still names them)."""
     return user.id if await db.get(User, user.id) is not None else None
@@ -81,7 +96,7 @@ class BlockIn(BaseModel):
     value: str = Field(..., max_length=2048)
     reason: str = Field("", max_length=500)
     expires_at: Optional[datetime] = None
-    group_id: Optional[str] = None
+    group_id: Optional[str] = Field(None, max_length=100)
 
 
 @router.get("/api/web-blocks")
@@ -119,7 +134,7 @@ async def add_block(body: BlockIn, db: AsyncSession = Depends(get_db), user: Use
         row = WebBlockEntry(domain=domain, group_id=target, source="manual", created_by=await _actor(db, user))
         db.add(row)
     row.status, row.reason, row.expires_at, row.seq = "active", body.reason.strip(), body.expires_at, web_blocks.next_seq()
-    await db.commit()
+    await _commit(db)
     await db.refresh(row)
     web_blocks.invalidate()
     await audit_log(db, user.id, "web_block.add", "web_block", str(row.id), {"domain": domain, "group_id": target})
@@ -140,8 +155,7 @@ async def remove_block(entry_id: UUID, db: AsyncSession = Depends(get_db), user:
             db.add(WebAllowRule(group_id=group, domain=row.domain, created_by=await _actor(db, user)))
         elif not exists.enabled:
             exists.enabled = True
-        await web_blocks.mark_rules_changed(db)
-        await db.commit()
+        await _commit(db, web_blocks.mark_rules_changed)
         await audit_log(db, user.id, "web_block.allowlist_feed", "web_block", str(row.id), {"domain": row.domain, "group_id": group})
         return {"status": "allowlisted"}
     row.status, row.seq = "removed", web_blocks.next_seq()
@@ -154,7 +168,7 @@ async def remove_block(entry_id: UUID, db: AsyncSession = Depends(get_db), user:
 class RuleIn(BaseModel):
     domain: str = Field(..., max_length=2048)
     include_subdomains: bool = False
-    group_id: Optional[str] = None
+    group_id: Optional[str] = Field(None, max_length=100)
 
 
 class RulePatch(BaseModel):
@@ -183,8 +197,7 @@ async def add_rule(body: RuleIn, db: AsyncSession = Depends(get_db), user: User 
         row = WebAllowRule(group_id=target, domain=domain, created_by=await _actor(db, user))
         db.add(row)
     row.include_subdomains, row.enabled = body.include_subdomains, True
-    await web_blocks.mark_rules_changed(db)
-    await db.commit()
+    await _commit(db, web_blocks.mark_rules_changed)
     await db.refresh(row)
     await audit_log(db, user.id, "web_allowlist.add", "web_allowlist", str(row.id), {"domain": domain, "group_id": target})
     return _rule_out(row)
@@ -241,6 +254,8 @@ class PreviewIn(BaseModel):
 
 
 def _policy_group(group_filter: Optional[str], group_id: str) -> str:
+    if len(group_id) > 100:
+        raise HTTPException(status_code=422, detail="Group id is too long")
     if group_filter is not None and group_id != group_filter:
         raise HTTPException(status_code=404, detail="Group not found")
     return group_id
@@ -267,7 +282,7 @@ async def put_policy(group_id: str, body: PolicyIn, db: AsyncSession = Depends(g
         setattr(row, key, getattr(body, key))
     row.page_html, row.seq = page, web_blocks.next_seq()
     db.add(row)
-    await db.commit()
+    await _commit(db)
     await db.refresh(row)  # seq was a SQL expression; policy_for reads it below
     web_blocks.invalidate()
     await audit_log(db, user.id, "web_block_policy.update", "web_block_policy", target,

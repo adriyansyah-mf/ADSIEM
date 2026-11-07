@@ -135,3 +135,17 @@ async def test_policy_defaults_save_sanitises_and_preview(env):
     assert reset["custom_page"] is False
     bad = await env.api.put("/api/web-block-policies/blue", json={**body, "max_entries": 10})
     assert bad.status_code == 422
+
+
+async def test_concurrent_upserts_never_500(env):
+    blocks = await asyncio.gather(*(env.api.post("/api/web-blocks", json={"value": "race.example"}) for _ in range(6)))
+    assert {r.status_code for r in blocks} <= {201, 409}
+    rules = await asyncio.gather(*(env.api.post("/api/web-allowlist", json={"domain": "race2.example"}) for _ in range(6)))
+    assert {r.status_code for r in rules} <= {201, 409}
+    assert any(r.status_code == 201 for r in blocks) and any(r.status_code == 201 for r in rules)
+
+
+async def test_group_ids_are_bounded(env):
+    env.user = env.make_user(role="superadmin")
+    assert (await env.api.put("/api/web-block-policies/" + "g" * 101, json={"enabled": True})).status_code == 422
+    assert (await env.api.post("/api/web-blocks", json={"value": "x.example", "group_id": "g" * 101})).status_code == 422
