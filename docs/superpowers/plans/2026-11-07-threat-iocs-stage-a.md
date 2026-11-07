@@ -461,7 +461,7 @@ def captured(monkeypatch):
         docs.extend(batch)
 
     async def get_setting(key, default=""):
-        return "203.0.113.0/24" if key == "case_ioc_exclusions" else default
+        return "151.101.0.0/16" if key == "case_ioc_exclusions" else default
 
     from worker import settings_cache
     monkeypatch.setattr(alert_iocs, "index_docs", index_docs)
@@ -470,15 +470,15 @@ def captured(monkeypatch):
 
 
 async def test_new_alert_indexes_alert_and_event_indicators(captured):
-    await alert_iocs.index_new_alert(META, "198.51.100.4", {"destination.ip": "203.0.113.9", "url.full": "http://x.example/a"})
-    assert pairs(captured) == {("ip", "198.51.100.4", "alert"), ("url", "http://x.example/a", "event")}
+    await alert_iocs.index_new_alert(META, "45.33.32.156", {"destination.ip": "151.101.1.69", "url.full": "http://x.example/a"})
+    assert pairs(captured) == {("ip", "45.33.32.156", "alert"), ("url", "http://x.example/a", "event")}
 
 
 async def test_triaged_alert_is_rewritten_with_ti_indicators_and_verdict(captured, monkeypatch):
     alert_id = "11111111-1111-1111-1111-111111111111"
     row = SimpleNamespace(id=UUID(alert_id), group_id="blue", severity="critical", hostname="h1", agent_id=None,
                           title="Beacon", created_at=datetime(2026, 11, 7, tzinfo=timezone.utc),
-                          source_ip="198.51.100.4", ai_verdict=None)
+                          source_ip="45.33.32.156", ai_verdict=None)
 
     class Session:
         async def __aenter__(self):
@@ -493,7 +493,7 @@ async def test_triaged_alert_is_rewritten_with_ti_indicators_and_verdict(capture
     from worker import database
     monkeypatch.setattr(database, "AsyncSessionLocal", Session)
     await alert_iocs.index_triaged_alert(alert_id, {}, [{"type": "domain", "value": "c2.example"}], "escalate")
-    assert pairs(captured) == {("ip", "198.51.100.4", "alert"), ("domain", "c2.example", "ti")}
+    assert pairs(captured) == {("ip", "45.33.32.156", "alert"), ("domain", "c2.example", "ti")}
     assert {d["ai_verdict"] for _, d in captured} == {"escalate"}
     assert {d["severity_rank"] for _, d in captured} == {4}
 
@@ -559,7 +559,7 @@ async def test_persist_node_hands_triage_result_to_index_dependency(monkeypatch)
     }
     graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
     state = {"alert_id": "11111111-1111-1111-1111-111111111111", "title": "Beacon", "severity": "medium",
-             "source_ip": "198.51.100.4", "hostname": "h1", "decoded_fields": {"url.full": "http://x.example/a"},
+             "source_ip": "45.33.32.156", "hostname": "h1", "decoded_fields": {"url.full": "http://x.example/a"},
              "group_id": "blue"}
     await graph.ainvoke(state)
     await asyncio.sleep(0)
@@ -722,9 +722,9 @@ Append to `tests/worker/test_alert_iocs.py`:
 ```python
 def test_case_indicators_become_extracted_items():
     assert alert_iocs.indicators_to_extracted(
-        ["ip:198.51.100.4", "ip:2001:db8::1", "domain:c2.example", "url:http://x.example/a",
+        ["ip:45.33.32.156", "ip:2001:db8::1", "domain:c2.example", "url:http://x.example/a",
          "hash:" + "a" * 64, "hash:" + "b" * 40, "hash:" + "c" * 32, "hash:zz", "account:admin"]
-    ) == [{"type": "ipv4", "value": "198.51.100.4"}, {"type": "ipv4", "value": "2001:db8::1"},
+    ) == [{"type": "ipv4", "value": "45.33.32.156"}, {"type": "ipv4", "value": "2001:db8::1"},
           {"type": "domain", "value": "c2.example"}, {"type": "url", "value": "http://x.example/a"},
           {"type": "hash_sha256", "value": "a" * 64}, {"type": "hash_sha1", "value": "b" * 40},
           {"type": "hash_md5", "value": "c" * 32}]
@@ -813,7 +813,7 @@ async def test_backfill_indexes_old_alerts_once(sessions, monkeypatch):
     from worker import alert_iocs, database, redis_client, settings_cache
     async with sessions() as db:
         alerts = [Alert(title=f"a{i}", severity="high", group_id="blue", source_ip=ip)
-                  for i, ip in enumerate(("198.51.100.1", "10.0.0.1", "198.51.100.3"))]
+                  for i, ip in enumerate(("45.33.32.1", "10.0.0.1", "45.33.32.3"))]
         db.add_all(alerts)
         await db.flush()
         case = Case(title="c", severity="high", status="open", group_id="blue", alert_id=alerts[0].id)
@@ -849,9 +849,9 @@ async def test_backfill_indexes_old_alerts_once(sessions, monkeypatch):
 
     assert await alert_iocs.backfill(batch=2) == 3
     assert {(d["alert_id"], d["type"], d["value"], d["origin"]) for _, d in docs} == {
-        (str(alerts[0].id), "ip", "198.51.100.1", "alert"),
+        (str(alerts[0].id), "ip", "45.33.32.1", "alert"),
         (str(alerts[1].id), "domain", "c2.example", "alert"),
-        (str(alerts[2].id), "ip", "198.51.100.3", "alert"),
+        (str(alerts[2].id), "ip", "45.33.32.3", "alert"),
     }
     assert await alert_iocs.backfill(batch=2) == 0
 ```
