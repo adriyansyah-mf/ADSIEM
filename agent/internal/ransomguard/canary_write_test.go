@@ -95,13 +95,18 @@ func TestCanaryWriteOtherProgramStillCanaryNotAdopted(t *testing.T) {
 	}
 }
 
-// OneDrive is not trusted with content that is no longer the canary.
-func TestCanaryWriteByOneDriveEncryptedIsHit(t *testing.T) {
+// A canary destroyed with only a trusted sync client as writer (OneDrive
+// syncing down a copy encrypted on another device): confirmed, the sync
+// client reported as trusted and not killed, and a detection without a
+// process (isolate when asked).
+func TestCanaryWriteByOneDriveEncryptedIsConfirmedNotKilled(t *testing.T) {
 	w := newWriteCase(t)
 	encryptFile(t, w.p)
 	w.write(`C:\Program Files\Microsoft OneDrive\OneDrive.exe`)
-	if l := w.out.wait(t, 1)[0]; !strings.HasPrefix(l, "detection=canary confirmed=true response=killed") {
-		t.Fatalf("line = %s", l)
+	lines := w.out.wait(t, 2)
+	if !has(lines, "detection=canary confirmed=true response=trusted", "PID=90 ") ||
+		!has(lines, "detection=canary_changed confirmed=true") || len(w.kills()) != 0 {
+		t.Fatalf("lines = %q killed %v", lines, w.kills())
 	}
 }
 

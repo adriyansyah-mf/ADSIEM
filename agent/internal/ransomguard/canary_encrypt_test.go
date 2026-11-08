@@ -124,7 +124,7 @@ func TestPeriodicCheckEncryptedCanaryWithoutIsolate(t *testing.T) {
 func TestPeriodicCheckBenignRewriteRetires(t *testing.T) {
 	g, out, p := checkGuard(t, func() error { t.Error("a benign rewrite isolated the host"); return nil })
 	for i := 0; i < retireAfter; i++ {
-		os.WriteFile(p, []byte(strings.Repeat("rewritten by a sync tool\n", 100)), 0o644)
+		os.WriteFile(p, canaryContent(), 0o644) // canary text, rewritten in clear (wiping it is destruction)
 		g.checkCanaries()
 	}
 	lines := out.wait(t, retireAfter+1)

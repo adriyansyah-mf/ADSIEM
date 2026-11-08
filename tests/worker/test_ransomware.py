@@ -112,6 +112,22 @@ def test_encrypted_canary_is_one_critical_alert(decoders):
         ("Ransomware Canary File Changed", "high")]
 
 
+def test_destroyed_canary_with_trusted_writer_is_critical(decoders):
+    """A destroyed canary is an incident even when a trusted sync client (not
+    killed: response=trusted) is among its writers."""
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    line = ('detection=canary confirmed=true response=trusted '
+            'Canary="C:\\\\Users\\\\bob\\\\Documents\\\\.siem-canary.docx" FileAction=write '
+            'Image="C:\\\\Program Files\\\\Microsoft OneDrive\\\\OneDrive.exe" Comm="OneDrive.exe" '
+            'PID=4120 PPID=3300 User=0 Isolated=false')
+    event, _ = decoders.decode_named("ransomware_activity", line)
+    assert event["ransomware.response"] == "trusted"
+    view = dict(event, raw_message=line, log_type="ransomware_activity", hostname="ws08")
+    assert [(m["title"], m["level"]) for m in asyncio.run(sig.evaluate(view))] == [
+        ("Ransomware Activity On Endpoint", "critical")]
+
+
 def test_canary_sync_raises_no_alert(decoders):
     """OneDrive (from its install location) renaming or deleting a canary while
     syncing: kept in the log, no rule fires (fresh engine: nothing suppressed)."""

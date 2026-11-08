@@ -4,8 +4,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -70,7 +71,8 @@ type canaries struct {
 	retired map[string]time.Time   // path -> when it was retired
 	// watching: canaries whose write is being followed (Guard.canaryWrite)
 	watching map[string]bool
-	cleaned  bool // legacy canaries removed
+	writers  map[string][]writer // canary -> recent writers (writerWindow)
+	cleaned  bool                // legacy canaries removed
 }
 
 func newCanaries(dirs, names []string, visible bool) *canaries {
@@ -85,7 +87,7 @@ func newCanaries(dirs, names []string, visible bool) *canaries {
 	}
 	return &canaries{dirs: dirs, names: names, hide: !visible, fold: runtime.GOOS == "windows", now: time.Now,
 		files: map[string]string{}, hits: map[string][]time.Time{}, retired: map[string]time.Time{},
-		watching: map[string]bool{}}
+		watching: map[string]bool{}, writers: map[string][]writer{}}
 }
 
 func canaryContent() []byte {
@@ -239,25 +241,107 @@ func (c *canaries) canaryPath(path string) (string, bool) {
 
 // canaryChange is a canary found changed or removed by verify.
 type canaryChange struct {
-	path      string
-	encrypted bool // its new content looks encrypted (looksEncrypted)
+	path  string
+	state int // canaryText, canaryDestroyed or canaryMissing
 }
 
 // verify returns the canaries that were changed or removed since they
-// were planted, and forgets them so plant writes them again.
+// were planted, and forgets them so plant writes them again. A canary whose
+// write is being followed (Guard.canaryWrite) is left to that, and one that
+// cannot be read for now (a lock) is looked at again next time.
 func (c *canaries) verify() []canaryChange {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	var bad []canaryChange
+	files := make(map[string]string, len(c.files))
 	for p, want := range c.files {
-		data, err := os.ReadFile(p)
-		sum := sha256.Sum256(data)
-		if err != nil || hex.EncodeToString(sum[:]) != want {
-			bad = append(bad, canaryChange{path: p, encrypted: err == nil && looksEncrypted(data)})
-			delete(c.files, p)
+		if !c.watching[p] {
+			files[p] = want
 		}
 	}
+	c.mu.Unlock()
+	var bad []canaryChange
+	for p, want := range files { // read outside the lock
+		st, _ := canaryState(p, want)
+		if st == canaryUnchanged || st == canaryUnreadable {
+			continue
+		}
+		c.mu.Lock()
+		if c.files[p] == want && !c.watching[p] {
+			bad = append(bad, canaryChange{path: p, state: st})
+			delete(c.files, p)
+		}
+		c.mu.Unlock()
+	}
 	return bad
+}
+
+// writer is a process that wrote a canary.
+type writer struct {
+	pid, ppid, uid uint32
+	image, comm    string
+	action         string
+	at             time.Time
+}
+
+// writerWindow: writers of a canary are blamed for damage found up to this
+// long after their write (the event path's read-back, or the periodic check).
+const (
+	writerWindow   = 2 * time.Minute
+	maxWriters     = 16 // per canary
+	maxWriterLists = 1024
+)
+
+// addWriter records a write to canary p (one entry per process, newest time).
+func (c *canaries) addWriter(p string, w writer) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	w.at = c.now()
+	kept := c.writers[p][:0]
+	for _, o := range c.writers[p] {
+		if o.pid != w.pid && w.at.Sub(o.at) < writerWindow {
+			kept = append(kept, o)
+		}
+	}
+	kept = append(kept, w)
+	if len(kept) > maxWriters {
+		kept = kept[len(kept)-maxWriters:]
+	}
+	c.writers[p] = kept
+	if len(c.writers) > maxWriterLists { // bounded: drop stale canaries' lists
+		for q, ws := range c.writers {
+			if len(ws) == 0 || w.at.Sub(ws[len(ws)-1].at) >= writerWindow {
+				delete(c.writers, q)
+			}
+		}
+	}
+}
+
+// takeWriters returns and forgets p's writers of the last writerWindow.
+func (c *canaries) takeWriters(p string) []writer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	var recent []writer
+	for _, w := range c.writers[p] {
+		if now.Sub(w.at) < writerWindow {
+			recent = append(recent, w)
+		}
+	}
+	delete(c.writers, p)
+	return recent
+}
+
+// writersOf returns p's writers of the last writerWindow.
+func (c *canaries) writersOf(p string) []writer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	var recent []writer
+	for _, w := range c.writers[p] {
+		if now.Sub(w.at) < writerWindow {
+			recent = append(recent, w)
+		}
+	}
+	return recent
 }
 
 // watch starts following a write to canary p: it returns the hash planted
@@ -292,17 +376,27 @@ func (c *canaries) adopt(p, want, sum string) {
 
 // What a canary holds after a write.
 const (
-	canaryUnchanged = iota // what was planted, or unreadable for now
-	canaryText             // other canary text: the marker, not encrypted
-	canaryDestroyed        // no longer the canary: encrypted, or the text gone
+	canaryUnchanged  = iota // what was planted
+	canaryText              // other canary text: the marker, not encrypted (a clear rewrite)
+	canaryDestroyed         // no longer the canary: encrypted, wiped, or the text gone
+	canaryMissing           // gone (deleted or renamed away)
+	canaryUnreadable        // cannot be read for now (locked): look again
 )
 
+// readCanary reads a canary (tests replace it).
+var readCanary = os.ReadFile
+
 // canaryState reads p and compares it with the planted hash want. It also
-// returns the hash of what it read.
+// returns the hash of what it read. Destruction (encrypted, wiped with zeros
+// or a pattern, the canary text gone) is told apart from a clear rewrite
+// that keeps the canary text.
 func canaryState(p, want string) (int, string) {
-	data, err := os.ReadFile(p)
+	data, err := readCanary(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return canaryMissing, ""
+	}
 	if err != nil {
-		return canaryUnchanged, ""
+		return canaryUnreadable, ""
 	}
 	h := sha256.Sum256(data)
 	sum := hex.EncodeToString(h[:])
@@ -340,18 +434,6 @@ func looksEncrypted(data []byte) bool {
 	}
 	return len(head) >= 1024 && !strings.HasPrefix(string(head[:len(canaryMarker)]), canaryMarker) &&
 		entropy(head[:1024]) >= encryptedEntropy
-}
-
-// fileLooksEncrypted is looksEncrypted on the first 4 KB of path.
-func fileLooksEncrypted(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	buf := make([]byte, entropySample)
-	n, _ := io.ReadFull(f, buf)
-	return looksEncrypted(buf[:n])
 }
 
 // strike records a clear-text change or a removal of a canary (from a file

@@ -17,20 +17,27 @@ Web roots (`/var/www`) are not in the defaults any more: deploys (`rsync --delet
 
 Nothing legitimate touches them. On Linux the eBPF sensor (`internal/linsensor`) reports a write, rename or delete of a canary with the process that did it, and the guard acts at once (`detection=canary`). On Windows the ETW sensor (`internal/winsensor`, Kernel-File) does the same for renames, deletes and in-place writes (see *Windows writes* below). Every 30 seconds the agent also checks the canaries' content and recreates missing ones. A change found that way has no process attached (`detection=canary_changed`). The periodic check is the only canary signal on hosts without either sensor.
 
-A **write** event on a canary is a hit only once the canary is no longer the canary. The agent reads it back, polling for up to a second (on Linux the event is the open, before the data), and decides:
+A **write** event on a canary is a hit only once the canary is no longer the canary. The agent records every process that writes a canary: its writers of the last 2 minutes, never just the first. It reads the canary back every 250 ms for one second (on Linux the event is the open, before the data). A read blocked by a lock is tried again, never taken for "unchanged". It then decides:
 
-- The content is unchanged (an open for write, a sync client putting back the same bytes): nothing happens.
-- It is other canary text (the marker, low entropy): this is OneDrive's Known Folder Move syncing another device's canary. From `OneDrive.exe`, `OneDrive.Sync.Service.exe` or `FileCoAuth.exe` the new content is adopted silently. From anything else it is left to the periodic check, which reports `canary_changed`, unconfirmed.
-- The content is encrypted, or the canary text is gone: a hit, whoever wrote it, sync clients included.
+- **Destroyed** (encrypted, wiped with zeros or a pattern, or the canary text gone), at any read: a hit. Every untrusted writer of the last 2 minutes is stopped and reported. A trusted sync client among them is reported with `response=trusted` and never killed. If no untrusted writer is known, it is a confirmed detection without a process.
+- **Other canary text** at the last read (the marker, low entropy): this is OneDrive's Known Folder Move syncing another device's canary. If every recent writer is a trusted sync client, the new content is adopted silently. Otherwise it is left to the periodic check, which reports `canary_changed`, unconfirmed.
+- **Unchanged or still unreadable** after a second: handed to the periodic check with its writers kept. If that check finds the canary destroyed within 2 minutes of a write, those writers are stopped as above. So a process that opens a canary, waits, then encrypts it is still stopped by name, not only isolated.
+
+A canary that is being followed this way is skipped by the periodic check, so it is not reported twice.
 
 Renames and deletes of a canary are hits at once, as before, with one exception for sync. When `OneDrive.exe`, `OneDrive.Sync.Service.exe` or `FileCoAuth.exe` renames or deletes a canary **and runs from an install location**, it is not a hit. The admin-only install locations, `<system drive>\Program Files\Microsoft OneDrive\` and `Program Files (x86)\Microsoft OneDrive\`, are trusted as they are. The per-user install, `Users\<user>\AppData\Local\Microsoft\OneDrive\`, can be written by the user, so a binary there is trusted only if it carries a valid Authenticode signature (WinVerifyTrust) whose signer certificate is *Microsoft Corporation*. The verdict is cached per path, size and modification time. In that case the agent reports `detection=canary_sync confirmed=false response=none`, which no rule alerts on, and plants the canary again. This does not count toward retirement. Nothing is trusted by its name: a binary called `OneDrive.exe` anywhere else, or unsigned in the per-user folder, is killed like any other. The same trust rule applies to adopting canary text from a sync client and to skipping the bulk-encryption heuristics for OneDrive.
 
-When a canary changed, the agent reads its new content. If it looks encrypted (first 4 KB at 7.2 bits per byte or more, or the canary text replaced by a first kilobyte that is, and no known file header; the canary itself is hex text, about 4 bits per byte), the change is ransomware:
+When a canary changed, the agent reads its new content. The canary itself is hex text after a fixed marker, about 4 bits per byte. The change is **destruction**, and so ransomware or a wiper, when the content:
 
-- with a process (a file event): the process tree is killed as for any canary hit;
-- without one (the periodic check): `detection=canary_changed confirmed=true`, so the critical rule fires, and the host is isolated through the firewall engine when `isolate` (or the policy's `ransomware_isolate`) is set: `response=isolated`, `Isolated=true`. Otherwise `response=none`.
+- looks encrypted: the first 4 KB at 7.2 bits per byte or more, or, with the canary text gone, a first kilobyte that is, and no known file header;
+- or no longer starts with the canary text: zeros, a repeated byte, anything else.
 
-A canary changed **in clear text** or removed 3 times within 24 hours (by either path) is **retired**: the agent stops planting it in that spot for 24 hours and reports `detection=canary_retired` once, with the process if one is known. That is a legitimate tool rewriting the directory, not ransomware, which is stopped on the first hit. An encrypted canary never counts toward retirement, so repeated attacks (or repeated test runs) cannot switch protection off. Retirement lives in memory and resets when the agent restarts.
+Then:
+
+- with a process (a file event): its writers are stopped as above;
+- without one (the periodic check, no recent writer): `detection=canary_changed confirmed=true`, so the critical rule fires, and the host is isolated through the firewall engine when `isolate` (or the policy's `ransomware_isolate`) is set: `response=isolated`, `Isolated=true`. Otherwise `response=none`.
+
+A canary rewritten **with canary text** (a clear rewrite), or removed, 3 times within 24 hours (by either path) is **retired**: the agent stops planting it in that spot for 24 hours and reports `detection=canary_retired` once, with the process if one is known. That is a legitimate tool rewriting the directory, not ransomware, which is stopped on the first hit. Destruction never counts toward retirement, in the event path or the periodic check, so repeated attacks, wipers or test runs cannot switch protection off. Retirement lives in memory and resets when the agent restarts.
 
 ## Bulk-encryption heuristics (Linux and Windows)
 
