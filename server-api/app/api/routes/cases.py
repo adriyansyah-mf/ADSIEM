@@ -16,6 +16,7 @@ from app.schemas.schemas import (
 from app.services.audit import audit_log
 from app.core.config import settings
 from app.api.routes.case_evidence import router as evidence_router
+from worker.soar.case_outbox import CaseEvent, enqueue_case_event
 import redis.asyncio as aioredis
 
 router = APIRouter(tags=["cases"])
@@ -141,6 +142,7 @@ async def create_case(
         case.ioc_data = {k: v for k, v in ioc.items() if v}
     db.add(case)
     await db.flush()
+    await enqueue_case_event(db, CaseEvent(case.id, case.group_id, "case.created", case.alert_id))
     if alert:
         db.add(CaseNote(
             case_id=case.id, author_id=current_user.id, is_ai_generated=False,

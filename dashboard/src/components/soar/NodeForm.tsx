@@ -194,7 +194,7 @@ export function NodeForm({ node, graph, catalog, disabled, onChange }: Props) {
 
       {node.type === 'trigger' && (
         <>
-          <Field label="Start on" hint="alert.triaged runs after the AI verdict is known; manual only runs from the Run button.">
+          <Field label="Start on" hint="case.created starts for a new open case; case.alert_linked starts for newly linked evidence. alert.triaged follows AI triage; manual uses the Run button.">
             <Select value={p.event} options={catalog.events} onChange={v => set({ event: v })} disabled={disabled} />
           </Field>
           <Conditions params={p} set={set} fields={catalog.trigger_fields} operators={catalog.operators} disabled={disabled} listId={`f-${node.id}`} />
@@ -257,6 +257,27 @@ export function NodeForm({ node, graph, catalog, disabled, onChange }: Props) {
           {op === 'quarantine_file' && (
             <Field label="File path"><Text mono value={p.path} onChange={v => set({ path: v })} disabled={disabled} /></Field>
           )}
+        </>
+      )}
+
+      {(node.type === 'case_evidence' || node.type === 'case_block_ips') && (
+        <>
+          <Field label="Case ID" hint="Must belong to the workflow's group.">
+            <Text mono value={p.case_id} placeholder="{{ trigger.case_id }}" onChange={v => set({ case_id: v })} disabled={disabled} />
+          </Field>
+          <Field label="Evidence scope" hint="event_alert uses only the triggering alert; case uses all currently linked alerts.">
+            <Select value={p.scope ?? 'event_alert'} options={['event_alert', 'case']} onChange={v => set({ scope: v })} disabled={disabled} />
+          </Field>
+          <Field label="Restrict to hostname" hint="Optional. Only hosts found in linked case evidence are eligible.">
+            <Text value={p.hostname} onChange={v => set({ hostname: v })} disabled={disabled} />
+          </Field>
+          {node.type === 'case_block_ips' && <>
+            <Field label="IP selection" hint="Empty selects all IPs in scope. Enter comma-separated IPs or an upstream list template. Domains and hashes are not IP block targets.">
+              <Text mono value={p.ips} placeholder="{{ steps.case_evidence_1.ips }}" onChange={v => set({ ips: v })} disabled={disabled} />
+            </Field>
+            <Field label="Block for (seconds)"><Num value={p.duration_seconds ?? 3600} min={60} max={604800} onChange={v => set({ duration_seconds: v })} disabled={disabled} /></Field>
+            <Field label="Maximum IP/host pairs"><Num value={p.max_pairs ?? 100} min={1} max={100} onChange={v => set({ max_pairs: v })} disabled={disabled} /></Field>
+          </>}
         </>
       )}
 

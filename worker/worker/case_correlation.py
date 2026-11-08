@@ -11,6 +11,7 @@ from sqlalchemy import or_, select, text
 from worker.database import AsyncSessionLocal
 from worker.llm_gateway import LLMError, complete, extract_json
 from worker.models import Alert, Case, CaseAlert
+from worker.soar.case_outbox import CaseEvent as CaseLifecycleEvent, enqueue_case_event
 
 log = structlog.get_logger()
 
@@ -154,7 +155,7 @@ async def choose_case(incoming: CorrelationInput) -> Decision:
         return Decision(method="fallback", reason="AI unavailable; no unambiguous indicator/target match.")
 
 
-async def record_link(incoming: CorrelationInput, decision: Decision) -> bool:
+async def record_link(incoming: CorrelationInput, decision: Decision, *, emit_event: bool = True) -> bool:
     if decision.case_id is None:
         return False
     async with AsyncSessionLocal() as db:
@@ -175,5 +176,7 @@ async def record_link(incoming: CorrelationInput, decision: Decision) -> bool:
         link.status = "suggested" if decision.action == "suggest" else "linked"
         link.reason, link.confidence, link.method = decision.reason, decision.confidence, decision.method
         link.indicators, link.accounts = sorted(set(incoming.keys + incoming.indicators)), incoming.accounts
+        if link.status == "linked" and alert.id != case.alert_id:
+            await enqueue_case_event(db, CaseLifecycleEvent(case.id, case.group_id, "case.alert_linked", alert.id, ready=emit_event))
         await db.commit()
         return True

@@ -13,6 +13,8 @@ import type { Playbook, Run } from '@/types/soar'
 const EVENT_LABEL: Record<string, string> = {
   'alert.created': 'on new alert',
   'alert.triaged': 'after AI triage',
+  'case.created': 'on new case',
+  'case.alert_linked': 'on new case evidence',
   manual: 'manual only',
 }
 

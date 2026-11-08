@@ -241,6 +241,7 @@ function Editor({ playbook, catalog }: { playbook: Playbook; catalog: Catalog })
   const [errors, setErrors] = useState<string[]>([])
   const [tab, setTab] = useState<'node' | 'runs'>(params.get('run') ? 'runs' : 'node')
   const [runAlert, setRunAlert] = useState('')
+  const [runCase, setRunCase] = useState('')
   const [showRun, setShowRun] = useState(false)
   const runId = params.get('run')
   const run = useRun(runId)
@@ -317,7 +318,7 @@ function Editor({ playbook, catalog }: { playbook: Playbook; catalog: Catalog })
 
   const startRun = () => {
     if (dirty) { emitToast('Save the workflow first — runs use the saved version', 'error'); return }
-    runNow.mutate({ id: playbook.id, alert_id: runAlert.trim() || undefined }, {
+    runNow.mutate({ id: playbook.id, alert_id: runAlert.trim() || undefined, case_id: runCase.trim() || undefined }, {
       onSuccess: r => { setShowRun(false); openRun(r.id); emitToast('Run queued', 'success') },
     })
   }
@@ -358,6 +359,8 @@ function Editor({ playbook, catalog }: { playbook: Playbook; catalog: Catalog })
             <div style={{ ...S.card, position: 'absolute', right: 0, top: 38, width: 320, zIndex: 20, padding: 12 }}>
               <label style={S.label}>Run with an alert (optional)</label>
               <input style={{ ...S.input, ...S.mono }} placeholder="alert id" value={runAlert} onChange={e => setRunAlert(e.target.value)} />
+              <label style={S.label}>Case ID (optional)</label>
+              <input aria-label="Case ID" style={{ ...S.input, ...S.mono }} placeholder="case id" value={runCase} onChange={e => setRunCase(e.target.value)} />
               <div style={S.hint}>The alert fills {'{{ trigger.* }}'}. Trigger conditions are skipped for manual runs.</div>
               <button style={{ ...S.btn(), marginTop: 8 }} disabled={runNow.isPending} onClick={startRun}><Play size={12} /> Run now</button>
             </div>

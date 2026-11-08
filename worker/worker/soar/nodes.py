@@ -17,7 +17,9 @@ import structlog
 from sqlalchemy import select, update
 
 from worker.database import AsyncSessionLocal
-from worker.models import Agent, AgentTask, Alert, AlertNote, AlertSuppression, Case
+from worker.models import Agent, AgentTask, Alert, AlertNote, AlertSuppression, Case, CaseNote
+from worker.soar.case_outbox import CaseEvent, enqueue_case_event
+from worker.soar.case_nodes import run_case_node
 from worker.soar.conditions import matches
 from worker.soar.template import lookup
 
@@ -199,8 +201,15 @@ async def run_case(node: dict, params: dict, ctx: dict) -> NodeResult:
 
     if op == "create_case":
         async with AsyncSessionLocal() as db:
+            if trig.get("case_id"):
+                existing = (await db.execute(select(Case).where(
+                    Case.id == trig["case_id"], Case.group_id == group_id,
+                ))).scalar_one_or_none()
+                if existing is None:
+                    raise NodeError("Trigger case not found in the run's group")
+                return NodeResult("main", {"case_id": str(existing.id), "created": False})
             if alert_id:
-                existing = (await db.execute(select(Case).where(Case.alert_id == alert_id).limit(1))).scalar_one_or_none()
+                existing = (await db.execute(select(Case).where(Case.alert_id == alert_id, Case.group_id == group_id).limit(1))).scalar_one_or_none()
                 if existing:
                     return NodeResult("main", {"case_id": str(existing.id), "created": False})
             case = Case(title=str(params.get("title") or f"SOAR: {trig.get('rule_title', 'alert')}")[:255],
@@ -208,6 +217,8 @@ async def run_case(node: dict, params: dict, ctx: dict) -> NodeResult:
                         severity=str(params.get("severity") or trig.get("severity") or "medium"),
                         status="open", alert_id=alert_id, group_id=group_id, created_by_ai=False)
             db.add(case)
+            await db.flush()
+            await enqueue_case_event(db, CaseEvent(case.id, case.group_id, "case.created", case.alert_id))
             await db.commit()
             return NodeResult("main", {"case_id": str(case.id), "created": True})
 
@@ -224,6 +235,19 @@ async def run_case(node: dict, params: dict, ctx: dict) -> NodeResult:
             await db.commit()
         return NodeResult("main", {"entity_type": entity_type, "value": value})
 
+    if op == "add_note" and trig.get("case_id"):
+        content = str(params.get("content") or "").strip()
+        if not content:
+            raise NodeError("note content is empty")
+        async with AsyncSessionLocal() as db:
+            case = (await db.execute(select(Case).where(
+                Case.id == trig["case_id"], Case.group_id == group_id,
+            ))).scalar_one_or_none()
+            if case is None:
+                raise NodeError("Trigger case not found in the run's group")
+            db.add(CaseNote(case_id=case.id, content=content, is_ai_generated=True))
+            await db.commit()
+        return NodeResult("main", {"case_id": str(case.id)})
     if not alert_id:
         raise NodeError(f"{op} needs an alert; this run has none")
     if op == "add_note":
@@ -583,6 +607,8 @@ async def run_block_ioc(node: dict, params: dict, ctx: dict) -> NodeResult:
 
 
 HANDLERS = {
+    "case_evidence": run_case_node,
+    "case_block_ips": run_case_node,
     "trigger": run_trigger,
     "alert_event": run_alert_event,
     "log_search": run_log_search,

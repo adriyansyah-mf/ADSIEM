@@ -19,6 +19,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from worker.database import AsyncSessionLocal
 from worker.models import SoarAction, SoarPlaybook, SoarRun, SoarRunStep
@@ -53,39 +54,42 @@ def playbook_graph(pb: SoarPlaybook, actions: list[SoarAction]) -> dict:
     ]))
 
 
-async def dispatch(event: str, trigger: dict, *, group_id: str) -> list[str]:
+async def dispatch(event: str, trigger: dict, *, group_id: str, db: AsyncSession | None = None) -> list[str]:
     """Queue a run for every enabled playbook whose Trigger matches. Returns run ids."""
+    if db is None:
+        async with AsyncSessionLocal() as session:
+            queued = await dispatch(event, trigger, group_id=group_id, db=session)
+            await session.commit()
+        if queued:
+            _wake.set()
+        return queued
     trigger = {**trigger, "event": event, "group_id": group_id}
     ctx = {"trigger": trigger, "steps": {}}
     queued: list[str] = []
-    async with AsyncSessionLocal() as db:
-        playbooks = (await db.execute(
-            select(SoarPlaybook).where(
-                SoarPlaybook.is_enabled.is_(True),
-                (SoarPlaybook.group_id == group_id) | (SoarPlaybook.group_id == "default"),
-            )
+    playbooks = (await db.execute(
+        select(SoarPlaybook).where(
+            SoarPlaybook.is_enabled.is_(True),
+            (SoarPlaybook.group_id == group_id) | (SoarPlaybook.group_id == "default"),
+        )
+    )).scalars().all()
+    for pb in playbooks:
+        actions = [] if pb.graph else (await db.execute(
+            select(SoarAction).where(SoarAction.playbook_id == pb.id)
         )).scalars().all()
-        for pb in playbooks:
-            actions = [] if pb.graph else (await db.execute(
-                select(SoarAction).where(SoarAction.playbook_id == pb.id)
-            )).scalars().all()
-            try:
-                graph = playbook_graph(pb, list(actions))
-            except GraphError as exc:
-                log.warning("soar_playbook_invalid", playbook=pb.name, errors=exc.errors[:5])
-                continue
-            if trigger_event(graph) != event or not matches(trigger_node(graph)["params"], ctx):
-                continue
-            run = SoarRun(playbook_id=pb.id, group_id=group_id, status="queued", trigger_event=event,
-                          alert_id=trigger.get("alert_id"), graph=graph,
-                          context={"trigger": trigger, "steps": {}, "queue": [trigger_node(graph)["id"]], "done": []})
-            db.add(run)
-            await db.flush()
-            queued.append(str(run.id))
-            log.info("soar_run_queued", playbook=pb.name, run_id=str(run.id), trigger_event=event)
-        await db.commit()
-    if queued:
-        _wake.set()
+        try:
+            graph = playbook_graph(pb, list(actions))
+        except GraphError as exc:
+            log.warning("soar_playbook_invalid", playbook=pb.name, errors=exc.errors[:5])
+            continue
+        if trigger_event(graph) != event or not matches(trigger_node(graph)["params"], ctx):
+            continue
+        run = SoarRun(playbook_id=pb.id, group_id=group_id, status="queued", trigger_event=event,
+                      alert_id=trigger.get("alert_id"), graph=graph,
+                      context={"trigger": trigger, "steps": {}, "queue": [trigger_node(graph)["id"]], "done": []})
+        db.add(run)
+        await db.flush()
+        queued.append(str(run.id))
+        log.info("soar_run_queued", playbook=pb.name, run_id=str(run.id), trigger_event=event)
     return queued
 
 
@@ -319,6 +323,11 @@ async def _expire_and_reap() -> None:
 async def soar_loop() -> None:
     running: set[asyncio.Task] = set()
     while True:
+        try:
+            from worker.soar.case_events import dispatch_case_events
+            await dispatch_case_events()
+        except Exception as exc:  # case events must not stall reaping or claiming runs
+            log.error("soar_case_events_error", error=str(exc))
         try:
             await _expire_and_reap()
             free = MAX_CONCURRENT_RUNS - len(running)
