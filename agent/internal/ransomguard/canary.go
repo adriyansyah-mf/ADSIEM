@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -195,26 +196,73 @@ func (c *canaries) canaryPath(path string) (string, bool) {
 	return "", false
 }
 
+// canaryChange is a canary found changed or removed by verify.
+type canaryChange struct {
+	path      string
+	encrypted bool // its new content looks encrypted (looksEncrypted)
+}
+
 // verify returns the canaries that were changed or removed since they
 // were planted, and forgets them so plant writes them again.
-func (c *canaries) verify() []string {
+func (c *canaries) verify() []canaryChange {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var bad []string
+	var bad []canaryChange
 	for p, want := range c.files {
 		data, err := os.ReadFile(p)
 		sum := sha256.Sum256(data)
 		if err != nil || hex.EncodeToString(sum[:]) != want {
-			bad = append(bad, p)
+			bad = append(bad, canaryChange{path: p, encrypted: err == nil && looksEncrypted(data)})
 			delete(c.files, p)
 		}
 	}
 	return bad
 }
 
-// strike records a change of a canary (from a file event or verify) and
-// drops it so the next plant replaces it. It returns true when this
-// change retires the canary: plant leaves that path alone for retireWindow.
+// forget drops a changed canary so the next plant replaces it.
+func (c *canaries) forget(path string) {
+	c.mu.Lock()
+	delete(c.files, path)
+	c.mu.Unlock()
+}
+
+// looksEncrypted reports whether a changed canary's content is encrypted:
+// high entropy without a known format header, over the first 4 KB or, when
+// the canary text is gone, over the first 1 KB (an encryptor that only
+// encrypts the head of each file). The canary itself is hex text (about 4
+// bits per byte); a tool that rewrites it in clear stays well below.
+func looksEncrypted(data []byte) bool {
+	head := data
+	if len(head) > entropySample {
+		head = head[:entropySample]
+	}
+	if len(head) < 512 || knownMagic(head) {
+		return false
+	}
+	if entropy(head) >= encryptedEntropy {
+		return true
+	}
+	return len(head) >= 1024 && !strings.HasPrefix(string(head[:len(canaryMarker)]), canaryMarker) &&
+		entropy(head[:1024]) >= encryptedEntropy
+}
+
+// fileLooksEncrypted is looksEncrypted on the first 4 KB of path.
+func fileLooksEncrypted(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, entropySample)
+	n, _ := io.ReadFull(f, buf)
+	return looksEncrypted(buf[:n])
+}
+
+// strike records a clear-text change or a removal of a canary (from a file
+// event or verify) and drops it so the next plant replaces it. It returns
+// true when this change retires the canary: plant leaves that path alone
+// for retireWindow. Encryption is never a strike: ransomware hitting the
+// same canary again must not switch protection off.
 func (c *canaries) strike(path string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

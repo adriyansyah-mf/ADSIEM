@@ -1,10 +1,14 @@
 # Ransomware detections from agent/internal/ransomguard:
-#   detection=canary          a process touched a canary file (Linux sensor)
-#   detection=canary_changed  a canary changed, found by the periodic check (no process)
-#   detection=canary_retired  a canary changed 3 times in 24 h; not planted there for 24 h
-#   detection=extension_change / mass_modify  bulk file heuristics; confirmed=true when
-#                             the files the process wrote have encrypted-looking entropy
-# response: killed, kill_refused, kill_failed, none (report only / not confirmed).
+#   detection=canary          a process touched a canary file (Linux eBPF / Windows ETW sensor)
+#   detection=canary_changed  a canary changed, found by the periodic check (no process);
+#                             confirmed=true when its new content looks encrypted
+#   detection=canary_retired  a canary changed in clear text 3 times in 24 h; not planted
+#                             there for 24 h (encryption never retires one)
+#   detection=extension_change / mass_modify / inplace_modify  bulk file heuristics;
+#                             confirmed=true when the files the process wrote look
+#                             encrypted (high entropy, format header gone)
+# response: killed, kill_refused, kill_failed, isolated (confirmed, no process to kill),
+#           none (report only / not confirmed).
 name: ransomware_activity
 log_type: ransomware_activity
 type: kv

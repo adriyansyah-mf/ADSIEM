@@ -1,6 +1,6 @@
 title: Ransomware Canary File Changed
 id: rule-ransomware-canary-changed
-description: The agent's periodic check found one of its canary files changed or gone (ransomware.canary). No process is attached (Windows, or no eBPF sensor); look at the host's other files and processes around that time.
+description: The agent's periodic check found one of its canary files changed in clear text or gone (ransomware.canary). No process is attached (no file event reached the agent); look at the host's other files and processes around that time. A canary found encrypted is confirmed (ransomware.confirmed) and raises Ransomware Activity On Endpoint instead.
 logsource:
   product: ransomware
   service: activity
@@ -8,7 +8,9 @@ detection:
   selection:
     event.action: ransomware
     ransomware.detection: canary_changed
-  condition: selection
+  encrypted:
+    ransomware.confirmed: 'true'
+  condition: selection and not encrypted
 # One alert per host per hour: ransomware changes every canary in one
 # sweep, and the lines are kept in the log either way.
 suppression:

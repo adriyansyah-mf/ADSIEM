@@ -43,8 +43,39 @@ func TestMain(m *testing.M) {
 		os.Remove(os.Getenv("RANSOM_CANARY"))
 		time.Sleep(15 * time.Second) // waits to be killed
 		os.Exit(0)
+	case "inplace":
+		// Encrypt each file over itself: open, read, write random bytes
+		// back at offset 0. No rename, no delete, no new file.
+		files, _ := filepath.Glob(filepath.Join(os.Getenv("RANSOM_DIR"), "*", "*.docx"))
+		for _, p := range files {
+			overwrite(p)
+			time.Sleep(20 * time.Millisecond)
+		}
+		os.WriteFile(filepath.Join(os.Getenv("RANSOM_DIR"), "FINISHED"), nil, 0o644)
+		os.Exit(0)
+	case "canary-overwrite":
+		overwrite(os.Getenv("RANSOM_CANARY"))
+		time.Sleep(15 * time.Second) // waits to be killed
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+// overwrite encrypts p in place: same file, same size, random bytes.
+func overwrite(p string) {
+	f, err := os.OpenFile(p, os.O_RDWR, 0)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return
+	}
+	data := make([]byte, info.Size())
+	f.ReadAt(data, 0)
+	rand.Read(data)
+	f.WriteAt(data, 0)
 }
 
 func helperWin(t *testing.T, ctx context.Context, kind string, env ...string) *exec.Cmd {
@@ -143,4 +174,78 @@ func TestRansomwareEndToEndWindows(t *testing.T) {
 	if !found {
 		t.Errorf("no canary kill line: %q", lines)
 	}
+
+	// In place: pre-existing documents overwritten with random bytes, no
+	// rename. Under the user profile, not TEMP: in-place writes under
+	// AppData\Local (TEMP) and other cache paths do not count.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs, err := os.MkdirTemp(home, "siem-ransom-e2e-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(docs) })
+	docs = longPath(t, docs)
+	const docCount = 400
+	for i := 0; i < docCount; i++ {
+		sub := filepath.Join(docs, fmt.Sprintf("folder%d", i%4))
+		os.MkdirAll(sub, 0o755)
+		text := strings.Repeat(fmt.Sprintf("quarterly report %d, nothing to see here. ", i), 200)
+		if err := os.WriteFile(filepath.Join(sub, fmt.Sprintf("report%03d.docx", i)), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(time.Second) // the test's own writes are not reported; let the sensor settle
+	ip := helperWin(t, hctx, "inplace", "RANSOM_DIR="+docs)
+	err = ip.Wait()
+	t.Logf("in-place encryptor: %v", err)
+	if !terminated(err) {
+		t.Errorf("in-place encryptor not terminated by the guard: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(docs, "FINISHED")); err == nil {
+		t.Error("in-place encryptor finished its run")
+	}
+	want := fmt.Sprintf("PID=%d ", ip.Process.Pid)
+	if l := waitLine(t, &out, func(l string) bool {
+		return strings.HasPrefix(l, "detection=inplace_modify confirmed=true response=killed") && strings.Contains(l, want)
+	}); l == "" {
+		t.Errorf("no inplace_modify kill line: %q", out.wait(t, 1))
+	}
+
+	// A canary overwritten in place (Kernel-File write, no rename or delete).
+	canary = filepath.Join(canaryDir, ".siem-canary.docx")
+	if _, err := os.Stat(canary); err != nil {
+		t.Fatalf("canary not planted: %v", err)
+	}
+	co := helperWin(t, hctx, "canary-overwrite", "RANSOM_CANARY="+canary)
+	err = co.Wait()
+	t.Logf("canary overwriter: %v", err)
+	if !terminated(err) {
+		t.Errorf("canary overwriter not terminated by the guard: %v", err)
+	}
+	want = fmt.Sprintf("PID=%d ", co.Process.Pid)
+	if l := waitLine(t, &out, func(l string) bool {
+		return strings.HasPrefix(l, "detection=canary confirmed=true response=killed") &&
+			strings.Contains(l, "FileAction=write") && strings.Contains(l, want)
+	}); l == "" {
+		t.Errorf("no canary write kill line: %q", out.wait(t, 1))
+	}
+}
+
+// waitLine waits up to 5 s for a line that match accepts.
+func waitLine(t *testing.T, s *sink, match func(string) bool) string {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		s.mu.Lock()
+		for _, l := range s.lines {
+			if match(l) {
+				s.mu.Unlock()
+				return l
+			}
+		}
+		s.mu.Unlock()
+	}
+	return ""
 }

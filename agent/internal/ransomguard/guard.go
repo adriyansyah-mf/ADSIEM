@@ -22,6 +22,9 @@ const LogType = "ransomware_activity"
 
 const verifyEvery = 30 * time.Second
 
+// confirmRetry is the wait before a heuristic hit's files are sampled again.
+const confirmRetry = 300 * time.Millisecond
+
 // Options configure the Guard.
 type Options struct {
 	Push        func(logType, line string)
@@ -82,15 +85,29 @@ func (g *Guard) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			for _, p := range g.can.verify() {
-				g.report(detection{kind: "canary_changed", canary: p})
-				if g.can.strike(p) {
-					g.report(detection{kind: "canary_retired", canary: p})
-				}
-			}
-			g.can.plant()
+			g.checkCanaries()
 		}
 	}
+}
+
+// checkCanaries is the periodic check: changed canaries are reported and
+// planted again. One that now looks encrypted is ransomware with no process
+// known (it overwrote the canary between two checks without a file event):
+// confirmed, so the critical rule fires, and the host is isolated when the
+// configuration or the policy asks for it. Only clear-text changes and
+// removals count toward retirement.
+func (g *Guard) checkCanaries() {
+	for _, c := range g.can.verify() {
+		if c.encrypted {
+			g.act(detection{kind: "canary_changed", canary: c.path, confirmed: true})
+			continue
+		}
+		g.report(detection{kind: "canary_changed", canary: c.path})
+		if g.can.strike(c.path) {
+			g.report(detection{kind: "canary_retired", canary: c.path})
+		}
+	}
+	g.can.plant()
 }
 
 // Observe takes one file event from the Linux sensor (or the Windows ETW
@@ -106,11 +123,17 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 			continue
 		}
 		if p, ok := g.can.canaryPath(name); ok {
-			retired := g.can.strike(p)
+			g.can.forget(p)
 			go func() {
 				g.act(detection{kind: "canary", pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
 					comm: ev.Comm, canary: p, action: ev.Action, confirmed: true})
-				if retired {
+				// Read once the process is stopped: what it left is final.
+				// The new content is at Path (a write, or a rename of the
+				// canary or over it); a delete leaves nothing to read.
+				if ev.Action != "delete" && fileLooksEncrypted(ev.Path) {
+					return // encryption: never a step toward retirement
+				}
+				if g.can.strike(p) {
 					g.report(detection{kind: "canary_retired", canary: p, image: ev.Image, comm: ev.Comm,
 						pid: ev.PID, ppid: ev.PPID, uid: ev.UID})
 				}
@@ -129,6 +152,12 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 	}
 	go func() {
 		ok, e := confirm(f.targets)
+		if !ok {
+			// The newest file may still be being written (on Linux the event
+			// is the open): look once more before calling it benign.
+			time.Sleep(confirmRetry)
+			ok, e = confirm(f.targets)
+		}
 		sample := ""
 		if len(f.targets) > 0 {
 			sample = f.targets[len(f.targets)-1]
@@ -164,9 +193,12 @@ func (g *Guard) SetRuntime(r Runtime) { g.rt.Store(&r) }
 func (g *Guard) act(d detection) {
 	d.response = "none"
 	rt := g.rt.Load()
-	excluded := rt.Excluded != nil && rt.Excluded(d.image)
-	if g.opts.Kill && rt.Kill && !excluded && d.confirmed && d.pid != 0 {
+	excluded := d.pid != 0 && rt.Excluded != nil && rt.Excluded(d.image)
+	// A confirmed detection without a process (the periodic check found a
+	// canary encrypted) has nothing to kill: isolating is the only response.
+	if g.opts.Kill && rt.Kill && !excluded && d.confirmed {
 		switch {
+		case d.pid == 0:
 		case g.response == nil:
 			d.response = "unsupported"
 		case d.pid == 1 || protectedImages[strings.ToLower(filepath.Base(d.image))]:
@@ -188,6 +220,9 @@ func (g *Guard) act(d detection) {
 				d.err = strings.TrimSpace(d.err + " isolate: " + err.Error())
 			} else {
 				d.isolated = true
+				if d.pid == 0 {
+					d.response = "isolated"
+				}
 			}
 		}
 	}
