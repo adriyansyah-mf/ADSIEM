@@ -90,6 +90,41 @@ func TestInplaceUniformExtension(t *testing.T) {
 	}
 }
 
+// The two cases of the fix round, as specified: 60 .pak/.bin rewritten under
+// Program Files and AppData stay quiet; 60 docx/pdf/jpg overwritten in place
+// in Documents are confirmed and stopped.
+func TestInplace60PakBinInProgramFilesAndAppDataQuiet(t *testing.T) {
+	for _, root := range []string{`C:\Program Files\Game\data`, `C:\Users\bob\AppData\Local\Game\data`,
+		`C:\Users\bob\AppData\Roaming\Game\data`} {
+		d := newDetector(nil)
+		for i := 0; i < 60; i++ {
+			p := fmt.Sprintf(`%s\pack%d\chunk%02d%s`, root, i%4, i, []string{".pak", ".bin"}[i%2])
+			if f := d.observe(ev(44, "write", p, "", time.Duration(i)*time.Millisecond)); f != nil {
+				t.Fatalf("%s: fired %+v", root, f)
+			}
+		}
+	}
+}
+
+func TestGuardInplace60DocsInDocumentsConfirmed(t *testing.T) {
+	g, out, killed := inplaceGuard(t)
+	tmp := t.TempDir()
+	// The real location rule, applied below the test's temp root.
+	g.det.ignore = func(p string) bool { return skipInplace(strings.TrimPrefix(p, tmp)) }
+	docs := filepath.Join(tmp, "home", "alice", "Documents")
+	for i := 0; i < 60; i++ {
+		sub := filepath.Join(docs, fmt.Sprintf("folder%d", i%4))
+		os.MkdirAll(sub, 0o755)
+		p := filepath.Join(sub, fmt.Sprintf("report%02d%s", i, []string{".docx", ".pdf", ".jpg"}[i%3]))
+		writeSample(t, p, nil) // overwritten in place with random bytes: header gone
+		g.Observe(linsensor.FileEvent{Time: t0.Add(time.Duration(i) * time.Millisecond), Action: "write", Path: p, PID: 69,
+			Image: "/tmp/.x/locker", Comm: "locker"})
+	}
+	if l := out.wait(t, 1)[0]; !strings.HasPrefix(l, "detection=inplace_modify confirmed=true response=killed") || len(*killed) != 1 {
+		t.Fatalf("line = %s killed=%v", l, *killed)
+	}
+}
+
 // A game updater rewriting 60 asset files with high-entropy data: even
 // where it counts (a user folder), it is reported, not stopped.
 func TestGuardInplaceGameAssetsNotKilled(t *testing.T) {
