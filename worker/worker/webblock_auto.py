@@ -11,6 +11,7 @@ verdict is escalate/create_case; the domain is not allowlisted for the group;
 the alert is not itself a web_block event. Never raises into triage."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -37,6 +38,14 @@ SET status = 'active', reason = EXCLUDED.reason, alert_id = EXCLUDED.alert_id,
 WHERE web_block_entries.status <> 'active'
    OR (web_block_entries.expires_at IS NOT NULL AND web_block_entries.expires_at < EXCLUDED.expires_at)
 RETURNING domain
+""")
+
+
+# no user acts here: actor_id stays NULL, the action name marks it as automatic
+_AUDIT = text("""
+INSERT INTO audit_logs (id, actor_id, group_id, action, resource_type, resource_id, detail, created_at)
+VALUES (gen_random_uuid(), NULL, :group, 'web_block.auto_block', 'web_block', :target,
+        CAST(:detail AS jsonb), now())
 """)
 
 
@@ -122,16 +131,17 @@ async def _maybe_block(alert_id, group_id, title, verdict, fields, enrichment, t
     # vouches for the event's destination, not for every host mentioned in the alert text.
     chosen = [d for d, from_event in cands.items()
               if d in bad or (verdict in BLOCKING_VERDICTS and from_event)]
-    evidence = "threat intelligence malicious" if bad & set(chosen) else f"AI verdict {verdict}"
     if not chosen:
         return []
-    reason = f"Alert: {(title or '')[:_MAX_TITLE]} ({evidence})"
+    # each domain cites its own evidence: a TI-malicious host cites TI, any other the verdict
+    evidence = {d: "threat intelligence malicious" if d in bad else f"AI verdict {verdict}" for d in chosen}
+    reasons = {d: f"Alert: {(title or '')[:_MAX_TITLE]} ({evidence[d]})" for d in chosen}
     expires = datetime.now(timezone.utc) + timedelta(days=days)
     async with AsyncSessionLocal() as db:
         await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": WEB_BLOCK_SEQ_LOCK})
         changed = []
         for domain in chosen:
-            res = await db.execute(_UPSERT, {"domain": domain, "group": group_id, "reason": reason,
+            res = await db.execute(_UPSERT, {"domain": domain, "group": group_id, "reason": reasons[domain],
                                              "alert": UUID(str(alert_id)), "expires": expires})
             if res.first():
                 changed.append(domain)
@@ -142,6 +152,11 @@ async def _maybe_block(alert_id, group_id, title, verdict, fields, enrichment, t
                 {"a": UUID(str(alert_id)),
                  "c": f"Web Protection: blocked {', '.join(changed)} for group {group_id} "
                       f"until {expires:%Y-%m-%d}"})
+            await db.execute(_AUDIT, {
+                "group": group_id, "target": ", ".join(changed),
+                "detail": json.dumps({"alert_id": str(alert_id), "group_id": group_id, "domains": changed,
+                                      "expires_at": expires.isoformat(),
+                                      "evidence": {d: evidence[d] for d in changed}})})
         await db.commit()
     if changed:
         log.info("webblock_auto_blocked", alert_id=alert_id, group=group_id, domains=changed)

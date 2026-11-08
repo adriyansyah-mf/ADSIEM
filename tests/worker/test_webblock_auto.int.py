@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.database import Base
-from app.models.models import Alert, WebAllowRule, WebBlockEntry, WebBlockPolicy, AlertNote
+from app.models.models import Alert, AuditLog, WebAllowRule, WebBlockEntry, WebBlockPolicy, AlertNote
 from worker.case_grouping import parse_exclusions
 
 
@@ -26,7 +26,7 @@ async def sessions():
     engine = create_async_engine(url, connect_args={"server_settings": {"search_path": f"{schema},public"}},
                                  execution_options={"schema_translate_map": {None: schema}})
     tables = {WebBlockEntry.__table__, WebAllowRule.__table__, WebBlockPolicy.__table__,
-              Alert.__table__, AlertNote.__table__}
+              Alert.__table__, AlertNote.__table__, AuditLog.__table__}
     while True:
         dependencies = {fk.column.table for table in tables for fk in table.foreign_keys}
         if dependencies <= tables:
@@ -135,3 +135,36 @@ async def test_other_group_allowlist_does_not_apply(auto, sessions):
         db.add(WebAllowRule(group_id="other", domain="example.com", include_subdomains=True, enabled=True))
         await db.commit()
     assert await mod.maybe_block(alert_id, "g", "Beacon", "monitor", {}, enrichment(), tags=TAGS) == ["c2.example.com"]
+
+
+async def test_block_writes_a_group_audit_row(auto, sessions):
+    mod, alert_id = auto
+    await mod.maybe_block(alert_id, "g", "Beacon", "monitor", {}, enrichment(), tags=TAGS)
+    async with sessions() as db:
+        (row,) = (await db.execute(text("SELECT group_id, action, resource_id, actor_id, detail FROM audit_logs"))).all()
+    assert (row.group_id, row.action, row.resource_id, row.actor_id) == ("g", "web_block.auto_block", "c2.example.com", None)
+    assert row.detail["alert_id"] == alert_id and row.detail["group_id"] == "g"
+    assert row.detail["expires_at"] and "threat intelligence" in row.detail["evidence"]["c2.example.com"]
+
+
+async def test_no_audit_row_when_nothing_changed(auto, sessions):
+    mod, alert_id = auto
+    await mod.maybe_block(alert_id, "g", "Beacon", "monitor", {}, enrichment(), tags=TAGS)
+    async with sessions() as db:  # already blocked for longer than a fresh block would be
+        await db.execute(text("UPDATE web_block_entries SET expires_at = expires_at + interval '1 day'"))
+        await db.commit()
+    assert await mod.maybe_block(alert_id, "g", "Beacon", "monitor", {}, enrichment(), tags=TAGS) == []
+    assert await mod.maybe_block(alert_id, "g", "Beacon", "monitor", {}, SimpleNamespace(iocs=[], reputation=[]), tags=TAGS) == []
+    async with sessions() as db:
+        assert (await db.execute(text("SELECT count(*) FROM audit_logs"))).scalar() == 1
+
+
+async def test_each_domain_cites_its_own_evidence(auto, sessions):
+    mod, alert_id = auto
+    e = SimpleNamespace(iocs=[{"type": "domain", "value": "bad.example.org"}],
+                        reputation=[SimpleNamespace(ioc_value="bad.example.org", ioc_type="domain", malicious=True)])
+    got = await mod.maybe_block(alert_id, "g", "Beacon", "escalate", {"url.domain": "dest.example.com"}, e, tags=TAGS)
+    assert sorted(got) == ["bad.example.org", "dest.example.com"]
+    reasons = {r.domain: r.reason for r in await entries(sessions)}
+    assert "threat intelligence" in reasons["bad.example.org"] and "AI verdict" not in reasons["bad.example.org"]
+    assert "AI verdict escalate" in reasons["dest.example.com"] and "threat intelligence" not in reasons["dest.example.com"]
