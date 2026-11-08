@@ -5,7 +5,9 @@ package webblock
 import (
 	"crypto/x509"
 	"errors"
+	"log"
 	"strings"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -35,7 +37,8 @@ func installTrust(der []byte, fingerprint string) error {
 }
 
 // forEachOurs visits every ADSIEM certificate in the machine ROOT store; fn
-// returns true to delete the one it was given.
+// returns true to delete the one it was given. A deletion refused with access
+// denied (a group-policy managed physical store) is logged and skipped.
 func forEachOurs(fn func(c *x509.Certificate) (del bool)) error {
 	store, err := openRootStore()
 	if err != nil {
@@ -47,7 +50,10 @@ func forEachOurs(fn func(c *x509.Certificate) (del bool)) error {
 	for {
 		// The enumeration frees prev; deleting works on a duplicate.
 		ctx, err := windows.CertEnumCertificatesInStore(store, prev)
-		if err != nil || ctx == nil {
+		if ctx == nil {
+			if err != nil && !errors.Is(err, syscall.Errno(windows.CRYPT_E_NOT_FOUND)) {
+				return err
+			}
 			break
 		}
 		prev = ctx
@@ -58,8 +64,12 @@ func forEachOurs(fn func(c *x509.Certificate) (del bool)) error {
 		}
 		if fn(c) {
 			dup := windows.CertDuplicateCertificateContext(ctx)
-			if derr := windows.CertDeleteCertificateFromStore(dup); derr != nil && firstErr == nil {
-				firstErr = derr
+			if derr := windows.CertDeleteCertificateFromStore(dup); derr != nil {
+				if errors.Is(derr, windows.ERROR_ACCESS_DENIED) {
+					log.Printf("webblock: cannot delete %q from the ROOT store: %v", c.Subject.CommonName, derr)
+				} else if firstErr == nil {
+					firstErr = derr
+				}
 			}
 		}
 	}
@@ -72,27 +82,11 @@ func removeTrust(string) error {
 
 func trustInstalled(fingerprint string) bool {
 	found := false
-	forEachOurs(func(c *x509.Certificate) bool {
+	err := forEachOurs(func(c *x509.Certificate) bool {
 		if fingerprintOf(c.Raw) == fingerprint {
 			found = true
 		}
 		return false
 	})
-	return found
-}
-
-// protectKeyFile restricts the file to SYSTEM and Administrators with a
-// protected (non-inherited) DACL.
-func protectKeyFile(path string) error {
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;SY)(A;;FA;;;BA)")
-	if err != nil {
-		return err
-	}
-	dacl, _, err := sd.DACL()
-	if err != nil {
-		return err
-	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil, nil, dacl, nil)
+	return err == nil && found
 }

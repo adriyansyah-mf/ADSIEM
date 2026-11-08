@@ -13,8 +13,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +25,8 @@ import (
 const (
 	CAKeyFile  = "webblock-ca.key"
 	CACertFile = "webblock-ca.crt"
+	// CADirName is the protected directory under the state dir holding the CA.
+	CADirName = "webblock"
 
 	// caSubjectPrefix identifies every certificate this package installs.
 	caSubjectPrefix = "ADSIEM Web Protection"
@@ -86,6 +88,7 @@ func generateCA(hostname string) (*CA, error) {
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.Add(caValidity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		MaxPathLen:            0,
@@ -102,13 +105,25 @@ func generateCA(hostname string) (*CA, error) {
 	return newCA(cert, der, key), nil
 }
 
-// LoadOrCreateCA loads the CA from dir, regenerating it when the files are
-// missing, corrupt, mismatched or expire within 30 days.
-func LoadOrCreateCA(dir, hostname string) (*CA, bool, error) {
-	if ca, err := loadCA(dir); err == nil {
+// errRegenerate marks a CA on disk that must be replaced (corrupt, mismatched,
+// wrong parameters, expiring). Other load errors (EACCES, EIO) are returned.
+var errRegenerate = errors.New("webblock: CA must be regenerated")
+
+func caDir(stateDir string) string { return filepath.Join(stateDir, CADirName) }
+
+// LoadOrCreateCA loads the CA from stateDir/webblock, regenerating it when the
+// files are missing, corrupt, mismatched, lack the server-auth restriction or
+// expire within 30 days. Other errors are returned without regenerating.
+func LoadOrCreateCA(stateDir, hostname string) (*CA, bool, error) {
+	dir := caDir(stateDir)
+	ca, err := loadCA(dir)
+	if err == nil {
 		return ca, false, nil
 	}
-	ca, err := generateCA(hostname)
+	if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, errRegenerate) {
+		return nil, false, err
+	}
+	ca, err = generateCA(hostname)
 	if err != nil {
 		return nil, false, err
 	}
@@ -118,7 +133,17 @@ func LoadOrCreateCA(dir, hostname string) (*CA, bool, error) {
 	return ca, true, nil
 }
 
+func regen(format string, a ...any) error {
+	return fmt.Errorf("%w: "+format, append([]any{errRegenerate}, a...)...)
+}
+
 func loadCA(dir string) (*CA, error) {
+	if _, err := os.Lstat(dir); err != nil {
+		return nil, err
+	}
+	if err := secureDir(dir); err != nil {
+		return nil, err
+	}
 	certPEM, err := os.ReadFile(filepath.Join(dir, CACertFile))
 	if err != nil {
 		return nil, err
@@ -130,35 +155,34 @@ func loadCA(dir string) (*CA, error) {
 	cb, _ := pem.Decode(certPEM)
 	kb, _ := pem.Decode(keyPEM)
 	if cb == nil || cb.Type != "CERTIFICATE" || kb == nil {
-		return nil, errors.New("webblock: CA files are not PEM")
+		return nil, regen("CA files are not PEM")
 	}
 	cert, err := x509.ParseCertificate(cb.Bytes)
 	if err != nil {
-		return nil, err
+		return nil, regen("%v", err)
 	}
 	key, err := x509.ParseECPrivateKey(kb.Bytes)
 	if err != nil {
-		return nil, err
+		return nil, regen("%v", err)
 	}
 	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
 	if !ok || !pub.Equal(&key.PublicKey) {
-		return nil, errors.New("webblock: CA key does not match certificate")
+		return nil, regen("key does not match certificate")
 	}
-	if !cert.IsCA || !strings.HasPrefix(cert.Subject.CommonName, caSubjectPrefix) {
-		return nil, errors.New("webblock: not an ADSIEM CA")
+	if !cert.IsCA || !cert.MaxPathLenZero || !strings.HasPrefix(cert.Subject.CommonName, caSubjectPrefix) {
+		return nil, regen("not an ADSIEM CA")
+	}
+	if len(cert.ExtKeyUsage) != 1 || cert.ExtKeyUsage[0] != x509.ExtKeyUsageServerAuth {
+		return nil, regen("CA lacks the server-auth restriction")
 	}
 	if time.Now().Add(caRenewWindow).After(cert.NotAfter) {
-		return nil, errors.New("webblock: CA expiring")
-	}
-	// Re-tighten permissions in case they were loosened.
-	if err := protectKeyFile(filepath.Join(dir, CAKeyFile)); err != nil {
-		return nil, err
+		return nil, regen("CA expiring")
 	}
 	return newCA(cert, cb.Bytes, key), nil
 }
 
 func (c *CA) save(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := secureDir(dir); err != nil {
 		return err
 	}
 	kd, err := x509.MarshalECPrivateKey(c.Key)
@@ -167,57 +191,15 @@ func (c *CA) save(dir string) error {
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kd})
 	// Key first: a cert without a key is regenerated on the next load.
-	if err := writeFileAtomic(filepath.Join(dir, CAKeyFile), keyPEM, true); err != nil {
+	if err := writeSecretFile(dir, CAKeyFile, keyPEM); err != nil {
 		return err
 	}
-	return writeFileAtomic(filepath.Join(dir, CACertFile), c.PEM(), false)
+	return writeSecretFile(dir, CACertFile, c.PEM())
 }
 
 // PEM returns the CA certificate in PEM form.
 func (c *CA) PEM() []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.DER})
-}
-
-// writeFileAtomic writes through a same-directory temp file created 0600, so
-// a secret is never readable by others, even briefly, then renames it.
-func writeFileAtomic(path string, data []byte, secret bool) error {
-	tmp := path + ".tmp"
-	os.Remove(tmp)
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	fail := func(err error) error {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if secret {
-		if err := protectKeyFile(tmp); err != nil {
-			return fail(err)
-		}
-	}
-	if _, err := f.Write(data); err != nil {
-		return fail(err)
-	}
-	if err := f.Sync(); err != nil {
-		return fail(err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if !secret {
-		os.Chmod(tmp, 0o644)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if secret {
-		return protectKeyFile(path)
-	}
-	return nil
 }
 
 // Fingerprint is the lowercase hex SHA-256 of the DER certificate.
@@ -237,8 +219,8 @@ func (c *CA) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error
 	if hello == nil {
 		return nil, errors.New("webblock: no client hello")
 	}
-	host := strings.ToLower(strings.TrimSuffix(hello.ServerName, "."))
-	if host == "" || net.ParseIP(host) != nil || strings.ContainsAny(host, " /\\@:*") {
+	host, ok := normalizeSNI(hello.ServerName)
+	if !ok {
 		return nil, errors.New("webblock: missing or invalid SNI")
 	}
 	c.mu.Lock()
@@ -307,6 +289,35 @@ func (c *CA) mint(host string, now time.Time) (*tls.Certificate, time.Time, erro
 	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, exp, nil
 }
 
+// normalizeSNI lowercases, trims one trailing dot and requires a strict LDH
+// hostname: labels of 1-63 characters, at least one dot, 253 bytes at most.
+func normalizeSNI(sni string) (string, bool) {
+	host := strings.ToLower(sni)
+	host = strings.TrimSuffix(host, ".")
+	if host == "" || len(host) > 253 || !strings.Contains(host, ".") {
+		return "", false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if len(label) < 1 || len(label) > 63 {
+			return "", false
+		}
+		for i := 0; i < len(label); i++ {
+			ch := label[i]
+			if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-') {
+				return "", false
+			}
+		}
+	}
+	return host, true
+}
+
+// Trust store operations, replaced in tests.
+var (
+	doInstall   = installTrust
+	doRemove    = removeTrust
+	doInstalled = trustInstalled
+)
+
 // Authority manages the CA lifecycle on the endpoint.
 type Authority interface {
 	Ensure(hostname string) (fingerprint string, err error)
@@ -326,11 +337,11 @@ func (t *TrustStore) Ensure(hostname string) (string, error) {
 		return "", err
 	}
 	fp := ca.Fingerprint()
-	if created || !trustInstalled(fp) {
-		if err := removeTrust(fp); err != nil {
+	if created || !doInstalled(fp) {
+		if err := doRemove(fp); err != nil {
 			return "", err
 		}
-		if err := installTrust(ca.DER, fp); err != nil {
+		if err := doInstall(ca.DER, fp); err != nil {
 			return "", err
 		}
 	}
@@ -339,20 +350,22 @@ func (t *TrustStore) Ensure(hostname string) (string, error) {
 
 // Installed reports whether the current CA is in the system trust store.
 func (t *TrustStore) Installed() bool {
-	ca, err := loadCA(t.Dir)
+	ca, err := loadCA(caDir(t.Dir))
 	if err != nil {
 		return false
 	}
-	return trustInstalled(ca.Fingerprint())
+	return doInstalled(ca.Fingerprint())
 }
 
 // Remove drops the CA from the trust store and deletes its files.
 func (t *TrustStore) Remove() error {
-	err := removeTrust("")
+	err := doRemove("")
+	dir := caDir(t.Dir)
 	for _, n := range []string{CAKeyFile, CACertFile} {
-		if rerr := os.Remove(filepath.Join(t.Dir, n)); rerr != nil && !os.IsNotExist(rerr) && err == nil {
+		if rerr := os.Remove(filepath.Join(dir, n)); rerr != nil && !os.IsNotExist(rerr) && err == nil {
 			err = rerr
 		}
 	}
+	os.Remove(dir)
 	return err
 }

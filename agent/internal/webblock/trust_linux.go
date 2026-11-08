@@ -3,20 +3,27 @@
 package webblock
 
 import (
+	"context"
 	"encoding/pem"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
+
+const toolTimeout = 2 * time.Minute
 
 // Injectable for tests.
 var (
 	lookPath = exec.LookPath
-	runTool  = func(name string, args ...string) error {
-		out, err := exec.Command(name, args...).CombinedOutput()
+	// runTool runs the absolute tool path with a timeout.
+	runTool = func(path string, args ...string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), toolTimeout)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, path, args...).CombinedOutput()
 		if err != nil {
-			return errors.New(name + ": " + err.Error() + ": " + string(out))
+			return errors.New(filepath.Base(path) + ": " + err.Error() + ": " + string(out))
 		}
 		return nil
 	}
@@ -37,19 +44,52 @@ func trustTools() []trustTool {
 	}
 }
 
+// writePublicFile writes a world-readable file through a random temp file in
+// the same directory and a rename.
+func writePublicFile(path string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Chmod(0o644)
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
+}
+
 func installTrust(der []byte, fingerprint string) error {
 	for _, t := range trustTools() {
-		if _, err := lookPath(t.cmd); err != nil {
+		tool, err := lookPath(t.cmd)
+		if err != nil {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(t.anchor), 0o755); err != nil {
 			return err
 		}
 		data := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-		if err := writeFileAtomic(t.anchor, data, false); err != nil {
+		if err := writePublicFile(t.anchor, data); err != nil {
 			return err
 		}
-		return runTool(t.cmd, t.args...)
+		if err := runTool(tool, t.args...); err != nil {
+			// Do not leave an anchor that looks installed: the next Ensure retries.
+			os.Remove(t.anchor)
+			return err
+		}
+		return nil
 	}
 	return errors.New("no supported trust store tool")
 }
@@ -66,8 +106,8 @@ func removeTrust(string) error {
 			}
 			continue
 		}
-		if _, err := lookPath(t.cmd); err == nil {
-			if err := runTool(t.cmd, t.args...); err != nil && firstErr == nil {
+		if tool, err := lookPath(t.cmd); err == nil {
+			if err := runTool(tool, t.args...); err != nil && firstErr == nil {
 				firstErr = err
 			}
 		}
@@ -88,5 +128,3 @@ func trustInstalled(fingerprint string) bool {
 	}
 	return false
 }
-
-func protectKeyFile(path string) error { return os.Chmod(path, 0o600) }
