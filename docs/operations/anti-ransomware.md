@@ -51,7 +51,7 @@ Per process, over a one-minute window of file events:
 
 For `inplace_modify`, files the process created in the window don't count (on Linux an open with `O_CREAT` counts as a create, so unpacking an archive is not "in place"; Linux in-place encryptors open with `O_RDWR`). Only user-data locations count:
 
-- Windows: profiles under `<system drive>\Users\` (not `AppData`), any other drive (data disks, mapped drives), and UNC shares.
+- Windows: profiles under `<system drive>\Users\` (not `AppData`), any other drive letter (data disks), and SMB shares. The kernel reports share files as `\Device\Mup\server\share\...`; mapped drives add redirector components, as in `\Device\Mup\;LanmanRedirector\;Z:...\server\share\...`. The sensor gives both to the guard as `\\server\share\...`; pipes and mailslots are left out. Share files reach the guard only: SIEM lines are for drive paths, as before. Data on the system drive outside `Users` (`C:\Data`, `C:\Shares`) is out of scope for `inplace_modify`. Canaries and the other heuristics still cover it.
 - Linux: `/home`, `/root`, `/srv`, `/var/www`, `/mnt`, `/media`, `/data` and `/opt/data`. Not `/usr`, `/opt`, `/var/lib`, `/var/cache`, `/tmp` or `/etc`.
 
 Inside those, temp, caches, browser profiles, `Program Files`, `$Recycle.Bin` and the like are skipped too.
@@ -70,7 +70,22 @@ A confirmed detection without a process (an encrypted canary found by the period
 
 ### Windows writes
 
-Kernel-File write events (event 16, keyword `WRITE` 0x200) carry no file name, only the `FileObject` of the open they write through. When the guard is running, the sensor starts a session of its own for them, `SIEMAgent-FileWrite`, with opens (event 12) and writes. The SIEM's `SIEMAgent-File` session is unchanged. Writes are decoded without TDH: only the header PID and the `FileObject`, read at its fixed offset after `ByteOffset` and `Irp`. They go through their own bounded queue (8,192) with their own drop counter, and the run loop handles every waiting SIEM event before a write. A write flood can therefore drop only writes, never a SIEM event. `windows_etw_status` reports `WritesDropped`/`WritesDroppedTotal` next to `Dropped`/`DroppedTotal`. Each write is resolved through a `FileObject -> name` map that this session's opens fill (bounded at 16,384 objects; a write through an unknown object is dropped). Writes go to the guard only, as `action=write` events, never as SIEM lines: what is shipped to the server is unchanged. A file written in many chunks is one event per process and file a minute (a bounded set of 16,384). Writes by System (PID 4: the lazy writer and paging I/O) and by the agent itself are dropped.
+Kernel-File write events (event 16, keyword `WRITE` 0x200) carry no file name, only the `FileObject` of the open they write through. When the guard is running, the sensor starts a session of its own for them, `SIEMAgent-FileWrite`, with opens (event 12) and writes. The SIEM's `SIEMAgent-File` session is unchanged. Writes are decoded without TDH: only the header PID and the `FileObject`, read at its fixed offset after `ByteOffset` and `Irp`. That fast decode has three safeguards:
+
+- It is used only for the event versions with that layout (0 and 1); other versions are decoded with TDH.
+- At session start the first 64 writes are decoded both ways and compared. On any mismatch the session switches to TDH for good.
+- The result is reported as `FastMismatches` and `FastDecodeOff`.
+
+The session's opens and writes have their own bounded queues (8,192 each) with their own drop counters. The run loop serves waiting SIEM events, then opens, before any write, so a write flood can drop only writes: never a SIEM event, and never the opens that name the writes. Each write is resolved through a `FileObject -> name` map that this session's opens fill. The map holds two generations of up to 16,384 objects each: when the current one is full it becomes the previous one, so objects opened just before stay known. A write through an unknown object is counted.
+
+`windows_etw_status` reports all of this when anything changed:
+
+- `Dropped`/`DroppedTotal` (SIEM events);
+- `WritesDropped`/`WritesDroppedTotal`, `OpensDropped`;
+- `WritesUnresolved` (writes through an unknown object);
+- `FastMismatches`, `FastDecodeOff`.
+
+Silence there means the write path works. A climbing `WritesUnresolved` means it doesn't. Writes go to the guard only, as `action=write` events, never as SIEM lines: what is shipped to the server is unchanged. A file written in many chunks is one event per process and file a minute (a bounded set of 16,384). Writes by System (PID 4: the lazy writer and paging I/O) and by the agent itself are dropped.
 
 **Limitation: memory-mapped writes.** A process that encrypts through a memory-mapped view (`CreateFileMapping`/`MapViewOfFile`) issues no write of its own. The data reaches disk as paging writes from System, so its writes are not attributed to it and `inplace_modify` does not see them. Such an encryptor is still caught by a canary it renames or deletes, by the periodic canary check (an encrypted canary is confirmed and isolates the host when `isolate` is set), and by the rename and delete heuristics.
 

@@ -19,7 +19,8 @@ import (
 // Sensor runs the ETW sessions and pushes telemetry lines into the buffer.
 type Sensor struct {
 	sessions []*etw.Session
-	q        *eventQueue // SIEM events, and the guard's writes apart
+	q        *eventQueue  // SIEM events, and the guard's opens and writes apart
+	writeSes *etw.Session // the guard's Kernel-File session, nil when not running
 	stop     chan struct{}
 	done     chan struct{}
 	once     sync.Once
@@ -102,6 +103,7 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 		if err != nil {
 			slog.Warn("etw: file writes for the ransomware guard unavailable", "err", err)
 		} else {
+			s.writeSes = ses
 			s.sessions = append(s.sessions, ses)
 		}
 	}
@@ -143,7 +145,8 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker
 	defer tick.Stop()
 	report := time.NewTicker(time.Minute)
 	defer report.Stop()
-	var reported, reportedWrites uint64
+	var reported, reportedWrites, reportedOpens, reportedUnresolved uint64
+	var reportedFastOff bool
 	emit := func(logType string, lines ...string) {
 		for _, l := range lines {
 			if l != "" {
@@ -192,12 +195,24 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker
 			emit(LogTypeAccess, access.tick(now)...)
 		},
 		report: func() {
-			d, w := s.q.dropped.Load(), s.q.writesDropped.Load()
-			if d != reported || w != reportedWrites {
-				slog.Warn("etw sensor dropped events: the agent fell behind", "dropped", d-reported,
-					"writes_dropped", w-reportedWrites)
-				emit(LogTypeStatus, statusLine(d-reported, d, w-reportedWrites, w))
-				reported, reportedWrites = d, w
+			// Anything that makes the SIEM feed or the guard's writes
+			// unreliable is reported: drops, writes through unknown
+			// objects, the fast decode's self-check.
+			d, w, o := s.q.dropped.Load(), s.q.writesDropped.Load(), s.q.opensDropped.Load()
+			var fast etw.FastStats
+			if s.writeSes != nil {
+				fast = s.writeSes.FastStats()
+			}
+			st := status{dropped: d - reported, droppedTotal: d, writes: w - reportedWrites, writesTotal: w,
+				opens: o - reportedOpens, unresolved: files.unresolvedWrites - reportedUnresolved,
+				fastMismatches: fast.Mismatches, fastOff: fast.Off}
+			if st.dropped+st.writes+st.opens+st.unresolved > 0 || fast.Off != reportedFastOff {
+				slog.Warn("etw sensor health", "dropped", st.dropped, "writes_dropped", st.writes,
+					"opens_dropped", st.opens, "writes_unresolved", st.unresolved, "fast_mismatches", fast.Mismatches,
+					"fast_decode_off", fast.Off)
+				emit(LogTypeStatus, statusLine(st))
+				reported, reportedWrites, reportedOpens = d, w, o
+				reportedUnresolved, reportedFastOff = files.unresolvedWrites, fast.Off
 			}
 		},
 	})

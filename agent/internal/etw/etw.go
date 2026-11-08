@@ -8,6 +8,7 @@ package etw
 import (
 	"encoding/binary"
 	"errors"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,6 +45,71 @@ type Config struct {
 type Fast struct {
 	ID     uint16
 	Offset func(pointerSize int) int
+	// Versions are the event versions whose layout Offset knows; other
+	// versions are decoded with TDH. Empty means all.
+	Versions []uint8
+	// Field is the TDH property Offset reads. The first Verify events are
+	// decoded both ways and compared: on any mismatch the fast decode is
+	// switched off for the session (TDH from then on).
+	Field  string
+	Verify int
+}
+
+// fastGate decides, per event, between the fast decode and TDH, and keeps
+// the self-check's counts. Safe for concurrent use.
+type fastGate struct {
+	field      string
+	versions   map[uint8]bool
+	verifyLeft atomic.Int64
+	verified   atomic.Uint64
+	mismatches atomic.Uint64
+	off        atomic.Bool
+}
+
+func newFastGate(f Fast) *fastGate {
+	g := &fastGate{field: f.Field}
+	if len(f.Versions) > 0 {
+		g.versions = map[uint8]bool{}
+		for _, v := range f.Versions {
+			g.versions[v] = true
+		}
+	}
+	g.verifyLeft.Store(int64(f.Verify))
+	return g
+}
+
+// plan says how to decode an event of version v: fast (the fast value is
+// wanted) and check (decode with TDH too and call result).
+func (g *fastGate) plan(v uint8) (fast, check bool) {
+	if g.off.Load() || (g.versions != nil && !g.versions[v]) {
+		return false, false
+	}
+	if g.verifyLeft.Load() > 0 && g.verifyLeft.Add(-1) >= 0 {
+		return true, true
+	}
+	return true, false
+}
+
+// result records a check: the value TDH decoded (ok: it had the field)
+// against the fast one. A mismatch switches the fast decode off.
+func (g *fastGate) result(tdh, fast uint64, ok bool) {
+	if ok && tdh == fast {
+		g.verified.Add(1)
+		return
+	}
+	g.mismatches.Add(1)
+	g.off.Store(true)
+}
+
+func (g *fastGate) stats() (verified, mismatches uint64, off bool) {
+	return g.verified.Load(), g.mismatches.Load(), g.off.Load()
+}
+
+// FastStats is the fast decode's self-check: events verified against TDH,
+// mismatches, and whether the fast decode was switched off.
+type FastStats struct {
+	Verified, Mismatches uint64
+	Off                  bool
 }
 
 // fastValue reads the pointer-sized little-endian value at off in data.

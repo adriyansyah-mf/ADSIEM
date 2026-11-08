@@ -61,9 +61,10 @@ func TestWriteFloodLeavesSIEMEventsDelivered(t *testing.T) {
 	}
 }
 
-// The status line counts write drops apart from SIEM drops.
+// The status line counts write drops apart from SIEM drops (more fields:
+// TestStatusLineWriteHealth).
 func TestStatusLineCountsWriteDrops(t *testing.T) {
-	l := statusLine(3, 10, 500, 9000)
+	l := statusLine(status{dropped: 3, droppedTotal: 10, writes: 500, writesTotal: 9000})
 	for _, want := range []string{`Dropped="3"`, `DroppedTotal="10"`, `WritesDropped="500"`, `WritesDroppedTotal="9000"`} {
 		if !strings.Contains(l, want) {
 			t.Errorf("%s missing from %s", want, l)

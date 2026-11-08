@@ -29,38 +29,50 @@ type source struct {
 	ev   *etw.Event
 }
 
-// Queue sizes: SIEM events, and the guard's Kernel-File writes apart.
+// Queue sizes: SIEM events; the guard session's opens and writes apart.
 const (
 	eventQueueSize = 8192
+	openQueueSize  = 8192
 	writeQueueSize = 8192
 )
 
 // eventQueue carries ETW events from the sessions' consumers to the run
-// loop. Writes, which come at the rate of every write on the host and only
-// feed the ransomware guard, have their own bounded channel and drop
-// counter: a flood of them never takes a SIEM event's place, and the loop
-// handles waiting SIEM events before any write.
+// loop. The guard's Kernel-File session comes at the rate of every write on
+// the host and only feeds the ransomware guard, so it has queues of its own
+// with their own drop counters: its opens (which name the writes) and its
+// writes. A flood of writes never takes a SIEM event's or an open's place,
+// and the loop serves waiting SIEM events, then opens, before any write.
 type eventQueue struct {
-	events, writes         chan source
-	dropped, writesDropped atomic.Uint64
+	events, opens, writes                chan source
+	dropped, opensDropped, writesDropped atomic.Uint64
 }
 
 func newEventQueue(events, writes int) *eventQueue {
-	return &eventQueue{events: make(chan source, events), writes: make(chan source, writes)}
+	return &eventQueue{events: make(chan source, events), opens: make(chan source, writes),
+		writes: make(chan source, writes)}
 }
 
 // push returns the ETW handler for a session of kind k. A full queue drops
 // and counts rather than stall the ETW consumer.
 func (q *eventQueue) push(k kind) func(*etw.Event) {
-	ch, dropped := q.events, &q.dropped
 	if k == writeEvent {
-		ch, dropped = q.writes, &q.writesDropped
+		return func(ev *etw.Event) {
+			ch, dropped := q.writes, &q.writesDropped
+			if ev.ID != fileWrite { // an open: names the writes that follow
+				ch, dropped = q.opens, &q.opensDropped
+			}
+			select {
+			case ch <- source{k, ev}:
+			default:
+				dropped.Add(1)
+			}
+		}
 	}
 	return func(ev *etw.Event) {
 		select {
-		case ch <- source{k, ev}:
+		case q.events <- source{k, ev}:
 		default:
-			dropped.Add(1)
+			q.dropped.Add(1)
 		}
 	}
 }
@@ -73,10 +85,21 @@ type loopHooks struct {
 	stop   func()
 }
 
-// loop serves the queue until stop closes. A write is handled only once no
-// SIEM event waits (they are drained first), so writes cost SIEM events
-// neither queue space nor latency beyond one write.
+// loop serves the queue until stop closes. Priority: SIEM events, then the
+// guard's opens, then its writes: a write is handled only once no SIEM event
+// or open waits, so writes cost neither queue space nor more latency than
+// one write, and every open is seen before the writes that follow it.
 func (q *eventQueue) loop(stop <-chan struct{}, tick, report <-chan time.Time, h loopHooks) {
+	drain := func(ch chan source) {
+		for {
+			select {
+			case src := <-ch:
+				h.handle(src)
+			default:
+				return
+			}
+		}
+	}
 	for {
 		select {
 		case <-stop:
@@ -86,16 +109,12 @@ func (q *eventQueue) loop(stop <-chan struct{}, tick, report <-chan time.Time, h
 			return
 		case src := <-q.events:
 			h.handle(src)
+		case o := <-q.opens:
+			drain(q.events)
+			h.handle(o)
 		case w := <-q.writes:
-		drain:
-			for {
-				select {
-				case src := <-q.events:
-					h.handle(src)
-				default:
-					break drain
-				}
-			}
+			drain(q.events)
+			drain(q.opens)
 			h.handle(w)
 		case now := <-tick:
 			if h.tick != nil {
@@ -109,11 +128,20 @@ func (q *eventQueue) loop(stop <-chan struct{}, tick, report <-chan time.Time, h
 	}
 }
 
-// statusLine reports the sensor's own losses: SIEM events and guard-only
-// writes dropped because the agent fell behind, since the last report and
-// in total.
-func statusLine(dropped, droppedTotal, writes, writesTotal uint64) string {
+// status is the sensor's own health for windows_etw_status: SIEM events
+// dropped since the last report and in total; the guard session's writes
+// and opens dropped (since the last report); writes through an unknown
+// FileObject (since the last report); and the fast decode's self-check.
+type status struct {
+	dropped, droppedTotal, writes, writesTotal, opens, unresolved, fastMismatches uint64
+	fastOff                                                                       bool
+}
+
+func statusLine(s status) string {
+	u := func(v uint64) string { return strconv.FormatUint(v, 10) }
 	return line(255, [][2]string{{"Channel", "ETW"}, {"Provider", "SIEMAgent"},
-		{"Dropped", strconv.FormatUint(dropped, 10)}, {"DroppedTotal", strconv.FormatUint(droppedTotal, 10)},
-		{"WritesDropped", strconv.FormatUint(writes, 10)}, {"WritesDroppedTotal", strconv.FormatUint(writesTotal, 10)}})
+		{"Dropped", u(s.dropped)}, {"DroppedTotal", u(s.droppedTotal)},
+		{"WritesDropped", u(s.writes)}, {"WritesDroppedTotal", u(s.writesTotal)},
+		{"OpensDropped", u(s.opens)}, {"WritesUnresolved", u(s.unresolved)},
+		{"FastMismatches", u(s.fastMismatches)}, {"FastDecodeOff", strconv.FormatBool(s.fastOff)}})
 }

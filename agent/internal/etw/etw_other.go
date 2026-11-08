@@ -10,3 +10,6 @@ func Start(Config, func(*Event)) (*Session, error) { return nil, ErrUnsupported 
 
 // Close is a no-op off Windows.
 func (*Session) Close() error { return nil }
+
+// FastStats is empty off Windows.
+func (*Session) FastStats() FastStats { return FastStats{} }
