@@ -89,9 +89,20 @@ write can leave the hosts file truncated. Keep free space on those systems.
 
 ## Removing everything without the server
 
+Linux (as root):
+
 ```
-<agent-binary> -webblock-cleanup -config <path-to-config>
+sudo /usr/bin/siem-agent -webblock-cleanup -config /etc/siem-agent/config.yaml
 ```
+
+Windows (elevated prompt):
+
+```
+"C:\Program Files\SIEMAgent\siem-agent.exe" -webblock-cleanup -config "%ProgramData%\SIEMAgent\config.yaml"
+```
+
+It must run as root or Administrator, because it edits the hosts file and the
+trust store.
 
 This removes the hosts block, the CA from the trust store, the CA files and the
 saved list, with no network access and without a running agent. Package removal
@@ -107,4 +118,11 @@ on the Ubuntu runner and on `windows-latest`:
 
 ```
 cd agent && sudo -E env "PATH=$PATH" WEBBLOCK_E2E=1 go test -count=1 -run E2E -v ./internal/webblock/
+```
+
+On Windows (elevated pwsh):
+
+```
+go test ./agent/internal/webblock/... -count=1
+$env:WEBBLOCK_E2E = '1'; go test ./agent/internal/webblock -run E2E -count=1 -v
 ```

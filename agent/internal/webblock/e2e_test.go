@@ -76,34 +76,48 @@ func TestWebBlockE2E(t *testing.T) {
 	if h.LastError != "" || !h.CAInstalled {
 		t.Fatalf("health after apply: %+v", h)
 	}
+	assertPageServer(t, h.PageServer)
+	caPEM, err := os.ReadFile(filepath.Join(stateDir, CADirName, CACertFile))
+	if err != nil {
+		t.Fatalf("read CA cert: %v", err)
+	}
 
-	waitResolve(t, true)
+	waitResolve(t, true, 5*time.Second)
 
 	// HTTP on port 80.
-	httpClient := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	httpClient := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}}
 	status, body := e2eGet(t, httpClient, "http://"+e2eDomain+"/x")
 	if status != 403 || !strings.Contains(body, e2eDomain) {
 		t.Fatalf("http: status %d body %q", status, body)
 	}
 
 	// HTTPS on 443: the system trust must now include the CA.
-	tr := &http.Transport{Proxy: nil, TLSClientConfig: e2eTLSConfig(t)}
+	tr := &http.Transport{Proxy: nil, DisableKeepAlives: true, TLSClientConfig: e2eTLSConfig(t)}
 	defer tr.CloseIdleConnections()
 	status, body = e2eGet(t, &http.Client{Timeout: 10 * time.Second, Transport: tr}, "https://"+e2eDomain+"/x")
 	if status != 403 || !strings.Contains(body, e2eDomain) {
 		t.Fatalf("https: status %d body %q", status, body)
 	}
 
-	mu.Lock()
-	var sawEvent bool
-	for _, l := range pushed {
-		if strings.HasPrefix(l, "event=web_block") {
-			sawEvent = true
+	// The server answers first and emits the event afterwards (process lookup,
+	// then Push), so poll for it.
+	sawEvent := false
+	for deadline := time.Now().Add(3 * time.Second); !sawEvent && time.Now().Before(deadline); {
+		mu.Lock()
+		for _, l := range pushed {
+			if strings.HasPrefix(l, "event=web_block") {
+				sawEvent = true
+			}
+		}
+		mu.Unlock()
+		if !sawEvent {
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	mu.Unlock()
 	if !sawEvent {
-		t.Fatalf("no web_block event pushed: %q", pushed)
+		mu.Lock()
+		defer mu.Unlock()
+		t.Fatalf("no web_block event pushed within 3s: %q", pushed)
 	}
 
 	// Deactivate.
@@ -111,8 +125,9 @@ func TestWebBlockE2E(t *testing.T) {
 	if h := c.Health(); h.LastError != "" {
 		t.Fatalf("health after deactivate: %+v", h)
 	}
-	waitResolve(t, false)
-	e2eAssertState(t, stateDir, hostsPath, orig, "deactivation")
+	// Go caches the hosts file for 5 s, so allow well over that.
+	waitResolve(t, false, 10*time.Second)
+	e2eAssertState(t, stateDir, hostsPath, orig, caPEM, "deactivation")
 
 	// Cleanup alone (what package removal runs) undoes a fresh Apply.
 	c2 := newController()
@@ -124,12 +139,12 @@ func TestWebBlockE2E(t *testing.T) {
 	if err := Cleanup(stateDir); err != nil {
 		t.Fatalf("Cleanup: %v", err)
 	}
-	e2eAssertState(t, stateDir, hostsPath, orig, "Cleanup")
+	e2eAssertState(t, stateDir, hostsPath, orig, caPEM, "Cleanup")
 }
 
-func e2eAssertState(t *testing.T, stateDir, hostsPath string, orig []byte, after string) {
+func e2eAssertState(t *testing.T, stateDir, hostsPath string, orig, caPEM []byte, after string) {
 	t.Helper()
-	e2eAssertTrustGone(t)
+	e2eAssertTrustGone(t, caPEM)
 	if _, err := os.Stat(filepath.Join(stateDir, CADirName)); !os.IsNotExist(err) {
 		t.Fatalf("after %s: CA directory still present: %v", after, err)
 	}
@@ -141,9 +156,9 @@ func e2eAssertState(t *testing.T, stateDir, hostsPath string, orig []byte, after
 
 // waitResolve polls the system resolution until the domain does (want) or does
 // not (!want) resolve to the block page address; the OS may cache for a moment.
-func waitResolve(t *testing.T, want bool) {
+func waitResolve(t *testing.T, want bool, limit time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(limit)
 	for {
 		addrs, err := net.DefaultResolver.LookupHost(context.Background(), e2eDomain)
 		got := false
@@ -178,4 +193,27 @@ func e2eGet(t *testing.T, cl *http.Client, url string) (int, string) {
 	}
 	t.Fatalf("GET %s: %v", url, lastErr)
 	return 0, ""
+}
+
+// assertPageServer fails with the bind status unless the IPv4 listeners are
+// up; only [::1] failures are tolerated (a runner may have no IPv6 loopback).
+func assertPageServer(t *testing.T, status string) {
+	t.Helper()
+	if status == "ok" {
+		return
+	}
+	rest, found := strings.CutPrefix(status, "page_unavailable: ")
+	if found {
+		bad := false
+		for _, a := range strings.Split(rest, ",") {
+			if !strings.Contains(a, "[::1]") {
+				bad = true
+			}
+		}
+		if !bad {
+			t.Logf("page server without IPv6: %s", status)
+			return
+		}
+	}
+	t.Fatalf("block page server could not bind its IPv4 addresses (is another service on port 80/443?): %q", status)
 }

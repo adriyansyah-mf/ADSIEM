@@ -21,7 +21,7 @@ func e2eSkipUnlessPrivileged(t *testing.T) {
 // verifier, which reads the machine ROOT store.
 func e2eTLSConfig(t *testing.T) *tls.Config { return &tls.Config{} }
 
-func e2eAssertTrustGone(t *testing.T) {
+func e2eAssertTrustGone(t *testing.T, _ []byte) {
 	t.Helper()
 	found := false
 	if err := forEachOurs(func(c *x509.Certificate) bool { found = true; return false }); err != nil {
