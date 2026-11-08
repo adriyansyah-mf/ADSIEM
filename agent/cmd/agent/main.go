@@ -468,10 +468,12 @@ func run(configPath string, stop <-chan struct{}) {
 		StateDir:  webStateDir,
 	}
 	heartbeat.WebBlockHealth = func() any { return webCtl.Health() }
-	webStore.OnChange = webCtl.Apply
+	// OnChange applies the store's newest list, never an older one that lost
+	// a race with it.
+	webStore.OnChange = func(*webblock.List) { webCtl.ApplyCurrent(webStore.Current) }
 	// The first Apply may run trust tools for minutes: never hold up startup
 	// (Health reports the last finished Apply meanwhile).
-	go func() { webCtl.Apply(webStore.Current()) }()
+	go webCtl.ApplyCurrent(webStore.Current)
 	go webStore.SyncLoop(flowCtx, c)
 	go webCtl.Run(flowCtx, webStore)
 	malFiles.Excluded = func(path, sha string) bool {
@@ -632,6 +634,7 @@ func run(configPath string, stop <-chan struct{}) {
 	slog.Info("shutting down", "reason", getStopReason())
 	heartbeat.SendStopping(cfg, c, getStopReason())
 	stopFlows()
+	webCtl.Stop() // removes the block page redirect; the hosts block keeps names refused
 	mgr.StopAll()
 	for i := len(stopProducers) - 1; i >= 0; i-- {
 		stopProducers[i]()

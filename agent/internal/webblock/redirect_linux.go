@@ -174,6 +174,21 @@ func detectRedirect() Redirector {
 	return nil
 }
 
+// detectAndClean detects the backend and, before the first install of this
+// process, removes the rules of both backends by name: a backend that changed
+// since the last run (iptables before, nft now) would otherwise leave stale
+// rules next to the new ones, possibly pointing at dead ports. "Not found"
+// is not an error for either Remove.
+func detectAndClean() Redirector {
+	r := detectRedirect()
+	if r != nil {
+		if err := removeRedirects(); err != nil {
+			slog.Warn("webblock: could not remove stale block page redirect rules", "err", err)
+		}
+	}
+	return r
+}
+
 // removeRedirects deletes our table and chain by name, whichever tool made
 // them (Cleanup; the ports need not be known).
 func removeRedirects() error {
@@ -215,9 +230,12 @@ func listening(r io.Reader, port int, addrs ...string) bool {
 // procTCP and procTCP6 are replaced in tests.
 var procTCP, procTCP6 = "/proc/net/tcp", "/proc/net/tcp6"
 
-// portInUse reports whether another service listens on port on 0.0.0.0,
+// portInUse is replaced in tests.
+var portInUse = portInUseProc
+
+// portInUseProc reports whether another service listens on port on 0.0.0.0,
 // 127.84.0.1 or [::] (binding the sink then would collide with it).
-func portInUse(port int) bool {
+func portInUseProc(port int) bool {
 	check := func(file string, addrs ...string) bool {
 		f, err := os.Open(file)
 		if err != nil {
@@ -245,6 +263,11 @@ func (s *Server) defaultPlan() ([]bindSpec, Redirector) {
 		{name: "https4", addr: AddrHTTPS4, label: AddrHTTPS4, tls: true},
 	}
 	for i, port := range []int{80, 443} {
+		// Our own listener holds the sink port once started; only a listener
+		// that is not up yet can collide with another service.
+		if s.listeners[specs[i].name] != nil {
+			continue
+		}
 		if portInUse(port) {
 			specs[i].skip = "port in use by another service"
 		}
@@ -257,7 +280,7 @@ func (s *Server) redirector() Redirector {
 		return s.Redirect
 	}
 	s.detectOnce.Do(func() {
-		s.detected = detectRedirect()
+		s.detected = detectAndClean()
 		if s.detected == nil {
 			slog.Warn("webblock: neither nft nor iptables usable; binding the block page ports directly where free")
 		}

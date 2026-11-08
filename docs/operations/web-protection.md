@@ -54,6 +54,11 @@ The rules are removed when the feature is turned off, when the agent stops
 the page server, and by `-webblock-cleanup`. They touch only traffic to
 `127.84.0.1`, so the agent's firewall table and other rules are unaffected.
 The TLS name (SNI) and `Host` header are unchanged by the redirect.
+After a graceful agent stop the redirect is gone and blocked names get
+"connection refused" on `127.84.0.1` (still blocked). After a crash the rules
+may keep pointing at a now-free high port on `127.0.0.1` until the agent
+restarts; at start it removes any leftover rules of both tools (nft and
+iptables) before installing its own.
 
 When neither tool is usable the agent binds `127.84.0.1:80/443` directly, but
 only a port no other service is listening on (checked in `/proc/net/tcp` and

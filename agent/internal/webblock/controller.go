@@ -99,6 +99,23 @@ type Controller struct {
 // Apply enforces l. It never panics; failures are recorded in Health.LastError.
 func (c *Controller) Apply(l *List) { c.apply(l, false) }
 
+// ApplyCurrent enforces the list current() returns, read under the controller
+// lock at execution time, so a caller that waited for the lock never applies a
+// list older than one applied meanwhile. force also rewrites the hosts block.
+func (c *Controller) ApplyCurrent(current func() *List) { c.applyCurrent(current, false) }
+
+func (c *Controller) applyCurrent(current func() *List, force bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.applyLocked(current(), force)
+}
+
+// Stop shuts the page server down, which removes the block page redirect. The
+// hosts block stays: blocked names then get "connection refused" on the sink
+// instead of a free high port any local user could bind. It does not wait for
+// a running Apply.
+func (c *Controller) Stop() { c.Server.Stop() }
+
 // reapply is Apply that also rewrites the hosts block (a no-op on disk when
 // the file is already right) so a tampered or removed block is repaired.
 func (c *Controller) reapply(l *List) { c.apply(l, true) }
@@ -106,6 +123,10 @@ func (c *Controller) reapply(l *List) { c.apply(l, true) }
 func (c *Controller) apply(l *List, force bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.applyLocked(l, force)
+}
+
+func (c *Controller) applyLocked(l *List, force bool) {
 	defer c.publish()
 	defer func() {
 		if r := recover(); r != nil {
@@ -294,7 +315,7 @@ func (c *Controller) Run(ctx context.Context, s *Store) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			c.reapply(s.Current())
+			c.applyCurrent(s.Current, true)
 		}
 	}
 }

@@ -279,12 +279,12 @@ func (s *Server) Start(page, contact string, lookup Lookup, ca *CA) (bool, strin
 	v6missing := false
 	up := map[string]bool{}
 	for _, spec := range specs {
-		if spec.skip != "" {
-			failed = append(failed, spec.label+" ("+spec.skip+")")
-			continue
-		}
 		if _, ok := s.listeners[spec.name]; ok && (!spec.tls || ca != nil) {
 			up[spec.name] = true
+			continue
+		}
+		if spec.skip != "" {
+			failed = append(failed, spec.label+" ("+spec.skip+")")
 			continue
 		}
 		if spec.tls && ca == nil {
