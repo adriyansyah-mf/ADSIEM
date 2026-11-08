@@ -112,6 +112,22 @@ def test_encrypted_canary_is_one_critical_alert(decoders):
         ("Ransomware Canary File Changed", "high")]
 
 
+def test_canary_sync_raises_no_alert(decoders):
+    """OneDrive (from its install location) renaming or deleting a canary while
+    syncing: kept in the log, no rule fires (fresh engine: nothing suppressed)."""
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    for action in ("delete", "rename"):
+        line = (f'detection=canary_sync confirmed=false response=none '
+                f'Canary="C:\\\\Users\\\\bob\\\\Documents\\\\.siem-canary.pdf" FileAction={action} '
+                'Image="C:\\\\Program Files\\\\Microsoft OneDrive\\\\OneDrive.exe" Comm="OneDrive.exe" '
+                'PID=4120 PPID=3300 User=0 Isolated=false')
+        event, name = decoders.decode_named("ransomware_activity", line)
+        assert name == "ransomware_activity" and event["ransomware.detection"] == "canary_sync"
+        view = dict(event, raw_message=line, log_type="ransomware_activity", hostname="ws07")
+        assert asyncio.run(sig.evaluate(view)) == []
+
+
 def test_repeats_suppressed(decoders):
     """Every canary an encryptor touches is one incident; another binary or host is not."""
     sig = SigmaEngine()

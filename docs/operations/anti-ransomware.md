@@ -23,7 +23,7 @@ A **write** event on a canary is a hit only once the canary is no longer the can
 - It is other canary text (the marker, low entropy): this is OneDrive's Known Folder Move syncing another device's canary. From `OneDrive.exe`, `OneDrive.Sync.Service.exe` or `FileCoAuth.exe` the new content is adopted silently. From anything else it is left to the periodic check, which reports `canary_changed`, unconfirmed.
 - The content is encrypted, or the canary text is gone: a hit, whoever wrote it, sync clients included.
 
-Renames and deletes of a canary are hits at once, as before.
+Renames and deletes of a canary are hits at once, as before, with one exception for sync. When `OneDrive.exe`, `OneDrive.Sync.Service.exe` or `FileCoAuth.exe` renames or deletes a canary **and runs from an install location**, it is not a hit. The install locations are `<system drive>\Program Files\Microsoft OneDrive\`, `Program Files (x86)\Microsoft OneDrive\` and `Users\<user>\AppData\Local\Microsoft\OneDrive\`. In that case the agent reports `detection=canary_sync confirmed=false response=none`, which no rule alerts on, and plants the canary again. This does not count toward retirement. The full image path is matched, not the name, so a binary called `OneDrive.exe` anywhere else is killed like any other. The same install-location check applies to adopting canary text from a sync client.
 
 When a canary changed, the agent reads its new content. If it looks encrypted (first 4 KB at 7.2 bits per byte or more, or the canary text replaced by a first kilobyte that is, and no known file header; the canary itself is hex text, about 4 bits per byte), the change is ransomware:
 
