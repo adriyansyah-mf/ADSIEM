@@ -3,6 +3,7 @@ package webblock
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,9 @@ func TestApplyIdempotentNoRewrite(t *testing.T) {
 }
 
 func TestApplyKeepsFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix mode bits do not apply on Windows; the Windows writer keeps the file's ACL and attributes by writing in place")
+	}
 	h, _ := newHosts(t, "127.0.0.1 localhost\n")
 	if err := os.Chmod(h.Path, 0o640); err != nil {
 		t.Fatal(err)
