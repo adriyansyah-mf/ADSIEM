@@ -49,7 +49,9 @@ var fileEventIDs = []uint16{fileCreate, fileDeletePath, fileRenamePath, fileCrea
 // FileKey, IssuingThreadId, IOSize, IOFlags, ExtraFlags, and no name. The
 // header PID is the writer; the name comes from the open (fileCreate) of the
 // same FileObject. Writes only feed the anti-ransomware guard (an in-place
-// encryptor neither renames nor deletes): they are never SIEM lines.
+// encryptor neither renames nor deletes): they are never SIEM lines, and
+// they come through a session of their own (writeProvider) so that their
+// volume never costs the SIEM's file events anything.
 const (
 	fileWrite    = 16
 	writeKeyword = 0x200
@@ -58,13 +60,14 @@ const (
 	maxWrites = 16384
 )
 
-// fileProvider is the Kernel-File session's keywords and event IDs: with
-// writes only for the guard.
-func fileProvider(guard bool) (uint64, []uint16) {
-	if !guard {
-		return kernelFileKeywords, fileEventIDs
-	}
-	return kernelFileKeywords | writeKeyword, append(append([]uint16{}, fileEventIDs...), fileWrite)
+// writeProvider is the guard's own Kernel-File session: opens (decoded, for
+// their FileObject and name) and writes, fast-decoded (etw.Fast): the
+// header PID and FileObject, read at its fixed offset after ByteOffset
+// (8 bytes) and Irp (a pointer).
+func writeProvider() (etw.Provider, []etw.Fast) {
+	return etw.Provider{GUID: kernelFileProvider, Keywords: 0x10 | 0x80 | writeKeyword,
+			EventIDs: []uint16{fileCreate, fileWrite}},
+		[]etw.Fast{{ID: fileWrite, Offset: func(ptr int) int { return 8 + ptr }}}
 }
 
 // writeKey is a process and the device path it writes.
@@ -152,8 +155,10 @@ type fileTracker struct {
 
 	objects map[string]string      // FileObject -> device path of its open
 	writes  map[writeKey]time.Time // a write reported to onFile -> when
-	windows map[uint32]*fileWindowState
-	images  map[string]time.Time // image|dll (or driver path) -> last reported
+	// writeObjects: FileObject -> device path, from the write session's opens
+	writeObjects map[uint64]string
+	windows      map[uint32]*fileWindowState
+	images       map[string]time.Time // image|dll (or driver path) -> last reported
 	// deferred lines wait for their process's start, which comes through
 	// another session: a short-lived child's file event often arrives first.
 	deferred []deferredLine
@@ -182,8 +187,9 @@ func newFileTracker(j *processJoiner, self uint32, longPath func(string) string)
 		longPath = func(p string) string { return p }
 	}
 	return &fileTracker{j: j, self: self, longPath: longPath, now: time.Now,
-		objects: map[string]string{}, writes: map[writeKey]time.Time{}, windows: map[uint32]*fileWindowState{},
-		images: map[string]time.Time{}}
+		objects: map[string]string{}, writes: map[writeKey]time.Time{}, writeObjects: map[uint64]string{},
+		windows: map[uint32]*fileWindowState{},
+		images:  map[string]time.Time{}}
 }
 
 // out is one line for the buffer.
@@ -227,28 +233,45 @@ func (t *fileTracker) file(ev *etw.Event) []out {
 	case fileDeletePath:
 		name, _ := ev.Get("FilePath")
 		return t.emit(ev.PID, "delete", t.path(name), "")
-	case fileWrite:
-		t.write(ev)
 	}
 	return nil
 }
 
-// write hands a Kernel-File write to onFile as a "write" of the file its
-// FileObject was opened as, once per process and file per fileWindow. It
-// ships nothing. Writes by System (the lazy writer and paging I/O flushing
-// what a process wrote earlier) and through unknown objects are dropped.
-// This runs for every write on the host: a map lookup in the common case.
-func (t *fileTracker) write(ev *etw.Event) {
-	if t.onFile == nil || ev.PID == 0 || ev.PID == 4 {
+// writeSession takes an event of the guard's own Kernel-File session
+// (writeProvider): it ships nothing. An open remembers its FileObject's name
+// (in a map of its own: this session's opens are not the SIEM session's);
+// a write goes to onFile as a "write" of that name, once per process and
+// file per fileWindow. Writes by System (the lazy writer and paging I/O
+// flushing what a process wrote earlier), by the agent and through unknown
+// objects are dropped. This runs for every write on the host: a map lookup
+// in the common case.
+func (t *fileTracker) writeSession(ev *etw.Event) {
+	if t.onFile == nil || ev.PID == t.self || ev.PID == 0 || ev.PID == 4 {
 		return
 	}
-	obj, _ := ev.Get("FileObject")
-	name := t.objects[obj]
-	if name == "" {
+	switch ev.ID {
+	case fileCreate:
+		obj, _ := ev.Get("FileObject")
+		name, _ := ev.Get("FileName")
+		if v, err := strconv.ParseUint(obj, 0, 64); err == nil && v != 0 && name != "" {
+			if len(t.writeObjects) >= maxObjects {
+				t.writeObjects = map[uint64]string{}
+			}
+			t.writeObjects[v] = name
+		}
+	case fileWrite:
+		t.write(ev.PID, ev.Value)
+	}
+}
+
+// write reports pid's write through FileObject obj (see writeSession).
+func (t *fileTracker) write(pid uint32, obj uint64) {
+	name := t.writeObjects[obj]
+	if obj == 0 || name == "" {
 		return
 	}
 	now := t.now()
-	k := writeKey{ev.PID, name}
+	k := writeKey{pid, name}
 	if last, ok := t.writes[k]; ok && now.Sub(last) < fileWindow {
 		return
 	}
@@ -270,7 +293,7 @@ func (t *fileTracker) write(ev *etw.Event) {
 	if strings.Contains(target, "~") { // 8.3 components: the canaries and the guard use long names
 		target = t.longPath(target)
 	}
-	t.notify(ev.PID, "write", target, "", now)
+	t.notify(pid, "write", target, "", now)
 }
 
 // path is a drive-letter path, or "" for what is not a file on a volume

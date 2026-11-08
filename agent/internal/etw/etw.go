@@ -6,6 +6,7 @@
 package etw
 
 import (
+	"encoding/binary"
 	"errors"
 	"time"
 )
@@ -31,6 +32,29 @@ type Config struct {
 	Name        string
 	Providers   []Provider
 	KernelFlags uint32
+	// Fast events skip TDH: the Event carries the header (ID, PID, TID,
+	// time) and Value, no Props. For very frequent events whose one needed
+	// field sits at a fixed offset (Kernel-File Write's FileObject).
+	Fast []Fast
+}
+
+// Fast decodes events of one ID by reading a pointer-sized field at the
+// byte offset Offset returns for the event's pointer size (4 or 8) into
+// Event.Value. An event too short for it has Value 0.
+type Fast struct {
+	ID     uint16
+	Offset func(pointerSize int) int
+}
+
+// fastValue reads the pointer-sized little-endian value at off in data.
+func fastValue(data []byte, pointerSize, off int) (uint64, bool) {
+	if off < 0 || off+pointerSize > len(data) {
+		return 0, false
+	}
+	if pointerSize == 4 {
+		return uint64(binary.LittleEndian.Uint32(data[off:])), true
+	}
+	return binary.LittleEndian.Uint64(data[off:]), true
 }
 
 // Kernel event groups for Config.KernelFlags (EVENT_TRACE_FLAG_*).
@@ -57,6 +81,8 @@ type Event struct {
 	Time         time.Time
 	Props        []Property
 	Truncated    bool
+	// Value is the field a Fast decode read (Config.Fast); 0 otherwise.
+	Value uint64
 }
 
 // Get returns the value of the named property and whether it is present.

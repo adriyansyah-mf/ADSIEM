@@ -27,6 +27,25 @@ type Session struct {
 	id           uintptr
 	once         sync.Once
 	decodeErrors atomic.Uint64
+	fast         map[uint16]func(pointerSize int) int // Config.Fast by event ID
+}
+
+// fastDecode is the Config.Fast decode: the header's IDs and PID/TID and
+// one pointer-sized field read in place from the user data. No TDH call,
+// no provider string, no time conversion: it runs for every write on the host.
+func fastDecode(rec *eventRecord, offset func(pointerSize int) int) *Event {
+	h := rec.EventHeader
+	ev := &Event{ID: h.EventDescriptor.ID, Version: h.EventDescriptor.Version, Opcode: h.EventDescriptor.Opcode,
+		Task: h.EventDescriptor.Task, PID: h.ProcessID, TID: h.ThreadID}
+	ptr := 8
+	if h.Flags&eventHeaderFlag32BitHeader != 0 {
+		ptr = 4
+	}
+	// UserData is a pointer ETW keeps valid during the callback.
+	if p := *(*unsafe.Pointer)(unsafe.Pointer(&rec.UserData)); p != nil && rec.UserDataLength > 0 {
+		ev.Value, _ = fastValue(unsafe.Slice((*byte)(p), rec.UserDataLength), ptr, offset(ptr))
+	}
+	return ev
 }
 
 var (
@@ -40,6 +59,10 @@ var (
 		s := sessions[rec.UserContext]
 		sessionsMu.Unlock()
 		if s != nil {
+			if off, ok := s.fast[rec.EventHeader.EventDescriptor.ID]; ok {
+				s.handler(fastDecode(rec, off))
+				return 0
+			}
 			ev, err := decode(rec)
 			if err != nil {
 				s.decodeErrors.Add(1)
@@ -67,6 +90,12 @@ func Start(cfg Config, handle func(*Event)) (*Session, error) {
 		return nil, err
 	}
 	s := &Session{name: cfg.Name, nameW: nameW, handler: handle, done: make(chan struct{})}
+	if len(cfg.Fast) > 0 {
+		s.fast = map[uint16]func(int) int{}
+		for _, f := range cfg.Fast {
+			s.fast[f.ID] = f.Offset
+		}
+	}
 	err = s.start(cfg)
 	if errors.Is(err, errorAlreadyExists) { // left running by a process that died
 		stopByName(nameW)
