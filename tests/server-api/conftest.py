@@ -112,3 +112,86 @@ async def evidence_api(monkeypatch):
         async with admin.begin() as db:
             await db.execute(text(f'DROP SCHEMA "{namespace}" CASCADE'))
         await admin.dispose()
+
+
+@pytest.fixture
+async def case_env(monkeypatch):
+    import httpx
+    from fastapi import FastAPI
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.api.routes.cases import router
+    from app.api.routes.soar import router as soar_router
+    from app.core.database import Base, get_db
+    from app.core import database as api_database
+    from app.core.deps import get_current_user
+    from app.models.models import Agent, AgentTask, Alert, Case, CaseAlert, Role, User
+
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("needs disposable PostgreSQL TEST_DATABASE_URL")
+    schema = "case_test_" + uuid4().hex
+    admin = create_async_engine(url)
+    async with admin.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    engine = create_async_engine(url, connect_args={"server_settings": {"search_path": f"{schema},public"}},
+                                 execution_options={"schema_translate_map": {None: schema}})
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    tables = {model.__table__ for model in (Agent, AgentTask, Alert, Case, CaseAlert, Role, User)}
+    tables.add(Base.metadata.tables["case_notes"])
+    tables.add(Base.metadata.tables["alert_notes"])
+    tables.update(Base.metadata.tables[name] for name in (
+        "soar_case_events", "soar_playbooks", "soar_actions", "soar_playbook_runs", "soar_playbook_run_steps",
+        "platform_settings", "audit_logs",
+    ))
+    monkeypatch.setattr(api_database, "AsyncSessionLocal", sessions)
+    while True:
+        dependencies = {fk.column.table for table in tables for fk in table.foreign_keys}
+        if dependencies <= tables:
+            break
+        tables |= dependencies
+    async with engine.begin() as connection:
+        await connection.run_sync(lambda connection: Base.metadata.create_all(connection, tables=list(tables)))
+    async with sessions() as db:
+        role = Role(name="admin")
+        db.add(role)
+        await db.flush()
+        user = User(username="test", email="test@example.com", password_hash="test", role_id=role.id, group_id="blue")
+        agents = [Agent(name=f"host{i}", hostname=f"host{i}", group_id=group, token_hash=uuid4().hex, approved=True, status="online")
+                  for i, group in enumerate(("blue", "blue", "red"))]
+        db.add_all([user, *agents])
+        await db.flush()
+        alerts = [Alert(title="Brute force", severity="high", group_id=a.group_id, agent_id=a.id,
+                        hostname=a.hostname, source_ip=f"8.8.8.{i + 1}") for i, a in enumerate(agents)]
+        db.add_all(alerts)
+        await db.flush()
+        case = Case(title="Distributed brute force", severity="high", status="open", group_id="blue", alert_id=alerts[0].id,
+                    ioc_data={"affected_hosts": ["host0", "host1"], "ioc_keys": ["ip:8.8.8.2"]})
+        db.add(case)
+        await db.flush()
+        db.add(CaseAlert(case_id=case.id, alert_id=alerts[1].id, status="linked", method="ai",
+                         reason="Same account and service", confidence=0.96, indicators=["ip:8.8.8.2"], accounts=["admin"]))
+        await db.commit()
+        env = SimpleNamespace(sessions=sessions, case=case, alerts=alerts, agents=agents,
+                              user=SimpleNamespace(id=user.id, username="test", group_id="blue",
+                                  role=SimpleNamespace(name="admin", permissions=[SimpleNamespace(name=n)
+                                      for n in ("cases:manage", "agents:manage")])))
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(soar_router)
+
+    async def database():
+        async with sessions() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = database
+    app.dependency_overrides[get_current_user] = lambda: env.user
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            env.client = client
+            yield env
+    finally:
+        await engine.dispose()
+        async with admin.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        await admin.dispose()

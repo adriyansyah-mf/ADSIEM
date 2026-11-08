@@ -4,6 +4,7 @@ export type NodeType =
   | 'trigger' | 'if' | 'enrich' | 'ai_decide' | 'approval'
   | 'response' | 'case' | 'notify' | 'http'
   | 'alert_event' | 'log_search' | 'scan' | 'hunt' | 'block_ioc'
+  | 'case_evidence' | 'case_block_ips'
 
 export type Params = Record<string, unknown>
 

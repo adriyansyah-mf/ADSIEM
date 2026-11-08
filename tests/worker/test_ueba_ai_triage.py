@@ -87,7 +87,7 @@ async def test_ai_grouping_links_existing_case_without_creating_or_merging():
     async def choose(incoming):
         return Decision(action="join", case_id=case_id, confidence=0.95, reason="Shared evidence")
 
-    async def record(incoming, decision):
+    async def record(incoming, decision, **kwargs):
         calls.append(("link", str(decision.case_id), incoming.alert_id))
         return True
 
@@ -113,7 +113,7 @@ async def test_ambiguous_grouping_records_suggestion_and_creates_separate_case()
     async def choose(incoming):
         return Decision(action="suggest", case_id=candidate_id, confidence=0.6, reason="Uncertain evidence")
 
-    async def record(incoming, decision):
+    async def record(incoming, decision, **kwargs):
         calls.append(("link", str(decision.case_id), decision.action))
         return True
 

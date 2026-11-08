@@ -446,6 +446,18 @@ class CaseAlert(Base):
     created_at = Column(DateTime(timezone=True), default=now_utc)
 
 
+class SoarCaseEvent(Base):
+    __tablename__ = "soar_case_events"
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    case_id = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    group_id = Column(String(100), nullable=False)
+    event = Column(String(40), nullable=False)
+    ready = Column(Boolean, nullable=False, default=True)
+    alert_id = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    processed_at = Column(DateTime(timezone=True), index=True)
+
+
 class CaseNote(Base):
     __tablename__ = "case_notes"
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

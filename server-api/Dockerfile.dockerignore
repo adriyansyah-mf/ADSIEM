@@ -16,6 +16,7 @@
 !worker/worker/soar/graph.py
 !worker/worker/soar/template.py
 !worker/worker/soar/curl.py
+!worker/worker/soar/case_outbox.py
 # built-in YARA rule pack, synced into yara_rules at start (services/yara_builtin.py)
 !yara/builtin
 # community YARA pack (YARA-Forge, licence-filtered; agent/cmd/yarapack)

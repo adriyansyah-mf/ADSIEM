@@ -16,10 +16,11 @@ from uuid import uuid4
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api.routes.cases import router
+from app.api.routes.soar import router as soar_router
 from app.core.database import Base, get_db
 from app.core.deps import get_current_user
 from app.models.models import Agent, Alert, Case, CaseAlert, Role, User
@@ -40,6 +41,11 @@ async def case_env():
     tables = {model.__table__ for model in (Agent, Alert, Case, CaseAlert, Role, User)}
     tables.add(Base.metadata.tables["case_notes"])
     tables.add(Base.metadata.tables["alert_notes"])
+    # case writes enqueue SOAR case events in the same transaction
+    tables.update(Base.metadata.tables[name] for name in (
+        "soar_case_events", "soar_playbooks", "soar_actions", "soar_playbook_runs", "soar_playbook_run_steps",
+        "platform_settings", "audit_logs",
+    ))
     while True:
         dependencies = {fk.column.table for table in tables for fk in table.foreign_keys}
         if dependencies <= tables:
@@ -73,6 +79,7 @@ async def case_env():
                                       for n in ("cases:manage", "agents:manage")])))
     app = FastAPI()
     app.include_router(router)
+    app.include_router(soar_router)
 
     async def database():
         async with sessions() as db:
@@ -202,3 +209,64 @@ async def test_join_refuses_case_closed_since_selection(case_env, monkeypatch):
     async with env.sessions() as db:
         case = await db.get(Case, env.case.id)
         assert case.status == "closed" and case.severity == "high" and case.ai_reasoning is None
+
+
+# ── SOAR case events emitted by the worker (moved here for the metrics-registry reason above)
+
+async def _case_playbook(env, monkeypatch, event):
+    from worker import settings_cache
+    from worker.soar import case_events, engine
+    for module in (case_events, engine, settings_cache):
+        monkeypatch.setattr(module, "AsyncSessionLocal", env.sessions)
+    monkeypatch.setattr(settings_cache, "_cache", {})
+    monkeypatch.setattr(settings_cache, "_fetched_at", 0)
+    graph = {"nodes": [{"id": "trigger", "type": "trigger", "params": {"event": event}}], "edges": []}
+    response = await env.client.post("/api/soar/playbooks", json={"name": event, "is_enabled": True, "graph": graph})
+    assert response.status_code == 201, response.text
+    return case_events
+
+
+async def test_ai_link_event_waits_for_final_case_update_and_survives_retry(case_env, monkeypatch):
+    from app.models.models import SoarCaseEvent, SoarRun
+    from worker import ai_analyst, case_correlation
+    env = case_env
+    monkeypatch.setattr(case_correlation, "AsyncSessionLocal", env.sessions)
+    monkeypatch.setattr(ai_analyst, "AsyncSessionLocal", env.sessions)
+    case_events = await _case_playbook(env, monkeypatch, "case.alert_linked")
+    async with env.sessions() as db:
+        (await db.get(CaseAlert, (env.case.id, env.alerts[1].id))).status = "suggested"
+        await db.commit()
+    incoming = case_correlation.CorrelationInput(alert_id=env.alerts[1].id, group_id="blue",
+                                                 title="Persistence", hostname="host1", keys=["ip:8.8.8.2"])
+    decision = case_correlation.Decision(action="join", case_id=env.case.id, confidence=0.95)
+    assert await case_correlation.record_link(incoming, decision, emit_event=False)
+    async with env.sessions() as db:
+        pending = (await db.execute(select(SoarCaseEvent))).scalar_one()
+        assert pending.ready is False and pending.processed_at is None
+    assert await case_events.dispatch_case_events() == 0
+    # Retrying the already-persisted association must preserve the pending event.
+    assert await case_correlation.record_link(incoming, decision, emit_event=False)
+    await ai_analyst._join_campaign_case(case_id=str(env.case.id), alert_id=str(env.alerts[1].id),
+        title="Persistence", triage_notes="Updated evidence", severity="critical", family="persistence",
+        keys=["ip:8.8.8.2"], hostname="host1")
+    assert await case_events.dispatch_case_events() == 1
+    async with env.sessions() as db:
+        run = (await db.execute(select(SoarRun))).scalar_one()
+        assert run.context["trigger"]["severity"] == "critical"
+
+
+async def test_ai_created_case_emits_creation_event(case_env, monkeypatch):
+    from app.models.models import SoarRun
+    from worker import ai_analyst
+    env = case_env
+    monkeypatch.setattr(ai_analyst, "AsyncSessionLocal", env.sessions)
+    case_events = await _case_playbook(env, monkeypatch, "case.created")
+    cid = await ai_analyst._create_case_from_verdict(
+        alert_id=str(env.alerts[0].id), title="Brute force", severity="high", verdict="create_case",
+        analysis={"triage_notes": "Suspicious activity", "confidence": 0.95}, enrichment=None,
+        group_id="blue", hostname="host0", keys=["ip:8.8.8.1"],
+    )
+    assert await case_events.dispatch_case_events() == 1
+    async with env.sessions() as db:
+        run = (await db.execute(select(SoarRun))).scalar_one()
+    assert run.context["trigger"]["case_id"] == cid and run.context["trigger"]["created_by_ai"]
