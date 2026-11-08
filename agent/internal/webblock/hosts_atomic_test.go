@@ -21,7 +21,7 @@ func TestApplyKeepsSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &HostsFile{Path: link}
-	if _, _, err := h.Apply([]string{"evil.example"}, false); err != nil {
+	if _, _, err := h.Apply([]string{"evil.example"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	st, err := os.Lstat(link)
@@ -38,7 +38,7 @@ func TestApplyFallsBackToInPlaceOnEBUSY(t *testing.T) {
 	defer func() { renameFile = old }()
 	renameFile = func(_, _ string) error { return &os.LinkError{Op: "rename", Err: syscall.EBUSY} }
 	h, _ := newHosts(t, "127.0.0.1 localhost\n")
-	if _, _, err := h.Apply([]string{"evil.example"}, false); err != nil {
+	if _, _, err := h.Apply([]string{"evil.example"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := readFile(t, h.Path)

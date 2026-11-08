@@ -106,6 +106,24 @@ func (l *List) Selected() []string {
 	return names
 }
 
+// wwwSource reports whether a domain from this source also blocks its www.
+// name: only operator-chosen entries do, feed entries are exact hosts.
+func wwwSource(s string) bool { return s == "manual" || s == "alert" }
+
+// bareDomains is the subset of domains whose source gets no www. line.
+func (l *List) bareDomains(domains []string) map[string]bool {
+	var bare map[string]bool
+	for _, d := range domains {
+		if !wwwSource(l.Entries[d].Source) {
+			if bare == nil {
+				bare = map[string]bool{}
+			}
+			bare[d] = true
+		}
+	}
+	return bare
+}
+
 // Save writes the list to path with the CA files' helpers: the directory is
 // created or verified as private (Linux: owned by euid, 0700; Windows:
 // SYSTEM and Administrators only), the file goes through a private temp file

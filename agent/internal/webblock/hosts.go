@@ -32,7 +32,9 @@ func validDomain(d string) bool { return len(d) <= 253 && domainRe.MatchString(d
 
 // RenderBlock renders the managed block with LF line endings, or "" when no
 // domain is valid. Invalid domains are skipped and logged once per call.
-func RenderBlock(domains []string, ipv6 bool) string {
+// Domains in bare get no www. line (feed entries: a feed lists exact hosts, so
+// guessing www. only adds lines); every other domain gets one.
+func RenderBlock(domains []string, ipv6 bool, bare map[string]bool) string {
 	seen := make(map[string]bool, len(domains))
 	valid := make([]string, 0, len(domains))
 	skipped := 0
@@ -58,7 +60,7 @@ func RenderBlock(domains []string, ipv6 bool) string {
 	written := make(map[string]bool, 2*len(valid))
 	for _, d := range valid {
 		names := []string{d}
-		if !strings.HasPrefix(d, "www.") {
+		if !strings.HasPrefix(d, "www.") && !bare[d] {
 			names = append(names, "www."+d)
 		}
 		for _, n := range names {
@@ -179,7 +181,7 @@ func ReplaceBlock(content, block string) (out string, hadBlock bool, tampered bo
 type Hosts interface {
 	// Apply writes the block; changed says the file was rewritten, tampered
 	// that the markers were found damaged.
-	Apply(domains []string, ipv6 bool) (changed, tampered bool, err error)
+	Apply(domains []string, ipv6 bool, bare map[string]bool) (changed, tampered bool, err error)
 	Remove() error
 }
 
@@ -198,8 +200,8 @@ func NewHostsFile() *HostsFile {
 // Apply writes the block for domains (removes it when none are valid). It
 // returns changed when the file was rewritten and tampered when the block was
 // found damaged and repaired.
-func (h *HostsFile) Apply(domains []string, ipv6 bool) (bool, bool, error) {
-	return h.rewrite(RenderBlock(domains, ipv6))
+func (h *HostsFile) Apply(domains []string, ipv6 bool, bare map[string]bool) (bool, bool, error) {
+	return h.rewrite(RenderBlock(domains, ipv6, bare))
 }
 
 // Remove deletes the block; a missing hosts file is not an error.
