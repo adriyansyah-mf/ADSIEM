@@ -69,7 +69,8 @@ func TestProcessLookupThrottledAndFlushed(t *testing.T) {
 	var calls int32
 	s.findProc = func(string) (int, string) {
 		atomic.AddInt32(&calls, 1)
-		time.Sleep(300 * time.Millisecond)
+		// far above CI scheduling jitter under -race, still inside wait()'s 2 s
+		time.Sleep(1500 * time.Millisecond)
 		return 7, "slow"
 	}
 	base := newHTTPTestServer(t, s)
@@ -99,7 +100,7 @@ func TestProcessLookupThrottledAndFlushed(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	if bodyDelay > 200*time.Millisecond {
+	if bodyDelay > 750*time.Millisecond {
 		t.Fatalf("body took %v; the page waited for the process lookup", bodyDelay)
 	}
 	c.wait(2)
