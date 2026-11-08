@@ -166,6 +166,49 @@ func TestJitterNewerWantDuringDelaySyncsOnce(t *testing.T) {
 	}
 }
 
+// blockedDelay installs g:1, then wants g:2 with the delay blocked; pages are
+// the responses to later syncs. It returns once the pause is entered.
+func blockedDelay(t *testing.T, pages ...string) (*jitterRig, *fakePoster, chan struct{}) {
+	t.Helper()
+	r := newJitterRig(t)
+	f := &fakePoster{pages: append([]string{verPage("g", 1, true)}, pages...)}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go r.s.SyncLoop(ctx, f)
+	r.s.Want("g:1")
+	waitFor(t, "g:1", func() bool { return r.s.Current().Version == "g:1" })
+	rel := make(chan struct{})
+	r.setBlock(rel)
+	r.s.Want("g:2")
+	waitFor(t, "pause", func() bool { return r.pauseCount() == 1 })
+	return r, f, rel
+}
+
+func TestJitterDisableDuringDelaySyncsImmediately(t *testing.T) {
+	r, _, rel := blockedDelay(t)
+	defer close(rel)
+	r.s.Want("") // protection turned off while waiting
+	waitFor(t, "off without waiting out the delay", func() bool { return r.s.Current().Version == "" })
+}
+
+func TestJitterGroupChangeDuringDelaySyncsImmediately(t *testing.T) {
+	r, _, rel := blockedDelay(t, verPage("h", 1, true), verPage("h", 1, true))
+	defer close(rel)
+	r.s.Want("h:1")
+	waitFor(t, "h:1 without waiting out the delay", func() bool { return r.s.Current().Version == "h:1" })
+}
+
+func TestJitterServedAgainAfterSync(t *testing.T) {
+	r, _, rel := blockedDelay(t, verPage("g", 2, false), verPage("g", 3, false))
+	close(rel)
+	waitFor(t, "g:2", func() bool { return r.s.Current().Version == "g:2" })
+	r.s.Want("g:3")
+	waitFor(t, "g:3", func() bool { return r.s.Current().Version == "g:3" })
+	if r.pauseCount() != 2 {
+		t.Fatalf("a later update must wait again, pauses %d", r.pauseCount())
+	}
+}
+
 func TestGroupOf(t *testing.T) {
 	for in, want := range map[string]string{"g:5": "g", "a:b:7": "a:b", "": "", "x": "x"} {
 		if got := groupOf(in); got != want {

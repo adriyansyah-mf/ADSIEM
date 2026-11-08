@@ -53,6 +53,9 @@ type Store struct {
 	want    string
 	wantSet bool
 	wake    chan struct{}
+	// abandon ends the delay in progress (nil: none); Want calls it when the
+	// new wanted version is no longer a routine update.
+	abandon context.CancelFunc
 
 	// OnChange is called with each newly installed list (the one loaded from
 	// disk is read through Current by Open's caller).
@@ -121,6 +124,9 @@ func (s *Store) Current() *List { return s.cur.Load() }
 func (s *Store) Want(version string) {
 	s.mu.Lock()
 	s.want, s.wantSet = version, true
+	if s.abandon != nil && !jittered(s.Current().Version, version) {
+		s.abandon()
+	}
 	s.mu.Unlock()
 	select {
 	case s.wake <- struct{}{}:
@@ -150,7 +156,7 @@ func (s *Store) SyncLoop(ctx context.Context, c Poster) {
 		if want, need := s.wanted(); need {
 			if synced && want != delayedFor && jittered(s.Current().Version, want) {
 				delayedFor = want
-				if !s.pause(ctx, s.jitter()) {
+				if !s.delay(ctx) && ctx.Err() != nil {
 					return
 				}
 				// a newer heartbeat may have arrived meanwhile: sync what is wanted now
@@ -172,6 +178,25 @@ func (s *Store) SyncLoop(ctx context.Context, c Poster) {
 		case <-t.C:
 		}
 	}
+}
+
+// delay waits the jitter; Want ends it early (disable, group change) and ctx
+// ends it for shutdown. It reports whether the full delay elapsed.
+func (s *Store) delay(ctx context.Context) bool {
+	dctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.mu.Lock()
+	if !jittered(s.Current().Version, s.want) {
+		s.mu.Unlock()
+		return false
+	}
+	s.abandon = cancel
+	s.mu.Unlock()
+	ok := s.pause(dctx, s.jitter())
+	s.mu.Lock()
+	s.abandon = nil
+	s.mu.Unlock()
+	return ok
 }
 
 // jittered reports whether moving from the installed version to want is a
