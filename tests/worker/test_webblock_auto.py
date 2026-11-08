@@ -84,7 +84,7 @@ async def test_ti_malicious_outbound_blocks(monkeypatch):
 
 async def test_escalate_verdict_blocks_without_ti(monkeypatch):
     setup(monkeypatch)
-    assert await run(verdict="escalate", enrichment=enrich()) == ["c2.example.com"]
+    assert await run(verdict="escalate", fields={"url.domain": "c2.example.com"}, enrichment=enrich()) == ["c2.example.com"]
 
 
 async def test_url_reputation_blocks_its_host(monkeypatch):
@@ -231,3 +231,19 @@ async def test_persist_node_calls_web_auto_block(monkeypatch):
     assert len(calls) == 1
     assert calls[0][:4] == (ALERT, "blue", "Beacon", "monitor")
     assert calls[0][4] == state["decoded_fields"] and calls[0][6] == "c2"
+
+
+# --- AI verdict alone blocks only event destination indicators ---
+
+async def test_escalate_blocks_only_event_origin_domains(monkeypatch):
+    writes = setup(monkeypatch)
+    e = enrich(domains=("cdn.example.org",))
+    got = await run(verdict="escalate", fields={"url.domain": "c2.example.com"}, enrichment=e)
+    assert got == ["c2.example.com"]
+    assert [w[1]["domain"] for w in writes if "web_block_entries" in w[0]] == ["c2.example.com"]
+
+
+async def test_ti_malicious_text_origin_domain_blocks_under_monitor(monkeypatch):
+    setup(monkeypatch)
+    e = enrich(rep("cdn.example.org"), domains=("cdn.example.org",))
+    assert await run(verdict="monitor", fields={"url.domain": "c2.example.com"}, enrichment=e) == ["cdn.example.org"]

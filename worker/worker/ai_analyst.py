@@ -573,9 +573,12 @@ async def _alert_tags(alert_id: str) -> list[str]:
 
 
 async def _web_auto_block(alert_id, group_id, title, verdict, fields, enrichment, threat_type=None) -> None:
-    from worker.webblock_auto import maybe_block
-    await maybe_block(alert_id, group_id, title, verdict, fields, enrichment,
-                      tags=await _alert_tags(alert_id), threat_type=threat_type)
+    try:
+        from worker.webblock_auto import maybe_block
+        await maybe_block(alert_id, group_id, title, verdict, fields, enrichment,
+                          tags=await _alert_tags(alert_id), threat_type=threat_type)
+    except Exception:
+        log.exception("webblock_auto_failed", alert_id=alert_id)
 
 
 BRUTEFORCE_DIGEST_MAX_SOURCES = 500

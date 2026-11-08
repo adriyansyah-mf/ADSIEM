@@ -55,14 +55,16 @@ def _host(value: str) -> str | None:
         return None
 
 
-def candidates(alert_id: str, group_id: str, title: str, fields: dict | None, extracted, exclusions) -> list[str]:
-    """Normalized domains of the alert's domain and URL indicators, in order, unique."""
+def candidates(alert_id: str, group_id: str, title: str, fields: dict | None, extracted,
+               exclusions) -> dict[str, bool]:
+    """Normalized domains of the alert's domain and URL indicators -> True when any came
+    from the decoded event fields (the destination), False when only from alert text/TI."""
     meta = alert_iocs.AlertMeta(alert_id=alert_id, group_id=group_id, severity="medium", hostname=None,
                                 agent_id=None, rule_title=title, created_at=datetime.now(timezone.utc))
-    out: list[str] = []
+    out: dict[str, bool] = {}
     for _id, doc in alert_iocs.collect(meta, None, fields, extracted, exclusions):
-        if doc["type"] in ("domain", "url") and (host := _host(doc["value"])) and host not in out:
-            out.append(host)
+        if doc["type"] in ("domain", "url") and (host := _host(doc["value"])):
+            out[host] = out.get(host, False) or doc["origin"] == "event"
     return out
 
 
@@ -114,14 +116,13 @@ async def _maybe_block(alert_id, group_id, title, verdict, fields, enrichment, t
         rules = await _allow_rules(db, group_id)
     cands = candidates(alert_id, group_id, title, fields, getattr(enrichment, "iocs", None),
                        await alert_iocs._exclusions())
-    cands = [d for d in cands if not allow_match(d, rules)]
-    if verdict in BLOCKING_VERDICTS:
-        evidence = f"AI verdict {verdict}"
-        chosen = cands
-    else:
-        bad = ti_malicious_hosts(enrichment)
-        chosen = [d for d in cands if d in bad]
-        evidence = "threat intelligence malicious"
+    cands = {d: ev for d, ev in cands.items() if not allow_match(d, rules)}
+    bad = ti_malicious_hosts(enrichment)
+    # TI-malicious hosts are blocked whatever their origin; the AI verdict alone only
+    # vouches for the event's destination, not for every host mentioned in the alert text.
+    chosen = [d for d, from_event in cands.items()
+              if d in bad or (verdict in BLOCKING_VERDICTS and from_event)]
+    evidence = "threat intelligence malicious" if bad & set(chosen) else f"AI verdict {verdict}"
     if not chosen:
         return []
     reason = f"Alert: {(title or '')[:_MAX_TITLE]} ({evidence})"
