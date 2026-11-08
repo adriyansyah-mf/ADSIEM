@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select, text, update
 
 from app.models.models import Agent, PlatformSetting, WebAllowRule, WebBlockEntry, WebBlockPolicy, _web_block_seq
 from app.services.web_page import DEFAULT_PAGE_HTML
-from worker.web_domains import BUILTIN_ALLOWLIST, allow_match
+from worker.web_domains import BUILTIN_ALLOWLIST, WEB_BLOCK_SEQ_LOCK, allow_match
 
 FEED_GROUP = "*"
 RULES_SEQ_KEY = "web_block_rules_seq"
@@ -27,6 +27,13 @@ _version_cache: dict[str, tuple[float, str]] = {}
 
 def invalidate() -> None:
     _version_cache.clear()
+
+
+async def lock_seq_writes(db) -> None:
+    """Serialize seq-assigning transactions until commit, so seqs commit in order
+    (an agent that synced past seq N must never miss a row that commits later).
+    Call first in every transaction that uses next_seq() or mark_rules_changed."""
+    await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": WEB_BLOCK_SEQ_LOCK})
 
 
 def next_seq():
@@ -73,6 +80,7 @@ async def _rules_seq(db, group_id: str) -> int:
 
 
 async def seed_builtin_allowlist(db) -> None:
+    await lock_seq_writes(db)
     inserted = 0
     for domain, include in BUILTIN_ALLOWLIST:
         result = await db.execute(text(
@@ -86,11 +94,17 @@ async def seed_builtin_allowlist(db) -> None:
 
 
 async def expire(db) -> int:
+    due = (await db.execute(select(func.count()).select_from(WebBlockEntry).where(
+        WebBlockEntry.status == "active", WebBlockEntry.expires_at.is_not(None),
+        WebBlockEntry.expires_at <= func.now()))).scalar_one()
+    if not due:
+        return 0
+    await lock_seq_writes(db)
     result = await db.execute(update(WebBlockEntry).where(
         WebBlockEntry.status == "active", WebBlockEntry.expires_at.is_not(None), WebBlockEntry.expires_at <= func.now(),
     ).values(status="removed", seq=next_seq(), updated_at=func.now()))
+    await db.commit()  # also releases the lock when a concurrent expire won the rows
     if result.rowcount:
-        await db.commit()
         invalidate()
     return result.rowcount or 0
 
@@ -152,6 +166,8 @@ async def delta(db, group_id: str, since: int, continuing: bool = False, limit: 
     (first sync, allowlist/policy change, or a seq it cannot have); changes are
     then the active set. With more, the agent continues from seq with continuing=true."""
     await expire(db)
+    # Wait for in-flight seq writers: rows below the top seq we report must all be visible.
+    await db.execute(text("SELECT pg_advisory_xact_lock_shared(:k)"), {"k": WEB_BLOCK_SEQ_LOCK})
     policy = await policy_for(db, group_id)
     if not policy["enabled"]:
         return {"policy": _policy_out(policy), "seq": 0, "reset": True, "more": False, "rules": 0,

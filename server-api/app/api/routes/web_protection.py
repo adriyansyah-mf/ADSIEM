@@ -151,6 +151,7 @@ async def list_blocks(
 
 async def _block_one(db: AsyncSession, user: User, target: str, value: str, reason: str,
                      expires_at: Optional[datetime]) -> WebBlockEntry:
+    await web_blocks.lock_seq_writes(db)
     try:
         domain = normalize(value)
     except DomainError as exc:
@@ -172,6 +173,7 @@ async def _block_one(db: AsyncSession, user: User, target: str, value: str, reas
 
 
 async def _unblock_one(db: AsyncSession, user: User, group: Optional[str], entry_id: UUID) -> dict:
+    await web_blocks.lock_seq_writes(db)
     row = await db.get(WebBlockEntry, entry_id)
     if row is None or (group is not None and row.group_id not in (group, web_blocks.FEED_GROUP)):
         raise HTTPException(status_code=404, detail="Block not found")
@@ -255,6 +257,7 @@ async def add_rule(body: RuleIn, db: AsyncSession = Depends(get_db), user: User 
         domain = normalize(body.domain)
     except DomainError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    await web_blocks.lock_seq_writes(db)
     row = (await db.execute(select(WebAllowRule).where(
         WebAllowRule.group_id == target, WebAllowRule.domain == domain))).scalar_one_or_none()
     if row is None:
@@ -279,6 +282,7 @@ async def _own_rule(db, rule_id: UUID, group: Optional[str]) -> WebAllowRule:
 @router.patch("/api/web-allowlist/{rule_id}")
 async def update_rule(rule_id: UUID, body: RulePatch, db: AsyncSession = Depends(get_db), user: User = Manage,
                       group: Optional[str] = Depends(get_scoped_group)):
+    await web_blocks.lock_seq_writes(db)
     row = await _own_rule(db, rule_id, group)
     if body.enabled is not None:
         row.enabled = body.enabled
@@ -293,6 +297,7 @@ async def update_rule(rule_id: UUID, body: RulePatch, db: AsyncSession = Depends
 @router.delete("/api/web-allowlist/{rule_id}")
 async def delete_rule(rule_id: UUID, db: AsyncSession = Depends(get_db), user: User = Manage,
                       group: Optional[str] = Depends(get_scoped_group)):
+    await web_blocks.lock_seq_writes(db)
     row = await _own_rule(db, rule_id, group)
     if row.builtin:
         raise HTTPException(status_code=409, detail="Built-in rules can be disabled, not deleted")
@@ -341,6 +346,7 @@ async def put_policy(group_id: str, body: PolicyIn, db: AsyncSession = Depends(g
         page = web_page.sanitize(body.page_html) if body.page_html is not None else None
     except web_page.PageError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    await web_blocks.lock_seq_writes(db)
     row = await db.get(WebBlockPolicy, target) or WebBlockPolicy(group_id=target)
     for key in ("enabled", "feed_enabled", "alert_enabled", "alert_block_days", "max_entries", "contact"):
         setattr(row, key, getattr(body, key))
