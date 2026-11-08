@@ -1,6 +1,7 @@
 package ransomguard
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -9,22 +10,78 @@ import (
 	"github.com/siem-platform/agent/internal/linsensor"
 )
 
-func TestSyncClientMatchesInstallPathOnly(t *testing.T) {
+// A sync client is trusted from Program Files (admin-only) as it is; from
+// the user-writable per-user install only with a valid Microsoft signature.
+// Never by its name alone.
+func TestSyncClientTrust(t *testing.T) {
+	const signedApp = `C:\Users\bob\AppData\Local\Microsoft\OneDrive\OneDrive.exe`
+	const signedDesk = `C:\Users\bob\Desktop\OneDrive.exe`
+	signed := func(p string) bool { return p == signedApp || p == signedDesk }
 	for img, want := range map[string]bool{
 		`C:\Program Files\Microsoft OneDrive\OneDrive.exe`:                           true,
 		`C:\Program Files (x86)\Microsoft OneDrive\25.1.0\OneDrive.Sync.Service.exe`: true,
-		`C:\Users\bob\AppData\Local\Microsoft\OneDrive\OneDrive.exe`:                 true,
-		`c:\users\bob\appdata\local\microsoft\onedrive\25.1.0\FileCoAuth.exe`:        true,
-		`C:\Users\bob\Desktop\OneDrive.exe`:                                          false, // malware named like it
-		`C:\Users\bob\AppData\Local\Temp\Microsoft\OneDrive\OneDrive.exe`:            false,
-		`C:\Program Files\Microsoft OneDrive\evil.exe`:                               false,
-		`C:\Users\bob\AppData\Local\Microsoft\OneDrive\Update\OneDriveSetup.exe`:     false, // the updater is no sync client
-		`C:\Program Files\Microsoft OneDrive\..\..\Users\bob\Desktop\OneDrive.exe`:   false,
+		signedApp: true,
+		`c:\users\bob\appdata\local\microsoft\onedrive\25.1.0\FileCoAuth.exe`:     false, // unsigned, user-writable
+		`C:\Users\bob\AppData\Local\Microsoft\OneDrive\OneDrive.Sync.Service.exe`: false, // unsigned
+		signedDesk: false, // signed, but not an install location
+		`C:\Users\bob\AppData\Local\Temp\Microsoft\OneDrive\OneDrive.exe`:          false,
+		`C:\Program Files\Microsoft OneDrive\evil.exe`:                             false,
+		`C:\Users\bob\AppData\Local\Microsoft\OneDrive\Update\OneDriveSetup.exe`:   false, // the updater is no sync client
+		`C:\Program Files\Microsoft OneDrive\..\..\Users\bob\Desktop\OneDrive.exe`: false,
 		"/usr/bin/onedrive": false,
 	} {
-		if got := syncClient(img); got != want {
-			t.Errorf("syncClient(%s) = %t, want %t", img, got, want)
+		if got := trustedSync(img, signed); got != want {
+			t.Errorf("trustedSync(%s) = %t, want %t", img, got, want)
 		}
+	}
+}
+
+// The review's case: ransomware as the user drops an unsigned OneDrive.exe
+// into %LOCALAPPDATA%\Microsoft\OneDrive. A canary delete is a kill, and the
+// heuristics see it.
+func TestUnsignedOneDriveInUserProfileNotTrusted(t *testing.T) {
+	const fake = `C:\Users\bob\AppData\Local\Microsoft\OneDrive\OneDrive.exe`
+	w := newWriteCase(t)
+	w.g.setSigned(func(string) bool { return false })
+	os.Remove(w.p)
+	w.g.Observe(linsensor.FileEvent{Action: "delete", Path: w.p, PID: 93, Image: fake, Comm: "OneDrive.exe"})
+	if l := w.out.wait(t, 1)[0]; !strings.HasPrefix(l, "detection=canary confirmed=true response=killed") {
+		t.Fatalf("line = %s", l)
+	}
+	f := (*finding)(nil)
+	for i := 0; i < minExtRenames; i++ {
+		e := ev(94, "rename", fmt.Sprintf(`C:\Users\bob\Documents\d%d\r%d.docx.lck`, i%3, i), fmt.Sprintf(`C:\Users\bob\Documents\d%d\r%d.docx`, i%3, i), 0)
+		e.Image, e.Comm = fake, "OneDrive.exe"
+		if got := w.g.det.observe(e); got != nil {
+			f = got
+		}
+	}
+	if f == nil || f.kind != "extension_change" {
+		t.Fatalf("heuristics skipped an unsigned OneDrive.exe: %+v", f)
+	}
+	// Signed and in place: trusted by the heuristics too.
+	w.g.setSigned(func(string) bool { return true })
+	for i := 0; i < 2*minExtRenames; i++ {
+		e := ev(95, "rename", fmt.Sprintf(`C:\Users\bob\Documents\r%d.docx.tmp`, i), fmt.Sprintf(`C:\Users\bob\Documents\r%d.docx`, i), 0)
+		e.Image, e.Comm = fake, "OneDrive.exe"
+		if got := w.g.det.observe(e); got != nil {
+			t.Fatalf("signed OneDrive not trusted: %+v", got)
+		}
+	}
+	// Names alone are trusted nowhere: OneDrive.exe or OneDriveSetup.exe in Temp.
+	for _, img := range []string{`C:\Users\bob\AppData\Local\Temp\OneDrive.exe`, `C:\Users\bob\AppData\Local\Temp\OneDriveSetup.exe`} {
+		f = nil
+		for i := 0; i < minExtRenames; i++ {
+			e := ev(96, "rename", fmt.Sprintf(`C:\Users\bob\Documents\x%d.pdf.enc`, i), fmt.Sprintf(`C:\Users\bob\Documents\x%d.pdf`, i), 0)
+			e.Image, e.Comm = img, base(img)
+			if got := w.g.det.observe(e); got != nil {
+				f = got
+			}
+		}
+		if f == nil {
+			t.Errorf("%s trusted by name", img)
+		}
+		w.g.det.procs = map[uint32]*procWindow{}
 	}
 }
 
@@ -37,6 +94,7 @@ func TestCanarySyncRenameDeleteNotKilled(t *testing.T) {
 		{`C:\Users\bob\AppData\Local\Microsoft\OneDrive\25.1.0\OneDrive.Sync.Service.exe`, "rename"},
 	} {
 		w := newWriteCase(t)
+		w.g.setSigned(func(string) bool { return true }) // the per-user install: a Microsoft signature
 		w.g.response = func(uint32) (int, error) { t.Errorf("%s killed", c.image); return 0, nil }
 		for i := 0; i < 2*retireAfter; i++ {
 			if !w.g.can.isCanary(w.p) {

@@ -63,40 +63,8 @@ type Guard struct {
 	// writeWait is how long a canary write event waits for the canary's
 	// content to change (on Linux the event is the open, before the data).
 	writeWait time.Duration
-}
-
-// syncClients may rewrite, rename or delete a canary: OneDrive's Known
-// Folder Move syncs Documents and Desktop, canaries included, between a
-// user's devices. From them canary text is adopted, and a rename or delete
-// is canary_sync (planted again, no kill, no strike); encryption is still a hit.
-var syncClients = map[string]bool{"onedrive.exe": true, "onedrive.sync.service.exe": true, "filecoauth.exe": true}
-
-// syncClientDirs are OneDrive's install locations under the system drive
-// (lower case, forward slashes); per-user installs are under
-// Users\<user>\AppData\Local\Microsoft\OneDrive.
-var syncClientDirs = []string{"/program files/microsoft onedrive/", "/program files (x86)/microsoft onedrive/"}
-
-// syncClient reports whether image is a sync client running from its
-// install location: the full path counts, not the name, so a binary named
-// OneDrive.exe anywhere else is not trusted.
-func syncClient(image string) bool {
-	l := strings.ToLower(strings.ReplaceAll(image, `\`, "/"))
-	if !syncClients[base(l)] || strings.Contains(l, "/../") || strings.Contains(l, "/./") ||
-		len(l) < 3 || l[:2] != systemDrive || l[2] != '/' {
-		return false
-	}
-	rest := l[2:]
-	for _, d := range syncClientDirs {
-		if strings.HasPrefix(rest, d) {
-			return true
-		}
-	}
-	if u, ok := strings.CutPrefix(rest, "/users/"); ok {
-		if i := strings.IndexByte(u, '/'); i > 0 {
-			return strings.HasPrefix(u[i:], "/appdata/local/microsoft/onedrive/")
-		}
-	}
-	return false
+	// signed checks a Microsoft Authenticode signature (trust.go).
+	signed atomic.Pointer[func(string) bool]
 }
 
 func New(opts Options) *Guard {
@@ -107,6 +75,8 @@ func New(opts Options) *Guard {
 		response:  killTree,
 		writeWait: time.Second,
 	}
+	g.setSigned(microsoftSigned)
+	g.det.trusted = g.trusted
 	g.rt.Store(&Runtime{Kill: true})
 	return g
 }
@@ -166,7 +136,7 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 				return
 			}
 			g.can.forget(p)
-			if (ev.Action == "rename" || ev.Action == "delete") && syncClient(ev.Image) {
+			if (ev.Action == "rename" || ev.Action == "delete") && g.trusted(ev.Image) {
 				go func() {
 					g.report(detection{kind: "canary_sync", canary: p, action: ev.Action, image: ev.Image,
 						comm: ev.Comm, pid: ev.PID, ppid: ev.PPID, uid: ev.UID})
@@ -241,7 +211,7 @@ func (g *Guard) canaryWrite(ev linsensor.FileEvent, p string) {
 	}
 	switch st {
 	case canaryText:
-		if syncClient(ev.Image) {
+		if g.trusted(ev.Image) {
 			g.can.adopt(p, want, sum)
 		}
 	case canaryDestroyed:

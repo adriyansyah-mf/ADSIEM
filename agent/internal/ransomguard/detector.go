@@ -44,10 +44,11 @@ var DefaultAllowImages = []string{
 	// Build tools write and rename hundreds of cache files a minute
 	// (measured: go build -a). Interpreters are deliberately not here.
 	"go", "cargo", "rustc", "cc1", "cc1plus", "ld", "ld.lld", "collect2", "as", "make", "ninja", "cmake",
-	// Windows: installers and servicing, Defender, sync and copy tools,
-	// search indexing, build tools. Matched case-insensitively.
+	// Windows: installers and servicing, Defender, copy tools, search
+	// indexing, build tools. Matched case-insensitively. OneDrive is not
+	// here: it is trusted by path and signature (trust.go), not by name.
 	"msiexec.exe", "trustedinstaller.exe", "tiworker.exe", "dism.exe", "dismhost.exe", "cleanmgr.exe",
-	"msmpeng.exe", "mpcmdrun.exe", "onedrive.exe", "onedrivesetup.exe", "robocopy.exe", "searchindexer.exe", "git.exe",
+	"msmpeng.exe", "mpcmdrun.exe", "robocopy.exe", "searchindexer.exe", "git.exe",
 	"go.exe", "msbuild.exe", "cl.exe", "link.exe", "devenv.exe",
 }
 
@@ -135,11 +136,14 @@ type procWindow struct {
 type detector struct {
 	allow  map[string]bool
 	ignore func(string) bool // in-place writes not counted (skipInplace)
-	procs  map[uint32]*procWindow
+	// trusted images (by path and signature, trust.go) are skipped.
+	trusted func(image string) bool
+	procs   map[uint32]*procWindow
 }
 
 func newDetector(allow []string) *detector {
-	d := &detector{allow: map[string]bool{}, ignore: skipInplace, procs: map[uint32]*procWindow{}}
+	d := &detector{allow: map[string]bool{}, ignore: skipInplace, procs: map[uint32]*procWindow{},
+		trusted: func(image string) bool { return trustedSync(image, microsoftSigned) }}
 	for _, a := range append(append([]string{}, DefaultAllowImages...), allow...) {
 		d.allow[strings.ToLower(a)] = true
 	}
@@ -187,7 +191,7 @@ func base(p string) string { return p[strings.LastIndexAny(p, `/\`)+1:] }
 // observe adds one event and returns a finding the first time a process
 // crosses a threshold in its window.
 func (d *detector) observe(ev linsensor.FileEvent) *finding {
-	if d.allow[strings.ToLower(base(ev.Image))] || d.allow[strings.ToLower(ev.Comm)] {
+	if d.allow[strings.ToLower(base(ev.Image))] || d.allow[strings.ToLower(ev.Comm)] || d.trusted(ev.Image) {
 		return nil
 	}
 	w := d.procs[ev.PID]

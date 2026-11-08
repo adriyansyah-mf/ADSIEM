@@ -93,29 +93,35 @@ func keys(m map[string]string) []string {
 
 // Field case: OneDriveSetup.exe (AppData\Local\Microsoft\OneDrive\Update)
 // wrote 800 PNG tiles (entropy 7.2x) and deleted the old ones: mass_modify
-// was confirmed and the updater killed. It is allowlisted now, and PNGs
-// keep their header, so even an unlisted program doing that is not confirmed.
+// was confirmed and the updater killed. PNGs keep their header, so that work
+// is never confirmed. OneDriveSetup.exe is not trusted by its name (malware
+// takes that name): the heuristics see it, the magic check keeps it alive.
 func TestOneDriveSetupPNGTilesNotKilled(t *testing.T) {
 	d := newDetector(nil)
 	for _, img := range []string{
 		`C:\Users\bob\AppData\Local\Microsoft\OneDrive\Update\OneDriveSetup.exe`,
-		`C:\Users\bob\AppData\Local\Microsoft\OneDrive\StandaloneUpdater\OneDriveSetup.exe`,
+		`C:\Users\bob\AppData\Local\Temp\OneDriveSetup.exe`,
 	} {
-		for i := 0; i < 4*minWrites; i++ {
+		d.procs = map[uint32]*procWindow{}
+		var f *finding
+		for i := 0; i < minWrites; i++ {
 			p := fmt.Sprintf(`C:\Users\bob\AppData\Local\Microsoft\OneDrive\25.1\images\d%d\tile%d.png`, i%20, i)
 			e := ev(70, "create", p, "", 0)
 			e.Image, e.Comm = img, "OneDriveSetup.exe"
-			if f := d.observe(e); f != nil {
-				t.Fatalf("%s is allowed: %+v", img, f)
+			if got := d.observe(e); got != nil {
+				f = got
 			}
 			e.Action, e.Path = "delete", p+".old"
-			if f := d.observe(e); f != nil {
-				t.Fatalf("%s is allowed: %+v", img, f)
+			if got := d.observe(e); got != nil {
+				f = got
 			}
+		}
+		if f == nil || f.kind != "mass_modify" {
+			t.Fatalf("%s: trusted by name: %+v", img, f)
 		}
 	}
 
-	// The same work by a program not on the list: reported, not stopped.
+	// The same work on real PNG files: reported, not stopped.
 	var out sink
 	g := New(Options{Push: out.push, CanaryDirs: []string{filepath.Join(t.TempDir(), "none")}, Kill: true})
 	g.response = func(uint32) (int, error) { t.Error("killed an updater writing PNGs"); return 0, nil }
