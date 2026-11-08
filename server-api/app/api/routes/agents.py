@@ -530,7 +530,10 @@ async def isolate_agent(
     current_user: Annotated[User, Depends(Perm)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    agent = await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    # AgentOut includes log_sources: load them here, a lazy load during async
+    # serialization fails after the commit and turns a done isolation into a 500
+    agent = await fetch_scoped(db, Agent, agent_id, group_filter,
+                               options=[selectinload(Agent.log_sources)], detail="Agent not found")
     if agent.status != "online":
         raise HTTPException(400, "Agent is not online")
     agent.is_isolated = True
@@ -547,7 +550,8 @@ async def unisolate_agent(
     current_user: Annotated[User, Depends(Perm)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    agent = await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    agent = await fetch_scoped(db, Agent, agent_id, group_filter,
+                               options=[selectinload(Agent.log_sources)], detail="Agent not found")
     agent.is_isolated = False
     task = AgentTask(agent_id=agent_id, task_type="unisolate_host", params={}, created_by=current_user.id)
     db.add(task)
