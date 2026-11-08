@@ -290,9 +290,16 @@ async def heartbeat(
     ]
 
     yara_hash, _ = await yara_ruleset.enabled_ruleset(db)
+    malware_version = await malware_hashes.agent_version(db, agent)
+    web_version = await web_blocks.agent_version(db, agent)
+    policy_version = (await agent_policy.effective(db, agent.group_id))["version"] if agent.approved else ""
+    # Agents hand these versions to their stores only when config_hash changes
+    # (heartbeat.Loop → onConfig): every version must be part of the hash, or a
+    # new block, hash set or policy reaches a running agent only on restart.
     config_hash = hashlib.sha256(
         json.dumps(
-            {"sources": sources_data, "fim_paths": fim_paths, "firewall": firewall_data, "yara": yara_hash},
+            {"sources": sources_data, "fim_paths": fim_paths, "firewall": firewall_data, "yara": yara_hash,
+             "malware": malware_version, "web": web_version, "policy": policy_version},
             sort_keys=True,
         ).encode()
     ).hexdigest()
@@ -311,9 +318,9 @@ async def heartbeat(
         uninstall_token_sha256=uninstall_token_sha256(agent.id),
         yara_rules_hash=yara_hash,
         log_batch_max=LOG_BATCH_MAX,
-        malware_hashes_version=await malware_hashes.agent_version(db, agent),
-        web_blocklist_version=await web_blocks.agent_version(db, agent),
-        policy_version=(await agent_policy.effective(db, agent.group_id))["version"] if agent.approved else "",
+        malware_hashes_version=malware_version,
+        web_blocklist_version=web_version,
+        policy_version=policy_version,
     )
 
 
