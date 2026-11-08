@@ -130,8 +130,11 @@ func TestHandlerUnknownHostFallback(t *testing.T) {
 		!strings.Contains(body, "&lt;script&gt;.test") || strings.Contains(body, "<script>") {
 		t.Fatalf("body %s", body)
 	}
-	if l := c.wait(1); len(l) != 1 || !strings.Contains(l[0], `reason="Blocked by your organisation"`) {
-		t.Fatalf("events %v", l)
+	// an unlisted Host gets the page but no event: any local process could
+	// otherwise forge web_block events
+	time.Sleep(100 * time.Millisecond)
+	if l := c.get(); len(l) != 0 {
+		t.Fatalf("event for an unlisted host: %v", l)
 	}
 }
 
@@ -219,7 +222,9 @@ func TestServerHTTPAndHTTPS(t *testing.T) {
 	if hresp.StatusCode != 403 || !strings.Contains(string(hbody), "evil.example") {
 		t.Fatalf("https %d %s", hresp.StatusCode, hbody)
 	}
-	if l := c.wait(2); len(l) < 2 || !strings.Contains(strings.Join(l, "\n"), "scheme=https") {
+	// the HTTP request above named 127.0.0.1 (unlisted): only the HTTPS one
+	// is an event, and it carries no path
+	if l := c.wait(1); len(l) != 1 || !strings.Contains(l[0], `domain="evil.example" scheme=https path="" `) {
 		t.Fatalf("events %v", l)
 	}
 
@@ -265,5 +270,27 @@ func TestStartTwiceSwapsPage(t *testing.T) {
 	s.Stop()
 	if _, err := http.Get("http://" + addr); err == nil {
 		t.Fatal("still serving after Stop")
+	}
+}
+
+func TestStartWithoutIPv6IsOKIPv4Only(t *testing.T) {
+	// 2001:db8::/32 is documentation space: never a local address, so the
+	// bind fails like it does on a host with IPv6 disabled
+	s, _, status := startTestServer(t, nil, Addrs{HTTP4: "127.0.0.1:0", HTTP6: "[2001:db8::1]:0"})
+	if status != "ok (ipv4 only)" {
+		t.Fatalf("status %q", status)
+	}
+	if s.Bound().HTTP4 == "" {
+		t.Fatal("IPv4 listener not up")
+	}
+}
+
+func TestNoIPv6Errors(t *testing.T) {
+	_, err := net.Listen("tcp", "[2001:db8::1]:0")
+	if err == nil {
+		t.Skip("2001:db8::1 is bound on this host")
+	}
+	if !noIPv6(err) {
+		t.Fatalf("%v not seen as missing IPv6", err)
 	}
 }

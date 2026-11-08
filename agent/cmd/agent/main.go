@@ -105,12 +105,21 @@ func main() {
 
 	if *webblockCleanup {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
-		cfg, err := config.Load(*configPath)
-		if err != nil {
-			slog.Error("webblock cleanup: could not load the config", "err", err)
-			os.Exit(1)
+		// The hosts block and the trust store entry are removed whatever
+		// happens to the config; without one the default state dir is used.
+		var stateDir string
+		cfg, cfgErr := config.Load(*configPath)
+		if cfgErr == nil {
+			stateDir = task.StateDir(cfg)
+		} else {
+			slog.Error("webblock cleanup: could not load the config; using the default state directory", "err", cfgErr)
+			d, err := config.DefaultStateDir()
+			if err != nil {
+				slog.Error("webblock cleanup: no default state directory; removing the hosts block and trust store entry only", "err", err)
+			}
+			stateDir = d
 		}
-		if err := webblock.Cleanup(task.StateDir(cfg)); err != nil {
+		if err := webblock.Cleanup(stateDir); err != nil || cfgErr != nil {
 			os.Exit(1)
 		}
 		return
@@ -449,7 +458,7 @@ func run(configPath string, stop <-chan struct{}) {
 	// Web protection: the server's blocklist becomes a hosts block pointing at
 	// a local block page (see internal/webblock).
 	webStateDir := task.StateDir(cfg)
-	webStore := webblock.Open(filepath.Join(webStateDir, webblock.ListFile))
+	webStore := webblock.Open(webblock.ListPath(webStateDir))
 	webHost := mustHostname()
 	webCtl := &webblock.Controller{
 		Hosts:     webblock.NewHostsFile(),
@@ -460,7 +469,9 @@ func run(configPath string, stop <-chan struct{}) {
 	}
 	heartbeat.WebBlockHealth = func() any { return webCtl.Health() }
 	webStore.OnChange = webCtl.Apply
-	webCtl.Apply(webStore.Current())
+	// The first Apply may run trust tools for minutes: never hold up startup
+	// (Health reports the last finished Apply meanwhile).
+	go func() { webCtl.Apply(webStore.Current()) }()
 	go webStore.SyncLoop(flowCtx, c)
 	go webCtl.Run(flowCtx, webStore)
 	malFiles.Excluded = func(path, sha string) bool {

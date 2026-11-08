@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -45,7 +48,7 @@ func (f *fakePoster) req(t *testing.T, i int, since float64, cont bool, rules fl
 
 const pol = `"policy":{"enabled":true,"page_html":"<p>b</p>","contact":"it","max_entries":100}`
 
-func newStore(t *testing.T) *Store { return Open(filepath.Join(t.TempDir(), ListFile)) }
+func newStore(t *testing.T) *Store { return Open(ListPath(t.TempDir())) }
 
 func TestFirstSync(t *testing.T) {
 	s := newStore(t)
@@ -140,7 +143,7 @@ func TestResetOnContinuingPage(t *testing.T) {
 }
 
 func TestGroupChange(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ListFile)
+	path := ListPath(t.TempDir())
 	old := Empty()
 	old.Group, old.Seq, old.Rules, old.Version = "blue", 7, 3, "blue:7"
 	old.Policy.Enabled = true
@@ -204,5 +207,74 @@ func TestWantedVersionCompare(t *testing.T) {
 	s.Want("g:1")
 	if w, need := s.wanted(); !need || w != "g:1" {
 		t.Fatal("expected need")
+	}
+}
+
+func TestGroupChangeMidPagination(t *testing.T) {
+	s := newStore(t)
+	f := &fakePoster{pages: []string{
+		`{"group":"blue","seq":5,"reset":true,"more":true,"rules":2,` + pol + `,"changes":[{"domain":"blue.example","action":"block","source":"manual"}]}`,
+		`{"group":"red","seq":9,"reset":false,"more":false,"rules":2,"version":"red:9",` + pol + `,"changes":[{"domain":"x.example","action":"block","source":"manual"}]}`,
+		`{"group":"red","seq":9,"reset":true,"more":false,"rules":1,"version":"red:9",` + pol + `,"changes":[{"domain":"red.example","action":"block","source":"manual"}]}`,
+	}}
+	if err := s.Sync(context.Background(), f, "red:9"); err != nil {
+		t.Fatal(err)
+	}
+	f.req(t, 2, 0, false, 0) // restarted from zero
+	c := s.Current()
+	if c.Group != "red" || len(c.Entries) != 1 || c.Entries["red.example"].Source != "manual" {
+		t.Fatalf("bad list %+v", c)
+	}
+}
+
+func TestGroupChangeMidPaginationTwiceFails(t *testing.T) {
+	s := newStore(t)
+	p := func(g string, more bool) string {
+		return `{"group":"` + g + `","seq":1,"reset":true,"more":` + fmt.Sprint(more) + `,"rules":1,"version":"` + g + `:1",` + pol + `,"changes":[]}`
+	}
+	f := &fakePoster{pages: []string{p("a", true), p("b", false), p("a", true), p("b", false)}}
+	if err := s.Sync(context.Background(), f, "b:1"); err == nil || !strings.Contains(err.Error(), "group changed") {
+		t.Fatalf("err %v", err)
+	}
+	if s.Current().Version != "" {
+		t.Fatal("partial list installed")
+	}
+}
+
+func TestListSavedInProtectedDirAndLegacyRemoved(t *testing.T) {
+	state := t.TempDir()
+	legacy := filepath.Join(state, LegacyListFile)
+	old := Empty()
+	old.Version, old.Policy.Enabled = "g:1", true
+	old.Entries["legacy.example"] = Entry{Source: "manual"}
+	b, _ := json.Marshal(old)
+	os.WriteFile(legacy, b, 0o644)
+	s := Open(ListPath(state))
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatal("old list not deleted")
+	}
+	if s.Current().Version != "" {
+		t.Fatal("old list loaded")
+	}
+	f := &fakePoster{pages: []string{`{"group":"g","seq":1,"reset":true,"rules":1,"version":"g:1",` + pol + `,"changes":[{"domain":"a.example","action":"block","source":"manual"}]}`}}
+	if err := s.Sync(context.Background(), f, "g:1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Load(ListPath(state)); err != nil || got.Version != "g:1" {
+		t.Fatalf("saved list %+v %v", got, err)
+	}
+	if runtime.GOOS != "windows" {
+		st, _ := os.Stat(ListPath(state))
+		dst, _ := os.Stat(filepath.Dir(ListPath(state)))
+		if st.Mode().Perm() != 0o600 || dst.Mode().Perm() != 0o700 {
+			t.Fatalf("modes %v %v", st.Mode(), dst.Mode())
+		}
+	}
+	// turned off: the saved list goes away
+	if err := s.Sync(context.Background(), f, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(ListPath(state)); !os.IsNotExist(err) {
+		t.Fatal("list kept while off")
 	}
 }

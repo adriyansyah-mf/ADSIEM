@@ -7,6 +7,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -55,11 +57,23 @@ type Store struct {
 	OnChange func(*List)
 }
 
-// Open loads the saved list, if there is a readable one.
+// Open loads the saved list at path (ListPath), if there is a readable one,
+// and deletes the list an older agent left at <state>/webblock.json.
 func Open(path string) *Store {
 	s := &Store{path: path, wake: make(chan struct{}, 1)}
+	if dir := filepath.Dir(path); filepath.Base(dir) == CADirName {
+		legacy := filepath.Join(filepath.Dir(dir), LegacyListFile)
+		if err := os.Remove(legacy); err == nil {
+			slog.Info("webblock: removed the old saved list", "path", legacy)
+		} else if !os.IsNotExist(err) {
+			slog.Warn("webblock: could not remove the old saved list", "path", legacy, "err", err)
+		}
+	}
 	l, err := Load(path)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("webblock: saved blocklist not loaded", "path", path, "err", err)
+		}
 		l = Empty()
 	} else {
 		slog.Info("webblock: blocklist loaded", "domains", len(l.Entries), "version", l.Version)
@@ -124,6 +138,7 @@ func (s *Store) Sync(ctx context.Context, c Poster, want string) error {
 		return s.install(Empty())
 	}
 	work, since, rules, continuing, restarted := cur.clone(), cur.Seq, cur.Rules, false, false
+	group := "" // the group of the first page of this pass
 	for n := 0; ; n++ {
 		if n == maxPages {
 			return fmt.Errorf("%s: more than %d pages", Path, maxPages)
@@ -138,6 +153,18 @@ func (s *Store) Sync(ctx context.Context, c Poster, want string) error {
 		if !continuing && !restarted && cur.Group != "" && p.Group != cur.Group {
 			// another group's sequence numbers mean nothing here: start over
 			work, since, rules, restarted = Empty(), 0, 0, true
+			n = -1
+			continue
+		}
+		if !continuing {
+			group = p.Group
+		} else if p.Group != group {
+			// the group changed between pages: the pages so far are another
+			// group's; start over once from zero
+			if restarted {
+				return fmt.Errorf("%s: group changed while paging (%q, then %q)", Path, group, p.Group)
+			}
+			work, since, rules, continuing, restarted = Empty(), 0, 0, false, true
 			n = -1
 			continue
 		}
@@ -165,7 +192,12 @@ func (s *Store) Sync(ctx context.Context, c Poster, want string) error {
 }
 
 func (s *Store) install(l *List) error {
-	if err := l.Save(s.path); err != nil {
+	if l.Version == "" && len(l.Entries) == 0 {
+		// off: nothing worth keeping (and no reason to create the directory)
+		if err := os.Remove(s.path); err != nil && !os.IsNotExist(err) {
+			slog.Warn("webblock: could not remove the saved blocklist", "path", s.path, "err", err)
+		}
+	} else if err := l.Save(s.path); err != nil {
 		// still enforce it; the next start downloads it again
 		slog.Warn("webblock: could not save web blocklist", "path", s.path, "err", err)
 	}

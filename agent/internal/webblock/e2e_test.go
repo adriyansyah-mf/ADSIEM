@@ -30,6 +30,7 @@ func TestWebBlockE2E(t *testing.T) {
 		t.Skipf("web protection end-to-end is not supported on %s", runtime.GOOS)
 	}
 	e2eSkipUnlessPrivileged(t)
+	e2eRequireRedirect(t)
 
 	stateDir := t.TempDir()
 	hostsPath := defaultHostsPath()
@@ -78,6 +79,9 @@ func TestWebBlockE2E(t *testing.T) {
 		t.Fatalf("health after apply: %+v", h)
 	}
 	failed := assertPageServer(t, h.PageServer)
+	// Regression for the Linux port grab: with the page server up, a local
+	// service can still bind the wildcard address on 80 and 443.
+	e2eAssertWildcardBindable(t)
 	caPEM, err := os.ReadFile(filepath.Join(stateDir, CADirName, CACertFile))
 	if err != nil {
 		t.Fatalf("read CA cert: %v", err)
@@ -87,7 +91,7 @@ func TestWebBlockE2E(t *testing.T) {
 
 	// HTTP on port 80, unless something else (HTTP.sys/IIS) holds it.
 	httpClient := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}}
-	if slices.Contains(failed, "127.84.0.1:80") {
+	if slices.ContainsFunc(failed, func(a string) bool { return strings.HasPrefix(a, "127.84.0.1:80") }) {
 		t.Logf("skipping HTTP :80 check: %s", h.PageServer)
 	} else {
 		status, body := e2eGet(t, httpClient, "http://"+e2eDomain+"/x")
@@ -150,6 +154,7 @@ func TestWebBlockE2E(t *testing.T) {
 func e2eAssertState(t *testing.T, stateDir, hostsPath string, orig, caPEM []byte, after string) {
 	t.Helper()
 	e2eAssertTrustGone(t, caPEM)
+	e2eAssertRedirectGone(t)
 	if _, err := os.Stat(filepath.Join(stateDir, CADirName)); !os.IsNotExist(err) {
 		t.Fatalf("after %s: CA directory still present: %v", after, err)
 	}
@@ -201,11 +206,11 @@ func e2eGet(t *testing.T, cl *http.Client, url string) (int, string) {
 }
 
 // assertPageServer returns the listener addresses that failed to bind. The
-// HTTPS listener on 127.84.0.1:443 must be up; port 80 (HTTP.sys/IIS may hold
+// HTTPS listener for 127.84.0.1:443 must be up; port 80 (HTTP.sys/IIS may hold
 // it on Windows) and [::1] failures are tolerated and logged.
 func assertPageServer(t *testing.T, status string) []string {
 	t.Helper()
-	if status == "ok" {
+	if status == "ok" || status == "ok (ipv4 only)" {
 		return nil
 	}
 	rest, found := strings.CutPrefix(status, "page_unavailable: ")
@@ -215,7 +220,7 @@ func assertPageServer(t *testing.T, status string) []string {
 	var failed []string
 	for _, a := range strings.Split(rest, ",") {
 		a = strings.TrimSpace(a)
-		if a == "127.84.0.1:443" {
+		if strings.HasPrefix(a, "127.84.0.1:443") || strings.HasPrefix(a, "redirect") {
 			t.Fatalf("block page server could not bind 127.84.0.1:443: %q", status)
 		}
 		failed = append(failed, a)

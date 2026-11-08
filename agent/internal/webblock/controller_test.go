@@ -6,9 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 type recorder struct {
@@ -33,15 +36,16 @@ type fakeHosts struct {
 	rec        *recorder
 	applied    [][]string
 	ipv6       []bool
+	changed    bool
 	tampered   bool
 	err, rmErr error
 }
 
-func (h *fakeHosts) Apply(d []string, v6 bool) (bool, error) {
+func (h *fakeHosts) Apply(d []string, v6 bool) (bool, bool, error) {
 	h.rec.add("hosts.apply")
 	h.applied = append(h.applied, d)
 	h.ipv6 = append(h.ipv6, v6)
-	return h.tampered, h.err
+	return h.changed, h.tampered, h.err
 }
 func (h *fakeHosts) Remove() error { h.rec.add("hosts.remove"); return h.rmErr }
 
@@ -296,7 +300,7 @@ func TestReapplyRepairsHostsOnly(t *testing.T) {
 	}
 }
 
-func TestPageUnavailableRetried(t *testing.T) {
+func TestPageUnavailableRetriedOnListChange(t *testing.T) {
 	c, _, _, s, _ := newCtl(t)
 	s.status = "page_unavailable: 127.84.0.1:80"
 	l := listOf("g:1", "p", "evil.example")
@@ -305,9 +309,54 @@ func TestPageUnavailableRetried(t *testing.T) {
 		t.Fatalf("%+v", c.Health())
 	}
 	s.status = "ok"
-	c.Apply(l)
+	c.Apply(l) // same list: no retry
+	if len(s.starts) != 1 {
+		t.Fatalf("retried without a change: starts %d", len(s.starts))
+	}
+	c.Apply(listOf("g:2", "p", "evil.example"))
 	if len(s.starts) != 2 || c.Health().PageServer != "ok" {
 		t.Fatalf("starts %d %+v", len(s.starts), c.Health())
+	}
+	c.Apply(listOf("g:3", "p", "evil.example")) // started: a new version alone does not restart
+	if len(s.starts) != 2 {
+		t.Fatalf("restarted a running server: starts %d", len(s.starts))
+	}
+}
+
+func TestPageUnavailableTimerRetryOnlyWhereAllowed(t *testing.T) {
+	for _, allowed := range []bool{false, true} {
+		old := retryStartOnTimer
+		retryStartOnTimer = allowed
+		c, _, _, s, _ := newCtl(t)
+		s.status = "page_unavailable: 127.84.0.1:80"
+		l := listOf("g:1", "p", "evil.example")
+		c.Apply(l)
+		c.reapply(l)
+		retryStartOnTimer = old
+		want := 1
+		if allowed {
+			want = 2
+		}
+		if len(s.starts) != want {
+			t.Fatalf("timer retry allowed=%v: starts %d, want %d", allowed, len(s.starts), want)
+		}
+	}
+}
+
+func TestStartOKIPv4OnlyCountsAsStarted(t *testing.T) {
+	c, _, _, s, _ := newCtl(t)
+	s.status, s.ipv6 = "ok (ipv4 only)", false
+	c.Apply(listOf("g:1", "p", "evil.example"))
+	c.Apply(listOf("g:2", "p", "evil.example"))
+	c.reapply(listOf("g:2", "p", "evil.example"))
+	if len(s.starts) != 1 || c.Health().PageServer != "ok (ipv4 only)" {
+		t.Fatalf("starts %d %+v", len(s.starts), c.Health())
+	}
+}
+
+func TestLinuxNeverRetriesStartOnTimer(t *testing.T) {
+	if runtime.GOOS == "linux" && retryStartOnTimer {
+		t.Fatal("Linux must not retry binds on the timer")
 	}
 }
 
@@ -326,12 +375,14 @@ func TestCleanup(t *testing.T) {
 	cadir := filepath.Join(dir, CADirName)
 	os.MkdirAll(cadir, 0o700)
 	os.WriteFile(filepath.Join(cadir, CAKeyFile), []byte("k"), 0o600)
-	list := filepath.Join(dir, ListFile)
+	list := ListPath(dir)
 	os.WriteFile(list, []byte("{}"), 0o600)
+	legacy := filepath.Join(dir, LegacyListFile)
+	os.WriteFile(legacy, []byte("{}"), 0o600)
 	if err := cleanup(dir, h, a); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{cadir, list} {
+	for _, p := range []string{cadir, list, legacy} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Fatalf("%s still there", p)
 		}
@@ -345,12 +396,12 @@ func TestCleanupExitCodeOnlyForHosts(t *testing.T) {
 	dir := t.TempDir()
 	rec := &recorder{}
 	h, a := &fakeHosts{rec: rec, rmErr: errors.New("locked")}, &fakeAuth{rec: rec}
-	os.WriteFile(filepath.Join(dir, ListFile), []byte("{}"), 0o600)
+	os.WriteFile(filepath.Join(dir, LegacyListFile), []byte("{}"), 0o600)
 	if err := cleanup(dir, h, a); err == nil {
 		t.Fatal("hosts failure not reported")
 	}
 	// everything else was still attempted
-	if _, err := os.Stat(filepath.Join(dir, ListFile)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, LegacyListFile)); !os.IsNotExist(err) {
 		t.Fatal("list kept after hosts failure")
 	}
 	if rec.count("ca.remove") != 1 {
@@ -365,8 +416,17 @@ func TestInactiveStartWithNothingToRemove(t *testing.T) {
 	if rec.count("ca.remove") != 0 || c.Health().LastError != "" {
 		t.Fatalf("log %v err %q", rec.log, c.Health().LastError)
 	}
-	// CA files left behind are removed
+	// a saved list alone in the directory is not a CA to remove
 	os.MkdirAll(filepath.Join(c.StateDir, CADirName), 0o700)
+	os.WriteFile(ListPath(c.StateDir), []byte("{}"), 0o600)
+	c1, _, _, _, rec1 := newCtl(t)
+	c1.StateDir = c.StateDir
+	c1.Apply(Empty())
+	if rec1.count("ca.remove") != 0 {
+		t.Fatalf("log %v", rec1.log)
+	}
+	// CA files left behind are removed
+	os.WriteFile(filepath.Join(c.StateDir, CADirName, CACertFile), []byte("c"), 0o600)
 	c2, _, _, _, rec2 := newCtl(t)
 	c2.StateDir = c.StateDir
 	c2.Apply(Empty())
@@ -421,5 +481,85 @@ func TestReapplyCARepairFailureRecorded(t *testing.T) {
 	c.reapply(l)
 	if h := c.Health(); !strings.Contains(h.LastError, "denied") || h.CAInstalled {
 		t.Fatalf("%+v", h)
+	}
+}
+
+// blockingAuth holds Ensure until released, like a slow trust tool.
+type blockingAuth struct {
+	fakeAuth
+	entered, release chan struct{}
+}
+
+func (a *blockingAuth) Ensure(h string) (string, error) {
+	close(a.entered)
+	<-a.release
+	return a.fakeAuth.Ensure(h)
+}
+
+func TestHealthDoesNotWaitForApply(t *testing.T) {
+	c, _, _, _, rec := newCtl(t)
+	c.Apply(listOf("g:1", "p", "evil.example"))
+	ba := &blockingAuth{fakeAuth: fakeAuth{rec: rec}, entered: make(chan struct{}), release: make(chan struct{})}
+	c.Authority = ba
+	c.caOK = false // force Ensure on the next Apply
+	done := make(chan struct{})
+	go func() { c.Apply(listOf("g:2", "p", "evil.example")); close(done) }()
+	<-ba.entered
+	got := make(chan Health, 1)
+	go func() { got <- c.Health() }()
+	select {
+	case h := <-got:
+		if h.Version != "g:1" {
+			t.Fatalf("health %+v, want the last finished apply", h)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Health blocked while Apply ran")
+	}
+	close(ba.release)
+	<-done
+	if c.Health().Version != "g:2" {
+		t.Fatalf("health not published after apply: %+v", c.Health())
+	}
+}
+
+func TestLastErrorClipped(t *testing.T) {
+	c, h, _, _, _ := newCtl(t)
+	h.err = errors.New(strings.Repeat("é", 1000))
+	c.Apply(listOf("g:1", "p", "evil.example"))
+	le := c.Health().LastError
+	if n := utf8.RuneCountInString(le); n != maxLastError+1 || !strings.HasSuffix(le, "…") || !utf8.ValidString(le) {
+		t.Fatalf("len %d valid %v suffix %q", n, utf8.ValidString(le), le[len(le)-6:])
+	}
+	if got := clipError("short"); got != "short" {
+		t.Fatal(got)
+	}
+}
+
+func TestRecheckRewriteMeansTampered(t *testing.T) {
+	c, h, _, _, _ := newCtl(t)
+	l := listOf("g:1", "p", "evil.example")
+	h.changed = true
+	c.Apply(l) // our own write
+	if c.Health().HostsTampered {
+		t.Fatal("own write reported as tampering")
+	}
+	c.reapply(l) // the re-check had to rewrite: someone deleted or edited the block
+	if !c.Health().HostsTampered {
+		t.Fatal("rewrite on re-check not reported")
+	}
+	h.changed = false
+	c.Apply(l) // no work: stays reported
+	if !c.Health().HostsTampered {
+		t.Fatal("cleared without a check")
+	}
+	c.reapply(l) // clean re-check clears it
+	if c.Health().HostsTampered {
+		t.Fatal("clean re-check did not clear it")
+	}
+	h.changed = true
+	c.reapply(l)
+	c.Apply(listOf("g:2", "p", "evil.example", "new.example")) // a real change clears it
+	if c.Health().HostsTampered {
+		t.Fatal("non-forced change did not clear it")
 	}
 }

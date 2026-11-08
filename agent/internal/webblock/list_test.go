@@ -49,7 +49,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	l.Version, l.Group, l.Seq, l.Rules = "g:3", "g", 3, 7
 	l.Policy = Policy{Enabled: true, PageHTML: "<p>x</p>", Contact: "it@x", MaxEntries: 10}
 	l.Entries["bad.example"] = Entry{Source: "manual", Reason: "r"}
-	p := filepath.Join(t.TempDir(), ListFile)
+	p := ListPath(t.TempDir())
 	if err := l.Save(p); err != nil {
 		t.Fatal(err)
 	}

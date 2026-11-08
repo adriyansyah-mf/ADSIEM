@@ -31,3 +31,7 @@ func e2eAssertTrustGone(t *testing.T, _ []byte) {
 		t.Fatal("an ADSIEM Web Protection certificate is still in the ROOT store")
 	}
 }
+
+func e2eRequireRedirect(t *testing.T)        {}
+func e2eAssertWildcardBindable(t *testing.T) {}
+func e2eAssertRedirectGone(t *testing.T)     {}

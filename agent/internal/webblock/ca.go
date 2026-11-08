@@ -388,6 +388,9 @@ func (t *TrustStore) Installed() bool {
 func (t *TrustStore) Remove() error {
 	t.setCA(nil)
 	err := doRemove("")
+	if t.Dir == "" { // no state dir known (cleanup without a config): trust store only
+		return err
+	}
 	dir := caDir(t.Dir)
 	for _, n := range []string{CAKeyFile, CACertFile} {
 		if rerr := os.Remove(filepath.Join(dir, n)); rerr != nil && !os.IsNotExist(rerr) && err == nil {

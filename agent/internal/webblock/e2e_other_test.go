@@ -12,3 +12,6 @@ func e2eSkipUnlessPrivileged(t *testing.T) {
 }
 func e2eTLSConfig(t *testing.T) *tls.Config     { return &tls.Config{} }
 func e2eAssertTrustGone(t *testing.T, _ []byte) {}
+func e2eRequireRedirect(t *testing.T)           {}
+func e2eAssertWildcardBindable(t *testing.T)    {}
+func e2eAssertRedirectGone(t *testing.T)        {}

@@ -5,11 +5,13 @@ import (
 	"errors"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -35,13 +37,16 @@ type Lookup func(host string) (Entry, bool)
 // PageServer serves the block page for blocked domains.
 type PageServer interface {
 	// Start serves the page (or swaps it when already running). ipv6 says
-	// both [::1] listeners are up; status is "ok" or names the failed binds.
+	// both [::1] listeners are up; status is "ok", "ok (ipv4 only)" (no IPv6
+	// on the host) or "page_unavailable: ..." naming the failed binds.
 	Start(page, contact string, lookup Lookup, ca *CA) (ipv6 bool, status string)
 	Stop()
 }
 
-// Addrs are the four listen addresses; an all-empty value means the defaults,
-// otherwise an empty field is not started (tests use ephemeral ports).
+// Addrs are the four listen addresses; an all-empty value means the platform
+// defaults (Linux: high ports on 127.0.0.1 behind a redirect, no [::1];
+// elsewhere the four sink addresses), otherwise an empty field is not started
+// (tests use ephemeral ports).
 type Addrs struct{ HTTP4, HTTPS4, HTTP6, HTTPS6 string }
 
 type listener struct {
@@ -71,6 +76,13 @@ type Server struct {
 
 	lmu       sync.Mutex // guards the fields below
 	listeners map[string]*listener
+	redirect  Redirector // applied by Start, removed by Stop
+
+	// Redirect overrides the detected redirect backend (tests). Only the
+	// default addresses on Linux use one.
+	Redirect   Redirector
+	detectOnce sync.Once
+	detected   Redirector
 }
 
 var _ PageServer = (*Server)(nil)
@@ -118,8 +130,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	page, contact, lookup := s.page, s.contact, s.lookup
 	s.mu.RUnlock()
 	entry := Entry{Source: fallbackSource, Reason: fallbackReason}
+	listed := false
 	if lookup != nil {
 		if e, ok := lookup(domain); ok {
+			listed = true
 			if e.Reason != "" {
 				entry.Reason = e.Reason
 			}
@@ -149,7 +163,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush() // the client has the page before the process lookup runs
 	}
-	s.emit(r, domain, entry)
+	// Any local process can send any Host header; only a listed domain is a
+	// block worth reporting.
+	if listed {
+		s.emit(r, domain, entry)
+	}
 }
 
 // process looks the client up, one lookup at a time; when one is running the
@@ -177,23 +195,75 @@ func (s *Server) emit(r *http.Request, domain string, entry Entry) {
 	if !emit {
 		return
 	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
+	// HTTPS carries the host only: the path was encrypted for the real site.
+	scheme, path := "https", ""
+	if r.TLS == nil {
+		scheme, path = "http", truncRunes(r.URL.Path, maxLoggedPath)
 	}
-	path := truncRunes(r.URL.Path, maxLoggedPath)
 	s.Push(LogType, Event{Domain: domain, Scheme: scheme, Path: path, Source: entry.Source,
 		Reason: entry.Reason, Process: name, PID: pid, Count: 1 + suppressed}.Line())
 }
 
-func (s *Server) addrs() Addrs {
-	if s.Addrs == (Addrs{}) {
-		return Addrs{AddrHTTP4, AddrHTTPS4, AddrHTTP6, AddrHTTPS6}
-	}
-	return s.Addrs
+// Redirector sends the sink's ports 80/443 to the page server's listeners
+// (Linux: nft or iptables NAT OUTPUT). A zero port has no rule.
+type Redirector interface {
+	Apply(httpPort, httpsPort int) error
+	Remove() error
 }
 
-// Start implements PageServer. Each listener binds independently.
+// bindSpec is one listener of a start plan.
+type bindSpec struct {
+	name, addr string
+	label      string // address reported in the status (the sink address when redirected)
+	tls        bool
+	v6         bool   // an IPv6 listener: an unavailable stack is not a failure
+	redirect   int    // the sink port redirected to this listener (0: none)
+	skip       string // reason not to bind at all
+}
+
+func (s *Server) plan() ([]bindSpec, Redirector) {
+	if s.Addrs == (Addrs{}) {
+		return s.defaultPlan()
+	}
+	a := s.Addrs
+	var specs []bindSpec
+	for _, sp := range []bindSpec{
+		{name: "http4", addr: a.HTTP4}, {name: "https4", addr: a.HTTPS4, tls: true},
+		{name: "http6", addr: a.HTTP6, v6: true}, {name: "https6", addr: a.HTTPS6, tls: true, v6: true},
+	} {
+		if sp.addr != "" {
+			sp.label = sp.addr
+			specs = append(specs, sp)
+		}
+	}
+	return specs, nil
+}
+
+// noIPv6 reports a bind error that means the host has no usable IPv6.
+func noIPv6(err error) bool {
+	if errors.Is(err, syscall.EADDRNOTAVAIL) || errors.Is(err, syscall.EAFNOSUPPORT) {
+		return true
+	}
+	for _, e := range platformNoIPv6 {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
+}
+
+func listenPort(l *listener) int {
+	if l == nil {
+		return 0
+	}
+	if a, ok := l.ln.Addr().(*net.TCPAddr); ok {
+		return a.Port
+	}
+	return 0
+}
+
+// Start implements PageServer. Each listener binds independently; with a
+// redirect the rules are (re)applied for the current listener ports.
 func (s *Server) Start(page, contact string, lookup Lookup, ca *CA) (bool, string) {
 	s.set(page, contact, lookup)
 	s.mu.Lock()
@@ -204,17 +274,13 @@ func (s *Server) Start(page, contact string, lookup Lookup, ca *CA) (bool, strin
 	if s.listeners == nil {
 		s.listeners = map[string]*listener{}
 	}
-	a := s.addrs()
+	specs, red := s.plan()
 	var failed []string
+	v6missing := false
 	up := map[string]bool{}
-	for _, spec := range []struct {
-		name, addr string
-		tls        bool
-	}{
-		{"http4", a.HTTP4, false}, {"https4", a.HTTPS4, true},
-		{"http6", a.HTTP6, false}, {"https6", a.HTTPS6, true},
-	} {
-		if spec.addr == "" {
+	for _, spec := range specs {
+		if spec.skip != "" {
+			failed = append(failed, spec.label+" ("+spec.skip+")")
 			continue
 		}
 		if _, ok := s.listeners[spec.name]; ok && (!spec.tls || ca != nil) {
@@ -222,12 +288,16 @@ func (s *Server) Start(page, contact string, lookup Lookup, ca *CA) (bool, strin
 			continue
 		}
 		if spec.tls && ca == nil {
-			failed = append(failed, spec.addr+" (no CA)")
+			failed = append(failed, spec.label+" (no CA)")
 			continue
 		}
 		ln, err := net.Listen("tcp", spec.addr)
 		if err != nil {
-			failed = append(failed, spec.addr)
+			if spec.v6 && noIPv6(err) {
+				v6missing = true
+				continue
+			}
+			failed = append(failed, spec.label)
 			continue
 		}
 		srv := s.newHTTPServer()
@@ -239,11 +309,22 @@ func (s *Server) Start(page, contact string, lookup Lookup, ca *CA) (bool, strin
 		up[spec.name] = true
 		go func() { _ = srv.Serve(serveLn) }()
 	}
-	ipv6 := up["http6"] && up["https6"]
-	if len(failed) == 0 {
-		return ipv6, "ok"
+	if red != nil {
+		hp, sp := listenPort(s.listeners["http4"]), listenPort(s.listeners["https4"])
+		if err := red.Apply(hp, sp); err != nil {
+			slog.Warn("webblock: could not install the block page redirect", "err", err)
+			failed = append(failed, "redirect ("+truncRunes(err.Error(), 120)+")")
+		}
+		s.redirect = red
 	}
-	return ipv6, "page_unavailable: " + strings.Join(failed, ", ")
+	ipv6 := up["http6"] && up["https6"]
+	switch {
+	case len(failed) > 0:
+		return ipv6, "page_unavailable: " + strings.Join(failed, ", ")
+	case v6missing:
+		return false, "ok (ipv4 only)"
+	}
+	return ipv6, "ok"
 }
 
 // Bound returns the addresses actually listening (empty when not).
@@ -259,10 +340,17 @@ func (s *Server) Bound() Addrs {
 	return Addrs{get("http4"), get("https4"), get("http6"), get("https6")}
 }
 
-// Stop closes every listener; calling it again is harmless.
+// Stop removes the redirect and closes every listener; calling it again is
+// harmless.
 func (s *Server) Stop() {
 	s.lmu.Lock()
 	defer s.lmu.Unlock()
+	if s.redirect != nil {
+		if err := s.redirect.Remove(); err != nil {
+			slog.Warn("webblock: could not remove the block page redirect", "err", err)
+		}
+		s.redirect = nil
+	}
 	for name, l := range s.listeners {
 		_ = l.srv.Close()
 		_ = l.ln.Close()

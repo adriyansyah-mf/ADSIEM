@@ -255,6 +255,15 @@ class WebBlockHealth(BaseModel):
     hosts_tampered: bool = False
     last_error: str = Field(default="", max_length=300)
 
+    @field_validator("version", "group", "ca_fingerprint", "page_server", "last_error", mode="before")
+    @classmethod
+    def truncate_long_strings(cls, value):
+        # An over-long string (a long agent error) is cut, not rejected: the
+        # rest of the health object is still worth keeping.
+        if isinstance(value, str) and len(value) > 300:
+            return value[:300]
+        return value
+
 class HeartbeatRequest(BaseModel):
     agent_id: UUID
     status: str = "online"

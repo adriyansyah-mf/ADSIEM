@@ -52,6 +52,7 @@ func TestLimiterGlobalCap(t *testing.T) {
 
 func TestServerEventFloodCapped(t *testing.T) {
 	s, c := newTestHandlerServer()
+	s.set(testPage, "c", func(string) (Entry, bool) { return Entry{Source: "manual"}, true })
 	for i := 0; i < 500; i++ {
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Host = fmt.Sprintf("h%d.example", i)
@@ -64,6 +65,7 @@ func TestServerEventFloodCapped(t *testing.T) {
 
 func TestProcessLookupThrottledAndFlushed(t *testing.T) {
 	s, c := newTestHandlerServer()
+	s.set(testPage, "c", func(h string) (Entry, bool) { return Entry{Source: "manual"}, strings.HasPrefix(h, "evil") })
 	var calls int32
 	s.findProc = func(string) (int, string) {
 		atomic.AddInt32(&calls, 1)

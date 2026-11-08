@@ -14,8 +14,17 @@ import (
 // Path is the agent endpoint that returns blocklist changes above a seq.
 const Path = "/api/ingest/web-blocklist"
 
-// ListFile is the saved list in the agent's state directory.
-const ListFile = "webblock.json"
+// ListFile is the saved list, kept in the protected <state>/webblock
+// directory next to the CA files.
+const ListFile = "list.json"
+
+// LegacyListFile is where agents before this version saved the list
+// (<state>/webblock.json, outside the protected directory). It is deleted,
+// never loaded.
+const LegacyListFile = "webblock.json"
+
+// ListPath is the saved list's path for a state directory.
+func ListPath(stateDir string) string { return filepath.Join(caDir(stateDir), ListFile) }
 
 // defaultMaxEntries applies when the policy does not set a limit.
 const defaultMaxEntries = 50000
@@ -97,35 +106,31 @@ func (l *List) Selected() []string {
 	return names
 }
 
-// Save writes the list to path (temp file in the same directory, then rename).
+// Save writes the list to path with the CA files' helpers: the directory is
+// created or verified as private (Linux: owned by euid, 0700; Windows:
+// SYSTEM and Administrators only), the file goes through a private temp file
+// that is fsynced before the rename.
 func (l *List) Save(path string) error {
 	b, err := json.Marshal(l)
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return writeSecretFile(filepath.Dir(path), filepath.Base(path), b)
 }
 
-// Load reads a saved list.
+// Load reads a saved list. Like the CA files it must be a regular file owned
+// by the agent user (Linux) or SYSTEM/Administrators (Windows) in a private
+// directory.
 func Load(path string) (*List, error) {
+	if _, err := os.Lstat(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	if err := secureDir(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	if err := checkSecretFile(path); err != nil {
+		return nil, err
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

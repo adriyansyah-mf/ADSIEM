@@ -7,15 +7,26 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // reapplyEvery is how often Run re-checks the hosts block and retries
 // whatever a previous Apply could not finish.
 const reapplyEvery = 5 * time.Minute
+
+// maxLastError bounds Health.LastError (the server keeps at most 300 chars).
+const maxLastError = 280
+
+// retryStartOnTimer lets the 5-minute re-check retry a page server that did
+// not start. Not on Linux: the agent never binds a privileged port on a
+// timer there (it could take the port from a service that starts later); a
+// failed start is retried only when the list, page or CA changes.
+var retryStartOnTimer = runtime.GOOS != "linux"
 
 // Health is the web protection state the heartbeat reports.
 type Health struct {
@@ -66,18 +77,23 @@ type Controller struct {
 
 	mu sync.Mutex
 	// what the last Apply left in place
-	off       bool   // everything removed
-	caOK      bool   // CA installed and handed to the server
-	ca        *CA    // the CA Ensure installed
-	startCA   *CA    // the CA the running server was started with
-	started   bool   // Server.Start succeeded
-	startPage string // page and contact the server runs with
-	startCont string
-	ipv6      bool   // [::1] listeners are up
-	hostsOK   bool   // Hosts.Apply succeeded for hostsKey
-	hostsKey  string // selected domains and ipv6 last written
-	snap      atomic.Pointer[snapshot]
-	health    Health
+	off        bool   // everything removed
+	caOK       bool   // CA installed and handed to the server
+	ca         *CA    // the CA Ensure installed
+	startCA    *CA    // the CA the running server was started with
+	started    bool   // Server.Start succeeded
+	startPage  string // page and contact the server runs with
+	startCont  string
+	startVer   string // list version of the last Start
+	startTried bool   // Server.Start ran since the last deactivate
+	ipv6       bool   // [::1] listeners are up
+	hostsOK    bool   // Hosts.Apply succeeded for hostsKey
+	hostsKey   string // selected domains and ipv6 last written
+	snap       atomic.Pointer[snapshot]
+	health     Health // working copy, under mu
+	// published is what Health returns; stored at the end of every apply so
+	// the heartbeat never waits for an Apply running trust tools.
+	published atomic.Pointer[Health]
 }
 
 // Apply enforces l. It never panics; failures are recorded in Health.LastError.
@@ -90,9 +106,10 @@ func (c *Controller) reapply(l *List) { c.apply(l, true) }
 func (c *Controller) apply(l *List, force bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	defer c.publish()
 	defer func() {
 		if r := recover(); r != nil {
-			c.health.LastError = fmt.Sprintf("web protection: %v", r)
+			c.health.LastError = clipError(fmt.Sprintf("web protection: %v", r))
 			slog.Error("webblock: apply panicked", "panic", r)
 		}
 	}()
@@ -122,17 +139,33 @@ func (c *Controller) deactivate(l *List) {
 	}
 	c.off = len(errs) == 0
 	c.caOK, c.ca, c.startCA, c.started, c.hostsOK, c.hostsKey = false, nil, nil, false, false, ""
+	c.startTried, c.startVer, c.startPage, c.startCont = false, "", "", ""
 	c.snap.Store(nil)
 	c.health = Health{Version: l.Version, Group: l.Group}
 	c.setErr(errs)
 }
 
+// caFilesExist reports CA files left by an earlier run (the directory alone
+// may only hold the saved list).
 func (c *Controller) caFilesExist() bool {
 	if c.StateDir == "" {
 		return false
 	}
-	_, err := os.Stat(caDir(c.StateDir))
-	return err == nil
+	for _, n := range []string{CACertFile, CAKeyFile} {
+		if _, err := os.Lstat(filepath.Join(caDir(c.StateDir), n)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// clipError cuts an error to maxLastError runes, marking the cut.
+func clipError(s string) string {
+	if utf8.RuneCountInString(s) <= maxLastError {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:maxLastError]) + "…"
 }
 
 func (c *Controller) setErr(errs []error) {
@@ -140,8 +173,14 @@ func (c *Controller) setErr(errs []error) {
 		c.health.LastError = ""
 		return
 	}
-	c.health.LastError = errors.Join(errs...).Error()
-	slog.Warn("webblock: apply incomplete", "err", c.health.LastError)
+	full := errors.Join(errs...).Error()
+	slog.Warn("webblock: apply incomplete", "err", full)
+	c.health.LastError = clipError(full)
+}
+
+func (c *Controller) publish() {
+	h := c.health
+	c.published.Store(&h)
 }
 
 func (c *Controller) activate(l *List, force bool) {
@@ -187,17 +226,28 @@ func (c *Controller) activate(l *List, force bool) {
 	}
 
 	page, contact := l.Policy.PageHTML, l.Policy.Contact
-	if !c.started || page != c.startPage || contact != c.startCont || c.ca != c.startCA {
+	swap := page != c.startPage || contact != c.startCont || c.ca != c.startCA
+	// A failed start is retried when the list changed, or on the timer where
+	// that is allowed (never on Linux, see retryStartOnTimer).
+	retry := !c.started && (l.Version != c.startVer || (force && retryStartOnTimer))
+	if !c.startTried || swap || retry {
 		v6, status := c.Server.Start(page, contact, c.lookup, c.ca)
 		c.ipv6, c.startPage, c.startCont, c.health.PageServer = v6, page, contact, status
-		c.started = status == "ok"
-		c.startCA = c.ca
+		c.started = !strings.HasPrefix(status, "page_unavailable")
+		c.startCA, c.startVer, c.startTried = c.ca, l.Version, true
 	}
 
 	key := strings.Join(domains, "\n") + fmt.Sprint("|", c.ipv6)
 	if force || !c.hostsOK || key != c.hostsKey {
-		tampered, err := c.Hosts.Apply(domains, c.ipv6)
-		c.health.HostsTampered = tampered
+		recheck := force && c.hostsOK && key == c.hostsKey
+		written, tampered, err := c.Hosts.Apply(domains, c.ipv6)
+		if recheck {
+			// Nothing we wanted changed, so a rewrite repaired someone else's
+			// edit (a deleted or edited block). A clean check clears it.
+			c.health.HostsTampered = tampered || written
+		} else {
+			c.health.HostsTampered = tampered
+		}
 		c.hostsOK = err == nil
 		if err != nil {
 			errs = append(errs, fmt.Errorf("hosts: %w", err))
@@ -224,12 +274,13 @@ func (c *Controller) lookup(host string) (Entry, bool) {
 	return s.entries[d], true
 }
 
-// Health reports the state the last Apply left.
+// Health reports the state the last Apply left. It never waits for a
+// running Apply.
 func (c *Controller) Health() Health {
-	c.mu.Lock()
-	h := c.health
-	c.mu.Unlock()
-	return h
+	if h := c.published.Load(); h != nil {
+		return *h
+	}
+	return Health{}
 }
 
 // Run re-applies the store's list every 5 minutes until ctx ends: a tampered
@@ -249,10 +300,15 @@ func (c *Controller) Run(ctx context.Context, s *Store) {
 }
 
 // Cleanup removes everything web protection put on the endpoint: the hosts
-// block, the CA from the trust store, <stateDir>/webblock and the saved list.
-// It needs no network and no running agent. The error is non-nil only when
-// the hosts block could not be removed; other failures are logged.
+// block, the block page redirect (Linux), the CA from the trust store,
+// <stateDir>/webblock (CA files and saved list) and the old
+// <stateDir>/webblock.json. It needs no network and no running agent; an
+// empty stateDir skips only the files. The error is non-nil only when the
+// hosts block could not be removed; other failures are logged.
 func Cleanup(stateDir string) error {
+	if err := removeRedirects(); err != nil {
+		slog.Warn("webblock: could not remove the block page redirect", "err", err)
+	}
 	return cleanup(stateDir, NewHostsFile(), &TrustStore{Dir: stateDir})
 }
 
@@ -264,12 +320,15 @@ func cleanup(stateDir string, hosts Hosts, auth Authority) error {
 	if err := auth.Remove(); err != nil {
 		slog.Warn("webblock: could not remove the trust store entry", "err", err)
 	}
-	if err := os.RemoveAll(caDir(stateDir)); err != nil {
-		slog.Warn("webblock: could not remove the CA files", "err", err)
+	if stateDir == "" {
+		return hostsErr
 	}
-	list := filepath.Join(stateDir, ListFile)
-	tmps, _ := filepath.Glob(list + ".tmp*")
-	for _, p := range append(tmps, list) {
+	if err := os.RemoveAll(caDir(stateDir)); err != nil {
+		slog.Warn("webblock: could not remove the CA files and saved list", "err", err)
+	}
+	legacy := filepath.Join(stateDir, LegacyListFile)
+	tmps, _ := filepath.Glob(legacy + ".tmp*")
+	for _, p := range append(tmps, legacy) {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			slog.Warn("webblock: could not remove the saved list", "path", p, "err", err)
 		}

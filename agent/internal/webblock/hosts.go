@@ -177,7 +177,9 @@ func ReplaceBlock(content, block string) (out string, hadBlock bool, tampered bo
 
 // Hosts manages the block in the system hosts file.
 type Hosts interface {
-	Apply(domains []string, ipv6 bool) (tampered bool, err error)
+	// Apply writes the block; changed says the file was rewritten, tampered
+	// that the markers were found damaged.
+	Apply(domains []string, ipv6 bool) (changed, tampered bool, err error)
 	Remove() error
 }
 
@@ -194,45 +196,48 @@ func NewHostsFile() *HostsFile {
 }
 
 // Apply writes the block for domains (removes it when none are valid). It
-// returns tampered when the block was found damaged and repaired.
-func (h *HostsFile) Apply(domains []string, ipv6 bool) (bool, error) {
+// returns changed when the file was rewritten and tampered when the block was
+// found damaged and repaired.
+func (h *HostsFile) Apply(domains []string, ipv6 bool) (bool, bool, error) {
 	return h.rewrite(RenderBlock(domains, ipv6))
 }
 
 // Remove deletes the block; a missing hosts file is not an error.
 func (h *HostsFile) Remove() error {
-	_, err := h.rewrite("")
+	_, _, err := h.rewrite("")
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	return err
 }
 
-func (h *HostsFile) rewrite(block string) (bool, error) {
+// rewrite puts block in place of the managed block; changed reports that
+// the file was written.
+func (h *HostsFile) rewrite(block string) (changed, tampered bool, err error) {
 	path, err := filepath.EvalSymlinks(h.Path)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	content := string(raw)
 	out, _, tampered := ReplaceBlock(content, block)
 	if out == content {
-		return tampered, nil
+		return false, tampered, nil
 	}
 	st, err := os.Stat(path)
 	if err != nil {
-		return tampered, err
+		return false, tampered, err
 	}
 	if err := writeHosts(path, []byte(out), st.Mode().Perm()); err != nil {
-		return tampered, err
+		return false, tampered, err
 	}
 	if h.Flush != nil {
 		if err := h.Flush(); err != nil {
 			slog.Warn("webblock: dns cache flush failed", "error", err)
 		}
 	}
-	return tampered, nil
+	return true, tampered, nil
 }

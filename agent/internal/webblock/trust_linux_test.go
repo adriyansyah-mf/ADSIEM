@@ -13,10 +13,11 @@ import (
 func fakeTrust(t *testing.T) *[]string {
 	t.Helper()
 	d := t.TempDir()
-	oldL, oldR, oldD, oldH := lookPath, runTool, debianAnchor, rhelAnchor
-	t.Cleanup(func() { lookPath, runTool, debianAnchor, rhelAnchor = oldL, oldR, oldD, oldH })
+	oldL, oldR, oldD, oldH, oldS := lookPath, runTool, debianAnchor, rhelAnchor, suseAnchor
+	t.Cleanup(func() { lookPath, runTool, debianAnchor, rhelAnchor, suseAnchor = oldL, oldR, oldD, oldH, oldS })
 	debianAnchor = filepath.Join(d, "deb", "adsiem-webblock.crt")
 	rhelAnchor = filepath.Join(d, "rhel", "adsiem-webblock.crt")
+	suseAnchor = filepath.Join(d, "suse", "anchors", "adsiem-webblock.crt")
 	ran := &[]string{}
 	runTool = func(path string, args ...string) error { *ran = append(*ran, path); return nil }
 	return ran
@@ -92,5 +93,54 @@ func TestRunToolKillsHungGrandchild(t *testing.T) {
 	}
 	if d := time.Since(start); d > 8*time.Second {
 		t.Fatalf("runTool blocked for %v", d)
+	}
+}
+
+func TestSUSEAnchorUsedWhenItsDirExists(t *testing.T) {
+	ran := fakeTrust(t)
+	lookPath = func(n string) (string, error) {
+		if n == "update-ca-certificates" {
+			return "/abs/update-ca-certificates", nil
+		}
+		return "", errors.New("none")
+	}
+	if err := os.MkdirAll(filepath.Dir(suseAnchor), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ca, _ := newTestCA(t)
+	if err := installTrust(ca.DER, ca.Fingerprint()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(suseAnchor); err != nil {
+		t.Fatalf("SUSE anchor not written: %v", err)
+	}
+	if _, err := os.Stat(debianAnchor); err == nil {
+		t.Fatal("Debian anchor written on SUSE")
+	}
+	if !trustInstalled(ca.Fingerprint()) {
+		t.Fatal("SUSE anchor not seen as installed")
+	}
+	if err := removeTrust(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(suseAnchor); err == nil || len(*ran) != 2 {
+		t.Fatalf("SUSE anchor not removed, ran=%v", *ran)
+	}
+}
+
+func TestRemoveChecksDebianAndSUSEAnchors(t *testing.T) {
+	fakeTrust(t)
+	lookPath = func(n string) (string, error) { return "/abs/" + n, nil }
+	for _, p := range []string{debianAnchor, suseAnchor} {
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte("x"), 0o644)
+	}
+	if err := removeTrust(""); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{debianAnchor, suseAnchor} {
+		if _, err := os.Stat(p); err == nil {
+			t.Fatalf("%s left", p)
+		}
 	}
 }

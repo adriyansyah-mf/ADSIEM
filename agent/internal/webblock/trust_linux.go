@@ -37,6 +37,8 @@ var (
 	}
 	debianAnchor = "/usr/local/share/ca-certificates/adsiem-webblock.crt"
 	rhelAnchor   = "/etc/pki/ca-trust/source/anchors/adsiem-webblock.crt"
+	// SUSE ships update-ca-certificates but reads its anchors from here.
+	suseAnchor = "/etc/pki/trust/anchors/adsiem-webblock.crt"
 )
 
 type trustTool struct {
@@ -45,9 +47,25 @@ type trustTool struct {
 	args   []string
 }
 
+// trustTools is the install order. update-ca-certificates writes to the SUSE
+// anchor directory when it exists (SUSE), otherwise to the Debian one.
 func trustTools() []trustTool {
+	anchor := debianAnchor
+	if fi, err := os.Stat(filepath.Dir(suseAnchor)); err == nil && fi.IsDir() {
+		anchor = suseAnchor
+	}
+	return []trustTool{
+		{anchor, "update-ca-certificates", nil},
+		{rhelAnchor, "update-ca-trust", []string{"extract"}},
+	}
+}
+
+// allTrustAnchors is every place an anchor may have been written, for
+// removal and the installed check.
+func allTrustAnchors() []trustTool {
 	return []trustTool{
 		{debianAnchor, "update-ca-certificates", nil},
+		{suseAnchor, "update-ca-certificates", nil},
 		{rhelAnchor, "update-ca-trust", []string{"extract"}},
 	}
 }
@@ -106,7 +124,7 @@ func installTrust(der []byte, fingerprint string) error {
 
 func removeTrust(string) error {
 	var firstErr error
-	for _, t := range trustTools() {
+	for _, t := range allTrustAnchors() {
 		if _, err := os.Stat(t.anchor); err != nil {
 			continue
 		}
@@ -127,7 +145,7 @@ func removeTrust(string) error {
 
 // trustInstalled reports whether our anchor file holds the given CA.
 func trustInstalled(fingerprint string) bool {
-	for _, t := range trustTools() {
+	for _, t := range allTrustAnchors() {
 		b, err := os.ReadFile(t.anchor)
 		if err != nil {
 			continue
