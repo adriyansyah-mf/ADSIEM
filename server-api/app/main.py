@@ -30,6 +30,7 @@ from app.api.routes.yara_rules import router as yara_router
 from app.api.routes.yara_rules import capability_router as yara_capability_router
 from app.api.routes.prevention_rules import router as prevention_router, agent_router as prevention_agent_router
 from app.api.routes.malware_hashes import router as malware_hashes_router, agent_router as malware_hashes_agent_router
+from app.api.routes.web_protection import router as web_protection_router, agent_router as web_protection_agent_router
 from app.api.routes.policies import router as policies_router, agent_router as policies_agent_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
@@ -376,6 +377,12 @@ async def _migrate_malware_hashes_tlsh() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE malware_hashes ADD COLUMN IF NOT EXISTS tlsh VARCHAR(72) NOT NULL DEFAULT ''"))
 
+async def _seed_web_allowlist() -> None:
+    from app.core.database import AsyncSessionLocal
+    from app.services.web_blocks import seed_builtin_allowlist
+    async with AsyncSessionLocal() as db:
+        await seed_builtin_allowlist(db)
+
 async def _migrate_agent_update_columns() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -387,6 +394,15 @@ async def _migrate_audit_log_group() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS group_id VARCHAR(100) NOT NULL DEFAULT 'default'"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_group_created ON audit_logs(group_id, created_at DESC)"))
+
+async def _migrate_web_block_indexes() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_web_block_entries_expiry ON web_block_entries (expires_at) "
+            "WHERE status = 'active' AND expires_at IS NOT NULL"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_web_block_entries_group_seq ON web_block_entries (group_id, seq)"))
 
 async def _migrate_agent_enrollment_columns() -> None:
     from sqlalchemy import text
@@ -487,6 +503,8 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_evidence_health()
         await _migrate_agent_update_columns()
         await _migrate_malware_hashes_tlsh()
+        await _migrate_web_block_indexes()
+        await _seed_web_allowlist()
         await _migrate_audit_log_group()
         await _migrate_agent_enrollment_columns()
         await _migrate_rule_source_columns()
@@ -545,6 +563,6 @@ for router in [
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, yara_drafts_router, knowledge_router, evidence_router,
     iocs_router,
-    prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, policies_router, policies_agent_router, agent_updates_router,
+    prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, policies_router, policies_agent_router, agent_updates_router,
 ]:
     app.include_router(router)

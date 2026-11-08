@@ -196,12 +196,12 @@ Every query is group-scoped; every change is audit-logged.
 - `DELETE /api/web-blocks/{id}` → `status=removed`. For a feed entry, an
   allowlist row for the caller's group is added instead, so the next feed sync
   does not re-block it.
-- `POST /api/web-blocks/bulk {action: block|unblock, ids|domains}`
+- `POST /api/web-blocks/bulk {action: block|unblock, values (block, <= 500), ids (unblock, <= 500), reason, expires_at, group_id}` → `{done, errors: [{value, detail}]}`; each item behaves like the single route and is audited.
 - `GET/POST/PATCH/DELETE /api/web-allowlist`
 - `GET/PUT /api/web-block-policies/{group_id}`
 - `POST /api/web-block-policies/{group_id}/preview` → rendered page with sample
   variables (for the editor).
-- `GET /api/web-blocks/agents` → per-agent status from heartbeats.
+- `GET /api/web-blocks/agents` → per-agent status from heartbeats (moved to stage B2: needs the heartbeat status).
 
 ### Block page HTML
 
@@ -216,11 +216,11 @@ Limit 256 KB. The agent's CSP (B2) is the second layer.
 
 ### Agent sync endpoint
 
-`POST /api/agent/web-blocklist {since}` (agent-token auth, like the malware
-hash sync) returns:
+`POST /api/ingest/web-blocklist {since, continuing, rules}` (agent-token header `X-Agent-Token`,
+like the malware hash sync) returns:
 
 ```json
-{"seq": 123, "more": false,
+{"seq": 123, "more": false, "reset": false, "rules": 77, "group": "blue", "version": "blue:123",
  "policy": {"enabled": true, "page_html": "...", "contact": "...", "max_entries": 50000},
  "changes": [{"domain": "evil.example", "action": "block", "source": "urlhaus", "reason": "..."},
              {"domain": "old.example", "action": "remove"}]}
@@ -228,10 +228,19 @@ hash sync) returns:
 
 - `changes` covers global (`*`) entries and the agent's group, after its group
   allowlist; expired and `suppressed` entries are sent as `remove`.
-- Pages of 5000 changes; `more=true` continues.
-- `since=0` returns the full active set.
-- The heartbeat response carries `web_blocklist_version` (latest relevant seq
-  including policy seq) so agents only fetch on change.
+- Pages of 5000 changes; `more=true` continues with `continuing=true`. The agent
+  stores `rules` from the first page (and from any reset page) and echoes it on continuing pages; a changed
+  marker restarts the sync with `reset=true` (full active set from the start).
+- `since=0` returns the full active set. The server sends the whole allowed set;
+  the agent applies `max_entries` and the manual > alert > feed priority (B2).
+- The response includes `group` (the agent's current group). `version` is an
+  opaque string `<group>:<seq>[+]` ("" when Web Protection is off for the
+  group); it is set on the final page, and the heartbeat's `web_blocklist_version`
+  carries the same string (`+` appended when an entry is due to expire) so
+  agents only fetch on change. Agents compare versions as opaque strings and
+  reset their local state when the group changes.
+- The allowlist change marker is per group (`web_block_rules_seq:<group>`, `*`
+  for global rules): a rule change resets only the agents it affects.
 
 ### Tests
 
@@ -334,6 +343,8 @@ not affect others.
 ---
 
 ## B3. Feeds and alert auto-block
+
+**Prerequisite:** Bulk feed upserts take seqs at flush and commit later; before B3, seq-assigning writers take a shared transaction-level advisory lock (`pg_advisory_xact_lock`) or the sync caps `top` at a safe watermark, so an agent cannot advance past an uncommitted lower seq.
 
 ### Feeds (`worker/worker/webblock/feeds.py`, loop like `malware_feed.py`)
 

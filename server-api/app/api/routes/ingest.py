@@ -25,6 +25,7 @@ from app.services.agent_tamper import check_integrity, heartbeat_anomaly, uninst
 from app.services import yara_ruleset
 from app.api.routes import malware_hashes
 from app.services import agent_policy
+from app.services import web_blocks
 from app.services.ingest import enqueue_log
 from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
                                         accept_evidence, accept_evidence_batch, check_evidence_durability)
@@ -309,6 +310,7 @@ async def heartbeat(
         yara_rules_hash=yara_hash,
         log_batch_max=LOG_BATCH_MAX,
         malware_hashes_version=await malware_hashes.agent_version(db, agent),
+        web_blocklist_version=await web_blocks.agent_version(db, agent),
         policy_version=(await agent_policy.effective(db, agent.group_id))["version"] if agent.approved else "",
     )
 

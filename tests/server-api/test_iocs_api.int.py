@@ -109,3 +109,16 @@ async def test_drill_down_never_returns_another_groups_alert(iocs_api):
     filters = _filters(iocs_api.bodies[0])
     assert {"term": {"type": "domain"}} in filters and {"term": {"value": "c2.example"}} in filters
     assert {"term": {"group_id": "blue"}} in filters
+
+
+async def test_domain_rows_report_whether_the_group_blocks_them(iocs_api):
+    from app.models.models import WebBlockEntry, WebBlockPolicy
+    async with iocs_api.sessions() as db:
+        db.add(WebBlockPolicy(group_id="blue", enabled=True))
+        db.add(WebBlockEntry(domain="evil.example", group_id="blue", source="manual"))
+        await db.commit()
+    iocs_api.reply["value"] = {"aggregations": {"types": {"buckets": []}, "matched": {"count": {"value": 3}, "iocs": {"buckets": [
+        {"key": k, "alerts": {"value": 1}, "hosts": {"value": 1}, "first_seen": {}, "last_seen": {}, "max_severity": {}}
+        for k in ("domain:evil.example", "url:http://evil.example/a", "ip:45.33.32.156")]}}}}
+    items = (await iocs_api.api.get("/api/iocs")).json()["items"]
+    assert [i["blocked"] for i in items] == [True, True, None]

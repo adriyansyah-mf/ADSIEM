@@ -1001,6 +1001,66 @@ class MalwareHash(Base):
     __table_args__ = (Index("ix_malware_hashes_source_status", "source", "status"),)
 
 
+_web_block_seq = Sequence("web_block_seq")
+
+
+class WebBlockEntry(Base):
+    """A domain the agents of a group block (group_id "*" = feed entry for every
+    group that enables feeds). Every change takes the next web_block_seq so
+    agents sync deltas (app/services/web_blocks.py)."""
+    __tablename__ = "web_block_entries"
+    __table_args__ = (
+        UniqueConstraint("group_id", "domain", "source", name="uq_web_block_entry"),
+        Index("ix_web_block_entries_expiry", "expires_at",
+              postgresql_where=text("status = 'active' AND expires_at IS NOT NULL")),
+        Index("ix_web_block_entries_group_seq", "group_id", "seq"),
+    )
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    domain            = Column(String(253), nullable=False, index=True)
+    group_id          = Column(String(100), nullable=False)
+    source            = Column(String(20), nullable=False)        # manual, alert, urlhaus, phishtank
+    status            = Column(String(20), nullable=False, default="active")  # active, removed, suppressed
+    reason            = Column(Text, nullable=False, default="")
+    sample_url        = Column(Text)
+    alert_id          = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
+    created_by        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at        = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at        = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+    expires_at        = Column(DateTime(timezone=True))
+    last_seen_in_feed = Column(DateTime(timezone=True))
+    seq               = Column(BigInteger, _web_block_seq, server_default=_web_block_seq.next_value(),
+                               nullable=False, index=True)
+
+
+class WebAllowRule(Base):
+    """Domains never web-blocked for a group ("*" = every group; built-ins)."""
+    __tablename__ = "web_allowlist"
+    __table_args__ = (UniqueConstraint("group_id", "domain", name="uq_web_allow_rule"),)
+    id                 = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id           = Column(String(100), nullable=False)
+    domain             = Column(String(253), nullable=False)
+    include_subdomains = Column(Boolean, nullable=False, default=False)
+    builtin            = Column(Boolean, nullable=False, default=False)
+    enabled            = Column(Boolean, nullable=False, default=True)
+    created_by         = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at         = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+
+class WebBlockPolicy(Base):
+    """Per-group Web Protection switches and block page; "default" is the fallback."""
+    __tablename__ = "web_block_policies"
+    group_id         = Column(String(100), primary_key=True)
+    enabled          = Column(Boolean, nullable=False, default=False)
+    feed_enabled     = Column(Boolean, nullable=False, default=False)
+    alert_enabled    = Column(Boolean, nullable=False, default=False)
+    alert_block_days = Column(Integer, nullable=False, default=30)
+    max_entries      = Column(Integer, nullable=False, default=50000)
+    page_html        = Column(Text)  # None = built-in page
+    contact          = Column(String(255), nullable=False, default="")
+    updated_at       = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+    seq              = Column(BigInteger, _web_block_seq, server_default=_web_block_seq.next_value(), nullable=False)
+
+
 class ExecPreventionRule(Base):
     """Execution rule enforced by Linux agents (agent/internal/prevent).
     rule_type: hash (value = SHA-256), path (value = executable), dir

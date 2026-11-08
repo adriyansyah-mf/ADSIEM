@@ -15,6 +15,8 @@ router = APIRouter(tags=["settings"])
 Perm = require_permission("settings:manage")
 
 SECRET_MASK = "••••••••"
+# internal markers (Web Protection allowlist change counters): not for the settings UI
+INTERNAL_PREFIXES = ("web_block_rules_seq",)
 
 def _mask(s: PlatformSetting) -> SettingOut:
     out = SettingOut.model_validate(s)
@@ -27,7 +29,8 @@ async def list_settings(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(Perm)],
 ):
-    result = await db.execute(select(PlatformSetting).order_by(PlatformSetting.key))
+    result = await db.execute(select(PlatformSetting).where(
+        *[~PlatformSetting.key.startswith(p) for p in INTERNAL_PREFIXES]).order_by(PlatformSetting.key))
     return [_mask(s) for s in result.scalars().all()]
 
 @router.put("/api/settings/{key}", response_model=SettingOut)
@@ -39,7 +42,7 @@ async def update_setting(
 ):
     result = await db.execute(select(PlatformSetting).where(PlatformSetting.key == key))
     setting = result.scalar_one_or_none()
-    if not setting:
+    if not setting or key.startswith(INTERNAL_PREFIXES):
         raise HTTPException(status_code=404, detail="Setting not found")
     setting.value = body.value
     setting.updated_by = current_user.id
