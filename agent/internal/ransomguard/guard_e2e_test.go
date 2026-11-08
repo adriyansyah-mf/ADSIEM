@@ -41,6 +41,17 @@ func TestMain(m *testing.M) {
 		os.WriteFile(os.Getenv("RANSOM_CANARY"), []byte("encrypted"), 0o644)
 		time.Sleep(10 * time.Second) // waits to be killed
 		os.Exit(0)
+	case "inplace-wb":
+		// fopen("wb") + write over each existing document, no rename.
+		files, _ := filepath.Glob(filepath.Join(os.Getenv("RANSOM_DIR"), "*", "*.docx"))
+		for _, p := range files {
+			data := make([]byte, 8192)
+			rand.Read(data)
+			os.WriteFile(p, data, 0o644)
+			time.Sleep(20 * time.Millisecond)
+		}
+		os.WriteFile(filepath.Join(os.Getenv("RANSOM_DIR"), "FINISHED"), nil, 0o644)
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
@@ -141,7 +152,48 @@ func TestRansomwareEndToEnd(t *testing.T) {
 		t.Fatalf("canary writer killed only after %v", d)
 	}
 	lines = out.wait(t, 2)
-	if !strings.HasPrefix(lines[1], "detection=canary confirmed=true response=killed") || !strings.Contains(lines[1], "FileAction=create") {
+	// os.WriteFile over the existing canary: O_CREAT|O_TRUNC, a rewrite
+	// ("write") where the filesystem records birth times, else "create".
+	if !strings.HasPrefix(lines[1], "detection=canary confirmed=true response=killed") ||
+		!strings.Contains(lines[1], "FileAction=write") && !strings.Contains(lines[1], "FileAction=create") {
 		t.Fatalf("line = %s", lines[1])
+	}
+
+	// In place, the way script ransomware does it: fopen("wb") over each
+	// existing document (O_WRONLY|O_CREAT|O_TRUNC), no rename. In a user-data
+	// location (the home directory), not /tmp.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory for the in-place case: %v", err)
+	}
+	docs, err := os.MkdirTemp(home, "siem-ransom-e2e-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(docs) })
+	for i := 0; i < 400; i++ {
+		sub := filepath.Join(docs, fmt.Sprintf("folder%d", i%4))
+		os.MkdirAll(sub, 0o755)
+		os.WriteFile(filepath.Join(sub, fmt.Sprintf("report%03d.docx", i)), append([]byte("PK\x03\x04"), make([]byte, 8192)...), 0o644)
+	}
+	time.Sleep(2500 * time.Millisecond) // the documents are older than the rewrite window
+	out.mu.Lock()
+	n := len(out.lines)
+	out.mu.Unlock()
+	wb := helper(t, "inplace-wb", "RANSOM_DIR="+docs)
+	if err := wb.Wait(); !killedBySignal(err) {
+		t.Fatalf("fopen(\"wb\") encryptor not killed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(docs, "FINISHED")); err == nil {
+		t.Fatal("fopen(\"wb\") encryptor finished its run")
+	}
+	lines = out.wait(t, n+1)
+	found := false
+	for _, l := range lines[n:] {
+		found = found || strings.HasPrefix(l, "detection=inplace_modify confirmed=true response=killed") &&
+			strings.Contains(l, fmt.Sprintf("PID=%d ", wb.Process.Pid))
+	}
+	if !found {
+		t.Fatalf("no inplace_modify kill: %q", lines[n:])
 	}
 }

@@ -55,6 +55,7 @@ const (
 	oRdwr      = 02
 	oCreat     = 0100
 	oTrunc     = 01000
+	oExcl      = 0200
 	atRemovDir = 0x200
 	commLen    = 16
 	pathLen    = 256
