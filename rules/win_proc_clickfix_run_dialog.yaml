@@ -1,0 +1,58 @@
+title: ClickFix Command Pasted Into The Run Dialog
+id: rule-win-proc-clickfix-run-dialog
+description: >-
+  Explorer (the Win+R Run dialog or the address bar) started PowerShell,
+  mshta, cmd or a headless console host with a command that downloads or
+  decodes and runs code. This is the ClickFix lure: a fake CAPTCHA or "fix
+  it" page copies a command to the clipboard and tells the user to paste it
+  into Win+R (T1204.004, T1059.001). Users starting PowerShell from the
+  Start menu pass no such arguments. CommandLine shows the pasted command;
+  the domain in it is where the page came from.
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  from_explorer:
+    ParentImage|endswith: '\explorer.exe'
+  shell:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\mshta.exe'
+      - '\cmd.exe'
+      - '\conhost.exe'
+  fetch_or_decode:
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+      - 'iwr '
+      - 'irm '
+      - 'iex'
+      - 'Invoke-WebRequest'
+      - 'Invoke-RestMethod'
+      - 'Invoke-Expression'
+      - 'DownloadString'
+      - 'DownloadFile'
+      - 'Net.WebClient'
+      - 'FromBase64String'
+      - ' -enc '
+      - ' -e '
+      - '-EncodedCommand'
+      - 'curl '
+      - 'curl.exe'
+      - 'bitsadmin'
+      - 'certutil'
+  lure_text:
+    CommandLine|contains:
+      - 'captcha'
+      - 'not a robot'
+      - 'not a bot'
+      - 'Verification ID'
+      - 'Ray ID'
+      - 'I am human'
+  condition: from_explorer and shell and (fetch_or_decode or lure_text)
+level: high
+tags:
+  - attack.execution
+  - attack.t1204.004
+  - attack.t1059.001

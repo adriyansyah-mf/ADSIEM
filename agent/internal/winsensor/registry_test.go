@@ -70,6 +70,18 @@ func TestRegDiff(t *testing.T) {
 	}
 }
 
+func TestRunMRUWatchedWithoutOrderValue(t *testing.T) {
+	for _, s := range userSpecs {
+		if strings.HasSuffix(s.path, `\Explorer\RunMRU`) {
+			if !s.wants("a") || !s.wants("z") || s.wants("MRUList") {
+				t.Fatal("RunMRU must report the typed commands (a-z), not MRUList")
+			}
+			return
+		}
+	}
+	t.Fatal("RunMRU is not watched")
+}
+
 func TestRegSpecValueFilter(t *testing.T) {
 	s := regSpec{values: []string{"Shell", "Userinit"}}
 	if !s.wants("shell") || s.wants("DefaultUserName") || !(regSpec{}).wants("anything") {
