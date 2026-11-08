@@ -269,6 +269,12 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                 alert_id, state.get("decoded_fields"), getattr(state.get("enrichment"), "iocs", None), verdict,
             ))
 
+        if alert_id and "web_auto_block" in deps:
+            asyncio.ensure_future(deps["web_auto_block"](
+                alert_id, state.get("group_id") or "default", state.get("title", ""), verdict,
+                state.get("decoded_fields"), state.get("enrichment"), analysis.get("threat_type"),
+            ))
+
         actions_str = ("\n\n**Immediate Actions:**\n" + "\n".join(f"- {a}" for a in actions)) if actions else ""
         note = (
             f"## 🤖 AI L1 Triage — {verdict.upper()}\n\n"

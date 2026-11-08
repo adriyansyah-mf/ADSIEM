@@ -8,6 +8,8 @@ class IOCReputationScore(BaseModel):
     ioc_type: str
     score: float = Field(..., ge=0.0, le=1.0)
     rationale: str = ""
+    sources: list[str] = Field(default_factory=list)
+    malicious: bool = False
 
 
 class EnrichmentSummary(BaseModel):
