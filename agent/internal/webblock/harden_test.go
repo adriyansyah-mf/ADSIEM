@@ -58,7 +58,8 @@ func TestServerEventFloodCapped(t *testing.T) {
 		r.Host = fmt.Sprintf("h%d.example", i)
 		s.handle(httptest.NewRecorder(), r)
 	}
-	if n := len(c.get()); n > globalMax {
+	s.emits.Wait()
+	if n := len(c.get()); n == 0 || n > globalMax {
 		t.Fatalf("%d lines", n)
 	}
 }
@@ -107,4 +108,32 @@ func TestProcessLookupThrottledAndFlushed(t *testing.T) {
 	if n := atomic.LoadInt32(&calls); n != 1 {
 		t.Fatalf("%d lookups, want 1", n)
 	}
+}
+
+// A browser reuses its keep-alive connection for the next request (favicon,
+// another tab): that request must not wait for the previous one's process
+// lookup.
+func TestNextRequestOnConnectionSkipsLookupWait(t *testing.T) {
+	s, _ := newTestHandlerServer()
+	s.set(testPage, "c", func(string) (Entry, bool) { return Entry{Source: "manual"}, true })
+	s.findProc = func(string) (int, string) {
+		time.Sleep(1500 * time.Millisecond)
+		return 7, "slow"
+	}
+	base := newHTTPTestServer(t, s)
+	client := &http.Client{Transport: &http.Transport{MaxConnsPerHost: 1}}
+	defer client.CloseIdleConnections()
+	for i := 0; i < 2; i++ {
+		start := time.Now()
+		resp, err := client.Get(base + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if d := time.Since(start); d > 750*time.Millisecond {
+			t.Fatalf("request %d took %v on the shared connection", i+1, d)
+		}
+	}
+	s.emits.Wait()
 }
