@@ -6,6 +6,7 @@ import asyncio
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import select
 
 from app.api.routes import web_protection as routes
 from app.core.database import get_db
@@ -79,6 +80,20 @@ async def test_unblocking_a_feed_entry_allowlists_it_for_the_group(env):
     assert any(i["domain"] == "feed.example" and i["group_id"] == "blue" for i in items)
     async with env.sessions() as db:
         assert (await db.get(WebBlockEntry, entry.id)).status == "active"
+
+
+async def test_global_unblock_of_a_feed_entry_adds_a_global_rule(env):
+    env.user = env.make_user(role="superadmin")
+    async with env.sessions() as db:
+        entry = WebBlockEntry(domain="feed2.example", group_id="*", source="urlhaus", reason="feed")
+        db.add(entry)
+        await db.commit()
+    assert (await env.api.delete(f"/api/web-blocks/{entry.id}")).json() == {"status": "removed"}
+    async with env.sessions() as db:
+        assert (await db.get(WebBlockEntry, entry.id)).status == "removed"
+        rule = (await db.execute(select(WebAllowRule).where(
+            WebAllowRule.group_id == "*", WebAllowRule.domain == "feed2.example"))).scalar_one()
+        assert rule.enabled and not rule.include_subdomains
 
 
 async def test_groups_cannot_see_or_change_each_other(env):

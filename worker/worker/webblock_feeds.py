@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import io
 import json
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
+from urllib.parse import urlsplit
 
 import httpx
 import structlog
@@ -40,7 +42,9 @@ LOOP_INTERVAL = 60
 BATCH = 1000
 MAX_URLS = 200_000
 MAX_BYTES = 200 * 1024 * 1024
-TIMEOUT = 120
+TIMEOUT = 120          # total seconds for one fetch (asyncio.timeout), not per read
+REMOVAL_GUARD = 0.5     # skip the sweep when it would remove more than this share of active rows
+MAX_REDIRECTS = 5
 STALE_HOURS = 24
 
 Fetch = Callable[[str], Awaitable[str]]
@@ -50,9 +54,8 @@ Parsed = list[tuple[str, str]]  # (url, reason) in feed order
 def parse_urlhaus(body: str, limit: int = MAX_URLS) -> Parsed:
     """csv_online: `#` comment lines, then id,dateadded,url,url_status,last_online,threat,tags,..."""
     rows: Parsed = []
-    lines = (ln for ln in body.splitlines() if ln.strip() and not ln.lstrip().startswith("#"))
-    for cols in csv.reader(lines, skipinitialspace=True):
-        if len(cols) < 6 or cols[3].strip().lower() != "online":
+    for cols in csv.reader(io.StringIO(body), skipinitialspace=True):
+        if len(cols) < 6 or cols[0].lstrip().startswith("#") or cols[3].strip().lower() != "online":
             continue
         url, threat = cols[2].strip(), cols[5].strip()
         tags = cols[6].strip() if len(cols) > 6 else ""
@@ -87,17 +90,35 @@ PARSERS = {"urlhaus": parse_urlhaus, "phishtank": parse_phishtank}
 
 
 async def _get(url: str, headers: dict) -> str:
-    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
-        async with client.stream("GET", url, headers=headers) as r:
-            if r.status_code in (401, 403):
-                raise RuntimeError(f"feed refused the key (HTTP {r.status_code})")
-            r.raise_for_status()
-            buf = bytearray()
-            async for chunk in r.aiter_bytes():
-                buf += chunk
-                if len(buf) > MAX_BYTES:
+    """GET with a byte cap. Redirects are followed by hand and the key header is
+    dropped when the host changes (the PhishTank key is in the URL path, which
+    is never re-sent to another host either)."""
+    host = urlsplit(url).hostname
+    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
+        for _ in range(MAX_REDIRECTS + 1):
+            same = urlsplit(url).hostname == host
+            async with client.stream("GET", url, headers=headers if same else {}) as r:
+                if r.is_redirect and r.headers.get("location"):
+                    url = str(r.url.join(r.headers["location"]))
+                    if urlsplit(url).hostname != host:
+                        headers = {}
+                    continue
+                if r.status_code in (401, 403):
+                    raise RuntimeError(f"feed refused the key (HTTP {r.status_code})")
+                try:
+                    r.raise_for_status()
+                except httpx.HTTPStatusError as exc:  # its message holds the URL, and the URL can hold the key
+                    raise RuntimeError(f"HTTP {exc.response.status_code}") from None
+                length = r.headers.get("content-length", "")
+                if length.isdigit() and int(length) > MAX_BYTES:
                     raise RuntimeError("feed response over the 200 MB limit")
-    return buf.decode("utf-8", errors="replace")
+                buf = bytearray()
+                async for chunk in r.aiter_bytes():
+                    buf += chunk
+                    if len(buf) > MAX_BYTES:
+                        raise RuntimeError("feed response over the 200 MB limit")
+                return buf.decode("utf-8", errors="replace")
+    raise RuntimeError("too many redirects")
 
 
 async def fetch_urlhaus(key: str) -> str:
@@ -112,8 +133,8 @@ FETCHERS: dict[str, Fetch] = {"urlhaus": fetch_urlhaus, "phishtank": fetch_phish
 
 
 def prepare(parsed: Parsed, rules: list[tuple[str, bool]]) -> tuple[list[tuple[str, str, str, str]], int]:
-    """-> ([(domain, status, reason, sample_url)], skipped). Deduped by domain, first URL wins."""
-    seen: dict[str, tuple[str, str, str, str]] = {}
+    """-> ([(domain, status, reason, sample_url)], skipped). Deduped by domain; the smallest URL (and its reason) represents it."""
+    best: dict[str, tuple[str, str]] = {}
     skipped = 0
     for url, reason in parsed:
         try:
@@ -121,11 +142,13 @@ def prepare(parsed: Parsed, rules: list[tuple[str, bool]]) -> tuple[list[tuple[s
         except DomainError:
             skipped += 1
             continue
-        if domain in seen:
-            continue
+        if domain not in best or (url, reason) < best[domain]:  # smallest URL: feed order never flips a reason
+            best[domain] = (url, reason)
+    out = []
+    for domain, (url, reason) in best.items():
         rule = allow_match(domain, rules)
-        seen[domain] = (domain, "suppressed", f"allowlisted ({rule})", url) if rule else (domain, "active", reason, url)
-    return list(seen.values()), skipped
+        out.append((domain, "suppressed", f"allowlisted ({rule})", url) if rule else (domain, "active", reason, url))
+    return out, skipped
 
 
 _UPSERT = text("""
@@ -141,9 +164,15 @@ WHERE (web_block_entries.status, web_block_entries.reason) IS DISTINCT FROM (EXC
 """)
 # rows the upsert left alone: only last_seen_in_feed moves (no seq)
 _TOUCH = text("""
-UPDATE web_block_entries SET last_seen_in_feed = now()
-WHERE group_id = '*' AND source = :source AND domain = ANY(CAST(:domains AS text[]))
-  AND last_seen_in_feed IS DISTINCT FROM now()
+UPDATE web_block_entries e SET last_seen_in_feed = now(), sample_url = t.u
+FROM unnest(CAST(:domains AS text[]), CAST(:urls AS text[])) AS t(d, u)
+WHERE e.group_id = '*' AND e.source = :source AND e.domain = t.d
+  AND e.last_seen_in_feed IS DISTINCT FROM now()
+""")
+_STALE_COUNT = text("""
+SELECT count(*) FILTER (WHERE last_seen_in_feed < now() - make_interval(hours => :hours)) AS stale,
+       count(*) AS active
+FROM web_block_entries WHERE group_id = '*' AND source = :source AND status = 'active'
 """)
 _REMOVE = text("""
 UPDATE web_block_entries SET status = 'removed', updated_at = now(), seq = nextval('web_block_seq')
@@ -167,8 +196,15 @@ async def store(source: str, entries: list[tuple[str, str, str, str]]) -> dict:
         async with AsyncSessionLocal() as db:
             await _lock(db)
             await db.execute(_UPSERT, params)
-            await db.execute(_TOUCH, {"source": source, "domains": params["domains"]})
+            await db.execute(_TOUCH, {"source": source, "domains": params["domains"], "urls": params["urls"]})
             await db.commit()
+    async with AsyncSessionLocal() as db:
+        counts = (await db.execute(_STALE_COUNT, {"source": source, "hours": STALE_HOURS})).one()
+    counts_out = {"entries": sum(1 for e in entries if e[1] == "active"),
+                  "suppressed": sum(1 for e in entries if e[1] == "suppressed")}
+    if counts.stale > counts.active * REMOVAL_GUARD:
+        log.warning("webblock_feed_removal_guard", feed=source, stale=counts.stale, active=counts.active)
+        return {**counts_out, "removed": 0, "guard": {"stale": counts.stale, "active": counts.active}}
     removed = 0
     while True:
         async with AsyncSessionLocal() as db:
@@ -178,8 +214,7 @@ async def store(source: str, entries: list[tuple[str, str, str, str]]) -> dict:
         removed += n
         if n < BATCH:
             break
-    return {"entries": sum(1 for e in entries if e[1] == "active"),
-            "suppressed": sum(1 for e in entries if e[1] == "suppressed"), "removed": removed}
+    return {**counts_out, "removed": removed}
 
 
 async def _global_rules() -> list[tuple[str, bool]]:
@@ -210,13 +245,36 @@ async def _key_for(name: str) -> str:
 
 async def sync_once(redis, name: str, key: str, fetch: Fetch | None = None, now: datetime | None = None) -> dict:
     stamp = (now or datetime.now(timezone.utc)).isoformat()
-    body = await (fetch or FETCHERS[name])(key)
-    entries, skipped = prepare(PARSERS[name](body), await _global_rules())
+    async with asyncio.timeout(TIMEOUT):
+        body = await (fetch or FETCHERS[name])(key)
+    rules = await _global_rules()
+
+    def work():
+        parsed = PARSERS[name](body)
+        return (len(parsed) >= MAX_URLS, *prepare(parsed, rules))
+    truncated, entries, skipped = await asyncio.to_thread(work)
+    if not entries:  # a 200 with nothing usable must not age out the whole list
+        raise RuntimeError("feed returned no entries")
+    if truncated:
+        log.warning("webblock_feed_truncated", feed=name, limit=MAX_URLS)
     result = await store(name, entries)
-    state = await _put_state(redis, name, status="ok", last_success=stamp, last_attempt=stamp, error="",
-                             skipped=skipped, **result)
-    log.info("webblock_feed_synced", feed=name, skipped=skipped, **result)
+    guard = result.pop("guard", None)
+    fields = {"status": "removal_guard" if guard else "ok", "last_success": stamp, "last_attempt": stamp,
+              "error": "", "skipped": skipped, "truncated": truncated, "guard": guard or {}, **result}
+    state = await _put_state(redis, name, **fields)
+    log.info("webblock_feed_synced", feed=name, skipped=skipped, truncated=truncated, status=fields["status"], **result)
     return state
+
+
+def redact(message: str, keys) -> str:
+    for key in keys:
+        if key:
+            message = message.replace(key, "***")
+    return message
+
+
+async def _all_keys() -> list[str]:
+    return [(await get_setting(k, "")).strip() for k in ("abusech_auth_key", "malwarebazaar_api_key", "phishtank_app_key")]
 
 
 async def _due(redis, name: str, requested: set[str]) -> bool:
@@ -238,12 +296,15 @@ async def run_feed(redis, name: str, requested: set[str]) -> None:
         await _put_state(redis, name, status="missing_key", error="")
         return
     if not await redis.set(LOCK_PREFIX + name, "1", nx=True, ex=900):
+        if name in requested:  # a sync asked for while one runs: do it next round
+            await redis.rpush(SYNC_QUEUE, name)
         return
     try:
         await sync_once(redis, name, key)
     except Exception as exc:  # noqa: BLE001 — shown on the Feeds tab
-        log.warning("webblock_feed_failed", feed=name, error=str(exc))
-        await _put_state(redis, name, status="error", error=str(exc)[:500],
+        message = redact(str(exc) or type(exc).__name__, [key, *await _all_keys()])
+        log.warning("webblock_feed_failed", feed=name, error=message[:500])
+        await _put_state(redis, name, status="error", error=message[:500],
                          last_attempt=datetime.now(timezone.utc).isoformat())
     finally:
         await redis.delete(LOCK_PREFIX + name)
