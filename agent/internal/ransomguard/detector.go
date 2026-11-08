@@ -130,7 +130,9 @@ type procWindow struct {
 	inplace     map[string]bool // pre-existing files it wrote
 	inplaceDirs map[string]bool
 	inTargets   []string // recent in-place writes to sample
-	fired       bool
+	inHeaded    []string // recent in-place writes whose extension promises a header
+	inNext      int      // in-place files at which inplace_modify is evaluated next
+	fired       bool     // extension_change or mass_modify fired in this window
 }
 
 type detector struct {
@@ -201,11 +203,8 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 		}
 		w = &procWindow{start: ev.Time, image: ev.Image, comm: ev.Comm, ppid: ev.PPID, uid: ev.UID,
 			extRenames: map[string]int{}, written: map[string]bool{}, dirs: map[string]bool{},
-			created: map[string]bool{}, inplace: map[string]bool{}, inplaceDirs: map[string]bool{}}
+			created: map[string]bool{}, inplace: map[string]bool{}, inplaceDirs: map[string]bool{}, inNext: minInplace}
 		d.procs[ev.PID] = w
-	}
-	if w.fired {
-		return nil
 	}
 	switch ev.Action {
 	case "rename":
@@ -232,6 +231,9 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 			w.inplace[ev.Path] = true
 			w.inplaceDirs[dir(ev.Path)] = true
 			w.inTargets = appendRecent(w.inTargets, ev.Path)
+			if _, ok := headerOf[ext(ev.Path)]; ok {
+				w.inHeaded = appendRecent(w.inHeaded, ev.Path)
+			}
 		}
 	case "delete":
 		w.destroyed++
@@ -244,24 +246,37 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 			best, bestExt = n, e
 		}
 	}
-	f := &finding{pid: ev.PID, ppid: w.ppid, uid: w.uid, image: w.image, comm: w.comm, targets: w.targets}
-	switch {
-	case total >= minExtRenames && float64(best) >= sameExtShare*float64(total):
-		f.kind, f.files, f.ext = "extension_change", total, bestExt
-	case len(w.written) >= minWrites && len(w.dirs) >= minWriteDirs && w.destroyed >= minDestructive:
-		f.kind, f.files = "mass_modify", len(w.written)
-	case len(w.inplace) >= minInplace && len(w.inplaceDirs) >= minInplaceDirs:
-		f.kind, f.files, f.targets = "inplace_modify", len(w.inplace), w.inTargets
+	f := &finding{pid: ev.PID, ppid: w.ppid, uid: w.uid, image: w.image, comm: w.comm,
+		targets: append([]string(nil), w.targets...)}
+	// extension_change and mass_modify fire once per window.
+	if !w.fired {
+		switch {
+		case total >= minExtRenames && float64(best) >= sameExtShare*float64(total):
+			f.kind, f.files, f.ext = "extension_change", total, bestExt
+		case len(w.written) >= minWrites && len(w.dirs) >= minWriteDirs && w.destroyed >= minDestructive:
+			f.kind, f.files = "mass_modify", len(w.written)
+		}
+		if f.kind != "" {
+			w.fired = true
+			return f
+		}
+	}
+	// inplace_modify is evaluated at every further minInplace files: an
+	// unconfirmed hit (or another heuristic's) does not mute the process.
+	if len(w.inplace) >= w.inNext && len(w.inplaceDirs) >= minInplaceDirs {
+		w.inNext = len(w.inplace) + minInplace
+		f.kind, f.files = "inplace_modify", len(w.inplace)
+		// Sample files whose extension promises a header first: in a mixed
+		// tree the newest writes are often .txt or .csv.
+		f.targets = append(append([]string(nil), w.inTargets...), w.inHeaded...)
 		if total >= minUniformRenames && float64(best) >= sameExtShare*float64(total) {
 			// Files also renamed to one new extension: sample those
 			// (the in-place targets may have been renamed away).
-			f.uniformExt, f.ext, f.targets = true, bestExt, w.targets
+			f.uniformExt, f.ext, f.targets = true, bestExt, append([]string(nil), w.targets...)
 		}
-	default:
-		return nil
+		return f
 	}
-	w.fired = true
-	return f
+	return nil
 }
 
 func (w *procWindow) target(p string) { w.targets = appendRecent(w.targets, p) }
@@ -388,10 +403,30 @@ func headerGone(p string, b []byte, e float64) bool {
 // half of the newest files read (up to 3) lost the header their extension
 // promises. High entropy without a header is not enough there: game assets,
 // packed data and compressed blobs are rewritten in place legitimately.
+// Only files whose extension promises a header are counted (up to the 3
+// newest); with none of them, the newest of any kind are read (they cannot
+// confirm, but give the entropy for the report).
 func confirmInplace(targets []string) (bool, float64) {
-	read, gone := 0, 0
-	sum := 0.0
+	read, gone, sum := sampleInplace(targets, true)
+	if read == 0 {
+		read, gone, sum = sampleInplace(targets, false)
+	}
+	if read == 0 {
+		return false, 0
+	}
+	return gone*2 >= read, sum / float64(read)
+}
+
+func sampleInplace(targets []string, headedOnly bool) (read, gone int, sum float64) {
+	seen := map[string]bool{}
 	for i := len(targets) - 1; i >= 0 && read < 3; i-- {
+		if seen[targets[i]] {
+			continue
+		}
+		seen[targets[i]] = true
+		if _, ok := headerOf[ext(targets[i])]; headedOnly && !ok {
+			continue
+		}
 		f, err := os.Open(targets[i])
 		if err != nil {
 			continue
@@ -409,8 +444,5 @@ func confirmInplace(targets []string) (bool, float64) {
 			gone++
 		}
 	}
-	if read == 0 {
-		return false, 0
-	}
-	return gone*2 >= read, sum / float64(read)
+	return read, gone, sum
 }
