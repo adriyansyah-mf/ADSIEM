@@ -49,6 +49,9 @@ type HeartbeatRequest struct {
 	// Durable evidence mode only; legacy agents omit it and the server shows
 	// their evidence delivery as not reported.
 	EvidenceHealth any `json:"evidence_health,omitempty"`
+	// Web protection state (hosts block, CA, page server); omitted until the
+	// agent wires WebBlockHealth.
+	WebBlockHealth any `json:"web_block_health,omitempty"`
 	// Self-update status (agents >= 1.9.0); the server offers updates only to
 	// agents reporting it.
 	Update *update.Status `json:"update,omitempty"`
@@ -232,6 +235,9 @@ type HeartbeatResponse struct {
 	// "<seq>:<action>" of the known-malware hash set, "" when it is off (or
 	// the server is older); changes are fetched from /api/ingest/malware-hashes.
 	MalwareHashesVersion string `json:"malware_hashes_version"`
+	// "<group>:<seq>[+]" of the web blocklist, "" when web protection is off
+	// (or the server is older); changes come from /api/ingest/web-blocklist.
+	WebBlocklistVersion string `json:"web_blocklist_version"`
 	// Version of the group policy (internal/policy); "" from older servers.
 	PolicyVersion string `json:"policy_version"`
 	// Set while this agent's group rollout wants it on another version.
@@ -252,6 +258,9 @@ func LogBatchMax() int { return int(logBatchMax.Load()) }
 // cumulative health for the heartbeat. Counters live in the journal, so a
 // failed heartbeat loses nothing: the next one reports the same totals.
 var EvidenceHealth func() any
+
+// WebBlockHealth, when set, returns the web protection state for the heartbeat.
+var WebBlockHealth func() any
 
 // SupportsEvidenceV2 reports whether the last successful heartbeat advertised
 // durable ingest protocol 2. The evidence sender sends nothing until it does.
@@ -308,6 +317,9 @@ func Loop(
 		}
 		if EvidenceHealth != nil {
 			payload.EvidenceHealth = EvidenceHealth()
+		}
+		if WebBlockHealth != nil {
+			payload.WebBlockHealth = WebBlockHealth()
 		}
 		payload.Update = updateStatus()
 		resp, err := c.Post("/api/ingest/heartbeat", payload)

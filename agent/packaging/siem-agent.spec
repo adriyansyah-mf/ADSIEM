@@ -54,6 +54,9 @@ if [ "$1" -eq 0 ]; then
     echo "Run: sudo SIEM_UNINSTALL_TOKEN=<token> dnf remove siem-agent" >&2
     exit 1
   fi
+  # drop the web protection hosts block, trust-store CA and its key
+  [ -x /usr/bin/siem-agent ] && \
+    /usr/bin/siem-agent -webblock-cleanup -config /etc/siem-agent/config.yaml || :
   systemctl disable --now siem-agent.service >/dev/null 2>&1 || :
 fi
 

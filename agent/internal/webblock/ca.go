@@ -333,6 +333,22 @@ type Authority interface {
 // TrustStore implements Authority with the operating system trust store.
 type TrustStore struct {
 	Dir string // state dir holding the CA files
+
+	mu sync.Mutex
+	ca *CA // the CA Ensure last loaded; the page server signs with it
+}
+
+// CA returns the CA Ensure last loaded, nil before one or after Remove.
+func (t *TrustStore) CA() *CA {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.ca
+}
+
+func (t *TrustStore) setCA(ca *CA) {
+	t.mu.Lock()
+	t.ca = ca
+	t.mu.Unlock()
 }
 
 // Ensure loads or creates the CA and installs it when new or missing.
@@ -342,6 +358,11 @@ func (t *TrustStore) Ensure(hostname string) (string, error) {
 		return "", err
 	}
 	fp := ca.Fingerprint()
+	t.mu.Lock()
+	if t.ca != nil && t.ca.Fingerprint() == fp {
+		ca = t.ca // keep the leaf cache and allow-set of the running CA
+	}
+	t.mu.Unlock()
 	if created || !doInstalled(fp) {
 		if err := doRemove(fp); err != nil {
 			return "", err
@@ -350,6 +371,7 @@ func (t *TrustStore) Ensure(hostname string) (string, error) {
 			return "", err
 		}
 	}
+	t.setCA(ca)
 	return fp, nil
 }
 
@@ -364,6 +386,7 @@ func (t *TrustStore) Installed() bool {
 
 // Remove drops the CA from the trust store and deletes its files.
 func (t *TrustStore) Remove() error {
+	t.setCA(nil)
 	err := doRemove("")
 	dir := caDir(t.Dir)
 	for _, n := range []string{CAKeyFile, CACertFile} {
