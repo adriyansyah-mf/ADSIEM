@@ -44,7 +44,7 @@ var DefaultAllowImages = []string{
 	// Windows: installers and servicing, Defender, sync and copy tools,
 	// search indexing, build tools. Matched case-insensitively.
 	"msiexec.exe", "trustedinstaller.exe", "tiworker.exe", "dism.exe", "dismhost.exe", "cleanmgr.exe",
-	"msmpeng.exe", "mpcmdrun.exe", "onedrive.exe", "robocopy.exe", "searchindexer.exe", "git.exe",
+	"msmpeng.exe", "mpcmdrun.exe", "onedrive.exe", "onedrivesetup.exe", "robocopy.exe", "searchindexer.exe", "git.exe",
 	"go.exe", "msbuild.exe", "cl.exe", "link.exe", "devenv.exe",
 }
 
@@ -167,7 +167,7 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 	case "create", "write":
 		if !w.written[ev.Path] && len(w.written) < 4*minWrites {
 			w.written[ev.Path] = true
-			w.dirs[filepath.Dir(ev.Path)] = true
+			w.dirs[dir(ev.Path)] = true
 		}
 		w.target(ev.Path)
 		if ev.Action == "create" {

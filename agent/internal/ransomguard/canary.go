@@ -92,14 +92,52 @@ func canaryContent() []byte {
 		"Changing, renaming or deleting it raises an alert. Do not edit.\n%s\n", hex.EncodeToString(pad)))
 }
 
+// linkedProfiles are Windows profile names that are junctions to another
+// directory ("All Users" -> ProgramData, "Default User" -> Default).
+var linkedProfiles = []string{"All Users", "Default User"}
+
+// expand returns the canary directories, each real directory once. A glob
+// can reach one directory by several paths: on Windows Users\* gives "All
+// Users" (a junction to ProgramData, whose Documents and Desktop are
+// junctions to Public's), so two canaries were the same file and each plant
+// overwrote the other. Directories a glob reached through a link (a junction
+// or symlink) are skipped, as are the linked profile names, and what is
+// left is deduped by file identity (volume serial and file index on
+// Windows, device and inode on Linux) in the order given.
 func (c *canaries) expand() []string {
 	var dirs []string
+	var seen []os.FileInfo
+	add := func(d string, globbed bool) {
+		for _, part := range strings.FieldsFunc(d, func(r rune) bool { return r == '/' || r == '\\' }) {
+			for _, n := range linkedProfiles {
+				if strings.EqualFold(part, n) {
+					return
+				}
+			}
+		}
+		if globbed && isLink(d) {
+			return
+		}
+		info, err := os.Stat(d)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		for _, s := range seen {
+			if os.SameFile(s, info) {
+				return
+			}
+		}
+		seen = append(seen, info)
+		dirs = append(dirs, d)
+	}
 	for _, pattern := range c.dirs {
 		if strings.ContainsAny(pattern, "*?[") {
 			m, _ := filepath.Glob(pattern)
-			dirs = append(dirs, m...)
+			for _, d := range m {
+				add(d, true)
+			}
 		} else {
-			dirs = append(dirs, pattern)
+			add(pattern, false)
 		}
 	}
 	return dirs
