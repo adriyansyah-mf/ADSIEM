@@ -60,14 +60,23 @@ type Guard struct {
 	det *detector
 	// response is the platform's kill; nil where there is none.
 	response func(pid uint32) (killed int, err error)
+	// writeWait is how long a canary write event waits for the canary's
+	// content to change (on Linux the event is the open, before the data).
+	writeWait time.Duration
 }
+
+// syncClients may rewrite a canary with canary text: OneDrive's Known
+// Folder Move syncs Documents and Desktop, canaries included, between a
+// user's devices. Only canary text is accepted from them.
+var syncClients = map[string]bool{"onedrive.exe": true, "onedrive.sync.service.exe": true, "filecoauth.exe": true}
 
 func New(opts Options) *Guard {
 	g := &Guard{
-		opts:     opts,
-		can:      newCanaries(opts.CanaryDirs, opts.CanaryNames, opts.CanaryVisible),
-		det:      newDetector(opts.AllowImages),
-		response: killTree,
+		opts:      opts,
+		can:       newCanaries(opts.CanaryDirs, opts.CanaryNames, opts.CanaryVisible),
+		det:       newDetector(opts.AllowImages),
+		response:  killTree,
+		writeWait: time.Second,
 	}
 	g.rt.Store(&Runtime{Kill: true})
 	return g
@@ -123,21 +132,12 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 			continue
 		}
 		if p, ok := g.can.canaryPath(name); ok {
+			if (ev.Action == "write" || ev.Action == "create") && name == ev.Path {
+				go g.canaryWrite(ev, p)
+				return
+			}
 			g.can.forget(p)
-			go func() {
-				g.act(detection{kind: "canary", pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
-					comm: ev.Comm, canary: p, action: ev.Action, confirmed: true})
-				// Read once the process is stopped: what it left is final.
-				// The new content is at Path (a write, or a rename of the
-				// canary or over it); a delete leaves nothing to read.
-				if ev.Action != "delete" && fileLooksEncrypted(ev.Path) {
-					return // encryption: never a step toward retirement
-				}
-				if g.can.strike(p) {
-					g.report(detection{kind: "canary_retired", canary: p, image: ev.Image, comm: ev.Comm,
-						pid: ev.PID, ppid: ev.PPID, uid: ev.UID})
-				}
-			}()
+			go g.canaryHit(ev, p)
 			return
 		}
 	}
@@ -151,12 +151,12 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 		return
 	}
 	go func() {
-		ok, e := confirm(f.targets)
+		ok, e := f.check()
 		if !ok {
 			// The newest file may still be being written (on Linux the event
 			// is the open): look once more before calling it benign.
 			time.Sleep(confirmRetry)
-			ok, e = confirm(f.targets)
+			ok, e = f.check()
 		}
 		sample := ""
 		if len(f.targets) > 0 {
@@ -165,6 +165,52 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 		g.act(detection{kind: f.kind, pid: f.pid, ppid: f.ppid, uid: f.uid, image: f.image, comm: f.comm,
 			files: f.files, ext: f.ext, sample: sample, entropy: e, confirmed: ok})
 	}()
+}
+
+// canaryHit stops the process that changed, renamed or deleted canary p and
+// counts the change toward retirement unless it was encryption.
+func (g *Guard) canaryHit(ev linsensor.FileEvent, p string) {
+	g.act(detection{kind: "canary", pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
+		comm: ev.Comm, canary: p, action: ev.Action, confirmed: true})
+	// Read once the process is stopped: what it left is final. The new
+	// content is at Path (a write, or a rename of the canary or over it);
+	// a delete leaves nothing to read.
+	if ev.Action != "delete" && fileLooksEncrypted(ev.Path) {
+		return // encryption: never a step toward retirement
+	}
+	if g.can.strike(p) {
+		g.report(detection{kind: "canary_retired", canary: p, image: ev.Image, comm: ev.Comm,
+			pid: ev.PID, ppid: ev.PPID, uid: ev.UID})
+	}
+}
+
+// canaryWrite handles a write to canary p: a hit only once the content is
+// no longer the canary (encrypted, or the canary text gone). The canary is
+// read back until it changes or writeWait passes. Unchanged content (an
+// open for write, a sync client putting back the same bytes) is nothing;
+// other canary text is adopted from a sync client and otherwise left to
+// the periodic check, which reports it unconfirmed as before. One write
+// at a time is followed per canary.
+func (g *Guard) canaryWrite(ev linsensor.FileEvent, p string) {
+	want, ok := g.can.watch(p)
+	if !ok {
+		return
+	}
+	defer g.can.unwatch(p)
+	st, sum := canaryState(p, want)
+	for deadline := time.Now().Add(g.writeWait); st == canaryUnchanged && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+		st, sum = canaryState(p, want)
+	}
+	switch st {
+	case canaryText:
+		if syncClients[strings.ToLower(base(ev.Image))] {
+			g.can.adopt(p, want, sum)
+		}
+	case canaryDestroyed:
+		g.can.forget(p)
+		g.canaryHit(ev, p)
+	}
 }
 
 type detection struct {

@@ -210,6 +210,7 @@ func TestGuardRefusesProtected(t *testing.T) {
 	g := New(Options{Push: out.push, CanaryDirs: []string{dir}, Kill: true})
 	g.response = func(uint32) (int, error) { t.Error("killed a protected process"); return 0, nil }
 	g.can.plant()
+	os.WriteFile(filepath.Join(dir, ".siem-canary.docx"), []byte("overwritten"), 0o644) // a write is a hit once the canary is gone
 	g.Observe(linsensor.FileEvent{Action: "write", Path: filepath.Join(dir, ".siem-canary.docx"), PID: 77, Image: "/usr/sbin/sshd", Comm: "sshd"})
 	if l := out.wait(t, 1)[0]; !strings.Contains(l, "response=kill_refused") {
 		t.Fatalf("line = %s", l)

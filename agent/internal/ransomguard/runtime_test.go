@@ -1,6 +1,7 @@
 package ransomguard
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ func TestRuntimeFromGroupPolicy(t *testing.T) {
 	g.response = func(pid uint32) (int, error) { killed = append(killed, pid); return 1, nil }
 	g.can.plant()
 	hit := func(pid uint32, image string) {
+		os.WriteFile(filepath.Join(dir, ".c.pdf"), []byte("overwritten"), 0o644) // a write is a hit once the canary is gone
 		g.Observe(linsensor.FileEvent{Action: "write", Path: filepath.Join(dir, ".c.pdf"), PID: pid, Image: image,
 			Comm: filepath.Base(image)})
 	}

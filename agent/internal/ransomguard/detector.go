@@ -27,6 +27,9 @@ const (
 	// several directories, without renames (encrypt each file over itself).
 	minInplace     = 50
 	minInplaceDirs = 3
+	// renames to one new extension that make an in-place hit confirmable
+	// without a lost header (fewer than extension_change needs).
+	minUniformRenames = 5
 
 	entropySample    = 4096
 	encryptedEntropy = 7.2 // bits per byte; compressed media and archives come close
@@ -53,16 +56,31 @@ var DefaultAllowImages = []string{
 // mail profiles, the OS and installed programs. In-place writes there do
 // not count; ransomware goes for documents and shares.
 var inplaceSkip = []string{
-	"/appdata/local/", "/appdata/locallow/", "/temp/", "/tmp/", "/inetcache/",
+	"/appdata/", "/temp/", "/tmp/", "/inetcache/",
 	"/windows/", "/program files/", "/program files (x86)/", "/programdata/", "/$recycle.bin/",
 	"/var/tmp/", "/var/cache/", "/var/log/", "/.cache/", "/proc/", "/sys/", "/dev/", "/run/",
 	"/.mozilla/", "/.thunderbird/", "/.config/google-chrome/", "/.config/chromium/",
 	"/.config/microsoft-edge/", "/.config/brave", "/snap/",
 }
 
-// skipInplace reports whether in-place writes to p are ignored. AppData\Roaming
-// holds both settings and caches: its cache-like directories and browser
-// and mail profiles are skipped.
+// userDataRoots (Linux, lower case) are where user and server data lives.
+// /usr, /opt (but /opt/data), /var/lib, /etc and the rest belong to programs.
+var userDataRoots = []string{"/home/", "/root/", "/srv/", "/var/www/", "/mnt/", "/media/", "/data/", "/opt/data/"}
+
+// systemDrive is the Windows system drive, lower case ("c:").
+var systemDrive = func() string {
+	if d := os.Getenv("SystemDrive"); d != "" {
+		return strings.ToLower(d)
+	}
+	return "c:"
+}()
+
+// skipInplace reports whether in-place writes to p are ignored: anything
+// outside user data, and inside it the caches, temp and profiles programs
+// rewrite. User data is, on Windows, the profiles under <system drive>\Users
+// (not AppData), any other drive (data disks, mapped drives) and UNC shares;
+// on Linux userDataRoots. AppData (Local, LocalLow and Roaming) is program
+// state, not documents.
 func skipInplace(p string) bool {
 	l := strings.ToLower(strings.ReplaceAll(p, `\`, "/"))
 	for _, s := range inplaceSkip {
@@ -70,9 +88,26 @@ func skipInplace(p string) bool {
 			return true
 		}
 	}
-	if i := strings.Index(l, "/appdata/roaming/"); i >= 0 {
-		r := l[i:]
-		return strings.Contains(r, "cache") || strings.Contains(r, "/mozilla/") || strings.Contains(r, "/thunderbird/")
+	return !userData(l)
+}
+
+// userData reports whether l (lower case, forward slashes) is a user-data
+// location (see skipInplace).
+func userData(l string) bool {
+	if strings.HasPrefix(l, "//?/unc/") {
+		return true
+	}
+	l = strings.TrimPrefix(l, "//?/")
+	if strings.HasPrefix(l, "//") {
+		return true // \\server\share
+	}
+	if len(l) >= 3 && l[1] == ':' && l[2] == '/' {
+		return l[:2] != systemDrive || strings.HasPrefix(l[2:], "/users/")
+	}
+	for _, r := range userDataRoots {
+		if strings.HasPrefix(l, r) {
+			return true
+		}
 	}
 	return false
 }
@@ -122,6 +157,18 @@ type finding struct {
 	files   int
 	ext     string
 	targets []string
+	// uniformExt: an inplace_modify whose process also renamed files to
+	// one new extension; confirmed like the other heuristics.
+	uniformExt bool
+}
+
+// check samples the finding's files: confirmInplace for in-place writes
+// alone, confirm otherwise.
+func (f *finding) check() (bool, float64) {
+	if f.kind == "inplace_modify" && !f.uniformExt {
+		return confirmInplace(f.targets)
+	}
+	return confirm(f.targets)
 }
 
 func ext(p string) string { return strings.ToLower(filepath.Ext(p)) }
@@ -201,6 +248,11 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 		f.kind, f.files = "mass_modify", len(w.written)
 	case len(w.inplace) >= minInplace && len(w.inplaceDirs) >= minInplaceDirs:
 		f.kind, f.files, f.targets = "inplace_modify", len(w.inplace), w.inTargets
+		if total >= minUniformRenames && float64(best) >= sameExtShare*float64(total) {
+			// Files also renamed to one new extension: sample those
+			// (the in-place targets may have been renamed away).
+			f.uniformExt, f.ext, f.targets = true, bestExt, w.targets
+		}
 	default:
 		return nil
 	}
@@ -297,4 +349,64 @@ func confirm(targets []string) (bool, float64) {
 		return false, 0
 	}
 	return high*2 > read, sum / float64(read)
+}
+
+// headerOf is the header a file of each extension starts with when intact.
+// mp3 is left out: a legit one without an ID3 tag has no fixed header.
+var headerOf = map[string]string{
+	".docx": "PK\x03\x04", ".docm": "PK\x03\x04", ".xlsx": "PK\x03\x04", ".xlsm": "PK\x03\x04",
+	".pptx": "PK\x03\x04", ".odt": "PK\x03\x04", ".ods": "PK\x03\x04", ".odp": "PK\x03\x04",
+	".zip": "PK", ".jar": "PK\x03\x04", ".epub": "PK\x03\x04",
+	".doc": "\xD0\xCF\x11\xE0", ".xls": "\xD0\xCF\x11\xE0", ".ppt": "\xD0\xCF\x11\xE0", ".msg": "\xD0\xCF\x11\xE0",
+	".pdf": "%PDF", ".png": "\x89PNG", ".jpg": "\xFF\xD8\xFF", ".jpeg": "\xFF\xD8\xFF", ".gif": "GIF8",
+	".rtf": "{\\rtf", ".7z": "7z\xBC\xAF\x27\x1C", ".rar": "Rar!\x1A\x07", ".gz": "\x1F\x8B", ".tgz": "\x1F\x8B",
+	".bz2": "BZh", ".xz": "\xFD7zXZ\x00", ".psd": "8BPS", ".mkv": "\x1A\x45\xDF\xA3", ".webm": "\x1A\x45\xDF\xA3",
+	".wav": "RIFF", ".avi": "RIFF", ".webp": "RIFF", ".ogg": "OggS", ".flac": "fLaC",
+	".exe": "MZ", ".dll": "MZ", ".sqlite": "SQLite format 3\x00",
+	".mp4": "\x00ftyp", ".m4a": "\x00ftyp", ".mov": "\x00ftyp", ".heic": "\x00ftyp", // "ftyp" at offset 4
+}
+
+// headerGone reports whether a file named p, whose first bytes are b, lost
+// the header its extension promises: no known header now, and encrypted-
+// looking (entropy e).
+func headerGone(p string, b []byte, e float64) bool {
+	want, ok := headerOf[ext(p)]
+	if !ok || e < encryptedEntropy || knownMagic(b) {
+		return false
+	}
+	if strings.HasPrefix(want, "\x00ftyp") {
+		return len(b) < 8 || string(b[4:8]) != "ftyp"
+	}
+	return !strings.HasPrefix(string(b), want)
+}
+
+// confirmInplace is the confirmation of in-place writes alone: at least
+// half of the newest files read (up to 3) lost the header their extension
+// promises. High entropy without a header is not enough there: game assets,
+// packed data and compressed blobs are rewritten in place legitimately.
+func confirmInplace(targets []string) (bool, float64) {
+	read, gone := 0, 0
+	sum := 0.0
+	for i := len(targets) - 1; i >= 0 && read < 3; i-- {
+		f, err := os.Open(targets[i])
+		if err != nil {
+			continue
+		}
+		buf := make([]byte, entropySample)
+		n, _ := f.Read(buf)
+		f.Close()
+		if n < 512 {
+			continue
+		}
+		e := entropy(buf[:n])
+		sum += e
+		read++
+		if headerGone(targets[i], buf[:n], e) {
+			gone++
+		}
+	}
+	if read == 0 {
+		return false, 0
+	}
+	return gone*2 >= read, sum / float64(read)
 }

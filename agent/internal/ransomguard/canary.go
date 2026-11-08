@@ -68,7 +68,9 @@ type canaries struct {
 	files   map[string]string      // path -> sha256 of what we wrote
 	hits    map[string][]time.Time // path -> recent changes, within retireWindow
 	retired map[string]time.Time   // path -> when it was retired
-	cleaned bool                   // legacy canaries removed
+	// watching: canaries whose write is being followed (Guard.canaryWrite)
+	watching map[string]bool
+	cleaned  bool // legacy canaries removed
 }
 
 func newCanaries(dirs, names []string, visible bool) *canaries {
@@ -82,7 +84,8 @@ func newCanaries(dirs, names []string, visible bool) *canaries {
 		}
 	}
 	return &canaries{dirs: dirs, names: names, hide: !visible, fold: runtime.GOOS == "windows", now: time.Now,
-		files: map[string]string{}, hits: map[string][]time.Time{}, retired: map[string]time.Time{}}
+		files: map[string]string{}, hits: map[string][]time.Time{}, retired: map[string]time.Time{},
+		watching: map[string]bool{}}
 }
 
 func canaryContent() []byte {
@@ -255,6 +258,61 @@ func (c *canaries) verify() []canaryChange {
 		}
 	}
 	return bad
+}
+
+// watch starts following a write to canary p: it returns the hash planted
+// there, or false when p is not a canary any more or a write to it is
+// already followed.
+func (c *canaries) watch(p string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	want, ok := c.files[p]
+	if !ok || c.watching[p] {
+		return "", false
+	}
+	c.watching[p] = true
+	return want, true
+}
+
+func (c *canaries) unwatch(p string) {
+	c.mu.Lock()
+	delete(c.watching, p)
+	c.mu.Unlock()
+}
+
+// adopt takes p's new canary text (hash sum) as its content, if p still
+// holds what was planted (want): the periodic check then sees no change.
+func (c *canaries) adopt(p, want, sum string) {
+	c.mu.Lock()
+	if c.files[p] == want {
+		c.files[p] = sum
+	}
+	c.mu.Unlock()
+}
+
+// What a canary holds after a write.
+const (
+	canaryUnchanged = iota // what was planted, or unreadable for now
+	canaryText             // other canary text: the marker, not encrypted
+	canaryDestroyed        // no longer the canary: encrypted, or the text gone
+)
+
+// canaryState reads p and compares it with the planted hash want. It also
+// returns the hash of what it read.
+func canaryState(p, want string) (int, string) {
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return canaryUnchanged, ""
+	}
+	h := sha256.Sum256(data)
+	sum := hex.EncodeToString(h[:])
+	switch {
+	case sum == want:
+		return canaryUnchanged, sum
+	case strings.HasPrefix(string(data), canaryMarker) && !looksEncrypted(data):
+		return canaryText, sum
+	}
+	return canaryDestroyed, sum
 }
 
 // forget drops a changed canary so the next plant replaces it.
