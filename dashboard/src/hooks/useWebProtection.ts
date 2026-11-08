@@ -35,6 +35,27 @@ export interface WebPolicy {
   custom_page: boolean
 }
 
+export interface AgentWebHealth {
+  enabled: boolean
+  entries: number
+  version: string
+  group: string
+  ca_installed: boolean
+  ca_fingerprint: string
+  page_server: string
+  hosts_tampered: boolean
+  last_error: string
+}
+
+export interface AgentHealthRow {
+  agent_id: string
+  hostname: string
+  group_id: string
+  online: boolean
+  health: AgentWebHealth | null
+  health_at: string | null
+}
+
 export interface BlockFilter { q: string; source: string; status: string; offset: number }
 export const BLOCK_PAGE = 50
 const KEY = ['web-protection']
@@ -128,5 +149,13 @@ export function usePreviewPage(group: string) {
     mutationFn: (page_html: string | null) =>
       api.post(`/api/web-block-policies/${encodeURIComponent(group)}/preview`, { page_html })
         .then(r => (r.data as { html: string }).html),
+  })
+}
+
+export function useAgentWebHealth() {
+  return useQuery<{ items: AgentHealthRow[] }>({
+    queryKey: [...KEY, 'agents'],
+    queryFn: () => api.get('/api/web-blocks/agents').then(r => r.data),
+    refetchInterval: 30_000,
   })
 }

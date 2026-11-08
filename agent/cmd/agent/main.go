@@ -42,6 +42,7 @@ import (
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/unpack"
+	"github.com/siem-platform/agent/internal/webblock"
 	"github.com/siem-platform/agent/internal/winsensor"
 	"github.com/siem-platform/agent/internal/yarascan"
 )
@@ -66,6 +67,8 @@ func main() {
 	flag.StringVar(&opts.auditing, "enable-auditing", "", "with -configure on Windows: 1 to turn on logon/process/account auditing and PowerShell script block logging")
 	verifyUninstall := flag.Bool("verify-uninstall", false,
 		"exit 0 only if -token (or $SIEM_UNINSTALL_TOKEN) is this agent's uninstall token; used by the MSI and .deb/.rpm removal")
+	webblockCleanup := flag.Bool("webblock-cleanup", false,
+		"remove web protection (hosts block, trust-store CA and its key, saved list) and exit; works with the agent stopped, needs no network (used by package removal)")
 	uninstallToken := flag.String("token", "", "with -verify-uninstall: the uninstall token")
 	var ev evidenceCommand
 	flag.BoolVar(&ev.list, "evidence-list", false, "list held and quarantined durable evidence (agent stopped, as root/Administrator)")
@@ -96,6 +99,28 @@ func main() {
 		if err := heartbeat.VerifyUninstallToken(*configPath, token); err != nil {
 			fmt.Fprintln(os.Stderr, "siem-agent:", err)
 			os.Exit(3)
+		}
+		return
+	}
+
+	if *webblockCleanup {
+		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
+		// The hosts block and the trust store entry are removed whatever
+		// happens to the config; without one the default state dir is used.
+		var stateDir string
+		cfg, cfgErr := config.Load(*configPath)
+		if cfgErr == nil {
+			stateDir = task.StateDir(cfg)
+		} else {
+			slog.Error("webblock cleanup: could not load the config; using the default state directory", "err", cfgErr)
+			d, err := config.DefaultStateDir()
+			if err != nil {
+				slog.Error("webblock cleanup: no default state directory; removing the hosts block and trust store entry only", "err", err)
+			}
+			stateDir = d
+		}
+		if err := webblock.Cleanup(stateDir); err != nil || cfgErr != nil {
+			os.Exit(1)
 		}
 		return
 	}
@@ -429,6 +454,28 @@ func run(configPath string, stop <-chan struct{}) {
 		preventer.SetKnownMalware(malStore.Current(), malStore.File())
 	}
 	go malStore.SyncLoop(flowCtx, c)
+
+	// Web protection: the server's blocklist becomes a hosts block pointing at
+	// a local block page (see internal/webblock).
+	webStateDir := task.StateDir(cfg)
+	webStore := webblock.Open(webblock.ListPath(webStateDir))
+	webHost := mustHostname()
+	webCtl := &webblock.Controller{
+		Hosts:     webblock.NewHostsFile(),
+		Authority: &webblock.TrustStore{Dir: webStateDir},
+		Server:    &webblock.Server{Push: push, Hostname: webHost},
+		Hostname:  webHost,
+		StateDir:  webStateDir,
+	}
+	heartbeat.WebBlockHealth = func() any { return webCtl.Health() }
+	// OnChange applies the store's newest list, never an older one that lost
+	// a race with it.
+	webStore.OnChange = func(*webblock.List) { webCtl.ApplyCurrent(webStore.Current) }
+	// The first Apply may run trust tools for minutes: never hold up startup
+	// (Health reports the last finished Apply meanwhile).
+	go webCtl.ApplyCurrent(webStore.Current)
+	go webStore.SyncLoop(flowCtx, c)
+	go webCtl.Run(flowCtx, webStore)
 	malFiles.Excluded = func(path, sha string) bool {
 		return polStore.Current().Settings.Excluded(policy.ScopeMalware, policy.Match{Path: path, Image: path, SHA256: sha})
 	}
@@ -526,6 +573,7 @@ func run(configPath string, stop <-chan struct{}) {
 			fimWatcher.UpdatePaths(resp.FimPaths)
 			yaraScanner.Want(resp.YaraRulesHash)
 			malStore.Want(resp.MalwareHashesVersion)
+			webStore.Want(resp.WebBlocklistVersion)
 			polStore.Want(resp.PolicyVersion)
 			fwEngine.RefreshGuard(cfg.Server.URL)
 
@@ -586,6 +634,7 @@ func run(configPath string, stop <-chan struct{}) {
 	slog.Info("shutting down", "reason", getStopReason())
 	heartbeat.SendStopping(cfg, c, getStopReason())
 	stopFlows()
+	webCtl.Stop() // removes the block page redirect; the hosts block keeps names refused
 	mgr.StopAll()
 	for i := len(stopProducers) - 1; i >= 0; i-- {
 		stopProducers[i]()
@@ -681,7 +730,7 @@ func wait(ctx context.Context, d time.Duration) bool {
 // urgentLogTypes jump the legacy queue: a detection must reach the server
 // before the telemetry backlog ahead of it.
 var urgentLogTypes = map[string]bool{
-	malhash.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
+	malhash.LogType: true, webblock.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
 	ransomguard.LogType: true, mlscan.LogType: true, "local_detection": true, "linux_sensor_health": true,
 	scriptscan.LogType: true,
 }

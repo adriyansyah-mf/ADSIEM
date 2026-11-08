@@ -351,6 +351,12 @@ async def _migrate_agent_evidence_health() -> None:
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health JSONB"))
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health_at TIMESTAMPTZ"))
 
+async def _migrate_agent_web_block_health() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS web_block_health JSONB"))
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS web_block_health_at TIMESTAMPTZ"))
+
 async def _migrate_investigation_ledger_columns() -> None:
     """Columns the investigation ledger (services/investigation_ledger.py) adds to existing tables."""
     from sqlalchemy import text
@@ -501,6 +507,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_flow_poll()
         await _migrate_agent_integrity()
         await _migrate_agent_evidence_health()
+        await _migrate_agent_web_block_health()
         await _migrate_agent_update_columns()
         await _migrate_malware_hashes_tlsh()
         await _migrate_web_block_indexes()
