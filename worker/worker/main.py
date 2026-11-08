@@ -29,6 +29,7 @@ from worker.stream_maintenance import stream_maintenance_loop
 from worker.evidence_inbox import evidence_dispatch_loop, evidence_retention_loop
 from worker.knowledge import knowledge_loop
 from worker.malware_feed import malware_feed_loop
+from worker.webblock_feeds import webblock_feeds_loop
 from worker.soar.engine import soar_loop
 from worker.es_client import ensure_index as ensure_es_index
 from worker.alert_iocs import ensure_index as ensure_alert_iocs_index, backfill_once as alert_iocs_backfill
@@ -187,6 +188,7 @@ async def main():
         _supervise("sop_index", sop_index_loop),
         _supervise("knowledge", knowledge_loop),
         _supervise("malware_feed", malware_feed_loop),
+        _supervise("webblock_feeds", webblock_feeds_loop),
         _supervise("health_probe", health_probe_loop),
         alert_iocs_backfill(),
         return_exceptions=True,
