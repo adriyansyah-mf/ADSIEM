@@ -51,5 +51,20 @@ func TestCADirLoosePermissionsFixed(t *testing.T) {
 	if st.Mode().Perm() != 0o700 {
 		t.Fatalf("mode not fixed: %v", st.Mode())
 	}
-	_ = filepath.Join
+}
+
+func skipIfNotElevated(t *testing.T) {}
+
+func TestCASymlinkedKeyRefused(t *testing.T) {
+	_, state := newTestCA(t)
+	real := filepath.Join(t.TempDir(), "k")
+	b, _ := os.ReadFile(keyPath(state))
+	os.WriteFile(real, b, 0o600)
+	os.Remove(keyPath(state))
+	if err := os.Symlink(real, keyPath(state)); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := LoadOrCreateCA(state, "host1"); err == nil || created {
+		t.Fatalf("symlinked key accepted: %v created=%v", err, created)
+	}
 }

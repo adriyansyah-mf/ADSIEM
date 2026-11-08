@@ -9,19 +9,27 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
-const toolTimeout = 2 * time.Minute
-
 // Injectable for tests.
+// toolTimeout bounds one trust tool run (variable for tests).
+var toolTimeout = 2 * time.Minute
+
 var (
 	lookPath = exec.LookPath
-	// runTool runs the absolute tool path with a timeout.
+	// runTool runs the absolute tool path in its own process group with a
+	// timeout; on timeout the whole group is killed so a hung grandchild
+	// cannot keep the output pipe open.
 	runTool = func(path string, args ...string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), toolTimeout)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, path, args...).CombinedOutput()
+		cmd := exec.CommandContext(ctx, path, args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+		cmd.WaitDelay = 10 * time.Second
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return errors.New(filepath.Base(path) + ": " + err.Error() + ": " + string(out))
 		}
@@ -87,6 +95,8 @@ func installTrust(der []byte, fingerprint string) error {
 		if err := runTool(tool, t.args...); err != nil {
 			// Do not leave an anchor that looks installed: the next Ensure retries.
 			os.Remove(t.anchor)
+			// A bundle rewritten before a failing post-hook must not keep our CA.
+			_ = runTool(tool, t.args...)
 			return err
 		}
 		return nil

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func fakeTrust(t *testing.T) *[]string {
@@ -62,5 +63,34 @@ func TestFailedToolRemovesAnchor(t *testing.T) {
 	}
 	if trustInstalled(ca.Fingerprint()) {
 		t.Fatal("reported installed after failure")
+	}
+}
+
+func TestFailedToolRunsAgainBestEffort(t *testing.T) {
+	fakeTrust(t)
+	lookPath = func(n string) (string, error) { return "/abs/" + n, nil }
+	n := 0
+	runTool = func(string, ...string) error { n++; return errors.New("boom") }
+	ca, _ := newTestCA(t)
+	if err := installTrust(ca.DER, ca.Fingerprint()); err == nil || n != 2 {
+		t.Fatalf("err=%v runs=%d", err, n)
+	}
+}
+
+func TestRunToolKillsHungGrandchild(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "tool.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 300 &\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := toolTimeout
+	toolTimeout = 500 * time.Millisecond
+	defer func() { toolTimeout = old }()
+	start := time.Now()
+	err := runTool(script)
+	if err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if d := time.Since(start); d > 8*time.Second {
+		t.Fatalf("runTool blocked for %v", d)
 	}
 }

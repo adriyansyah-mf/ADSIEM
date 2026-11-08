@@ -144,6 +144,11 @@ func loadCA(dir string) (*CA, error) {
 	if err := secureDir(dir); err != nil {
 		return nil, err
 	}
+	for _, n := range []string{CACertFile, CAKeyFile} {
+		if err := checkSecretFile(filepath.Join(dir, n)); err != nil {
+			return nil, err
+		}
+	}
 	certPEM, err := os.ReadFile(filepath.Join(dir, CACertFile))
 	if err != nil {
 		return nil, err

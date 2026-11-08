@@ -78,3 +78,19 @@ func writeSecretFile(dir, name string, data []byte) error {
 	}
 	return nil
 }
+
+// checkSecretFile requires path, when present, to be a regular file (no
+// symlink) owned by the agent user.
+func checkSecretFile(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("webblock: %s is not a regular file", path)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != os.Geteuid() {
+		return fmt.Errorf("webblock: %s is not owned by the agent user", path)
+	}
+	return nil
+}

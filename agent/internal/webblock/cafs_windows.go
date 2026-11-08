@@ -29,9 +29,47 @@ func secAttrs(sddl string) (*windows.SecurityAttributes, *windows.SECURITY_DESCR
 	return sa, sd, nil
 }
 
+// openNoFollow opens path itself (never through a reparse point) with the
+// given access.
+func openNoFollow(path string, access uint32) (windows.Handle, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return 0, err
+	}
+	return windows.CreateFile(p, access,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
+		windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+}
+
+// checkHandle refuses reparse points and wrong object kinds, and requires the
+// owner to be SYSTEM or Administrators.
+func checkHandle(h windows.Handle, path string, wantDir bool) error {
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		return err
+	}
+	isDir := info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || isDir != wantDir {
+		return fmt.Errorf("webblock: %s is not a plain file or directory", path)
+	}
+	osd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	owner, _, err := osd.Owner()
+	if err != nil {
+		return err
+	}
+	if !owner.IsWellKnown(windows.WinLocalSystemSid) && !owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
+		return fmt.Errorf("webblock: %s has an unexpected owner", path)
+	}
+	return nil
+}
+
 // secureDir creates dir with a protected SYSTEM+Administrators DACL (so it is
 // never open to other users, even briefly), or verifies and re-applies that
-// DACL on an existing one. Reparse points and foreign owners are refused.
+// DACL on an existing one, all through one handle. Reparse points and foreign
+// owners are refused.
 func secureDir(dir string) error {
 	sa, sd, err := secAttrs(dirSDDL)
 	if err != nil {
@@ -47,31 +85,32 @@ func secureDir(dir string) error {
 	if err := windows.CreateDirectory(p, sa); err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		return err
 	}
-	attrs, err := windows.GetFileAttributes(p)
+	h, err := openNoFollow(dir, windows.READ_CONTROL|windows.WRITE_DAC)
 	if err != nil {
 		return err
 	}
-	if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || attrs&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
-		return fmt.Errorf("webblock: %s is not a plain directory", dir)
-	}
-	osd, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
-	if err != nil {
+	defer windows.CloseHandle(h)
+	if err := checkHandle(h, dir, true); err != nil {
 		return err
-	}
-	owner, _, err := osd.Owner()
-	if err != nil {
-		return err
-	}
-	if !owner.IsWellKnown(windows.WinLocalSystemSid) && !owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) {
-		return fmt.Errorf("webblock: %s has an unexpected owner", dir)
 	}
 	acl, _, err := sd.DACL()
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
+	return windows.SetSecurityInfo(h, windows.SE_FILE_OBJECT,
 		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
 		nil, nil, acl, nil)
+}
+
+// checkSecretFile requires path to be a plain file owned by SYSTEM or
+// Administrators.
+func checkSecretFile(path string) error {
+	h, err := openNoFollow(path, windows.READ_CONTROL)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+	return checkHandle(h, path, false)
 }
 
 // writeSecretFile creates a random-named temp file inside the protected

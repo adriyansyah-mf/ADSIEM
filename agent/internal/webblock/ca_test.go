@@ -17,6 +17,7 @@ import (
 
 func newTestCA(t *testing.T) (*CA, string) {
 	t.Helper()
+	skipIfNotElevated(t)
 	dir := t.TempDir()
 	ca, created, err := LoadOrCreateCA(dir, "host1")
 	if err != nil || !created {
@@ -108,7 +109,6 @@ func TestCARegeneratesWhenExpiring(t *testing.T) {
 func TestCARegeneratesWithoutServerAuthEKU(t *testing.T) {
 	ca, dir := newTestCA(t)
 	rewriteCert(t, ca, dir, func(c *x509.Certificate) { c.ExtKeyUsage = nil })
-	// Sanity: with the EKU the same cert is kept.
 	ca2, created, err := LoadOrCreateCA(dir, "host1")
 	if err != nil || !created || ca2.Fingerprint() == ca.Fingerprint() {
 		t.Fatalf("no-EKU CA must be regenerated: %v created=%v", err, created)
@@ -116,6 +116,7 @@ func TestCARegeneratesWithoutServerAuthEKU(t *testing.T) {
 	if len(ca2.Cert.ExtKeyUsage) != 1 {
 		t.Fatal("regenerated CA lacks EKU")
 	}
+	// With the EKU present the CA is kept.
 	_, created, _ = LoadOrCreateCA(dir, "host1")
 	if created {
 		t.Fatal("CA with EKU must be kept")
@@ -273,6 +274,7 @@ func TestEnsureOrdering(t *testing.T) {
 	doInstall = func([]byte, string) error { calls = append(calls, "install"); installed = true; return nil }
 	doInstalled = func(string) bool { return installed }
 
+	skipIfNotElevated(t)
 	ts := &TrustStore{Dir: t.TempDir()}
 	fp, err := ts.Ensure("host1")
 	if err != nil || len(fp) != 64 {

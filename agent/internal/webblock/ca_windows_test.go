@@ -9,6 +9,13 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+func skipIfNotElevated(t *testing.T) {
+	t.Helper()
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("the CA directory is owned by Administrators; run this test elevated")
+	}
+}
+
 func assertProtectedSYBA(t *testing.T, path string) {
 	t.Helper()
 	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
@@ -53,6 +60,7 @@ func assertProtectedSYBA(t *testing.T, path string) {
 }
 
 func TestWindowsCAFilesProtected(t *testing.T) {
+	skipIfNotElevated(t)
 	state := t.TempDir()
 	if _, _, err := LoadOrCreateCA(state, "h"); err != nil {
 		t.Fatal(err)
