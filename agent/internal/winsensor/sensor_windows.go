@@ -96,11 +96,14 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 			EventIDs: dnsEventIDs}}}, dnsEvent},
 	}
 	if !off[GroupFile] {
+		// Writes ride in the same session as the opens that name them, so
+		// an open is seen before the writes through its FileObject.
+		keywords, ids := fileProvider(opts.OnFile != nil)
 		configs = append(configs, struct {
 			cfg etw.Config
 			k   kind
 		}{etw.Config{Name: "SIEMAgent-File", Providers: []etw.Provider{{GUID: kernelFileProvider,
-			Keywords: kernelFileKeywords, EventIDs: fileEventIDs}}}, fileEvent})
+			Keywords: keywords, EventIDs: ids}}}, fileEvent})
 	}
 	if !off[GroupImage] {
 		configs = append(configs, struct {

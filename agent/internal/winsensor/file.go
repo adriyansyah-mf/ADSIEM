@@ -40,10 +40,38 @@ const (
 )
 
 // Keywords: FILENAME, CREATE, DELETE_PATH, RENAME_SETLINK_PATH, CREATE_NEW_FILE.
-// Reads, writes and closes never reach the agent.
+// Reads and closes never reach the agent; writes only when the guard listens.
 const kernelFileKeywords = 0x10 | 0x80 | 0x400 | 0x800 | 0x1000
 
 var fileEventIDs = []uint16{fileCreate, fileDeletePath, fileRenamePath, fileCreateNew}
+
+// Kernel-File Write (KERNEL_FILE_KEYWORD_WRITE): ByteOffset, Irp, FileObject,
+// FileKey, IssuingThreadId, IOSize, IOFlags, ExtraFlags, and no name. The
+// header PID is the writer; the name comes from the open (fileCreate) of the
+// same FileObject. Writes only feed the anti-ransomware guard (an in-place
+// encryptor neither renames nor deletes): they are never SIEM lines.
+const (
+	fileWrite    = 16
+	writeKeyword = 0x200
+	// maxWrites bounds the (pid, file) set that makes a file written in
+	// many chunks one event per fileWindow.
+	maxWrites = 16384
+)
+
+// fileProvider is the Kernel-File session's keywords and event IDs: with
+// writes only for the guard.
+func fileProvider(guard bool) (uint64, []uint16) {
+	if !guard {
+		return kernelFileKeywords, fileEventIDs
+	}
+	return kernelFileKeywords | writeKeyword, append(append([]uint16{}, fileEventIDs...), fileWrite)
+}
+
+// writeKey is a process and the device path it writes.
+type writeKey struct {
+	pid  uint32
+	name string
+}
 
 // Microsoft-Windows-Kernel-Process ImageLoad (WINEVENT_KEYWORD_IMAGE): ProcessID,
 // ImageName (an NT device path). A load into PID 0 or 4 is a kernel driver.
@@ -89,7 +117,8 @@ type Options struct {
 	OnScript func(AMSIScript)
 }
 
-// FileEvent is one file create, rename or delete, before rate limiting: the
+// FileEvent is one file create, rename or delete, before rate limiting, or a
+// write (one per process and file a minute, never a SIEM line): the
 // anti-ransomware heuristics (internal/ransomguard) see every one. Image may
 // be empty or a bare name for a process whose start has not arrived yet.
 type FileEvent struct {
@@ -98,7 +127,7 @@ type FileEvent struct {
 	PPID   uint32
 	Image  string
 	User   string
-	Action string // create, rename, delete
+	Action string // create, write, rename, delete
 	Path   string // the new name for a rename
 	From   string // the old name for a rename, when known
 }
@@ -121,7 +150,8 @@ type fileTracker struct {
 	// onFile, when set, sees every file event before the budget.
 	onFile func(FileEvent)
 
-	objects map[string]string // FileObject -> device path of its open
+	objects map[string]string      // FileObject -> device path of its open
+	writes  map[writeKey]time.Time // a write reported to onFile -> when
 	windows map[uint32]*fileWindowState
 	images  map[string]time.Time // image|dll (or driver path) -> last reported
 	// deferred lines wait for their process's start, which comes through
@@ -152,7 +182,8 @@ func newFileTracker(j *processJoiner, self uint32, longPath func(string) string)
 		longPath = func(p string) string { return p }
 	}
 	return &fileTracker{j: j, self: self, longPath: longPath, now: time.Now,
-		objects: map[string]string{}, windows: map[uint32]*fileWindowState{}, images: map[string]time.Time{}}
+		objects: map[string]string{}, writes: map[writeKey]time.Time{}, windows: map[uint32]*fileWindowState{},
+		images: map[string]time.Time{}}
 }
 
 // out is one line for the buffer.
@@ -196,8 +227,50 @@ func (t *fileTracker) file(ev *etw.Event) []out {
 	case fileDeletePath:
 		name, _ := ev.Get("FilePath")
 		return t.emit(ev.PID, "delete", t.path(name), "")
+	case fileWrite:
+		t.write(ev)
 	}
 	return nil
+}
+
+// write hands a Kernel-File write to onFile as a "write" of the file its
+// FileObject was opened as, once per process and file per fileWindow. It
+// ships nothing. Writes by System (the lazy writer and paging I/O flushing
+// what a process wrote earlier) and through unknown objects are dropped.
+// This runs for every write on the host: a map lookup in the common case.
+func (t *fileTracker) write(ev *etw.Event) {
+	if t.onFile == nil || ev.PID == 0 || ev.PID == 4 {
+		return
+	}
+	obj, _ := ev.Get("FileObject")
+	name := t.objects[obj]
+	if name == "" {
+		return
+	}
+	now := t.now()
+	k := writeKey{ev.PID, name}
+	if last, ok := t.writes[k]; ok && now.Sub(last) < fileWindow {
+		return
+	}
+	if len(t.writes) >= maxWrites {
+		for k, last := range t.writes {
+			if now.Sub(last) >= fileWindow {
+				delete(t.writes, k)
+			}
+		}
+		if len(t.writes) >= maxWrites {
+			t.writes = map[writeKey]time.Time{}
+		}
+	}
+	t.writes[k] = now
+	target := t.path(name)
+	if target == "" {
+		return
+	}
+	if strings.Contains(target, "~") { // 8.3 components: the canaries and the guard use long names
+		target = t.longPath(target)
+	}
+	t.notify(ev.PID, "write", target, "", now)
 }
 
 // path is a drive-letter path, or "" for what is not a file on a volume
@@ -224,17 +297,7 @@ func (t *fileTracker) emit(pid uint32, action, target, source string) []out {
 		return nil
 	}
 	now := t.now()
-	if t.onFile != nil {
-		image, user := t.j.owner(pid)
-		var ppid uint32
-		if p := t.j.known[pid]; p != nil {
-			ppid = p.ppid
-		} else if p := t.j.pending[pid]; p != nil {
-			ppid = p.ppid
-		}
-		t.onFile(FileEvent{Time: now, PID: pid, PPID: ppid, Image: image, User: user,
-			Action: action, Path: target, From: source})
-	}
+	t.notify(pid, action, target, source, now)
 	w := t.windows[pid]
 	var res []out
 	if w == nil || now.Sub(w.start) >= fileWindow {
@@ -273,6 +336,22 @@ func (t *fileTracker) emit(pid uint32, action, target, source string) []out {
 		w.sample = target
 	}
 	return res
+}
+
+// notify hands one file event to onFile, if set.
+func (t *fileTracker) notify(pid uint32, action, target, source string, now time.Time) {
+	if t.onFile == nil {
+		return
+	}
+	image, user := t.j.owner(pid)
+	var ppid uint32
+	if p := t.j.known[pid]; p != nil {
+		ppid = p.ppid
+	} else if p := t.j.pending[pid]; p != nil {
+		ppid = p.ppid
+	}
+	t.onFile(FileEvent{Time: now, PID: pid, PPID: ppid, Image: image, User: user,
+		Action: action, Path: target, From: source})
 }
 
 func (t *fileTracker) summary(pid uint32, w *fileWindowState) []out {
