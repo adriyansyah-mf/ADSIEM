@@ -1,0 +1,38 @@
+title: Suspicious Command Typed Into The Run Dialog
+id: rule-win-registry-runmru-clickfix
+description: >-
+  Windows recorded a Win+R command (RunMRU) that starts PowerShell, mshta or
+  a download, or carries fake "I am not a robot" verification text: the
+  ClickFix lure, where a web page copies a command to the clipboard and asks
+  the user to paste and run it (T1204.004). Details is the command as the
+  user ran it. Fires even when the process itself was not caught.
+logsource:
+  product: windows
+  category: registry_set
+detection:
+  run_mru:
+    TargetObject|contains: '\Explorer\RunMRU\'
+  suspicious:
+    Details|contains:
+      - 'powershell'
+      - 'pwsh'
+      - 'mshta'
+      - 'http://'
+      - 'https://'
+      - 'iwr '
+      - 'irm '
+      - 'iex'
+      - 'curl'
+      - 'FromBase64String'
+      - ' -enc '
+      - ' -e '
+      - 'bitsadmin'
+      - 'certutil'
+      - 'captcha'
+      - 'not a robot'
+      - 'Verification ID'
+  condition: run_mru and suspicious
+level: high
+tags:
+  - attack.execution
+  - attack.t1204.004

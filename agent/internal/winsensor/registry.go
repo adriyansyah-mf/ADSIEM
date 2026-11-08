@@ -48,6 +48,19 @@ var userSpecs = []regSpec{
 	{path: `Software\Microsoft\Windows NT\CurrentVersion\Winlogon`, values: []string{"Shell"}},
 	{path: `Software\Microsoft\Windows NT\CurrentVersion\Windows`, values: []string{"Load", "Run"}},
 	{path: `Environment`, values: []string{"UserInitMprLogonScript"}},
+	// What the user typed into Win+R, one value per letter (MRUList, the
+	// order, changes on every use and is left out): ClickFix lures have the
+	// user paste a command there (rules/win_registry_runmru_clickfix.yaml).
+	{path: `Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU`, values: runMRUValues()},
+}
+
+// runMRUValues are RunMRU's entry names, a to z.
+func runMRUValues() []string {
+	out := make([]string, 0, 26)
+	for c := 'a'; c <= 'z'; c++ {
+		out = append(out, string(c))
+	}
+	return out
 }
 
 // regSnapshot is what a spec saw: value TargetObject -> Details, and the
