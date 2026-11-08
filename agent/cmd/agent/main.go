@@ -456,6 +456,7 @@ func run(configPath string, stop <-chan struct{}) {
 		Authority: &webblock.TrustStore{Dir: webStateDir},
 		Server:    &webblock.Server{Push: push, Hostname: webHost},
 		Hostname:  webHost,
+		StateDir:  webStateDir,
 	}
 	heartbeat.WebBlockHealth = func() any { return webCtl.Health() }
 	webStore.OnChange = webCtl.Apply

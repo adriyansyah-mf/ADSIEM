@@ -99,7 +99,9 @@ case "$1" in
       echo "Run: sudo SIEM_UNINSTALL_TOKEN=<token> apt remove siem-agent" >&2
       exit 1
     fi
-    # drop the web protection hosts block, trust-store CA and its key
+    # stop the agent first so it cannot rewrite the hosts block, then drop the
+    # web protection hosts block, trust-store CA and its key
+    systemctl stop siem-agent.service 2>/dev/null || true
     [ -x /usr/bin/siem-agent ] && \
       /usr/bin/siem-agent -webblock-cleanup -config /etc/siem-agent/config.yaml || true
     ;;

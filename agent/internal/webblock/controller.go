@@ -60,6 +60,9 @@ type Controller struct {
 	Authority Authority
 	Server    PageServer
 	Hostname  string
+	// StateDir is where <StateDir>/webblock holds the CA files; used to tell
+	// whether an inactive start has anything of ours to remove.
+	StateDir string
 
 	mu sync.Mutex
 	// what the last Apply left in place
@@ -112,14 +115,24 @@ func (c *Controller) deactivate(l *List) {
 		errs = append(errs, fmt.Errorf("hosts: %w", err))
 	}
 	c.Server.Stop()
-	if err := c.Authority.Remove(); err != nil {
-		errs = append(errs, fmt.Errorf("ca: %w", err))
+	if c.caOK || c.Authority.Installed() || c.caFilesExist() {
+		if err := c.Authority.Remove(); err != nil {
+			errs = append(errs, fmt.Errorf("ca: %w", err))
+		}
 	}
 	c.off = len(errs) == 0
 	c.caOK, c.ca, c.startCA, c.started, c.hostsOK, c.hostsKey = false, nil, nil, false, false, ""
 	c.snap.Store(nil)
 	c.health = Health{Version: l.Version, Group: l.Group}
 	c.setErr(errs)
+}
+
+func (c *Controller) caFilesExist() bool {
+	if c.StateDir == "" {
+		return false
+	}
+	_, err := os.Stat(caDir(c.StateDir))
+	return err == nil
 }
 
 func (c *Controller) setErr(errs []error) {
@@ -141,6 +154,10 @@ func (c *Controller) activate(l *List, force bool) {
 	}
 	c.snap.Store(sn)
 
+	if force && c.caOK && !c.Authority.Installed() {
+		// an admin removed the CA from the trust store, or its files are gone
+		c.caOK = false
+	}
 	if !c.caOK {
 		fp, err := c.Authority.Ensure(c.Hostname)
 		if err != nil {
@@ -189,6 +206,7 @@ func (c *Controller) activate(l *List, force bool) {
 		}
 	}
 
+	c.health.CAInstalled = c.caOK && c.Authority.Installed()
 	c.health.Enabled, c.health.Entries = true, len(domains)
 	c.health.Version, c.health.Group = l.Version, l.Group
 	c.setErr(errs)
@@ -211,9 +229,6 @@ func (c *Controller) Health() Health {
 	c.mu.Lock()
 	h := c.health
 	c.mu.Unlock()
-	if h.Enabled && c.Authority != nil {
-		h.CAInstalled = c.Authority.Installed()
-	}
 	return h
 }
 

@@ -50,6 +50,9 @@ type fakeAuth struct {
 	ensureErr error
 	ca        *CA
 	installed bool
+
+	countInstalled bool
+	installedCalls int
 }
 
 func (a *fakeAuth) Ensure(string) (string, error) {
@@ -60,8 +63,13 @@ func (a *fakeAuth) Ensure(string) (string, error) {
 	a.installed = true
 	return "fp1", nil
 }
-func (a *fakeAuth) Remove() error   { a.rec.add("ca.remove"); a.installed = false; return nil }
-func (a *fakeAuth) Installed() bool { return a.installed }
+func (a *fakeAuth) Remove() error { a.rec.add("ca.remove"); a.installed = false; return nil }
+func (a *fakeAuth) Installed() bool {
+	if a.countInstalled {
+		a.installedCalls++
+	}
+	return a.installed
+}
 func (a *fakeAuth) CA() *CA {
 	if a.installed {
 		return a.ca
@@ -173,6 +181,7 @@ func TestApplyInactive(t *testing.T) {
 
 func TestApplyDisabledPolicyIsInactive(t *testing.T) {
 	c, _, _, _, rec := newCtl(t)
+	c.Authority.(*fakeAuth).installed = true
 	l := listOf("g:1", "p", "evil.example")
 	l.Policy.Enabled = false
 	c.Apply(l)
@@ -346,5 +355,71 @@ func TestCleanupExitCodeOnlyForHosts(t *testing.T) {
 	}
 	if rec.count("ca.remove") != 1 {
 		t.Fatal("trust store skipped")
+	}
+}
+
+func TestInactiveStartWithNothingToRemove(t *testing.T) {
+	c, _, _, _, rec := newCtl(t)
+	c.StateDir = t.TempDir()
+	c.Apply(Empty())
+	if rec.count("ca.remove") != 0 || c.Health().LastError != "" {
+		t.Fatalf("log %v err %q", rec.log, c.Health().LastError)
+	}
+	// CA files left behind are removed
+	os.MkdirAll(filepath.Join(c.StateDir, CADirName), 0o700)
+	c2, _, _, _, rec2 := newCtl(t)
+	c2.StateDir = c.StateDir
+	c2.Apply(Empty())
+	if rec2.count("ca.remove") != 1 {
+		t.Fatalf("log %v", rec2.log)
+	}
+}
+
+func TestHealthDoesNotQueryTrustStore(t *testing.T) {
+	c, _, a, _, _ := newCtl(t)
+	a.countInstalled = true
+	c.Apply(listOf("g:1", "p", "evil.example"))
+	n := a.installedCalls
+	c.Health()
+	c.Health()
+	if a.installedCalls != n || !c.Health().CAInstalled {
+		t.Fatalf("calls %d -> %d, health %+v", n, a.installedCalls, c.Health())
+	}
+}
+
+func TestReapplyRepairsRemovedCA(t *testing.T) {
+	c, _, a, s, rec := newCtl(t)
+	l := listOf("g:1", "p", "evil.example")
+	c.Apply(l)
+	a.installed = false // admin removed it from the trust store
+	ca2, err := generateCA("host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.ca = ca2 // Ensure regenerates it
+	c.reapply(l)
+	if rec.count("ca.ensure") != 2 || len(s.starts) != 2 || s.starts[1].ca != ca2 {
+		t.Fatalf("log %v starts %d", rec.log, len(s.starts))
+	}
+	if !c.Health().CAInstalled || c.Health().LastError != "" {
+		t.Fatalf("%+v", c.Health())
+	}
+	// a plain Apply does not re-check
+	a.installed = false
+	c.Apply(l)
+	if rec.count("ca.ensure") != 2 {
+		t.Fatalf("Apply re-ensured: %v", rec.log)
+	}
+}
+
+func TestReapplyCARepairFailureRecorded(t *testing.T) {
+	c, _, a, _, _ := newCtl(t)
+	l := listOf("g:1", "p", "evil.example")
+	c.Apply(l)
+	a.installed = false
+	a.ensureErr = errors.New("denied")
+	c.reapply(l)
+	if h := c.Health(); !strings.Contains(h.LastError, "denied") || h.CAInstalled {
+		t.Fatalf("%+v", h)
 	}
 }

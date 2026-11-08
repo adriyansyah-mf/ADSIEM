@@ -235,8 +235,9 @@ type HeartbeatResponse struct {
 	// "<seq>:<action>" of the known-malware hash set, "" when it is off (or
 	// the server is older); changes are fetched from /api/ingest/malware-hashes.
 	MalwareHashesVersion string `json:"malware_hashes_version"`
-	// "<group>:<seq>[+]" of the web blocklist, "" when web protection is off
-	// (or the server is older); changes come from /api/ingest/web-blocklist.
+	// Opaque version of the web blocklist, compared as a string only (the
+	// server's format is "<group>:<seq>[+]"); "" when web protection is off
+	// (or the server is older). Changes come from /api/ingest/web-blocklist.
 	WebBlocklistVersion string `json:"web_blocklist_version"`
 	// Version of the group policy (internal/policy); "" from older servers.
 	PolicyVersion string `json:"policy_version"`
