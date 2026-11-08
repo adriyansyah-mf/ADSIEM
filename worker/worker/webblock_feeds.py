@@ -18,9 +18,11 @@ import asyncio
 import csv
 import io
 import json
+import logging
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Awaitable, Callable
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 import structlog
@@ -35,7 +37,7 @@ log = structlog.get_logger()
 STATE_PREFIX = "siem:webblock_feed:"          # + name; server-api reads it
 SYNC_QUEUE = "siem:webblock_feed:sync"
 LOCK_PREFIX = "siem:webblock_feed:lock:"
-URLHAUS_URL = "https://urlhaus.abuse.ch/downloads/csv_online/"
+URLHAUS_URL = "https://urlhaus-api.abuse.ch/v2/files/exports/{key}/online.csv"
 PHISHTANK_URL = "https://data.phishtank.com/data/{key}/online-valid.json"
 INTERVALS = {"urlhaus": 30 * 60, "phishtank": 60 * 60}
 LOOP_INTERVAL = 60
@@ -89,25 +91,55 @@ def parse_phishtank(body: str, limit: int = MAX_URLS) -> Parsed:
 PARSERS = {"urlhaus": parse_urlhaus, "phishtank": parse_phishtank}
 
 
+_private_feed_request: ContextVar[bool] = ContextVar("private_feed_request", default=False)
+
+
+class _FeedTransportFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not _private_feed_request.get()
+
+
+_transport_filter = _FeedTransportFilter()
+
+
+def _protect_transport_logs() -> None:
+    # HTTPX logs the full URL at INFO; HTTPCore DEBUG can include Location
+    # headers and exception URLs. Context-local filtering preserves other tasks'
+    # diagnostics without racing global logger levels or retaining old keys.
+    for name in ("httpx", "httpcore.connection", "httpcore.http11", "httpcore.http2",
+                 "httpcore.proxy", "httpcore.socks"):
+        logging.getLogger(name).addFilter(_transport_filter)
+
+
 async def _get(url: str, headers: dict) -> str:
-    """GET with a byte cap. Redirects are followed by hand and the key header is
-    dropped when the host changes (the PhishTank key is in the URL path, which
-    is never re-sent to another host either)."""
-    host = urlsplit(url).hostname
+    """Bounded GET; credential-bearing URLs may redirect only within their HTTPS origin."""
+    _protect_transport_logs()
+    token = _private_feed_request.set(True)
+    try:
+        return await _get_private(url, headers)
+    finally:
+        _private_feed_request.reset(token)
+
+
+async def _get_private(url: str, headers: dict) -> str:
+    initial = urlsplit(url)
+    origin = (initial.hostname, initial.port or 443)
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
         for _ in range(MAX_REDIRECTS + 1):
-            same = urlsplit(url).hostname == host
-            async with client.stream("GET", url, headers=headers if same else {}) as r:
+            async with client.stream("GET", url, headers=headers) as r:
                 if r.is_redirect and r.headers.get("location"):
                     url = str(r.url.join(r.headers["location"]))
-                    if urlsplit(url).hostname != host:
-                        headers = {}
+                    target = urlsplit(url)
+                    if (target.scheme != "https" or target.username is not None
+                            or target.password is not None
+                            or (target.hostname, target.port or 443) != origin):
+                        raise RuntimeError("unsafe feed redirect")
                     continue
                 if r.status_code in (401, 403):
                     raise RuntimeError(f"feed refused the key (HTTP {r.status_code})")
                 try:
                     r.raise_for_status()
-                except httpx.HTTPStatusError as exc:  # its message holds the URL, and the URL can hold the key
+                except httpx.HTTPStatusError as exc:
                     raise RuntimeError(f"HTTP {exc.response.status_code}") from None
                 length = r.headers.get("content-length", "")
                 if length.isdigit() and int(length) > MAX_BYTES:
@@ -122,11 +154,11 @@ async def _get(url: str, headers: dict) -> str:
 
 
 async def fetch_urlhaus(key: str) -> str:
-    return await _get(URLHAUS_URL, {"Auth-Key": key})
+    return await _get(URLHAUS_URL.format(key=quote(key, safe="")), {})
 
 
 async def fetch_phishtank(key: str) -> str:
-    return await _get(PHISHTANK_URL.format(key=key), {"User-Agent": "phishtank/adsiem"})
+    return await _get(PHISHTANK_URL.format(key=quote(key, safe="")), {"User-Agent": "phishtank/adsiem"})
 
 
 FETCHERS: dict[str, Fetch] = {"urlhaus": fetch_urlhaus, "phishtank": fetch_phishtank}
@@ -269,7 +301,7 @@ async def sync_once(redis, name: str, key: str, fetch: Fetch | None = None, now:
 def redact(message: str, keys) -> str:
     for key in keys:
         if key:
-            message = message.replace(key, "***")
+            message = message.replace(quote(key, safe=""), "***").replace(key, "***")
     return message
 
 

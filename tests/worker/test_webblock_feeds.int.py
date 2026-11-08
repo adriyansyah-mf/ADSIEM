@@ -210,13 +210,13 @@ async def test_auth_key_is_not_sent_to_another_host(feeds, monkeypatch):
     seen = []
 
     def handler(request):
-        seen.append((request.url.host, request.headers.get("auth-key")))
-        if request.url.host == "urlhaus.abuse.ch":
-            return httpx.Response(302, headers={"location": "https://elsewhere.example/x"})
-        return httpx.Response(200, text="ok")
+        seen.append(request)
+        return httpx.Response(302, headers={"location": "https://elsewhere.example/KEY"})
     mock_http(monkeypatch, feeds, handler)
-    assert await feeds.fetch_urlhaus("KEY") == "ok"
-    assert seen == [("urlhaus.abuse.ch", "KEY"), ("elsewhere.example", None)]
+    with pytest.raises(RuntimeError, match="unsafe feed redirect"):
+        await feeds.fetch_urlhaus("KEY")
+    assert len(seen) == 1
+    assert seen[0].url.host == "urlhaus-api.abuse.ch"
 
 
 async def test_empty_feed_is_an_error_and_keeps_rows(feeds, sessions, monkeypatch):

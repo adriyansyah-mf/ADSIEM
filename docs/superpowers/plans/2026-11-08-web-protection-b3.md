@@ -52,7 +52,7 @@ Commit: `fix(webblock): commit seqs in order with an advisory lock`.
 **Files:** create `worker/worker/webblock_feeds.py`; modify `worker/worker/main.py` (loop in the gather); tests `tests/worker/test_webblock_feeds.py` (parsers, pure) and `tests/worker/test_webblock_feeds.int.py` (DB upserts, expiry; schema-per-test fixture like `tests/worker/test_alert_iocs_backfill.int.py`).
 
 - Read `worker/worker/malware_feed.py` and copy its structure (loop interval, `_due`, Redis state key, `get_setting`, httpx client, error handling).
-- URLhaus: `GET https://urlhaus.abuse.ch/downloads/csv_online/` with header `Auth-Key: <key>`; CSV with `#` comment lines; columns `id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter`. Keep `url_status == online`. Reason `URLhaus: <threat>` (+ first tag), `sample_url` = url.
+- URLhaus: `GET https://urlhaus-api.abuse.ch/v2/files/exports/<key>/online.csv` with the key encoded as a URL path segment; CSV with `#` comment lines; columns `id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter`. Keep `url_status == online`. Reason `URLhaus: <threat>` (+ first tag), `sample_url` = url.
 - PhishTank: `GET https://data.phishtank.com/data/<key>/online-valid.json` (User-Agent `phishtank/adsiem`), JSON list with `url`, `verified`, `online`, `target`. Keep `verified == "yes"` and `online == "yes"`. Reason `PhishTank: phishing (<target>)`.
 - Per feed run: normalize each URL host (`DomainError` → skip, counted), dedupe by domain, check the global allowlist (`web_allowlist` rows with `group_id='*'` and `enabled`), then upsert in batches of 1000 inside `lock_seq_writes`: `INSERT … ON CONFLICT (group_id, domain, source) DO UPDATE SET last_seen_in_feed = now(), reason = EXCLUDED.reason, sample_url = EXCLUDED.sample_url, status = EXCLUDED.status, seq = <next>, updated_at = now()` — but only bump `seq` (and `updated_at`) when `status`/`reason` actually changed (use `WHERE web_block_entries.status IS DISTINCT FROM EXCLUDED.status OR web_block_entries.reason IS DISTINCT FROM EXCLUDED.reason`, and a second statement that only touches `last_seen_in_feed` for unchanged rows) so an unchanged feed does not make every agent resync. Then mark rows of that source with `last_seen_in_feed < now() - 24h` and `status = 'active'` as `removed` (seq bump, locked).
 - The worker writes with SQL (`text()`), using the same lock constant; no ORM model duplication needed.
@@ -90,3 +90,11 @@ Commit: `feat(webblock): no www. lines for feed entries; jitter fleet syncs`.
 
 ## Final verification
 All commands in "Test commands"; then push and let CI run the Linux/Windows e2e.
+
+
+## Final review corrections (2026-11-08)
+
+- The legacy URLhaus `downloads/csv_online/` endpoint returns HTTP 410 Gone. Use the authenticated v2 `online.csv` export, preserving the active-only dataset. Both feed keys are URL path segments, so redirects must stay on the original HTTPS origin and HTTP client logs must not expose credential-bearing URLs. Sources: [URLhaus Community API](https://urlhaus.abuse.ch/api/) and the URLhaus export schema embedded in the [official abuse.ch API reference](https://abusech-docs.spamhaus.com/api-reference).
+- A pending fleet jitter must be interrupted when protection is disabled or the endpoint changes group.
+- Unblocking a global manual entry must not create an allowlist exemption; persistent global allowlisting is reserved for feed entries.
+- Alert auto-block writes a group-scoped audit row in the same transaction as the block and alert note, as required by the B3 design.
