@@ -1,6 +1,7 @@
 # server-api/app/api/routes/web_protection.py
 """Web Protection (spec B1): agents sync the blocklist here; the dashboard
 manages the blocklist, allowlist, policy and block page."""
+import json
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Optional
 from uuid import UUID
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_agent, get_scoped_group, require_permission
+from app.core.llm_gateway import get_setting
+from app.core.redis_client import get_redis
 from app.models.models import Agent, User, WebAllowRule, WebBlockEntry, WebBlockPolicy
 from app.services import web_blocks, web_page
 from app.services.audit import audit_log
@@ -47,6 +50,12 @@ async def agent_web_blocklist(
 router = APIRouter(tags=["web-protection"])
 Read = Depends(require_permission("alerts:read"))
 Manage = Depends(require_permission("agents:manage"))
+SettingsManage = Depends(require_permission("settings:manage"))
+
+# worker/worker/webblock_feeds.py owns these; the worker package cannot be imported here without its DB engine
+FEED_STATE_PREFIX = "siem:webblock_feed:"
+FEED_SYNC_QUEUE = "siem:webblock_feed:sync"
+FEED_KEYS = {"urlhaus": ("abusech_auth_key", "malwarebazaar_api_key"), "phishtank": ("phishtank_app_key",)}
 
 
 def _target_group(group_filter: Optional[str], requested: Optional[str]) -> str:
@@ -151,6 +160,7 @@ async def list_blocks(
 
 async def _block_one(db: AsyncSession, user: User, target: str, value: str, reason: str,
                      expires_at: Optional[datetime]) -> WebBlockEntry:
+    await web_blocks.lock_seq_writes(db)
     try:
         domain = normalize(value)
     except DomainError as exc:
@@ -172,6 +182,7 @@ async def _block_one(db: AsyncSession, user: User, target: str, value: str, reas
 
 
 async def _unblock_one(db: AsyncSession, user: User, group: Optional[str], entry_id: UUID) -> dict:
+    await web_blocks.lock_seq_writes(db)
     row = await db.get(WebBlockEntry, entry_id)
     if row is None or (group is not None and row.group_id not in (group, web_blocks.FEED_GROUP)):
         raise HTTPException(status_code=404, detail="Block not found")
@@ -187,8 +198,19 @@ async def _unblock_one(db: AsyncSession, user: User, group: Optional[str], entry
         await audit_log(db, user.id, "web_block.allowlist_feed", "web_block", str(row.id), {"domain": row.domain, "group_id": group})
         return {"status": "allowlisted"}
     row.status, row.seq = "removed", web_blocks.next_seq()
-    await db.commit()
-    web_blocks.invalidate()
+    if row.group_id == web_blocks.FEED_GROUP and row.source in FEED_KEYS:
+        # a global unblock of a feed entry: allowlist it so the next feed sync stores it suppressed
+        rule = (await db.execute(select(WebAllowRule).where(
+            WebAllowRule.group_id == web_blocks.FEED_GROUP, WebAllowRule.domain == row.domain))).scalar_one_or_none()
+        if rule is None:
+            db.add(WebAllowRule(group_id=web_blocks.FEED_GROUP, domain=row.domain, include_subdomains=False,
+                                created_by=await _actor(db, user)))
+        else:
+            rule.enabled = True
+        await _commit(db, lambda session: web_blocks.mark_rules_changed(session, web_blocks.FEED_GROUP))
+    else:
+        await db.commit()
+        web_blocks.invalidate()
     await audit_log(db, user.id, "web_block.remove", "web_block", str(row.id), {"domain": row.domain})
     return {"status": "removed"}
 
@@ -255,6 +277,7 @@ async def add_rule(body: RuleIn, db: AsyncSession = Depends(get_db), user: User 
         domain = normalize(body.domain)
     except DomainError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    await web_blocks.lock_seq_writes(db)
     row = (await db.execute(select(WebAllowRule).where(
         WebAllowRule.group_id == target, WebAllowRule.domain == domain))).scalar_one_or_none()
     if row is None:
@@ -279,6 +302,7 @@ async def _own_rule(db, rule_id: UUID, group: Optional[str]) -> WebAllowRule:
 @router.patch("/api/web-allowlist/{rule_id}")
 async def update_rule(rule_id: UUID, body: RulePatch, db: AsyncSession = Depends(get_db), user: User = Manage,
                       group: Optional[str] = Depends(get_scoped_group)):
+    await web_blocks.lock_seq_writes(db)
     row = await _own_rule(db, rule_id, group)
     if body.enabled is not None:
         row.enabled = body.enabled
@@ -293,6 +317,7 @@ async def update_rule(rule_id: UUID, body: RulePatch, db: AsyncSession = Depends
 @router.delete("/api/web-allowlist/{rule_id}")
 async def delete_rule(rule_id: UUID, db: AsyncSession = Depends(get_db), user: User = Manage,
                       group: Optional[str] = Depends(get_scoped_group)):
+    await web_blocks.lock_seq_writes(db)
     row = await _own_rule(db, rule_id, group)
     if row.builtin:
         raise HTTPException(status_code=409, detail="Built-in rules can be disabled, not deleted")
@@ -341,6 +366,7 @@ async def put_policy(group_id: str, body: PolicyIn, db: AsyncSession = Depends(g
         page = web_page.sanitize(body.page_html) if body.page_html is not None else None
     except web_page.PageError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    await web_blocks.lock_seq_writes(db)
     row = await db.get(WebBlockPolicy, target) or WebBlockPolicy(group_id=target)
     for key in ("enabled", "feed_enabled", "alert_enabled", "alert_block_days", "max_entries", "contact"):
         setattr(row, key, getattr(body, key))
@@ -366,3 +392,32 @@ async def preview_page(group_id: str, body: PreviewIn, db: AsyncSession = Depend
         raise HTTPException(status_code=422, detail=str(exc))
     values = {**web_page.SAMPLE, "contact": policy["contact"] or web_page.SAMPLE["contact"]}
     return {"html": web_page.document(page, values)}
+
+
+@router.get("/api/web-blocks/feeds")
+async def feed_status(db: AsyncSession = Depends(get_db), redis=Depends(get_redis), _=Read):
+    """Per-feed sync state the worker keeps in Redis. Feeds are global (group '*'), so this is not group scoped."""
+    feeds = []
+    for name, keys in FEED_KEYS.items():
+        try:
+            state = json.loads(await redis.get(FEED_STATE_PREFIX + name) or "{}")
+        except ValueError:
+            state = {}
+        if not isinstance(state, dict):
+            state = {}
+        present = any([(await get_setting(db, k)).strip() for k in keys])
+        feeds.append({"name": name, "enabled_key_present": present, "status": state.get("status") or "never_run",
+                      "last_success": state.get("last_success"), "last_attempt": state.get("last_attempt"),
+                      "entries": state.get("entries"), "suppressed": state.get("suppressed"),
+                      "removed": state.get("removed"), "error": state.get("error") or ""})
+    return {"feeds": feeds}
+
+
+@router.post("/api/web-blocks/feeds/{name}/sync")
+async def sync_feed(name: str, db: AsyncSession = Depends(get_db), redis=Depends(get_redis),
+                    user: User = SettingsManage):
+    if name not in FEED_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown feed")
+    await redis.rpush(FEED_SYNC_QUEUE, name)
+    await audit_log(db, user.id, "web_block_feed.sync", "web_block_feed", name, {})
+    return {"status": "queued"}

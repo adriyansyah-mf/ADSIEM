@@ -51,6 +51,36 @@ def _vt_summary(d: dict[str, Any], label: str) -> str | None:
     return _bullet(label, f"malicious={mal} suspicious={sus}")
 
 
+VT_MALICIOUS_MIN = 3  # engines flagging a domain/URL before it counts as malicious
+
+
+def _vt_malicious(d: dict[str, Any]) -> int:
+    if d.get("skipped") or d.get("not_found"):
+        return 0
+    stats = d.get("data", {}).get("attributes", {}).get("last_analysis_stats") or {}
+    try:
+        return int(stats.get("malicious") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _reputation(value: str, kind: str, uh_listed: bool, vt_mal: int) -> IOCReputationScore | None:
+    """Structured verdict for a domain/URL: only listed or VT-flagged indicators get an entry."""
+    sources, score, why = [], 0.0, []
+    if uh_listed:
+        sources.append("urlhaus")
+        score = max(score, 0.85)
+        why.append("listed in URLhaus")
+    if vt_mal >= VT_MALICIOUS_MIN:
+        sources.append("virustotal")
+        score = max(score, min(1.0, 0.5 + vt_mal / 40.0))
+        why.append(f"virustotal malicious={vt_mal}")
+    if not sources:
+        return None
+    return IOCReputationScore(ioc_value=value, ioc_type=kind, score=round(score, 3),
+                              rationale="; ".join(why), sources=sources, malicious=True)
+
+
 def _otx_pulse(d: dict[str, Any], label: str) -> str | None:
     if d.get("skipped") or d.get("not_found"):
         return None
@@ -159,6 +189,7 @@ class EnrichmentAggregator:
         bullets: list[str] = []
         risk_samples: list[float] = []
         triage_hints: list[str] = []
+        reputation: list[IOCReputationScore] = []
         sem = asyncio.Semaphore(8)
 
         async def gate(coro):
@@ -232,6 +263,8 @@ class EnrichmentAggregator:
                 risk_samples.append(0.65)
             if who.get("rdap"):
                 bullets.append(_bullet("rdap(domain)", "registration queried"))
+            if rep := _reputation(dom, "domain", bool(_urlhaus_host(uh)), _vt_malicious(vt)):
+                reputation.append(rep)
 
         async def ingest_hash(h: str) -> None:
             vt, otx, uh = await asyncio.gather(
@@ -264,6 +297,8 @@ class EnrichmentAggregator:
                 bullets.append(s)
             if s := _otx_pulse(otx, "otx(url)"):
                 bullets.append(s)
+            if rep := _reputation(url, "url", bool(_urlhaus_host(uh)), _vt_malicious(vt)):
+                reputation.append(rep)
 
         # SearXNG search
         if self._cfg.searxng_url:
@@ -303,7 +338,7 @@ class EnrichmentAggregator:
         return EnrichmentSummary(
             iocs=iocs,
             provider_bullets=sorted(set(bullets))[:40],
-            reputation=[],
+            reputation=reputation,
             overall_risk=round(overall, 3),
             triage_hints=triage_hints[:20],
         )

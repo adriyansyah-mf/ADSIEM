@@ -35,13 +35,15 @@ func (r *recorder) count(prefix string) int {
 type fakeHosts struct {
 	rec        *recorder
 	applied    [][]string
+	bare       []map[string]bool
 	ipv6       []bool
 	changed    bool
 	tampered   bool
 	err, rmErr error
 }
 
-func (h *fakeHosts) Apply(d []string, v6 bool) (bool, bool, error) {
+func (h *fakeHosts) Apply(d []string, v6 bool, bare map[string]bool) (bool, bool, error) {
+	h.bare = append(h.bare, bare)
 	h.rec.add("hosts.apply")
 	h.applied = append(h.applied, d)
 	h.ipv6 = append(h.ipv6, v6)

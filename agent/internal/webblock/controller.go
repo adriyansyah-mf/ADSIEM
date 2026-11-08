@@ -258,10 +258,17 @@ func (c *Controller) activate(l *List, force bool) {
 		c.startCA, c.startVer, c.startTried = c.ca, l.Version, true
 	}
 
-	key := strings.Join(domains, "\n") + fmt.Sprint("|", c.ipv6)
+	bare := l.bareDomains(domains)
+	var bareNames []string
+	for _, d := range domains { // domains order is deterministic
+		if bare[d] {
+			bareNames = append(bareNames, d)
+		}
+	}
+	key := strings.Join(domains, "\n") + fmt.Sprint("|", c.ipv6) + "|" + strings.Join(bareNames, "\n")
 	if force || !c.hostsOK || key != c.hostsKey {
 		recheck := force && c.hostsOK && key == c.hostsKey
-		written, tampered, err := c.Hosts.Apply(domains, c.ipv6)
+		written, tampered, err := c.Hosts.Apply(domains, c.ipv6, bare)
 		if recheck {
 			// Nothing we wanted changed, so a rewrite repaired someone else's
 			// edit (a deleted or edited block). A clean check clears it.

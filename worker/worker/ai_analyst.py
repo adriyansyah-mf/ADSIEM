@@ -572,6 +572,15 @@ async def _alert_tags(alert_id: str) -> list[str]:
         return []
 
 
+async def _web_auto_block(alert_id, group_id, title, verdict, fields, enrichment, threat_type=None) -> None:
+    try:
+        from worker.webblock_auto import maybe_block
+        await maybe_block(alert_id, group_id, title, verdict, fields, enrichment,
+                          tags=await _alert_tags(alert_id), threat_type=threat_type)
+    except Exception:
+        log.exception("webblock_auto_failed", alert_id=alert_id)
+
+
 BRUTEFORCE_DIGEST_MAX_SOURCES = 500
 
 
@@ -867,6 +876,7 @@ async def analyze_and_maybe_create_case(
             "get_setting": get_setting,
             "set_alert_verdict": _set_alert_verdict,
             "index_alert_iocs": index_triaged_alert,
+            "web_auto_block": _web_auto_block,
             "write_alert_note": _write_alert_note,
             "tag_alert_with_mitre": _tag_alert_with_mitre,
             "run_soar_playbooks": run_soar_playbooks,

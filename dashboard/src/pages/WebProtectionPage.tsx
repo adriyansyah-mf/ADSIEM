@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import {
   BLOCK_PAGE, type BlockFilter, type WebPolicy, apiError, useAddAllowRule, useAgentWebHealth, useAllowlist, useBlockWeb,
-  useDeleteAllowRule, usePreviewPage, useSaveWebPolicy, useUnblockWeb, useUpdateAllowRule, useWebBlocks, useWebPolicy,
+  useDeleteAllowRule, usePreviewPage, useSaveWebPolicy, useSyncFeed, useUnblockWeb, useUpdateAllowRule, useWebBlocks, useWebFeeds, useWebPolicy,
 } from '@/hooks/useWebProtection'
 
-type Tab = 'blocklist' | 'allowlist' | 'page' | 'agents'
+type Tab = 'blocklist' | 'allowlist' | 'page' | 'feeds' | 'agents'
 const SOURCE_LABEL: Record<string, string> = { manual: 'Manual', alert: 'Alert', urlhaus: 'URLhaus', phishtank: 'PhishTank' }
 const input = 'bg-muted border border-border rounded px-2 py-1.5 text-sm'
 const button = 'text-xs px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed'
@@ -34,6 +35,52 @@ function PolicySwitch({ group }: { group: string }) {
   )
 }
 
+function AutomationPanel({ group }: { group: string }) {
+  const { data: policy } = useWebPolicy(group)
+  const save = useSaveWebPolicy(group)
+  const [draft, setDraft] = useState<{ feed_enabled: boolean; alert_enabled: boolean; alert_block_days: string; max_entries: string } | null>(null)
+  useEffect(() => {
+    if (policy) setDraft({ feed_enabled: policy.feed_enabled, alert_enabled: policy.alert_enabled,
+      alert_block_days: String(policy.alert_block_days), max_entries: String(policy.max_entries) })
+  }, [policy])
+  if (!policy || !draft) return null
+  const days = Number(draft.alert_block_days)
+  const max = Number(draft.max_entries)
+  const valid = Number.isInteger(days) && days >= 1 && days <= 365 && Number.isInteger(max) && max >= 100 && max <= 200000
+  const submit = () => save.mutate({
+    enabled: policy.enabled, contact: policy.contact, feed_enabled: draft.feed_enabled, alert_enabled: draft.alert_enabled,
+    alert_block_days: days, max_entries: max, page_html: policy.custom_page ? policy.page_html : null,
+  })
+  return (
+    <form onSubmit={e => { e.preventDefault(); if (valid) submit() }} className="rounded-lg border border-border p-4 space-y-3">
+      <div className="text-sm font-semibold">Automatic blocking for group {group}</div>
+      <div className="flex flex-wrap items-end gap-4">
+        <label className="text-xs inline-flex items-center gap-1">
+          <input type="checkbox" checked={draft.feed_enabled} onChange={e => setDraft({ ...draft, feed_enabled: e.target.checked })} />
+          Block domains from threat feeds (URLhaus, PhishTank)
+        </label>
+        <label className="text-xs inline-flex items-center gap-1">
+          <input type="checkbox" checked={draft.alert_enabled} onChange={e => setDraft({ ...draft, alert_enabled: e.target.checked })} />
+          Block destinations of confirmed alerts
+        </label>
+        <label className="space-y-1">
+          <span className="block text-xs text-muted-foreground">Alert block lasts (days, 1-365)</span>
+          <input type="number" min={1} max={365} value={draft.alert_block_days} className={`${input} w-28`}
+            onChange={e => setDraft({ ...draft, alert_block_days: e.target.value })} />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-xs text-muted-foreground">Max entries sent to agents (100-200000)</span>
+          <input type="number" min={100} max={200000} value={draft.max_entries} className={`${input} w-32`}
+            onChange={e => setDraft({ ...draft, max_entries: e.target.value })} />
+        </label>
+        <button type="submit" disabled={!valid || save.isPending}
+          className="px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm font-medium disabled:opacity-50">Save</button>
+      </div>
+      {save.isError && <p className="text-xs text-destructive">{apiError(save.error, 'Could not save.')}</p>}
+    </form>
+  )
+}
+
 function Blocklist({ group, superadmin }: { group: string; superadmin: boolean }) {
   const [filter, setFilter] = useState<BlockFilter>({ q: '', source: '', status: 'active', offset: 0 })
   const [value, setValue] = useState('')
@@ -46,7 +93,7 @@ function Blocklist({ group, superadmin }: { group: string; superadmin: boolean }
 
   return (
     <div className="space-y-3">
-      {group ? <PolicySwitch group={group} /> : <p className="text-sm text-muted-foreground">Enter a group to manage its policy and block page.</p>}
+      {group ? <><PolicySwitch group={group} /><AutomationPanel group={group} /></> : <p className="text-sm text-muted-foreground">Enter a group to manage its policy and block page.</p>}
       <form onSubmit={e => { e.preventDefault(); submit() }} className="flex flex-wrap items-end gap-2">
         <label className="space-y-1">
           <span className="block text-xs text-muted-foreground">Domain or URL</span>
@@ -240,6 +287,67 @@ function BlockPageEditor({ group }: { group: string }) {
   )
 }
 
+const FEED_LABEL: Record<string, string> = { urlhaus: 'URLhaus', phishtank: 'PhishTank' }
+const FEED_STATUS: Record<string, string> = {
+  ok: 'OK', error: 'Error', missing_key: 'Key missing', removal_guard: 'Paused (removal guard)', never_run: 'Never run',
+}
+
+function FeedsTab() {
+  const { data, isLoading, isError } = useWebFeeds()
+  const sync = useSyncFeed()
+  const canSync = useAuthStore(s => s.hasRole)('admin')
+  const when = (v: string | null) => (v ? new Date(v).toLocaleString() : '—')
+  const num = (v: number | null) => (v == null ? '—' : v.toLocaleString())
+  if (isError) return <p className="text-sm text-destructive">Could not load feed status.</p>
+  if (isLoading) return <Loader2 size={16} className="animate-spin" />
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Feed domains are blocked for every group whose policy turns feeds on. Feeds sync on a schedule; Sync now queues one immediately.
+      </p>
+      <div className="rounded-lg border border-border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
+            <tr>
+              <th className="text-left px-3 py-2">Feed</th><th className="text-left px-3 py-2">Status</th>
+              <th className="text-left px-3 py-2">Last sync</th><th className="text-left px-3 py-2">Last attempt</th>
+              <th className="text-left px-3 py-2">Blocked</th><th className="text-left px-3 py-2">Allowlisted</th>
+              <th className="text-left px-3 py-2">Removed</th><th className="text-left px-3 py-2">Error</th><th className="px-3 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {data?.feeds.map(f => (
+              <tr key={f.name} className="border-t border-border align-top">
+                <td className="px-3 py-2 text-xs font-medium">{FEED_LABEL[f.name] ?? f.name}</td>
+                <td className={`px-3 py-2 text-xs ${f.status === 'ok' ? '' : f.status === 'never_run' ? 'text-muted-foreground' : 'text-red-500'}`}>
+                  {FEED_STATUS[f.status] ?? f.status}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{when(f.last_success)}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{when(f.last_attempt)}</td>
+                <td className="px-3 py-2 text-xs">{num(f.entries)}</td>
+                <td className="px-3 py-2 text-xs">{num(f.suppressed)}</td>
+                <td className="px-3 py-2 text-xs">{num(f.removed)}</td>
+                <td className="px-3 py-2 text-xs text-muted-foreground break-all">
+                  {f.error || '—'}
+                  {!f.enabled_key_present && (
+                    <div>No API key set. <Link to="/settings" className="underline">Add it in Settings</Link>.</div>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {canSync && (
+                    <button className={button} disabled={sync.isPending || !f.enabled_key_present} onClick={() => sync.mutate(f.name)}>Sync now</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {sync.isSuccess && <p className="text-xs text-muted-foreground">Sync queued; status updates within a minute.</p>}
+      {sync.isError && <p className="text-xs text-destructive">{apiError(sync.error, 'Could not queue the sync.')}</p>}
+    </div>
+  )
+}
+
 function AgentsTab({ superadmin }: { superadmin: boolean }) {
   const { data, isLoading, isError } = useAgentWebHealth()
   if (isError) return <p className="text-sm text-destructive">Could not load agent health.</p>
@@ -320,7 +428,7 @@ export default function WebProtectionPage() {
         )}
       </div>
       <div className="flex flex-wrap gap-1 border-b border-border">
-        {([['blocklist', 'Blocklist'], ['allowlist', 'Allowlist'], ['page', 'Block page'], ['agents', 'Agents']] as const).map(([key, label]) => (
+        {([['blocklist', 'Blocklist'], ['allowlist', 'Allowlist'], ['page', 'Block page'], ['feeds', 'Feeds'], ['agents', 'Agents']] as const).map(([key, label]) => (
           <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}
             className={`px-3 py-1.5 text-sm border-b-2 -mb-px ${tab === key ? 'border-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
             {label}
@@ -329,6 +437,7 @@ export default function WebProtectionPage() {
       </div>
       {tab === 'blocklist' && <Blocklist group={group} superadmin={superadmin} />}
       {tab === 'allowlist' && <Allowlist group={group} superadmin={superadmin} />}
+      {tab === 'feeds' && <FeedsTab />}
       {tab === 'agents' && <AgentsTab superadmin={superadmin} />}
       {tab === 'page' && (group ? <BlockPageEditor key={group} group={group} /> : noGroup)}
     </div>

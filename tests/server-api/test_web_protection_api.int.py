@@ -2,14 +2,17 @@
 """Web Protection dashboard API: manual block/unblock, allowlist, policy and
 block page — every route scoped to the caller's group."""
 import asyncio
+import json
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import select
 
 from app.api.routes import web_protection as routes
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.redis_client import get_redis
 from app.models.models import WebAllowRule, WebBlockEntry
 from app.services import web_blocks as wb
 
@@ -40,6 +43,7 @@ async def env(evidence_api, monkeypatch):
     app.include_router(routes.router)
     app.dependency_overrides[get_db] = database
     app.dependency_overrides[get_current_user] = lambda: evidence_api.user
+    app.dependency_overrides[get_redis] = lambda: evidence_api.redis
     async with evidence_api.sessions() as db:
         await wb.seed_builtin_allowlist(db)
     wb.invalidate()
@@ -79,6 +83,35 @@ async def test_unblocking_a_feed_entry_allowlists_it_for_the_group(env):
     assert any(i["domain"] == "feed.example" and i["group_id"] == "blue" for i in items)
     async with env.sessions() as db:
         assert (await db.get(WebBlockEntry, entry.id)).status == "active"
+
+
+async def test_global_unblock_of_a_feed_entry_adds_a_global_rule(env):
+    env.user = env.make_user(role="superadmin")
+    async with env.sessions() as db:
+        entry = WebBlockEntry(domain="feed2.example", group_id="*", source="urlhaus", reason="feed")
+        db.add(entry)
+        await db.commit()
+    assert (await env.api.delete(f"/api/web-blocks/{entry.id}")).json() == {"status": "removed"}
+    async with env.sessions() as db:
+        assert (await db.get(WebBlockEntry, entry.id)).status == "removed"
+        rule = (await db.execute(select(WebAllowRule).where(
+            WebAllowRule.group_id == "*", WebAllowRule.domain == "feed2.example"))).scalar_one()
+        assert rule.enabled and not rule.include_subdomains
+
+
+@pytest.mark.parametrize("source", ["manual", "alert"])
+async def test_global_unblock_of_a_non_feed_entry_adds_no_rule(env, source):
+    env.user = env.make_user(role="superadmin")
+    async with env.sessions() as db:
+        entry = WebBlockEntry(domain="plain.example", group_id="*", source=source, reason="r")
+        db.add(entry)
+        await db.commit()
+    assert (await env.api.delete(f"/api/web-blocks/{entry.id}")).json() == {"status": "removed"}
+    async with env.sessions() as db:
+        assert (await db.get(WebBlockEntry, entry.id)).status == "removed"
+        rules = (await db.execute(select(WebAllowRule).where(
+            WebAllowRule.group_id == "*", WebAllowRule.domain == "plain.example"))).scalars().all()
+        assert rules == []
 
 
 async def test_groups_cannot_see_or_change_each_other(env):
@@ -216,3 +249,62 @@ async def test_settings_api_hides_rules_markers(env):
             await settings_routes.update_setting("web_block_rules_seq:blue", SettingUpdate(value="9"),
                                                  BackgroundTasks(), db, env.user)
         assert exc.value.status_code == 404
+
+
+async def _set_keys(env, **keys):
+    from app.models.models import PlatformSetting
+    async with env.sessions() as db:
+        for k, v in keys.items():
+            db.add(PlatformSetting(key=k, value=v, is_secret=True))
+        await db.commit()
+
+
+async def test_feed_status_reads_worker_state_and_never_leaks_keys(env):
+    await _set_keys(env, abusech_auth_key="", malwarebazaar_api_key="mb-secret", phishtank_app_key="")
+    env.redis.kv["siem:webblock_feed:urlhaus"] = json.dumps(
+        {"status": "ok", "last_success": "2026-11-08T10:00:00+00:00", "last_attempt": "2026-11-08T10:00:00+00:00",
+         "entries": 12, "suppressed": 1, "removed": 3, "error": ""})
+    r = await env.api.get("/api/web-blocks/feeds")
+    assert r.status_code == 200, r.text
+    feeds = {f["name"]: f for f in r.json()["feeds"]}
+    assert set(feeds) == {"urlhaus", "phishtank"}
+    # URLhaus falls back to the MalwareBazaar key; PhishTank has none
+    assert feeds["urlhaus"]["enabled_key_present"] is True and feeds["phishtank"]["enabled_key_present"] is False
+    assert feeds["urlhaus"]["status"] == "ok" and feeds["urlhaus"]["entries"] == 12 and feeds["urlhaus"]["removed"] == 3
+    assert feeds["phishtank"]["status"] == "never_run" and feeds["phishtank"]["last_success"] is None
+    assert "mb-secret" not in r.text
+
+
+async def test_feed_status_tolerates_malformed_state(env):
+    env.redis.kv["siem:webblock_feed:urlhaus"] = "{not json"
+    env.redis.kv["siem:webblock_feed:phishtank"] = "[1]"
+    r = await env.api.get("/api/web-blocks/feeds")
+    assert r.status_code == 200
+    assert [f["status"] for f in r.json()["feeds"]] == ["never_run", "never_run"]
+
+
+async def test_feed_status_phishtank_key_and_permission(env):
+    await _set_keys(env, phishtank_app_key="pt-secret")
+    feeds = {f["name"]: f for f in (await env.api.get("/api/web-blocks/feeds")).json()["feeds"]}
+    assert feeds["phishtank"]["enabled_key_present"] is True
+    env.user = env.make_user(perms=())
+    assert (await env.api.get("/api/web-blocks/feeds")).status_code == 403
+
+
+async def test_feed_sync_queues_name_and_needs_settings_manage(env):
+    env.user = env.make_user(perms=("alerts:read",))
+    assert (await env.api.post("/api/web-blocks/feeds/urlhaus/sync")).status_code == 403
+    assert "siem:webblock_feed:sync" not in env.redis.kv
+    env.user = env.make_user(perms=("alerts:read", "settings:manage"))
+    r = await env.api.post("/api/web-blocks/feeds/phishtank/sync")
+    assert r.status_code == 200 and env.redis.kv["siem:webblock_feed:sync"] == ["phishtank"]
+    assert (await env.api.post("/api/web-blocks/feeds/nope/sync")).status_code == 404
+    assert env.redis.kv["siem:webblock_feed:sync"] == ["phishtank"]
+
+
+async def test_policy_bounds_are_enforced(env):
+    base = {"enabled": True, "feed_enabled": True, "alert_enabled": True, "alert_block_days": 30, "max_entries": 5000}
+    for patch in ({"alert_block_days": 0}, {"alert_block_days": 366}, {"max_entries": 99}, {"max_entries": 200001}):
+        assert (await env.api.put("/api/web-block-policies/blue", json={**base, **patch})).status_code == 422
+    ok = await env.api.put("/api/web-block-policies/blue", json={**base, "alert_block_days": 365, "max_entries": 100})
+    assert ok.status_code == 200 and ok.json()["alert_block_days"] == 365 and ok.json()["max_entries"] == 100

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -51,16 +53,49 @@ type Store struct {
 	want    string
 	wantSet bool
 	wake    chan struct{}
+	// abandon ends the delay in progress (nil: none); Want calls it when the
+	// new wanted version is no longer a routine update.
+	abandon context.CancelFunc
 
 	// OnChange is called with each newly installed list (the one loaded from
 	// disk is read through Current by Open's caller).
 	OnChange func(*List)
+
+	// jitter picks the delay before a fleet-wide update sync and pause waits
+	// for it (false: ctx ended). Replaced in tests.
+	jitter func() time.Duration
+	pause  func(ctx context.Context, d time.Duration) bool
+}
+
+// maxSyncJitter spreads the fleet's syncs of a new list version over a minute
+// so a feed refresh does not hit the server with every agent at once.
+const maxSyncJitter = 60 * time.Second
+
+func randomJitter() time.Duration { return rand.N(maxSyncJitter) }
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// groupOf is the part of a "<group>:<seq>" version before the last colon.
+func groupOf(version string) string {
+	if i := strings.LastIndex(version, ":"); i >= 0 {
+		return version[:i]
+	}
+	return version
 }
 
 // Open loads the saved list at path (ListPath), if there is a readable one,
 // and deletes the list an older agent left at <state>/webblock.json.
 func Open(path string) *Store {
-	s := &Store{path: path, wake: make(chan struct{}, 1)}
+	s := &Store{path: path, wake: make(chan struct{}, 1), jitter: randomJitter, pause: sleepCtx}
 	if dir := filepath.Dir(path); filepath.Base(dir) == CADirName {
 		legacy := filepath.Join(filepath.Dir(dir), LegacyListFile)
 		if err := os.Remove(legacy); err == nil {
@@ -89,6 +124,9 @@ func (s *Store) Current() *List { return s.cur.Load() }
 func (s *Store) Want(version string) {
 	s.mu.Lock()
 	s.want, s.wantSet = version, true
+	if s.abandon != nil && !jittered(s.Current().Version, version) {
+		s.abandon()
+	}
 	s.mu.Unlock()
 	select {
 	case s.wake <- struct{}{}:
@@ -106,17 +144,32 @@ func (s *Store) wanted() (string, bool) {
 }
 
 // SyncLoop syncs whenever the wanted version differs from the current one,
-// retrying every minute until it works, until ctx ends.
+// retrying every minute until it works, until ctx ends. An update within the
+// group of an active list waits a random 0-60s first; the first sync after
+// start, turning on, and a group change do not (see jittered).
 func (s *Store) SyncLoop(ctx context.Context, c Poster) {
 	t := time.NewTicker(retryEvery)
 	defer t.Stop()
+	synced := false  // a sync has run since start
+	delayedFor := "" // the version the pause was already served for
 	for {
 		if want, need := s.wanted(); need {
-			sctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-			if err := s.Sync(sctx, c, want); err != nil {
-				slog.Warn("webblock: could not sync web blocklist, will retry", "err", err)
+			if synced && want != delayedFor && jittered(s.Current().Version, want) {
+				delayedFor = want
+				if !s.delay(ctx) && ctx.Err() != nil {
+					return
+				}
+				// a newer heartbeat may have arrived meanwhile: sync what is wanted now
+				want, need = s.wanted()
 			}
-			cancel()
+			if need {
+				sctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+				if err := s.Sync(sctx, c, want); err != nil {
+					slog.Warn("webblock: could not sync web blocklist, will retry", "err", err)
+				}
+				cancel()
+				synced = true
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -125,6 +178,31 @@ func (s *Store) SyncLoop(ctx context.Context, c Poster) {
 		case <-t.C:
 		}
 	}
+}
+
+// delay waits the jitter; Want ends it early (disable, group change) and ctx
+// ends it for shutdown. It reports whether the full delay elapsed.
+func (s *Store) delay(ctx context.Context) bool {
+	dctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.mu.Lock()
+	if !jittered(s.Current().Version, s.want) {
+		s.mu.Unlock()
+		return false
+	}
+	s.abandon = cancel
+	s.mu.Unlock()
+	ok := s.pause(dctx, s.jitter())
+	s.mu.Lock()
+	s.abandon = nil
+	s.mu.Unlock()
+	return ok
+}
+
+// jittered reports whether moving from the installed version to want is a
+// routine update (same group, list already active) that may wait.
+func jittered(cur, want string) bool {
+	return cur != "" && want != "" && want != cur && groupOf(cur) == groupOf(want)
 }
 
 // Sync fetches the changes since the current list (every page) and installs

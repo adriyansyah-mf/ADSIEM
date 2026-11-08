@@ -317,3 +317,24 @@ async def test_sync_reports_group_and_opaque_version(env):
         agent = await db.get(wb.Agent, env.agents["blue"])
         version = await wb.agent_version(db, agent)
     assert version.startswith("blue:") and version.endswith("+")
+
+
+async def test_delta_waits_for_an_uncommitted_seq_writer(env):
+    """A seq taken but not yet committed must not be skipped by a concurrent sync."""
+    await set_policy(env, "blue", enabled=True)
+    async with env.sessions() as writer:
+        await wb.lock_seq_writes(writer)
+        writer.add(WebBlockEntry(domain="late.example", group_id="blue", source="manual", status="active",
+                                 reason="r", seq=wb.next_seq()))
+        await writer.flush()
+
+        async def reader():
+            async with env.sessions() as db:
+                return await wb.delta(db, "blue", 0)
+
+        task = asyncio.create_task(reader())
+        await asyncio.sleep(0.5)
+        assert not task.done()
+        await writer.commit()
+        out = await asyncio.wait_for(task, 5)
+    assert "late.example" in {c["domain"] for c in out["changes"]}

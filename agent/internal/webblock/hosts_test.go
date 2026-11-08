@@ -29,17 +29,17 @@ func readFile(t *testing.T, p string) string {
 }
 
 func TestRenderBlock(t *testing.T) {
-	if RenderBlock(nil, false) != "" {
+	if RenderBlock(nil, false, nil) != "" {
 		t.Fatal("empty list must render nothing")
 	}
-	got := RenderBlock([]string{"evil.example", "www.other.example"}, false)
+	got := RenderBlock([]string{"evil.example", "www.other.example"}, false, nil)
 	want := BlockBegin + "\n" +
 		"127.84.0.1 evil.example\n127.84.0.1 www.evil.example\n" +
 		"127.84.0.1 www.other.example\n" + BlockEnd + "\n"
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}
-	v6 := RenderBlock([]string{"evil.example"}, true)
+	v6 := RenderBlock([]string{"evil.example"}, true, nil)
 	if !strings.Contains(v6, "::1 evil.example\n") || !strings.Contains(v6, "::1 www.evil.example\n") {
 		t.Fatalf("missing ipv6 lines:\n%s", v6)
 	}
@@ -56,7 +56,7 @@ func TestRenderBlockRejectsInjection(t *testing.T) {
 		"good.example",
 		"nodot",
 		strings.Repeat("a", 250) + ".com",
-	}, false)
+	}, false, nil)
 	if strings.Contains(got, "bank.example") || strings.Contains(got, "bad") ||
 		strings.Contains(got, "UPPER") || strings.Contains(got, "nodot") || strings.Contains(got, "aaaa") {
 		t.Fatalf("invalid domains leaked:\n%s", got)
@@ -73,7 +73,7 @@ func TestApplyPreservesForeignLinesLFAndCRLF(t *testing.T) {
 	for _, eol := range []string{"\n", "\r\n"} {
 		orig := "127.0.0.1 localhost" + eol + "# custom  line\t" + eol + eol + "10.0.0.5 nas" + eol
 		h, _ := newHosts(t, orig)
-		_, tampered, err := h.Apply([]string{"evil.example"}, false)
+		_, tampered, err := h.Apply([]string{"evil.example"}, false, nil)
 		if err != nil || tampered {
 			t.Fatalf("apply: %v tampered=%v", err, tampered)
 		}
@@ -98,7 +98,7 @@ func TestApplyPreservesForeignLinesLFAndCRLF(t *testing.T) {
 
 func TestApplyIdempotentNoRewrite(t *testing.T) {
 	h, flushed := newHosts(t, "127.0.0.1 localhost\n")
-	if _, _, err := h.Apply([]string{"evil.example"}, true); err != nil {
+	if _, _, err := h.Apply([]string{"evil.example"}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-time.Hour)
@@ -106,7 +106,7 @@ func TestApplyIdempotentNoRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.Stat(h.Path)
-	if _, _, err := h.Apply([]string{"evil.example"}, true); err != nil {
+	if _, _, err := h.Apply([]string{"evil.example"}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.Stat(h.Path)
@@ -116,7 +116,7 @@ func TestApplyIdempotentNoRewrite(t *testing.T) {
 	if *flushed != 1 {
 		t.Fatalf("flush calls = %d, want 1", *flushed)
 	}
-	if _, _, err := h.Apply([]string{"evil.example", "two.example"}, true); err != nil {
+	if _, _, err := h.Apply([]string{"evil.example", "two.example"}, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if *flushed != 2 {
@@ -135,7 +135,7 @@ func TestApplyKeepsFileMode(t *testing.T) {
 	if err := os.Chmod(h.Path, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.Apply([]string{"evil.example"}, false); err != nil {
+	if _, _, err := h.Apply([]string{"evil.example"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := os.Stat(h.Path)
@@ -146,7 +146,7 @@ func TestApplyKeepsFileMode(t *testing.T) {
 
 func TestApplyMissingFileErrors(t *testing.T) {
 	h := &HostsFile{Path: filepath.Join(t.TempDir(), "nope")}
-	if _, _, err := h.Apply([]string{"evil.example"}, false); err == nil {
+	if _, _, err := h.Apply([]string{"evil.example"}, false, nil); err == nil {
 		t.Fatal("want error for missing hosts file")
 	}
 	if err := h.Remove(); err != nil {
@@ -157,10 +157,10 @@ func TestApplyMissingFileErrors(t *testing.T) {
 func TestApplyEmptyListRemovesBlock(t *testing.T) {
 	orig := "127.0.0.1 localhost\n"
 	h, _ := newHosts(t, orig)
-	if _, _, err := h.Apply([]string{"evil.example"}, false); err != nil {
+	if _, _, err := h.Apply([]string{"evil.example"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.Apply(nil, false); err != nil {
+	if _, _, err := h.Apply(nil, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if readFile(t, h.Path) != orig {
@@ -170,7 +170,7 @@ func TestApplyEmptyListRemovesBlock(t *testing.T) {
 
 func TestTamperedMissingEnd(t *testing.T) {
 	h, _ := newHosts(t, "127.0.0.1 localhost\n"+BlockBegin+"\n127.84.0.1 old.example\n10.0.0.5 nas\n")
-	_, tampered, err := h.Apply([]string{"evil.example"}, false)
+	_, tampered, err := h.Apply([]string{"evil.example"}, false, nil)
 	if err != nil || !tampered {
 		t.Fatalf("tampered=%v err=%v", tampered, err)
 	}
@@ -186,7 +186,7 @@ func TestTamperedMissingEnd(t *testing.T) {
 func TestTamperedTwoBlocks(t *testing.T) {
 	blk := BlockBegin + "\n127.84.0.1 a.example\n" + BlockEnd + "\n"
 	h, _ := newHosts(t, "127.0.0.1 localhost\n"+blk+"10.0.0.5 nas\n"+blk)
-	_, tampered, err := h.Apply([]string{"evil.example"}, false)
+	_, tampered, err := h.Apply([]string{"evil.example"}, false, nil)
 	if err != nil || !tampered {
 		t.Fatalf("tampered=%v err=%v", tampered, err)
 	}
@@ -195,14 +195,14 @@ func TestTamperedTwoBlocks(t *testing.T) {
 		!strings.Contains(got, "10.0.0.5 nas\n") {
 		t.Fatalf("repair wrong:\n%s", got)
 	}
-	if _, tampered, _ = h.Apply([]string{"evil.example"}, false); tampered {
+	if _, tampered, _ = h.Apply([]string{"evil.example"}, false, nil); tampered {
 		t.Fatal("still tampered after repair")
 	}
 }
 
 func TestOrphanEndRepaired(t *testing.T) {
 	h, _ := newHosts(t, "127.0.0.1 localhost\n::1 localhost\n127.84.0.1 old.example\n127.84.0.1 www.old.example\n"+BlockEnd+"\n10.0.0.5 nas\n")
-	_, tampered, err := h.Apply([]string{"evil.example"}, false)
+	_, tampered, err := h.Apply([]string{"evil.example"}, false, nil)
 	if err != nil || !tampered {
 		t.Fatalf("tampered=%v err=%v", tampered, err)
 	}
@@ -213,20 +213,20 @@ func TestOrphanEndRepaired(t *testing.T) {
 	if !strings.HasPrefix(got, "127.0.0.1 localhost\n::1 localhost\n") || !strings.Contains(got, "10.0.0.5 nas\n") {
 		t.Fatalf("foreign lines damaged:\n%s", got)
 	}
-	if _, tampered, _ = h.Apply([]string{"evil.example"}, false); tampered {
+	if _, tampered, _ = h.Apply([]string{"evil.example"}, false, nil); tampered {
 		t.Fatal("still tampered")
 	}
 }
 
 func TestRenderBlockDedupesWWW(t *testing.T) {
-	got := RenderBlock([]string{"x.example", "www.x.example"}, false)
+	got := RenderBlock([]string{"x.example", "www.x.example"}, false, nil)
 	if c := strings.Count(got, "127.84.0.1 www.x.example\n"); c != 1 {
 		t.Fatalf("www line count %d:\n%s", c, got)
 	}
 }
 
 func TestReplaceBlockCleanReportsNoTamper(t *testing.T) {
-	out, had, tam := ReplaceBlock("a\n", RenderBlock([]string{"x.example"}, false))
+	out, had, tam := ReplaceBlock("a\n", RenderBlock([]string{"x.example"}, false, nil))
 	if had || tam {
 		t.Fatalf("had=%v tam=%v", had, tam)
 	}
@@ -238,15 +238,15 @@ func TestReplaceBlockCleanReportsNoTamper(t *testing.T) {
 
 func TestApplyReportsChanged(t *testing.T) {
 	h, _ := newHosts(t, "127.0.0.1 localhost\n")
-	if changed, _, err := h.Apply([]string{"evil.example"}, false); err != nil || !changed {
+	if changed, _, err := h.Apply([]string{"evil.example"}, false, nil); err != nil || !changed {
 		t.Fatalf("first write: changed=%v err=%v", changed, err)
 	}
-	if changed, _, _ := h.Apply([]string{"evil.example"}, false); changed {
+	if changed, _, _ := h.Apply([]string{"evil.example"}, false, nil); changed {
 		t.Fatal("unchanged file reported as changed")
 	}
 	// someone deletes the block: the rewrite is a change, not damage
 	os.WriteFile(h.Path, []byte("127.0.0.1 localhost\n"), 0o644)
-	if changed, tampered, _ := h.Apply([]string{"evil.example"}, false); !changed || tampered {
+	if changed, tampered, _ := h.Apply([]string{"evil.example"}, false, nil); !changed || tampered {
 		t.Fatalf("deleted block: changed=%v tampered=%v", changed, tampered)
 	}
 }

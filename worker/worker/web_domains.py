@@ -10,6 +10,9 @@ from typing import Iterable
 from urllib.parse import urlsplit
 
 MAX_DOMAIN = 253
+# Postgres advisory lock key ordering web_block_seq commits: writers take it
+# exclusive, the agent delta sync shared (spec B3).
+WEB_BLOCK_SEQ_LOCK = 0x5745424C4B
 _LABEL = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
 _HEX_LABEL = re.compile(r"^0x[0-9a-f]+$")
 
