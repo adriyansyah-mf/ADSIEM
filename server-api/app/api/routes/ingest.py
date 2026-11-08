@@ -209,6 +209,8 @@ async def heartbeat(
     # Heartbeats without it (legacy agents) keep the last known snapshot.
     evidence = ({"evidence_health": body.evidence_health.model_dump(mode="json"), "evidence_health_at": now}
                 if body.evidence_health is not None else {})
+    if body.web_block_health is not None:
+        evidence |= {"web_block_health": body.web_block_health.model_dump(mode="json"), "web_block_health_at": now}
     anomaly = await _session_anomaly(redis, agent.id, body)
     if anomaly and agent.approved:
         await enqueue_log(redis, health("agent_heartbeat_anomaly", kind=anomaly, session=body.session,

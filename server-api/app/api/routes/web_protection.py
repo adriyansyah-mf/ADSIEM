@@ -119,6 +119,18 @@ class BulkIn(BaseModel):
     _check_expiry = field_validator("expires_at")(_future)
 
 
+@router.get("/api/web-blocks/agents")
+async def list_agent_health(db: AsyncSession = Depends(get_db), _=Read, group: Optional[str] = Depends(get_scoped_group)):
+    q = select(Agent).where(Agent.approved.is_(True)).order_by(Agent.hostname)
+    if group is not None:
+        q = q.where(Agent.group_id == group)
+    rows = (await db.execute(q)).scalars().all()
+    return {"items": [{"agent_id": str(a.id), "hostname": a.hostname, "group_id": a.group_id,
+                       "online": a.status == "online", "health": a.web_block_health,
+                       "health_at": a.web_block_health_at.isoformat() if a.web_block_health_at else None}
+                      for a in rows]}
+
+
 @router.get("/api/web-blocks")
 async def list_blocks(
     q: str = Query("", max_length=253), source: str = "", status: str = "active",

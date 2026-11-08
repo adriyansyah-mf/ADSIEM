@@ -242,6 +242,19 @@ class AgentUpdateStatus(BaseModel):
     attempts: int = Field(default=0, ge=0, le=100)
     error: str = Field(default="", max_length=1000)
 
+class WebBlockHealth(BaseModel):
+    """Web Protection state the agent reports in each heartbeat (agent/internal/webblock)."""
+    model_config = ConfigDict(extra="ignore")
+    enabled: bool = False
+    entries: int = Field(default=0, ge=0, le=10_000_000)
+    version: str = Field(default="", max_length=300)
+    group: str = Field(default="", max_length=300)
+    ca_installed: bool = False
+    ca_fingerprint: str = Field(default="", max_length=300)
+    page_server: str = Field(default="", max_length=300)
+    hosts_tampered: bool = False
+    last_error: str = Field(default="", max_length=300)
+
 class HeartbeatRequest(BaseModel):
     agent_id: UUID
     status: str = "online"
@@ -253,8 +266,9 @@ class HeartbeatRequest(BaseModel):
     seq: int | None = None
     evidence_health: EvidenceHealth | None = None  # durable agents only
     update: AgentUpdateStatus | None = None
+    web_block_health: WebBlockHealth | None = None
 
-    @field_validator("evidence_health", "update", mode="wrap")
+    @field_validator("evidence_health", "update", "web_block_health", mode="wrap")
     @classmethod
     def drop_invalid_evidence_health(cls, value, handler):
         # An invalid or unbounded health object is rejected on its own: the

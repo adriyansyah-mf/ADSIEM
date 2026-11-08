@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import {
-  BLOCK_PAGE, type BlockFilter, type WebPolicy, apiError, useAddAllowRule, useAllowlist, useBlockWeb,
+  BLOCK_PAGE, type BlockFilter, type WebPolicy, apiError, useAddAllowRule, useAgentWebHealth, useAllowlist, useBlockWeb,
   useDeleteAllowRule, usePreviewPage, useSaveWebPolicy, useUnblockWeb, useUpdateAllowRule, useWebBlocks, useWebPolicy,
 } from '@/hooks/useWebProtection'
 
-type Tab = 'blocklist' | 'allowlist' | 'page'
+type Tab = 'blocklist' | 'allowlist' | 'page' | 'agents'
 const SOURCE_LABEL: Record<string, string> = { manual: 'Manual', alert: 'Alert', urlhaus: 'URLhaus', phishtank: 'PhishTank' }
 const input = 'bg-muted border border-border rounded px-2 py-1.5 text-sm'
 const button = 'text-xs px-2 py-1 rounded border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed'
@@ -240,6 +240,60 @@ function BlockPageEditor({ group }: { group: string }) {
   )
 }
 
+function AgentsTab({ superadmin }: { superadmin: boolean }) {
+  const { data, isLoading, isError } = useAgentWebHealth()
+  if (isError) return <p className="text-sm text-destructive">Could not load agent health.</p>
+  if (isLoading) return <Loader2 size={16} className="animate-spin" />
+  if (!data?.items.length) return <p className="text-sm text-muted-foreground">No approved agents.</p>
+  return (
+    <div className="rounded-lg border border-border overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
+          <tr>
+            <th className="text-left px-3 py-2">Host</th>
+            {superadmin && <th className="text-left px-3 py-2">Group</th>}
+            <th className="text-left px-3 py-2">Status</th>
+            <th className="text-left px-3 py-2">Entries</th>
+            <th className="text-left px-3 py-2">CA</th>
+            <th className="text-left px-3 py-2">Block page server</th>
+            <th className="text-left px-3 py-2">Hosts file</th>
+            <th className="text-left px-3 py-2">Last error</th>
+            <th className="text-left px-3 py-2">Reported</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.items.map(a => {
+            const h = a.health
+            return (
+              <tr key={a.agent_id} className="border-t border-border">
+                <td className="px-3 py-2 text-xs">{a.hostname}{!a.online && <span className="ml-1 text-muted-foreground">(offline)</span>}</td>
+                {superadmin && <td className="px-3 py-2 text-xs">{a.group_id}</td>}
+                {h ? (
+                  <>
+                    <td className="px-3 py-2 text-xs">{h.enabled ? 'Enabled' : 'Off'}</td>
+                    <td className="px-3 py-2 text-xs">{h.entries.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-xs font-mono">
+                      {h.ca_installed ? `Installed ${h.ca_fingerprint.slice(0, 12)}` : 'Not installed'}</td>
+                    <td className={`px-3 py-2 text-xs ${h.page_server.startsWith('page_unavailable') ? 'text-red-500' : ''}`}>
+                      {h.page_server || '—'}</td>
+                    <td className={`px-3 py-2 text-xs ${h.hosts_tampered ? 'text-red-500' : ''}`}>
+                      {h.hosts_tampered ? 'Tampered' : 'OK'}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground break-all">{h.last_error || '—'}</td>
+                  </>
+                ) : (
+                  <td colSpan={6} className="px-3 py-2 text-xs text-muted-foreground">No health reported yet</td>
+                )}
+                <td className="px-3 py-2 text-xs text-muted-foreground">
+                  {a.health_at ? new Date(a.health_at).toLocaleString() : '—'}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function WebProtectionPage() {
   const user = useAuthStore(s => s.user)
   const superadmin = user?.role === 'superadmin'
@@ -266,7 +320,7 @@ export default function WebProtectionPage() {
         )}
       </div>
       <div className="flex flex-wrap gap-1 border-b border-border">
-        {([['blocklist', 'Blocklist'], ['allowlist', 'Allowlist'], ['page', 'Block page']] as const).map(([key, label]) => (
+        {([['blocklist', 'Blocklist'], ['allowlist', 'Allowlist'], ['page', 'Block page'], ['agents', 'Agents']] as const).map(([key, label]) => (
           <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}
             className={`px-3 py-1.5 text-sm border-b-2 -mb-px ${tab === key ? 'border-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
             {label}
@@ -275,6 +329,7 @@ export default function WebProtectionPage() {
       </div>
       {tab === 'blocklist' && <Blocklist group={group} superadmin={superadmin} />}
       {tab === 'allowlist' && <Allowlist group={group} superadmin={superadmin} />}
+      {tab === 'agents' && <AgentsTab superadmin={superadmin} />}
       {tab === 'page' && (group ? <BlockPageEditor key={group} group={group} /> : noGroup)}
     </div>
   )
