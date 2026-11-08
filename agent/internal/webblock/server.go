@@ -66,7 +66,9 @@ type Server struct {
 	// lookupSlot lets one process lookup run at a time; a busy request skips it.
 	lookupOnce sync.Once
 	lookupSlot chan struct{}
-	findProc   func(remoteAddr string) (int, string) // tests; default clientProcess
+	// emits tracks the event reports running after their responses (tests wait on it).
+	emits    sync.WaitGroup
+	findProc func(remoteAddr string) (int, string) // tests; default clientProcess
 
 	mu      sync.RWMutex
 	page    string
@@ -160,14 +162,26 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodHead {
 		_, _ = w.Write([]byte(body))
 	}
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush() // the client has the page before the process lookup runs
-	}
 	// Any local process can send any Host header; only a listed domain is a
-	// block worth reporting.
+	// block worth reporting. The process lookup can take a while (Windows
+	// walks the TCP table): it runs after the handler returns, so a
+	// keep-alive connection is free for the browser's next request at once.
 	if listed {
-		s.emit(r, domain, entry)
+		req := blockedRequest{remoteAddr: r.RemoteAddr, tls: r.TLS != nil, path: r.URL.Path}
+		s.emits.Add(1)
+		go func() {
+			defer s.emits.Done()
+			s.emit(req, domain, entry)
+		}()
 	}
+}
+
+// blockedRequest is what a block event needs from a request, copied before
+// the handler returns.
+type blockedRequest struct {
+	remoteAddr string
+	tls        bool
+	path       string
 }
 
 // process looks the client up, one lookup at a time; when one is running the
@@ -186,19 +200,19 @@ func (s *Server) process(remoteAddr string) (int, string) {
 	return clientProcess(remoteAddr)
 }
 
-func (s *Server) emit(r *http.Request, domain string, entry Entry) {
+func (s *Server) emit(r blockedRequest, domain string, entry Entry) {
 	if s.Push == nil {
 		return
 	}
-	pid, name := s.process(r.RemoteAddr)
+	pid, name := s.process(r.remoteAddr)
 	emit, suppressed := s.limiter.Allow(domain, pid, s.now())
 	if !emit {
 		return
 	}
 	// HTTPS carries the host only: the path was encrypted for the real site.
 	scheme, path := "https", ""
-	if r.TLS == nil {
-		scheme, path = "http", truncRunes(r.URL.Path, maxLoggedPath)
+	if !r.tls {
+		scheme, path = "http", truncRunes(r.path, maxLoggedPath)
 	}
 	s.Push(LogType, Event{Domain: domain, Scheme: scheme, Path: path, Source: entry.Source,
 		Reason: entry.Reason, Process: name, PID: pid, Count: 1 + suppressed}.Line())
