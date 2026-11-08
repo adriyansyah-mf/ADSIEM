@@ -99,6 +99,21 @@ async def test_global_unblock_of_a_feed_entry_adds_a_global_rule(env):
         assert rule.enabled and not rule.include_subdomains
 
 
+@pytest.mark.parametrize("source", ["manual", "alert"])
+async def test_global_unblock_of_a_non_feed_entry_adds_no_rule(env, source):
+    env.user = env.make_user(role="superadmin")
+    async with env.sessions() as db:
+        entry = WebBlockEntry(domain="plain.example", group_id="*", source=source, reason="r")
+        db.add(entry)
+        await db.commit()
+    assert (await env.api.delete(f"/api/web-blocks/{entry.id}")).json() == {"status": "removed"}
+    async with env.sessions() as db:
+        assert (await db.get(WebBlockEntry, entry.id)).status == "removed"
+        rules = (await db.execute(select(WebAllowRule).where(
+            WebAllowRule.group_id == "*", WebAllowRule.domain == "plain.example"))).scalars().all()
+        assert rules == []
+
+
 async def test_groups_cannot_see_or_change_each_other(env):
     async with env.sessions() as db:
         red = WebBlockEntry(domain="red.example", group_id="red", source="manual")

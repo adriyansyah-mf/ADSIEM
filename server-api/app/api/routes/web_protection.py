@@ -198,7 +198,7 @@ async def _unblock_one(db: AsyncSession, user: User, group: Optional[str], entry
         await audit_log(db, user.id, "web_block.allowlist_feed", "web_block", str(row.id), {"domain": row.domain, "group_id": group})
         return {"status": "allowlisted"}
     row.status, row.seq = "removed", web_blocks.next_seq()
-    if row.group_id == web_blocks.FEED_GROUP:
+    if row.group_id == web_blocks.FEED_GROUP and row.source in FEED_KEYS:
         # a global unblock of a feed entry: allowlist it so the next feed sync stores it suppressed
         rule = (await db.execute(select(WebAllowRule).where(
             WebAllowRule.group_id == web_blocks.FEED_GROUP, WebAllowRule.domain == row.domain))).scalar_one_or_none()
