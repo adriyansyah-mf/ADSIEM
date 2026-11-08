@@ -196,6 +196,31 @@ func TestTamperedTwoBlocks(t *testing.T) {
 	}
 }
 
+func TestOrphanEndRepaired(t *testing.T) {
+	h, _ := newHosts(t, "127.0.0.1 localhost\n::1 localhost\n127.84.0.1 old.example\n127.84.0.1 www.old.example\n"+BlockEnd+"\n10.0.0.5 nas\n")
+	tampered, err := h.Apply([]string{"evil.example"}, false)
+	if err != nil || !tampered {
+		t.Fatalf("tampered=%v err=%v", tampered, err)
+	}
+	got := readFile(t, h.Path)
+	if strings.Contains(got, "old.example") || strings.Count(got, BlockBegin) != 1 || strings.Count(got, BlockEnd) != 1 {
+		t.Fatalf("not repaired:\n%s", got)
+	}
+	if !strings.HasPrefix(got, "127.0.0.1 localhost\n::1 localhost\n") || !strings.Contains(got, "10.0.0.5 nas\n") {
+		t.Fatalf("foreign lines damaged:\n%s", got)
+	}
+	if tampered, _ = h.Apply([]string{"evil.example"}, false); tampered {
+		t.Fatal("still tampered")
+	}
+}
+
+func TestRenderBlockDedupesWWW(t *testing.T) {
+	got := RenderBlock([]string{"x.example", "www.x.example"}, false)
+	if c := strings.Count(got, "127.84.0.1 www.x.example\n"); c != 1 {
+		t.Fatalf("www line count %d:\n%s", c, got)
+	}
+}
+
 func TestReplaceBlockCleanReportsNoTamper(t *testing.T) {
 	out, had, tam := ReplaceBlock("a\n", RenderBlock([]string{"x.example"}, false))
 	if had || tam {

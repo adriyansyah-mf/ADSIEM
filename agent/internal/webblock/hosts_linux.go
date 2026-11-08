@@ -3,28 +3,36 @@
 package webblock
 
 import (
-	"os"
+	"context"
+	"log/slog"
 	"os/exec"
+	"time"
 )
+
+const flushTimeout = 5 * time.Second
 
 func defaultHostsPath() string { return "/etc/hosts" }
 
-func replaceFile(tmp, dst string) error { return os.Rename(tmp, dst) }
+func run(name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), flushTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).Run()
+}
 
 // flushDNSCache clears the resolver caches that may hold the old answers.
 // Missing tools are ignored.
 func flushDNSCache() error {
 	var firstErr error
-	if p, err := exec.LookPath("resolvectl"); err == nil {
-		if exec.Command("systemctl", "is-active", "--quiet", "systemd-resolved").Run() == nil {
-			if err := exec.Command(p, "flush-caches").Run(); err != nil {
+	if _, err := exec.LookPath("resolvectl"); err == nil {
+		if run("systemctl", "is-active", "--quiet", "systemd-resolved") == nil {
+			if err := run("resolvectl", "flush-caches"); err != nil {
 				firstErr = err
 			}
 		}
 	}
-	if p, err := exec.LookPath("nscd"); err == nil {
-		if err := exec.Command(p, "-i", "hosts").Run(); err != nil && firstErr == nil {
-			firstErr = err
+	if _, err := exec.LookPath("nscd"); err == nil {
+		if err := run("nscd", "-i", "hosts"); err != nil {
+			slog.Debug("webblock: nscd invalidate failed", "error", err)
 		}
 	}
 	return firstErr

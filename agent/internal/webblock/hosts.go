@@ -2,9 +2,9 @@ package webblock
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -55,12 +55,17 @@ func RenderBlock(domains []string, ipv6 bool) string {
 	sort.Strings(valid)
 	var b strings.Builder
 	b.WriteString(BlockBegin + "\n")
+	written := make(map[string]bool, 2*len(valid))
 	for _, d := range valid {
 		names := []string{d}
 		if !strings.HasPrefix(d, "www.") {
 			names = append(names, "www."+d)
 		}
 		for _, n := range names {
+			if written[n] {
+				continue
+			}
+			written[n] = true
 			b.WriteString(SinkV4 + " " + n + "\n")
 			if ipv6 {
 				b.WriteString(SinkV6 + " " + n + "\n")
@@ -82,13 +87,7 @@ func ourLine(line string) bool {
 	if len(f) != 2 {
 		return false
 	}
-	switch f[0] {
-	case SinkV4:
-		return true
-	case SinkV6:
-		return f[1] != "localhost" && !strings.HasPrefix(f[1], "ip6-")
-	}
-	return false
+	return (f[0] == SinkV4 || f[0] == SinkV6) && validDomain(f[1])
 }
 
 // ReplaceBlock removes every managed block from content and, when block is
@@ -116,6 +115,17 @@ func ReplaceBlock(content, block string) (out string, hadBlock bool, tampered bo
 	}
 	blocks := 0
 	for i := 0; i < len(lines); {
+		if markerLine(lines[i]) == BlockEnd {
+			// END without BEGIN: remove it and the sink lines above it.
+			tampered = true
+			hadBlock = true
+			for n := len(kept); n > 0 && ourLine(kept[n-1]); n = len(kept) {
+				kept = kept[:n-1]
+			}
+			dropBlank()
+			i++
+			continue
+		}
 		if markerLine(lines[i]) != BlockBegin {
 			kept = append(kept, lines[i])
 			i++
@@ -199,7 +209,11 @@ func (h *HostsFile) Remove() error {
 }
 
 func (h *HostsFile) rewrite(block string) (bool, error) {
-	raw, err := os.ReadFile(h.Path)
+	path, err := filepath.EvalSymlinks(h.Path)
+	if err != nil {
+		return false, err
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
@@ -208,11 +222,11 @@ func (h *HostsFile) rewrite(block string) (bool, error) {
 	if out == content {
 		return tampered, nil
 	}
-	st, err := os.Stat(h.Path)
+	st, err := os.Stat(path)
 	if err != nil {
 		return tampered, err
 	}
-	if err := writeAtomic(h.Path, []byte(out), st.Mode().Perm()); err != nil {
+	if err := writeHosts(path, []byte(out), st.Mode().Perm()); err != nil {
 		return tampered, err
 	}
 	if h.Flush != nil {
@@ -221,32 +235,4 @@ func (h *HostsFile) rewrite(block string) (bool, error) {
 		}
 	}
 	return tampered, nil
-}
-
-// writeAtomic writes path+".adsiem.tmp" next to path, syncs it and renames it
-// over path.
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".adsiem.tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-	if err != nil {
-		return fmt.Errorf("create %s: %w", tmp, err)
-	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Chmod(mode)
-	}
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = replaceFile(tmp, path)
-	}
-	if err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
 }
