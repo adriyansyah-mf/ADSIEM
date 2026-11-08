@@ -52,10 +52,24 @@ func clientProcess(remoteAddr string) (int, string) {
 	if perr != nil || ip == nil {
 		return 0, ""
 	}
-	// MIB_TCPROW_OWNER_PID (24 bytes) and MIB_TCP6ROW_OWNER_PID (56 bytes).
-	family, rowSize, portOff, pidOff := uint32(windows.AF_INET), 24, 8, 20
-	if ip.To4() == nil {
-		family, rowSize, portOff, pidOff = windows.AF_INET6, 56, 20, 52
+	// A v4 client is looked up in the v4 table, then (dual-stack sockets) as a
+	// v4-mapped address in the v6 table.
+	if ip4 := ip.To4(); ip4 != nil {
+		if pid, name := ownerIn(windows.AF_INET, ip4, port); pid != 0 {
+			return pid, name
+		}
+	}
+	return ownerIn(windows.AF_INET6, ip.To16(), port)
+}
+
+// ownerIn matches the row whose local address and port are the client's.
+// MIB_TCPROW_OWNER_PID is 24 bytes (dwLocalAddr at 4, dwLocalPort at 8, pid at
+// 20); MIB_TCP6ROW_OWNER_PID is 56 bytes (ucLocalAddr at 0, dwLocalPort at 20,
+// pid at 52).
+func ownerIn(family uint32, ip net.IP, port int) (int, string) {
+	rowSize, addrOff, portOff, pidOff := 24, 4, 8, 20
+	if family == windows.AF_INET6 {
+		rowSize, addrOff, portOff, pidOff = 56, 0, 20, 52
 	}
 	buf := tcpTable(family)
 	if len(buf) < 4 {
@@ -69,6 +83,9 @@ func clientProcess(remoteAddr string) (int, string) {
 		}
 		raw := binary.LittleEndian.Uint32(buf[off+portOff:])
 		if int(raw&0xff)<<8|int(raw>>8&0xff) != port {
+			continue
+		}
+		if !net.IP(buf[off+addrOff : off+addrOff+len(ip)]).Equal(ip) {
 			continue
 		}
 		pid := binary.LittleEndian.Uint32(buf[off+pidOff:])

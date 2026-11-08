@@ -3,8 +3,11 @@ package webblock
 import (
 	"crypto/tls"
 	"errors"
+	"io"
+	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +58,10 @@ type Server struct {
 	Now      func() time.Time // tests
 
 	limiter Limiter
+	// lookupSlot lets one process lookup run at a time; a busy request skips it.
+	lookupOnce sync.Once
+	lookupSlot chan struct{}
+	findProc   func(remoteAddr string) (int, string) // tests; default clientProcess
 
 	mu      sync.RWMutex
 	page    string
@@ -100,14 +107,13 @@ func (s *Server) newHTTPServer() *http.Server {
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       30 * time.Second,
 		MaxHeaderBytes:    16 << 10,
+		ErrorLog:          log.New(io.Discard, "", 0),
 	}
 }
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	domain := hostOf(r.Host)
-	if len(domain) > maxLoggedDomain {
-		domain = domain[:maxLoggedDomain]
-	}
+	domain = truncRunes(domain, maxLoggedDomain)
 	s.mu.RLock()
 	page, contact, lookup := s.page, s.contact, s.lookup
 	s.mu.RUnlock()
@@ -135,18 +141,38 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusForbidden)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write([]byte(body))
 	}
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush() // the client has the page before the process lookup runs
+	}
 	s.emit(r, domain, entry)
+}
+
+// process looks the client up, one lookup at a time; when one is running the
+// request goes without process details.
+func (s *Server) process(remoteAddr string) (int, string) {
+	s.lookupOnce.Do(func() { s.lookupSlot = make(chan struct{}, 1) })
+	select {
+	case s.lookupSlot <- struct{}{}:
+		defer func() { <-s.lookupSlot }()
+	default:
+		return 0, ""
+	}
+	if s.findProc != nil {
+		return s.findProc(remoteAddr)
+	}
+	return clientProcess(remoteAddr)
 }
 
 func (s *Server) emit(r *http.Request, domain string, entry Entry) {
 	if s.Push == nil {
 		return
 	}
-	pid, name := clientProcess(r.RemoteAddr)
+	pid, name := s.process(r.RemoteAddr)
 	emit, suppressed := s.limiter.Allow(domain, pid, s.now())
 	if !emit {
 		return
@@ -155,10 +181,7 @@ func (s *Server) emit(r *http.Request, domain string, entry Entry) {
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	path := r.URL.Path
-	if len(path) > maxLoggedPath {
-		path = path[:maxLoggedPath]
-	}
+	path := truncRunes(r.URL.Path, maxLoggedPath)
 	s.Push(LogType, Event{Domain: domain, Scheme: scheme, Path: path, Source: entry.Source,
 		Reason: entry.Reason, Process: name, PID: pid, Count: 1 + suppressed}.Line())
 }

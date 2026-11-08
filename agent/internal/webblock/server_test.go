@@ -58,6 +58,7 @@ func (c *captured) wait(n int) []string {
 func newTestHandlerServer() (*Server, *captured) {
 	c := &captured{}
 	s := &Server{Push: c.push, Hostname: "WS-1", Now: func() time.Time { return time.Date(2026, 11, 8, 10, 5, 0, 0, time.UTC) }}
+	s.findProc = func(string) (int, string) { return 0, "" }
 	s.set(testPage, "sec <team>", testLookup)
 	return s, c
 }
@@ -218,7 +219,7 @@ func TestServerHTTPAndHTTPS(t *testing.T) {
 	if hresp.StatusCode != 403 || !strings.Contains(string(hbody), "evil.example") {
 		t.Fatalf("https %d %s", hresp.StatusCode, hbody)
 	}
-	if l := c.wait(1); len(l) == 0 || !strings.Contains(l[len(l)-1], "scheme=https") {
+	if l := c.wait(2); len(l) < 2 || !strings.Contains(strings.Join(l, "\n"), "scheme=https") {
 		t.Fatalf("events %v", l)
 	}
 
