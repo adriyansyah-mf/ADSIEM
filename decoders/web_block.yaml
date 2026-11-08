@@ -1,0 +1,23 @@
+# A local app on the endpoint asked for a domain on the Web Protection
+# blocklist and was answered with the block page (agent/internal/webblock).
+# source: where the entry came from (manual, alert, urlhaus, phishtank);
+# count > 1 when repeated hits within a minute were folded into one line.
+name: web_block
+log_type: web_block
+type: kv
+priority: 3
+enabled: true
+match: 'event=web_block '
+fields:
+  web.action: action
+  url.domain: domain
+  url.scheme: scheme
+  url.path: path
+  web.block_source: source
+  web.block_reason: reason
+  process.name: process
+  process.pid: pid
+  event.count: count
+static_fields:
+  event.category: network
+  event.action: web_block
