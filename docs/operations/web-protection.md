@@ -81,6 +81,17 @@ in the agent detail view and the API.
 | Domain still reachable | Flush the DNS cache (`ipconfig /flushdns` on Windows; `resolvectl flush-caches` on systemd-resolved). The agent flushes after changes, but browsers keep their own cache and DoH skips the hosts file. |
 | Certificate error on a blocked HTTPS site | The CA is not trusted by that program (see Browsers), or `ca_installed` is false in health; check `last_error`. |
 
+### Windows: port 80 held by HTTP.sys/IIS
+
+On Windows the HTTP.sys kernel driver (IIS, WinRM, and other services) often
+listens on all addresses on port 80, so the agent cannot bind `127.84.0.1:80`
+and health shows `page_unavailable`. Blocked domains stay blocked: the
+connection reaches HTTP.sys and never the real site. Plain-HTTP visits show
+HTTP.sys's own error instead of the custom page; HTTPS, which is most traffic,
+shows the custom page. The agent does not change HTTP.sys configuration. An
+administrator who wants the page over HTTP can restrict HTTP.sys to specific
+addresses with `netsh http add iplisten`.
+
 Notes on the hosts file write: it is replaced through a temp file and a rename
 in the same directory. Where that is impossible (a Docker bind-mounted
 `/etc/hosts`, or Windows when the file is locked) the agent writes in place,
