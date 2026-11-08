@@ -29,6 +29,12 @@ class _Redis:
     async def expire(self, key, seconds):
         pass
 
+    async def get(self, key):
+        return self.kv.get(key)
+
+    async def rpush(self, key, value):
+        self.kv.setdefault(key, []).append(value)
+
     async def set(self, key, value, ex=None, nx=False):
         if nx and key in self.kv:
             return None

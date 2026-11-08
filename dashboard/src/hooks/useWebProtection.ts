@@ -159,3 +159,31 @@ export function useAgentWebHealth() {
     refetchInterval: 30_000,
   })
 }
+
+export interface FeedStatus {
+  name: 'urlhaus' | 'phishtank'
+  enabled_key_present: boolean
+  status: string
+  last_success: string | null
+  last_attempt: string | null
+  entries: number | null
+  suppressed: number | null
+  removed: number | null
+  error: string
+}
+
+export function useWebFeeds() {
+  return useQuery<{ feeds: FeedStatus[] }>({
+    queryKey: [...KEY, 'feeds'],
+    queryFn: () => api.get('/api/web-blocks/feeds').then(r => r.data),
+    refetchInterval: 30_000,
+  })
+}
+
+export function useSyncFeed() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => api.post(`/api/web-blocks/feeds/${name}/sync`).then(r => r.data as { status: string }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...KEY, 'feeds'] }),
+  })
+}

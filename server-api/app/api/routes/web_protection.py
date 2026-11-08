@@ -1,6 +1,7 @@
 # server-api/app/api/routes/web_protection.py
 """Web Protection (spec B1): agents sync the blocklist here; the dashboard
 manages the blocklist, allowlist, policy and block page."""
+import json
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Optional
 from uuid import UUID
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_agent, get_scoped_group, require_permission
+from app.core.llm_gateway import get_setting
+from app.core.redis_client import get_redis
 from app.models.models import Agent, User, WebAllowRule, WebBlockEntry, WebBlockPolicy
 from app.services import web_blocks, web_page
 from app.services.audit import audit_log
@@ -47,6 +50,12 @@ async def agent_web_blocklist(
 router = APIRouter(tags=["web-protection"])
 Read = Depends(require_permission("alerts:read"))
 Manage = Depends(require_permission("agents:manage"))
+SettingsManage = Depends(require_permission("settings:manage"))
+
+# worker/worker/webblock_feeds.py owns these; the worker package cannot be imported here without its DB engine
+FEED_STATE_PREFIX = "siem:webblock_feed:"
+FEED_SYNC_QUEUE = "siem:webblock_feed:sync"
+FEED_KEYS = {"urlhaus": ("abusech_auth_key", "malwarebazaar_api_key"), "phishtank": ("phishtank_app_key",)}
 
 
 def _target_group(group_filter: Optional[str], requested: Optional[str]) -> str:
@@ -383,3 +392,32 @@ async def preview_page(group_id: str, body: PreviewIn, db: AsyncSession = Depend
         raise HTTPException(status_code=422, detail=str(exc))
     values = {**web_page.SAMPLE, "contact": policy["contact"] or web_page.SAMPLE["contact"]}
     return {"html": web_page.document(page, values)}
+
+
+@router.get("/api/web-blocks/feeds")
+async def feed_status(db: AsyncSession = Depends(get_db), redis=Depends(get_redis), _=Read):
+    """Per-feed sync state the worker keeps in Redis. Feeds are global (group '*'), so this is not group scoped."""
+    feeds = []
+    for name, keys in FEED_KEYS.items():
+        try:
+            state = json.loads(await redis.get(FEED_STATE_PREFIX + name) or "{}")
+        except ValueError:
+            state = {}
+        if not isinstance(state, dict):
+            state = {}
+        present = any([(await get_setting(db, k)).strip() for k in keys])
+        feeds.append({"name": name, "enabled_key_present": present, "status": state.get("status") or "never_run",
+                      "last_success": state.get("last_success"), "last_attempt": state.get("last_attempt"),
+                      "entries": state.get("entries"), "suppressed": state.get("suppressed"),
+                      "removed": state.get("removed"), "error": state.get("error") or ""})
+    return {"feeds": feeds}
+
+
+@router.post("/api/web-blocks/feeds/{name}/sync")
+async def sync_feed(name: str, db: AsyncSession = Depends(get_db), redis=Depends(get_redis),
+                    user: User = SettingsManage):
+    if name not in FEED_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown feed")
+    await redis.rpush(FEED_SYNC_QUEUE, name)
+    await audit_log(db, user.id, "web_block_feed.sync", "web_block_feed", name, {})
+    return {"status": "queued"}

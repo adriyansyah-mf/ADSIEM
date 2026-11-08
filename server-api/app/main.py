@@ -83,6 +83,8 @@ _DEFAULT_SETTINGS = [
     ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),
     ("malwarebazaar_enabled", "false",                  False, "Allow AI case investigations to send observed file hashes to MalwareBazaar (true/false). Metadata only: no file uploads or sample downloads"),
     ("malwarebazaar_api_key", "",                       True,  "MalwareBazaar Auth-Key from auth.abuse.ch (free): downloads new malware hashes for the known-malware set (malware_feed_enabled) and, with malwarebazaar_enabled=true, lets AI investigations look hashes up. Check abuse.ch fair-use/commercial terms"),
+    ("abusech_auth_key",  "",                          True,  "abuse.ch Auth-Key (free, auth.abuse.ch) for the URLhaus feed in Web Protection; falls back to malwarebazaar_api_key when empty"),
+    ("phishtank_app_key",  "",                          True,  "PhishTank application key (free, phishtank.org) for the PhishTank feed in Web Protection"),
     ("malware_feed_enabled", "true",                   False, "Download new malware hashes from MalwareBazaar every 30 minutes into the known-malware set agents check (needs malwarebazaar_api_key; only downloads, nothing is sent) (true/false)"),
     ("malware_feed_retention_days", "180",             False, "Feed hashes not seen again for this many days stop being checked (0 = keep forever)"),
     ("malware_hash_learn_yara", "true",                False, "Add the SHA-256 of every file that matches a critical YARA rule to the known-malware set, so every agent knows it (true/false)"),
