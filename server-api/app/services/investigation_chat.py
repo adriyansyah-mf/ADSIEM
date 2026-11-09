@@ -21,9 +21,11 @@ writes as text.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,6 +33,7 @@ import structlog
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from sqlalchemy import desc, or_, select, update
+from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import (
@@ -75,6 +78,14 @@ EXTRA_READ_TOOLS: list[Callable[[AsyncSession, ChatCtx], list[ChatTool]]] = []
 
 class ChatUnavailable(Exception):
     """No AI provider is configured (the route answers 422)."""
+
+
+class ChatBusy(Exception):
+    """Another turn on this investigation is being answered (409); nothing was saved."""
+
+
+class ChatFailed(Exception):
+    """The turn could not be prepared (502); a system message records why."""
 
 
 # ─── Context ─────────────────────────────────────────────────────
@@ -247,32 +258,79 @@ async def run_turn(db: AsyncSession, inv: CaseInvestigation, user, text: str,
     if not api_key:
         raise ChatUnavailable("No AI provider is configured: an admin needs to set the 9router API key in Settings.")
     model = await investigator.investigation_model(db, model)
-
     ctx = ChatCtx(inv_id=inv.id, case_id=inv.case_id, group_id=inv.group_id, user_id=user.id)
+    async with _turn_lock(db, ctx.inv_id):
+        return await _turn(db, inv, ctx, text, api_key, model, effort, extra_tools)
+
+
+def _lock_key(inv_id: uuid.UUID) -> int:
+    """A signed 64-bit advisory-lock key for one investigation's chat."""
+    digest = hashlib.sha1(b"investigation_chat:" + inv_id.bytes).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+@asynccontextmanager
+async def _turn_lock(db: AsyncSession, inv_id: uuid.UUID):
+    """One turn at a time per investigation, across replicas: a session-level
+    advisory lock on a connection of its own (autocommit, so it isn't idle in a
+    transaction for the turn). Session-level rather than xact-scoped because the
+    turn commits several times on the request's session; the lock connection
+    never commits anything, and is unlocked in `finally` — or dropped from the
+    pool if the unlock fails, which ends its backend and with it the lock."""
+    key = _lock_key(inv_id)
+    conn = await db.bind.connect()
+    try:
+        conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        if not await conn.scalar(sql_text("SELECT pg_try_advisory_lock(:k)"), {"k": key}):
+            raise ChatBusy("a reply is already being written")
+        try:
+            yield
+        finally:
+            try:
+                await conn.execute(sql_text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+            except Exception:  # noqa: BLE001 — never reuse a connection that may still hold the lock
+                log.warning("investigation_chat_unlock_failed", investigation=str(inv_id))
+                await conn.invalidate()
+    finally:
+        await conn.close()
+
+
+async def _turn(db: AsyncSession, inv: CaseInvestigation, ctx: ChatCtx, text: str, api_key: str, model: str,
+                effort: str | None, extra_tools: list[ChatTool] | None,
+                ) -> tuple[list[InvestigationMessage], list[InvestigationChatAction]]:
     history = list(reversed((await db.execute(select(InvestigationMessage).where(
-        InvestigationMessage.investigation_id == inv.id)
+        InvestigationMessage.investigation_id == ctx.inv_id)
         .order_by(desc(InvestigationMessage.created_at)).limit(HISTORY_MESSAGES))).scalars().all()))
-    asked = InvestigationMessage(investigation_id=inv.id, group_id=inv.group_id, role="user", content=text,
-                                 author_id=user.id, tool_calls=[])
+    asked = InvestigationMessage(investigation_id=ctx.inv_id, group_id=ctx.group_id, role="user", content=text,
+                                 author_id=ctx.user_id, tool_calls=[])
     db.add(asked)
     await db.commit()
 
-    case = await db.get(Case, inv.case_id)
-    reads = _read_tools(db, ctx) + [t for make in EXTRA_READ_TOOLS for t in make(db, ctx)] + list(extra_tools or [])
-    by_name = {t.name: t for t in reads}
-    bindable = [_bindable(t.name, t.description, t.schema) for t in reads]
-    bindable += [_bindable(name, p.description, p.schema) for name, p in PROPOSAL_TOOLS.items()]
-    known = {t.name for t in bindable}
-    chat = investigator.make_chat_model(api_key, model, effort)
-    llm = chat.bind_tools(bindable)
-
-    messages: list[BaseMessage] = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content="The case and the investigation you ran. Context:\n"
-                             + investigator._json(await _context(db, inv, case), 20_000)),
-        *_history(history),
-        HumanMessage(content=text),
-    ]
+    try:
+        case = await db.get(Case, ctx.case_id)
+        reads = _read_tools(db, ctx) + [t for make in EXTRA_READ_TOOLS for t in make(db, ctx)] \
+            + list(extra_tools or [])
+        by_name = {t.name: t for t in reads}
+        bindable = [_bindable(t.name, t.description, t.schema) for t in reads]
+        bindable += [_bindable(name, p.description, p.schema) for name, p in PROPOSAL_TOOLS.items()]
+        known = {t.name for t in bindable}
+        chat = investigator.make_chat_model(api_key, model, effort)
+        llm = chat.bind_tools(bindable)
+        messages: list[BaseMessage] = [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content="The case and the investigation you ran. Context:\n"
+                                 + investigator._json(await _context(db, inv, case), 20_000)),
+            *_history(history),
+            HumanMessage(content=text),
+        ]
+    except Exception as exc:  # noqa: BLE001 — recorded after the analyst's message, not an orphan 500
+        log.exception("investigation_chat_prepare_failed", investigation=str(ctx.inv_id))
+        await db.rollback()
+        note = f"Could not prepare the reply: {investigator._clip(str(exc) or type(exc).__name__, 300)}"
+        db.add(InvestigationMessage(investigation_id=ctx.inv_id, group_id=ctx.group_id, role="system",
+                                    content=note, tool_calls=[]))
+        await db.commit()
+        raise ChatFailed(note) from exc
     made: list[dict] = []
     proposals: list[InvestigationChatAction] = []
     deadline = time.monotonic() + TURN_SECONDS

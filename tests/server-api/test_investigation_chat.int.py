@@ -343,6 +343,64 @@ async def test_time_limit_keeps_proposals_and_says_so(chat, monkeypatch):
     assert action["message_id"] == body["messages"][1]["id"]
 
 
+async def test_one_turn_at_a_time_per_investigation(chat):
+    import asyncio
+    from sqlalchemy import func, select
+    from app.models.models import InvestigationMessage
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Waiting(Scripted):
+        async def _invoke(self, messages, bound):
+            entered.set()
+            await release.wait()
+            return await super()._invoke(messages, bound)
+
+    chat.model = Waiting(lambda *a: "first reply")
+    first = asyncio.create_task(chat.client.post(_url(chat), json={"message": "first"}))
+    await asyncio.wait_for(entered.wait(), 10)
+
+    second = await chat.client.post(_url(chat), json={"message": "second"})
+    assert second.status_code == 409
+    assert second.json() == {"detail": "a reply is already being written"}
+    async with chat.sessions() as db:
+        assert await db.scalar(select(func.count()).select_from(InvestigationMessage)
+                               .where(InvestigationMessage.role == "user")) == 1
+
+    release.set()
+    r = await asyncio.wait_for(first, 10)
+    assert r.status_code == 200, r.text
+    # the lock is released: the next message goes through
+    assert (await chat.client.post(_url(chat), json={"message": "third"})).status_code == 200
+    # and released on a failure path too
+    chat.model = Scripted(lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert (await chat.client.post(_url(chat), json={"message": "fourth"})).status_code == 200
+    chat.model = Scripted(lambda *a: "ok")
+    assert (await chat.client.post(_url(chat), json={"message": "fifth"})).status_code == 200
+
+
+async def test_context_failure_is_recorded_and_a_clean_error(chat, monkeypatch):
+    from app.services import investigation_chat
+
+    async def broken(*a, **kw):
+        raise RuntimeError("evidence table unreadable")
+
+    monkeypatch.setattr(investigation_chat, "_context", broken)
+    chat.model = Scripted(lambda *a: "never")
+    r = await chat.client.post(_url(chat), json={"message": "hi"})
+    assert r.status_code == 502
+    assert "Could not prepare the reply" in r.json()["detail"]
+    assert chat.model.seen == []
+    got = (await chat.client.get(_url(chat))).json()["messages"]
+    assert [(m["role"], m["content"][:28]) for m in got] == [("user", "hi"),
+                                                            ("system", "Could not prepare the reply:")]
+    assert "evidence table unreadable" in got[1]["content"]
+    # the lock was released
+    monkeypatch.undo()
+    from app.services import investigator
+    monkeypatch.setattr(investigator, "make_chat_model", lambda *a: Scripted(lambda *a: "ok"))
+    assert (await chat.client.post(_url(chat), json={"message": "again"})).status_code == 200
+
+
 async def test_model_failure_is_a_system_message(chat):
     def script(turn, results, messages):
         raise RuntimeError("provider down")

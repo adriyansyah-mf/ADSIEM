@@ -91,4 +91,8 @@ async def post_chat(
         messages, actions = await chat.run_turn(db, inv, user, text)
     except chat.ChatUnavailable as exc:
         raise HTTPException(422, str(exc)) from None
+    except chat.ChatBusy as exc:
+        raise HTTPException(409, str(exc)) from None
+    except chat.ChatFailed as exc:
+        raise HTTPException(502, str(exc)) from None
     return ChatOut(messages=messages, actions=actions)
