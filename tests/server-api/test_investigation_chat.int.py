@@ -510,6 +510,32 @@ async def test_ti_lookup_pending_when_the_worker_is_slow(chat, ti):
     assert await _evidence(chat) == []
 
 
+@pytest.mark.parametrize("turn_seconds,longest", [(12, 3.0), (8, 0.5)])
+async def test_ti_lookup_wait_is_bounded_by_the_turn_budget(chat, ti, monkeypatch, turn_seconds, longest):
+    import time
+
+    from app.services import investigation_chat, investigation_ti
+    ti(None)
+    monkeypatch.setattr(investigation_ti, "WAIT_SECONDS", 25.0)
+    monkeypatch.setattr(investigation_chat, "TURN_SECONDS", turn_seconds)
+    out, took = [], []
+
+    def script(turn, results, messages):
+        if turn == 1:
+            took.append(time.monotonic())
+            return "ti_lookup", {"value": "evil.example.com"}
+        took.append(time.monotonic() - took[0])
+        out.append(results[-1])
+        return "ok"
+
+    chat.model = Scripted(script)
+    r = await chat.client.post(_url(chat), json={"message": "check"})
+    assert r.status_code == 200, r.text
+    assert out[0]["status"] == "pending"
+    assert took[1] <= longest, took
+    assert r.json()["messages"][1]["role"] == "assistant"  # the reply was not lost to the turn timeout
+
+
 async def test_ti_lookup_late_result_is_found_on_the_next_ask(chat, ti):
     redis = ti(None)
     out = []

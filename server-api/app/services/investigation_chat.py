@@ -26,6 +26,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -72,6 +73,9 @@ class ChatTool:
     schema: dict[str, Any]
     run: Callable[[dict], Awaitable[Any]]
 
+
+# time.monotonic() at which the current turn times out; tools that wait size their wait from it.
+TURN_DEADLINE: ContextVar[float | None] = ContextVar("investigation_chat_deadline", default=None)
 
 # Factories (db, ctx) -> [ChatTool, ...], called once per turn (so they may keep per-turn state).
 EXTRA_READ_TOOLS: list[Callable[[AsyncSession, ChatCtx], list[ChatTool]]] = []
@@ -343,6 +347,7 @@ async def _turn(db: AsyncSession, inv: CaseInvestigation, ctx: ChatCtx, text: st
     made: list[dict] = []
     proposals: list[InvestigationChatAction] = []
     deadline = time.monotonic() + TURN_SECONDS
+    TURN_DEADLINE.set(deadline)
 
     async def call_tool(name: str, args: dict) -> dict:
         record = {"name": name, "args": _clip_args(args)}

@@ -37,6 +37,7 @@ CACHE_PREFIX = "siem:ti:cache:"
 PENDING_PREFIX = "siem:ti:pending:"
 TTL = 600
 WAIT_SECONDS = 25.0
+TURN_RESERVE = 10.0  # of the turn's budget kept for the model's answer
 POLL_SECONDS = 0.25
 MAX_LOOKUPS = 3
 MAX_VALUE = 512
@@ -85,7 +86,12 @@ def _summary(value: str, result: dict) -> str:
 
 
 async def _wait(redis, job_id: str) -> dict | None:
-    end = time.monotonic() + WAIT_SECONDS
+    from app.services.investigation_chat import TURN_DEADLINE
+    wait = WAIT_SECONDS
+    deadline = TURN_DEADLINE.get()
+    if deadline is not None:  # leave the model 10 s to write its answer
+        wait = min(wait, deadline - time.monotonic() - TURN_RESERVE)
+    end = time.monotonic() + max(wait, 0.0)
     while True:
         raw = await redis.get(RESULT_PREFIX + job_id)
         if raw:
