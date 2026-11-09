@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -124,10 +125,27 @@ func TestRansomwareEndToEndWindows(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go g.Run(ctx)
+	// Diagnostics for the write path: how many writes reach the guard, and
+	// samples of their paths, printed when an in-place case fails.
+	var diagMu sync.Mutex
+	diag := map[string]int{}
+	var writeSamples []string
 	sensor, err := winsensor.StartWith(buffer.New(100000), winsensor.Options{OnFile: func(e winsensor.FileEvent) {
+		diagMu.Lock()
+		diag[e.Action]++
+		if e.Action == "write" && len(writeSamples) < 12 {
+			writeSamples = append(writeSamples, fmt.Sprintf("pid=%d image=%s path=%s", e.PID, filepath.Base(e.Image), e.Path))
+		}
+		diagMu.Unlock()
 		g.Observe(linsensor.FileEvent{Time: e.Time, PID: e.PID, PPID: e.PPID, Image: e.Image,
 			Comm: filepath.Base(e.Image), Action: e.Action, Path: e.Path, From: e.From})
 	}})
+	logDiag := func(what string) {
+		diagMu.Lock()
+		defer diagMu.Unlock()
+		t.Logf("%s: guard file events by action %v; writes dropped %d; write samples:\n  %s",
+			what, diag, sensor.WritesDropped(), strings.Join(writeSamples, "\n  "))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,6 +230,7 @@ func TestRansomwareEndToEndWindows(t *testing.T) {
 		return strings.HasPrefix(l, "detection=inplace_modify confirmed=true response=killed") && strings.Contains(l, want)
 	}); l == "" {
 		t.Errorf("no inplace_modify kill line: %q", out.wait(t, 1))
+		logDiag("in-place")
 	}
 
 	// A canary overwritten in place (Kernel-File write, no rename or delete).

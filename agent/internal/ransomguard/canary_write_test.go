@@ -39,6 +39,30 @@ func (w *writeCase) write(image string) {
 	w.g.Observe(linsensor.FileEvent{Action: "write", Path: w.p, PID: 90, Image: image, Comm: filepath.Base(image)})
 }
 
+// A rewrite caught between its truncate and its write reads as destroyed
+// for a moment; that alone must not kill the writer (it made
+// TestCanaryTextNotAdoptedWithAnUntrustedWriter flaky under -race).
+func TestCanaryWriteMidRewriteIsNoHit(t *testing.T) {
+	w := newWriteCase(t)
+	data, _ := os.ReadFile(w.p)
+	os.WriteFile(w.p, nil, 0o644) // truncated, the write not done yet
+	w.write("/usr/bin/rsync")
+	time.Sleep(w.g.writeWait / writeSteps / 3)
+	os.WriteFile(w.p, data, 0o644) // the write lands: the same canary
+	w.quiet(t, "mid-rewrite")
+}
+
+// Content that stays wiped is still destruction: the writer is stopped.
+func TestCanaryWriteStaysWipedKills(t *testing.T) {
+	w := newWriteCase(t)
+	os.WriteFile(w.p, make([]byte, 4096), 0o644)
+	w.write("/tmp/.x/wiper")
+	time.Sleep(w.g.writeWait + 200*time.Millisecond)
+	if len(w.kills()) != 1 {
+		t.Fatalf("killed %v", w.kills())
+	}
+}
+
 // quiet waits out the read-back and requires no report and no kill.
 func (w *writeCase) quiet(t *testing.T, what string) {
 	t.Helper()

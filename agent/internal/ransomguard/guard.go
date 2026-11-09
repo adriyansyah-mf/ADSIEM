@@ -224,16 +224,24 @@ func (g *Guard) canaryWrite(p string) {
 		return
 	}
 	defer g.can.unwatch(p)
-	st, sum := canaryUnchanged, ""
+	// A rewrite in progress (truncated, half written) also reads as
+	// destroyed for a moment: destruction counts once the same content is
+	// read twice in a row, or is still there at the last step.
+	st, sum, lastBad := canaryUnchanged, "", ""
 	for i := 0; i <= writeSteps; i++ {
 		if i > 0 {
 			time.Sleep(g.writeWait / writeSteps)
 		}
 		st, sum = canaryState(p, want)
-		if st == canaryDestroyed {
+		if st != canaryDestroyed {
+			lastBad = ""
+			continue
+		}
+		if sum == lastBad || i == writeSteps {
 			g.canaryDamaged(p)
 			return
 		}
+		lastBad = sum
 	}
 	if st == canaryText {
 		ws := g.can.writersOf(p)
