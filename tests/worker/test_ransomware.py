@@ -37,6 +37,24 @@ INPLACE = ('detection=inplace_modify confirmed=true response=killed Files=50 '
 INPLACE_UNCONFIRMED = ('detection=inplace_modify confirmed=false response=none Files=50 '
                        'TargetFilename="C:\\\\Users\\\\bob\\\\Pictures\\\\IMG_0059.jpg" Entropy=7.95 '
                        'Image="C:\\\\Program Files\\\\Editor\\\\editor.exe" Comm="editor.exe" PID=67 PPID=0 User=0 Isolated=false')
+# As TestWindowsCriticalPrecursorsKillTheInitiator: IronChain's shadow-copy
+# deletion; the Desktop sample (the initiator) and its tree were killed.
+PRECURSOR = ('detection=precursor confirmed=true response=killed Precursor=shadow_delete '
+             'CommandLine="vssadmin delete shadows /all /quiet" '
+             'PrecursorImage="C:\\\\Windows\\\\System32\\\\vssadmin.exe" PrecursorPID=3200 '
+             'Image="C:\\\\Users\\\\bob\\\\Desktop\\\\9f2c1e.exe" Comm="9f2c1e.exe" PID=3000 PPID=2000 User=0 '
+             'Killed=3 Isolated=false')
+# As TestProtectedInitiatorKillsOnlyThePrecursor / TestBootTamperIsReverted:
+# from services.exe (protected), only bcdedit was killed, the change undone.
+PRECURSOR_PROTECTED = ('detection=precursor confirmed=true response=killed Precursor=boot_tamper '
+                       'CommandLine="bcdedit /set {default} safeboot minimal" '
+                       'PrecursorImage="C:\\\\Windows\\\\System32\\\\bcdedit.exe" PrecursorPID=5200 '
+                       'Image="C:\\\\Windows\\\\System32\\\\services.exe" Comm="services.exe" PID=600 PPID=500 User=0 '
+                       'Killed=1 Isolated=false InitiatorProtected=true Reverted="safeboot"')
+# report_only on Linux.
+PRECURSOR_REPORT = ('detection=precursor confirmed=true response=none Precursor=snapshot_delete '
+                    'CommandLine="lvremove -f vg0/home_snap" PrecursorImage="/usr/sbin/lvremove" PrecursorPID=1200 '
+                    'Image="/tmp/.x/locker" Comm="locker" PID=1000 PPID=900 User=0 Isolated=false')
 RETIRED = ('detection=canary_retired confirmed=false response=none Canary="/srv/app/.siem-canary.pdf" '
            'Image="/usr/bin/rsync" Comm="rsync" PID=900 PPID=1 User=0 Isolated=false')
 
@@ -79,6 +97,24 @@ def test_decode(decoders):
     assert event["ransomware.detection"] == "inplace_modify" and event["ransomware.files"] == "50"
 
 
+def test_decode_precursor(decoders):
+    event, name = decoders.decode_named("ransomware_activity", PRECURSOR)
+    assert name == "ransomware_activity"
+    assert event["ransomware.detection"] == "precursor"
+    assert event["ransomware.precursor"] == "shadow_delete"
+    assert event["ransomware.command_line"] == "vssadmin delete shadows /all /quiet"
+    assert event["ransomware.precursor_image"] == "C:\\Windows\\System32\\vssadmin.exe"
+    assert event["ransomware.precursor_pid"] == "3200"
+    assert event["process.executable"] == "C:\\Users\\bob\\Desktop\\9f2c1e.exe"
+    assert event["ransomware.killed"] == "3"
+    # the command line is the precursor's, not the initiator's: kept out of
+    # process.command_line so process-creation rules do not fire on it again
+    assert "process.command_line" not in event
+    event, _ = decoders.decode_named("ransomware_activity", PRECURSOR_PROTECTED)
+    assert event["ransomware.initiator_protected"] == "true"
+    assert event["ransomware.reverted"] == "safeboot"
+
+
 @pytest.mark.parametrize("line,expected", [
     (CANARY, [("Ransomware Activity On Endpoint", "critical")]),
     (EXT, [("Ransomware Activity On Endpoint", "critical")]),
@@ -89,6 +125,9 @@ def test_decode(decoders):
     (INPLACE, [("Ransomware Activity On Endpoint", "critical")]),
     (INPLACE_UNCONFIRMED, []),
     (RETIRED, [("Ransomware Canary Retired", "medium")]),
+    (PRECURSOR, [("Ransomware Activity On Endpoint", "critical")]),
+    (PRECURSOR_PROTECTED, [("Ransomware Activity On Endpoint", "critical")]),
+    (PRECURSOR_REPORT, [("Ransomware Activity On Endpoint", "critical")]),
 ])
 def test_alerts(decoders, rules, line, expected):
     event, _ = decoders.decode_named("ransomware_activity", line)

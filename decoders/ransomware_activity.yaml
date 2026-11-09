@@ -9,6 +9,13 @@
 #   detection=extension_change / mass_modify / inplace_modify  bulk file heuristics;
 #                             confirmed=true when the files the process wrote look
 #                             encrypted (high entropy, format header gone)
+#   detection=precursor       a process ran what ransomware runs before it encrypts
+#                             (Precursor= shadow_delete, backup_delete, boot_tamper, byovd,
+#                             defense_tamper, snapshot_delete, kernel_module); always
+#                             confirmed. Image/PID are the initiator (the program behind the
+#                             shells), PrecursorImage/PrecursorPID/CommandLine the command;
+#                             InitiatorProtected=true: only the command was killed;
+#                             Reverted= the boot settings put back.
 # response: killed, kill_refused, kill_failed, isolated (confirmed, no process to kill),
 #           trusted (a trusted sync client among a destroyed canary's writers: not killed),
 #           none (report only / not confirmed).
@@ -27,6 +34,12 @@ fields:
   ransomware.entropy: Entropy
   ransomware.killed: Killed
   ransomware.isolated: Isolated
+  ransomware.precursor: Precursor
+  ransomware.command_line: CommandLine
+  ransomware.precursor_image: PrecursorImage
+  ransomware.precursor_pid: PrecursorPID
+  ransomware.initiator_protected: InitiatorProtected
+  ransomware.reverted: Reverted
   file.path: TargetFilename
   file.action: FileAction
   Image: Image

@@ -1,6 +1,6 @@
 title: Ransomware Activity On Endpoint
 id: rule-ransomware-detected
-description: A process touched a canary file, or renamed or rewrote many files in a minute and the result looks encrypted (ransomware.detection, ransomware.entropy). ransomware.response says whether the agent killed it (ransomware.killed processes) and ransomware.isolated whether it cut the host off.
+description: A process touched a canary file, renamed or rewrote many files in a minute and the result looks encrypted (ransomware.detection, ransomware.entropy), or ran a ransomware precursor such as shadow-copy deletion, boot-recovery tampering, a vulnerable driver or stopping security products (ransomware.detection=precursor, ransomware.precursor, ransomware.command_line). ransomware.response says whether the agent killed it (ransomware.killed processes) and ransomware.isolated whether it cut the host off.
 logsource:
   product: ransomware
   service: activity
