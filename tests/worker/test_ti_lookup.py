@@ -1,6 +1,7 @@
 """On-demand TI lookups for the investigation chat: queue -> aggregator -> result key."""
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -47,7 +48,7 @@ class Aggregator:
 
 
 def job(value, id="j1"):
-    return {"id": id, "value": value, "group": "blue", "requested_at": "2026-11-09T00:00:00Z"}
+    return {"id": id, "value": value, "group": "blue", "requested_at": datetime.now(timezone.utc).isoformat()}
 
 
 async def test_result_written_with_ttl():
@@ -80,6 +81,38 @@ async def test_single_iocs_accepted(value):
     r, agg = FakeRedis(), Aggregator()
     await ti_lookup.handle(r, json.dumps(job(value)), agg)
     assert "error" not in json.loads(r.store["siem:ti:result:j1"])
+
+
+@pytest.mark.parametrize("value", [
+    "http://[::1]/x", "http://10.1.2.3/a", "https://192.168.0.5:8443/", "http://169.254.169.254/latest",
+    "http://127.0.0.1:8080", "http://localhost/admin", "http://intranet/x", "http://db.corp/x",
+    "https://printer.local", "http://svc.internal/health", "http://nas.lan", "http://pc.home.arpa",
+    "http://host.localdomain", "http://user@10.0.0.1/", "http://[fd00::1]/",
+    "localhost", "intranet", "fileserver.local", "api.internal", "box.lan", "x.corp", "tv.home.arpa",
+    "srv.localdomain", "a.b.INTERNAL"])
+async def test_internal_indicators_never_reach_providers(value):
+    r, agg = FakeRedis(), Aggregator()
+    await ti_lookup.handle(r, json.dumps(job(value)), agg)
+    assert "error" in json.loads(r.store["siem:ti:result:j1"])
+    assert agg.seen == []
+
+
+@pytest.mark.parametrize("value", ["https://evil.example.com:8443/a", "http://8.8.8.8/x", "http://[2606:4700::1111]/"])
+async def test_public_urls_still_accepted(value):
+    r, agg = FakeRedis(), Aggregator()
+    await ti_lookup.handle(r, json.dumps(job(value)), agg)
+    assert "error" not in json.loads(r.store["siem:ti:result:j1"])
+
+
+async def test_stale_job_is_skipped():
+    r, agg = FakeRedis(), Aggregator()
+    old = (datetime.now(timezone.utc) - timedelta(seconds=121)).isoformat()
+    await ti_lookup.handle(r, json.dumps({**job("8.8.8.8"), "requested_at": old}), agg)
+    assert agg.seen == []
+    assert json.loads(r.store["siem:ti:result:j1"]) == {"error": "expired"}
+    fresh = (datetime.now(timezone.utc) - timedelta(seconds=100)).isoformat()
+    await ti_lookup.handle(r, json.dumps({**job("8.8.8.8", "j2"), "requested_at": fresh}), agg)
+    assert agg.seen == ["8.8.8.8"]
 
 
 async def test_malformed_job_does_not_raise():

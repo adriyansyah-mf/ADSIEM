@@ -18,6 +18,7 @@ import hashlib
 import ipaddress
 import json
 import re
+from urllib.parse import urlsplit
 import time
 import uuid
 from datetime import datetime, timezone
@@ -36,6 +37,8 @@ RESULT_PREFIX = "siem:ti:result:"
 CACHE_PREFIX = "siem:ti:cache:"
 PENDING_PREFIX = "siem:ti:pending:"
 TTL = 600
+PENDING_TTL = 60  # a job nobody picked up in this time is asked for again
+QUEUE_CAP = 1000
 WAIT_SECONDS = 25.0
 TURN_RESERVE = 10.0  # of the turn's budget kept for the model's answer
 POLL_SECONDS = 0.25
@@ -46,6 +49,34 @@ PENDING = {"status": "pending", "note": "ask again in a moment"}
 _HASH = re.compile(r"^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 _DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$", re.I)
 _URL = re.compile(r"^https?://[^\s/?#]+(?:[/?#]\S*)?$", re.I)
+
+
+_INTERNAL_SUFFIXES = (".local", ".internal", ".lan", ".corp", ".home.arpa", ".localdomain")
+
+
+def _public_domain(host: str) -> str:
+    host = host.rstrip(".").lower()
+    if "." not in host or host.endswith(_INTERNAL_SUFFIXES):
+        raise ValueError("internal or single-label host names are not looked up")
+    if not _DOMAIN.match(host):
+        raise ValueError("not an ip, domain, url or md5/sha1/sha256 hash")
+    return host
+
+
+def _check_url_host(url: str) -> None:
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        raise ValueError("unreadable url") from None
+    if not host:
+        raise ValueError("url has no host")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        _public_domain(host)
+        return
+    if not ip.is_global:
+        raise ValueError("private or reserved addresses are not looked up")
 
 
 def check_value(value) -> tuple[str, str]:
@@ -70,10 +101,9 @@ def check_value(value) -> tuple[str, str]:
     if _HASH.match(v):
         return v.lower(), "hash"
     if _URL.match(v):
+        _check_url_host(v)
         return v, "url"
-    if _DOMAIN.match(v):
-        return v.lower(), "domain"
-    raise ValueError("not an ip, domain, url or md5/sha1/sha256 hash")
+    return _public_domain(v), "domain"
 
 
 def _summary(value: str, result: dict) -> str:
@@ -123,10 +153,11 @@ async def lookup(db: AsyncSession, ctx: ChatCtx, value: str) -> dict:
         job_id = await redis.get(PENDING_PREFIX + digest)
         if not job_id:
             job_id = uuid.uuid4().hex
-            await redis.set(PENDING_PREFIX + digest, job_id, ex=TTL)
+            await redis.set(PENDING_PREFIX + digest, job_id, ex=PENDING_TTL)
             await redis.rpush(QUEUE, json.dumps({
                 "id": job_id, "value": value, "group": ctx.group_id,
                 "requested_at": datetime.now(timezone.utc).isoformat()}))
+            await redis.ltrim(QUEUE, -QUEUE_CAP, -1)  # a long-dead worker must not let the list grow
         result = await _wait(redis, job_id)
         if result is None:
             return dict(PENDING)
@@ -137,7 +168,7 @@ async def lookup(db: AsyncSession, ctx: ChatCtx, value: str) -> dict:
     spec = ledger.EvidenceSpec(
         evidence_type="ti_result", source_type="threat_intel", source_id=value,
         title=f"Threat intel: {value}"[:300], summary=_summary(value, result), payload=result,
-        entities={"ioc": value, "kind": kind})
+        entities={"ioc": value, "kind": kind}, observed_at=datetime.now(timezone.utc))
     evidence_id = await ledger.record_evidence(db, investigation_id=ctx.inv_id, group_id=ctx.group_id,
                                                action_id=None, spec=spec)
     return {**result, "evidence_id": str(evidence_id)}

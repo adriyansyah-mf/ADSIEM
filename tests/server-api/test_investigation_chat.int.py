@@ -426,6 +426,9 @@ class FakeRedis:
         if self.answer is not None:
             self.store["siem:ti:result:" + json.loads(raw)["id"]] = json.dumps(self.answer)
 
+    async def ltrim(self, key, start, stop):
+        self.trimmed = (key, start, stop)
+
     async def get(self, key):
         return self.store.get(key)
 
@@ -534,6 +537,58 @@ async def test_ti_lookup_wait_is_bounded_by_the_turn_budget(chat, ti, monkeypatc
     assert out[0]["status"] == "pending"
     assert took[1] <= longest, took
     assert r.json()["messages"][1]["role"] == "assistant"  # the reply was not lost to the turn timeout
+
+
+async def test_ti_lookup_pending_key_is_short_lived_and_the_queue_capped(chat, ti):
+    import hashlib
+    redis = ti(None)
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return "ti_lookup", {"value": "evil.example.com"}
+        return "ok"
+
+    chat.model = Scripted(script)
+    await chat.client.post(_url(chat), json={"message": "check"})
+    pending = "siem:ti:pending:" + hashlib.sha1(b"evil.example.com").hexdigest()
+    assert redis.ttl[pending] == 60
+    assert redis.trimmed == ("siem:ti:lookup", -1000, -1)
+    assert "requested_at" in redis.pushed[0][1]
+
+    del redis.store[pending]  # the pending key expired: the worker was down, the asker retries
+    chat.model = Scripted(script)
+    await chat.client.post(_url(chat), json={"message": "check again"})
+    assert len(redis.pushed) == 2 and redis.pushed[0][1]["id"] != redis.pushed[1][1]["id"]
+
+
+@pytest.mark.parametrize("value", ["http://[::1]/x", "http://10.1.2.3/a", "https://192.168.1.1/", "http://169.254.169.254/",
+                                   "http://localhost/", "localhost", "fileserver", "dc01.corp", "nas.local",
+                                   "x.internal", "box.lan", "tv.home.arpa", "srv.localdomain", "http://intranet/x"])
+async def test_ti_lookup_never_sends_internal_indicators(chat, ti, value):
+    redis = ti(MALICIOUS)
+    out = []
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return "ti_lookup", {"value": value}
+        out.append(results[-1])
+        return "ok"
+
+    chat.model = Scripted(script)
+    await chat.client.post(_url(chat), json={"message": "check"})
+    assert "error" in out[0] and redis.pushed == []
+
+
+async def test_ti_lookup_evidence_has_observed_at(chat, ti):
+    ti(MALICIOUS)
+
+    def script(turn, results, messages):
+        return ("ti_lookup", {"value": "198.41.0.4"}) if turn == 1 else "ok"
+
+    chat.model = Scripted(script)
+    await chat.client.post(_url(chat), json={"message": "check"})
+    [ev] = await _evidence(chat)
+    assert ev.observed_at is not None
 
 
 async def test_ti_lookup_late_result_is_found_on_the_next_ask(chat, ti):

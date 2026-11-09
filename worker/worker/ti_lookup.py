@@ -12,6 +12,8 @@ import asyncio
 import ipaddress
 import json
 import re
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import structlog
 
@@ -22,10 +24,39 @@ RESULT_PREFIX = "siem:ti:result:"
 RESULT_TTL = 600
 CONCURRENCY = 4
 MAX_VALUE = 512
+MAX_AGE_SECONDS = 120
 
 _HASH = re.compile(r"^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
 _DOMAIN = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$", re.I)
 _URL = re.compile(r"^https?://[^\s/?#]+(?:[/?#]\S*)?$", re.I)
+
+
+_INTERNAL_SUFFIXES = (".local", ".internal", ".lan", ".corp", ".home.arpa", ".localdomain")
+
+
+def _public_domain(host: str) -> str:
+    host = host.rstrip(".").lower()
+    if "." not in host or host.endswith(_INTERNAL_SUFFIXES):
+        raise ValueError("internal or single-label host names are not looked up")
+    if not _DOMAIN.match(host):
+        raise ValueError("not an ip, domain, url or md5/sha1/sha256 hash")
+    return host
+
+
+def _check_url_host(url: str) -> None:
+    try:
+        host = urlsplit(url).hostname
+    except ValueError:
+        raise ValueError("unreadable url") from None
+    if not host:
+        raise ValueError("url has no host")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        _public_domain(host)
+        return
+    if not ip.is_global:
+        raise ValueError("private or reserved addresses are not looked up")
 
 
 def check_value(value) -> str:
@@ -50,10 +81,22 @@ def check_value(value) -> str:
     if _HASH.match(v):
         return v.lower()
     if _URL.match(v):
+        _check_url_host(v)
         return v
-    if _DOMAIN.match(v):
-        return v.lower()
-    raise ValueError("not an ip, domain, url or md5/sha1/sha256 hash")
+    return _public_domain(v)
+
+
+def _stale(requested_at) -> bool:
+    """A job older than MAX_AGE_SECONDS was queued while the worker was down; its asker has moved on."""
+    if not requested_at:
+        return False
+    try:
+        at = datetime.fromisoformat(str(requested_at).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - at).total_seconds() > MAX_AGE_SECONDS
 
 
 async def _aggregator():
@@ -76,6 +119,8 @@ async def handle(redis, raw, aggregator) -> None:
     key = RESULT_PREFIX + job_id
     try:
         try:
+            if _stale(data.get("requested_at")):
+                raise ValueError("expired")
             value = check_value(data.get("value"))
             result = (await aggregator.enrich(value)).model_dump(mode="json")
         except ValueError as exc:
