@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from pydantic import Field, field_validator
 from sqlalchemy import func, select, true
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -20,7 +19,7 @@ from app.core.redis_client import get_redis
 from app.models.models import Agent, User, WebAllowRule, WebBlockEntry, WebBlockPolicy
 from app.services import web_blocks, web_page
 from app.services.audit import audit_log
-from worker.web_domains import DomainError, allow_match, normalize
+from worker.web_domains import DomainError, normalize
 
 agent_router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -67,23 +66,8 @@ def _target_group(group_filter: Optional[str], requested: Optional[str]) -> str:
     return requested or "default"
 
 
-async def _commit(db: AsyncSession, before_commit=None) -> None:
-    """Commit; a concurrent upsert of the same unique key loses with 409, never 500.
-
-    `before_commit` runs inside the guard after the pending inserts are flushed (a query would autoflush them)."""
-    try:
-        await db.flush()
-        if before_commit is not None:
-            await before_commit(db)
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="This item was changed at the same time; try again")
-
-
-async def _actor(db: AsyncSession, user: User) -> Optional[UUID]:
-    """created_by is a foreign key to users; tolerate a caller without a users row (the audit log still names them)."""
-    return user.id if await db.get(User, user.id) is not None else None
+_commit = web_blocks.commit_or_conflict
+_actor = web_blocks.actor_id
 
 
 def _visible(group_filter: Optional[str], column):
@@ -160,24 +144,8 @@ async def list_blocks(
 
 async def _block_one(db: AsyncSession, user: User, target: str, value: str, reason: str,
                      expires_at: Optional[datetime]) -> WebBlockEntry:
-    await web_blocks.lock_seq_writes(db)
-    try:
-        domain = normalize(value)
-    except DomainError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    rule = allow_match(domain, await web_blocks.allow_rules(db, target))
-    if rule:
-        raise HTTPException(status_code=409, detail=f"{domain} is allowlisted ({rule})")
-    row = (await db.execute(select(WebBlockEntry).where(
-        WebBlockEntry.group_id == target, WebBlockEntry.domain == domain, WebBlockEntry.source == "manual"))).scalar_one_or_none()
-    if row is None:
-        row = WebBlockEntry(domain=domain, group_id=target, source="manual", created_by=await _actor(db, user))
-        db.add(row)
-    row.status, row.reason, row.expires_at, row.seq = "active", reason.strip(), expires_at, web_blocks.next_seq()
-    await _commit(db)
-    await db.refresh(row)
-    web_blocks.invalidate()
-    await audit_log(db, user.id, "web_block.add", "web_block", str(row.id), {"domain": domain, "group_id": target})
+    row = await web_blocks.block_domain(db, user, target, value, reason, expires_at)
+    await audit_log(db, user.id, "web_block.add", "web_block", str(row.id), {"domain": row.domain, "group_id": target})
     return row
 
 
