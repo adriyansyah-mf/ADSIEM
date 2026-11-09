@@ -14,6 +14,7 @@ import app.models.models  # noqa: F401 — ensure all models are registered befo
 from app.api.routes import auth, users, agents, ingest, logs, events, alerts, rules, decoders, webhooks, system
 from app.api.routes.cases import router as cases_router
 from app.api.routes.investigations import router as investigations_router
+from app.api.routes.investigation_chat import router as investigation_chat_router
 from app.api.routes.yara_drafts import router as yara_drafts_router
 from app.api.routes.evidence import router as evidence_router
 from app.api.routes.iocs import router as iocs_router
@@ -570,7 +571,7 @@ for router in [
     export_router, suppressions_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
-    investigations_router, yara_drafts_router, knowledge_router, evidence_router,
+    investigations_router, investigation_chat_router, yara_drafts_router, knowledge_router, evidence_router,
     iocs_router,
     prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, policies_router, policies_agent_router, agent_updates_router,
 ]:

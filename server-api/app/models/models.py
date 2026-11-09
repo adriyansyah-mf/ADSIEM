@@ -433,6 +433,44 @@ class InvestigationHypothesis(Base):
     created_at                 = Column(DateTime(timezone=True), default=now_utc)
     updated_at                 = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
+class InvestigationMessage(Base):
+    """One turn of the follow-up chat on an investigation that has ended
+    (services/investigation_chat.py): the analyst's message, the AI's answer
+    with the tool calls it made, or a system note (an action's outcome)."""
+    __tablename__ = "investigation_messages"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    group_id         = Column(String(100), nullable=False, default="default")
+    role             = Column(String(20), nullable=False)  # user / assistant / system
+    content          = Column(Text, nullable=False, default="")
+    author_id        = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    tool_calls       = Column(JSONB, nullable=False, default=list)
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+
+class InvestigationChatAction(Base):
+    """An action the chat AI proposed. Nothing runs until an analyst with the
+    right permission approves it; the outcome is stored here."""
+    __tablename__ = "investigation_chat_actions"
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    investigation_id = Column(UUID(as_uuid=True), ForeignKey("case_investigations.id", ondelete="CASCADE"),
+                              nullable=False, index=True)
+    message_id       = Column(UUID(as_uuid=True), ForeignKey("investigation_messages.id", ondelete="SET NULL"))
+    group_id         = Column(String(100), nullable=False, default="default")
+    tool             = Column(String(60), nullable=False)
+    target           = Column(String(500))
+    params           = Column(JSONB, nullable=False, default=dict)
+    reason           = Column(Text)
+    # proposed → approved → executed | failed; proposed → rejected | expired (24 h)
+    status           = Column(String(20), nullable=False, default="proposed", index=True)
+    result           = Column(JSONB)
+    error            = Column(Text)
+    requested_by     = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    decided_by       = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at       = Column(DateTime(timezone=True))
+    executed_at      = Column(DateTime(timezone=True))
+    created_at       = Column(DateTime(timezone=True), default=now_utc)
+
 class CaseAlert(Base):
     __tablename__ = "case_alerts"
     case_id = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), primary_key=True)
