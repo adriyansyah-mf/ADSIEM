@@ -18,7 +18,8 @@
 #                             Reverted= the boot settings put back.
 # response: killed, kill_refused, kill_failed, isolated (confirmed, no process to kill),
 #           trusted (a trusted sync client among a destroyed canary's writers: not killed),
-#           none (report only / not confirmed).
+#           none (report only / not confirmed),
+#           excluded (a precursor the group policy's ransomware exclusions allow: no kill, no alert).
 name: ransomware_activity
 log_type: ransomware_activity
 type: kv

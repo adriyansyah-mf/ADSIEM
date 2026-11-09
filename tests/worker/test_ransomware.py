@@ -55,6 +55,11 @@ PRECURSOR_PROTECTED = ('detection=precursor confirmed=true response=killed Precu
 PRECURSOR_REPORT = ('detection=precursor confirmed=true response=none Precursor=snapshot_delete '
                     'CommandLine="lvremove -f vg0/home_snap" PrecursorImage="/usr/sbin/lvremove" PrecursorPID=1200 '
                     'Image="/tmp/.x/locker" Comm="locker" PID=1000 PPID=900 User=0 Isolated=false')
+# As TestPrecursorPolicyExclusions: an admin task the group policy excludes:
+# logged, not stopped, no alert.
+PRECURSOR_EXCLUDED = ('detection=precursor confirmed=true response=excluded Precursor=snapshot_delete '
+                      'CommandLine="lvremove -f vg0/home_snap" PrecursorImage="/usr/sbin/lvremove" PrecursorPID=1700 '
+                      'Image="/usr/sbin/cron" Comm="cron" PID=1500 PPID=1 User=0 Isolated=false InitiatorProtected=true')
 RETIRED = ('detection=canary_retired confirmed=false response=none Canary="/srv/app/.siem-canary.pdf" '
            'Image="/usr/bin/rsync" Comm="rsync" PID=900 PPID=1 User=0 Isolated=false')
 
@@ -128,11 +133,27 @@ def test_decode_precursor(decoders):
     (PRECURSOR, [("Ransomware Activity On Endpoint", "critical")]),
     (PRECURSOR_PROTECTED, [("Ransomware Activity On Endpoint", "critical")]),
     (PRECURSOR_REPORT, [("Ransomware Activity On Endpoint", "critical")]),
+    (PRECURSOR_EXCLUDED, []),
 ])
 def test_alerts(decoders, rules, line, expected):
     event, _ = decoders.decode_named("ransomware_activity", line)
     view = dict(event, raw_message=line, log_type="ransomware_activity", hostname="fs01")
     assert [(m["title"], m["level"]) for m in asyncio.run(rules.evaluate(view))] == expected
+
+
+def test_excluded_precursor_raises_no_alert(decoders):
+    """Fresh engine: nothing is suppressed, so silence means the rule does not match."""
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    event, _ = decoders.decode_named("ransomware_activity", PRECURSOR_EXCLUDED)
+    assert event["ransomware.response"] == "excluded"
+    view = dict(event, raw_message=PRECURSOR_EXCLUDED, log_type="ransomware_activity", hostname="db01")
+    assert asyncio.run(sig.evaluate(view)) == []
+    # the same line, stopped, does alert
+    killed = PRECURSOR_EXCLUDED.replace("response=excluded", "response=killed")
+    event, _ = decoders.decode_named("ransomware_activity", killed)
+    view = dict(event, raw_message=killed, log_type="ransomware_activity", hostname="db01")
+    assert [m["title"] for m in asyncio.run(sig.evaluate(view))] == ["Ransomware Activity On Endpoint"]
 
 
 def test_encrypted_canary_is_one_critical_alert(decoders):

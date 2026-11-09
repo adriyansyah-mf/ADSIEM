@@ -8,7 +8,10 @@ detection:
   selection:
     event.action: ransomware
     ransomware.confirmed: 'true'
-  condition: selection
+  # an admin task the group policy excludes (precursors): logged, not an incident
+  excluded:
+    ransomware.response: excluded
+  condition: selection and not excluded
 # One alert per program per host in 10 minutes: several canaries touched by
 # the same encryptor are one incident. Another binary still alerts.
 suppression:

@@ -45,10 +45,12 @@ type ProcessStart struct {
 	Time        time.Time
 }
 
-// proc is a process in the tree walk.
+// proc is a process in the tree walk; cmdline is known only for a start
+// the feed delivered.
 type proc struct {
 	pid, ppid uint32
 	image     string
+	cmdline   string
 }
 
 // procLookup reports a live process's parent and image; nil where there is
@@ -107,7 +109,7 @@ func (s *precursors) remember(p ProcessStart) {
 			s.seen = map[uint32]seenProc{}
 		}
 	}
-	s.seen[p.PID] = seenProc{proc: proc{pid: p.PID, ppid: p.PPID, image: p.Image}, at: p.Time}
+	s.seen[p.PID] = seenProc{proc: proc{pid: p.PID, ppid: p.PPID, image: p.Image, cmdline: p.CommandLine}, at: p.Time}
 }
 
 func (s *precursors) lookup(pid uint32) (proc, bool) {
@@ -133,10 +135,9 @@ func (s *precursors) dropOf(path string, now time.Time) (drop, bool) {
 	return d, ok && absDur(now.Sub(d.at)) < dropWindow
 }
 
-// count records hit h for initiator key: act says whether to respond (a
-// critical hit, or enough score indicators), report whether this is the
-// first time in precursorDedupe for this initiator.
-func (s *precursors) count(key string, h *hit, now time.Time) (act, report bool) {
+// count records hit h for initiator key and reports whether to act on it:
+// a critical hit, or enough score indicators.
+func (s *precursors) count(key string, h *hit, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if h.score != nil {
@@ -161,17 +162,26 @@ func (s *precursors) count(key string, h *hit, now time.Time) (act, report bool)
 		}
 		s.scores[key] = marks
 		if len(marks) < scoreNeeded {
-			return false, false
+			return false
 		}
 	}
+	return true
+}
+
+// firstQuiet reports whether a line where nothing was done (report_only,
+// excluded) is the first for initiator key in precursorDedupe. Lines of
+// kills are never held back.
+func (s *precursors) firstQuiet(key string, now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if last, ok := s.reported[key]; ok && absDur(now.Sub(last)) < precursorDedupe {
-		return true, false
+		return false
 	}
 	if len(s.reported) >= maxKeys {
 		s.reported = map[string]time.Time{}
 	}
 	s.reported[key] = now
-	return true, true
+	return true
 }
 
 // ObserveProcess takes one process start. It must stay cheap: only the
@@ -226,20 +236,25 @@ func (g *Guard) observeDrop(pid uint32, image, action, p, from string, at time.T
 
 func (g *Guard) precursor(p ProcessStart, h *hit) {
 	rt := g.rt.Load()
-	ini, alive, protected := g.initiator(p)
-	if rt.Excluded != nil && (rt.Excluded(ini.image) || rt.Excluded(p.Image)) {
-		return
-	}
+	ini, walked, alive, protected := g.initiator(p)
 	if h.inDrivers && !g.userWritable(ini.image) && !g.droppedBy(h.driver, ini, p.Time) {
 		return // a kernel service on a driver the initiator did not bring
 	}
-	act, report := g.pre.count(fmt.Sprintf("%d|%s", ini.pid, strings.ToLower(ini.image)), h, p.Time)
-	if !act {
+	key := fmt.Sprintf("%d|%s", ini.pid, strings.ToLower(ini.image))
+	if !g.pre.count(key, h, p.Time) {
 		return
 	}
 	d := detection{kind: "precursor", confirmed: true, precursor: h.category, cmdline: p.CommandLine,
 		preImage: p.Image, prePID: p.PID, pid: ini.pid, ppid: ini.ppid, image: ini.image, comm: base(ini.image),
 		iniProtected: protected}
+	if g.excluded(rt, p, walked) {
+		// An admin task the policy allows: reported (no alert), not stopped.
+		d.response = "excluded"
+		if g.pre.firstQuiet(key, p.Time) {
+			g.report(d)
+		}
+		return
+	}
 	target, image := ini.pid, ini.image
 	if protected || !alive {
 		target, image = p.PID, p.Image
@@ -247,17 +262,40 @@ func (g *Guard) precursor(p ProcessStart, h *hit) {
 	if g.respond(&d, target, image) && len(h.revert) > 0 {
 		g.revert(&d, h)
 	}
-	if report {
+	// Every kill is reported; a line where nothing was done (report_only)
+	// once per initiator in precursorDedupe.
+	if d.response != "none" || g.pre.firstQuiet(key, p.Time) {
 		g.report(d)
 	}
 }
 
+// excluded matches the precursor and every process walked up to the
+// initiator (the shells running an admin's script included) against the
+// policy's ransomware exclusions: by image (path, program) and command line.
+func (g *Guard) excluded(rt *Runtime, p ProcessStart, walked []proc) bool {
+	match := func(image, cmd string) bool {
+		if rt.ExcludedProcess != nil {
+			return rt.ExcludedProcess(image, cmd)
+		}
+		return rt.Excluded != nil && rt.Excluded(image)
+	}
+	if match(p.Image, p.CommandLine) {
+		return true
+	}
+	for _, q := range walked {
+		if match(q.image, q.cmdline) {
+			return true
+		}
+	}
+	return false
+}
+
 // initiator walks up from p's parent past shells and LOLBins. It returns
-// the first other ancestor, whether that process is still the one seen
-// (not exited, its PID not reused), and whether it is protected. A walk
-// that ends at a process gone gives the topmost shell; no ancestor at all,
-// the precursor itself.
-func (g *Guard) initiator(p ProcessStart) (ini proc, alive, protected bool) {
+// the first other ancestor, the processes walked (the initiator included),
+// whether the initiator is still the one seen (not exited, its PID not
+// reused), and whether it is protected. A walk that ends at a process gone
+// gives the topmost shell; no ancestor at all, the precursor itself.
+func (g *Guard) initiator(p ProcessStart) (ini proc, walked []proc, alive, protected bool) {
 	var look procLookup
 	if g.live != nil {
 		look = g.live()
@@ -271,11 +309,12 @@ func (g *Guard) initiator(p ProcessStart) (ini proc, alive, protected bool) {
 		if !ok {
 			break
 		}
+		walked = append(walked, q)
 		if ancestors[q.pid] || g.protectedProc(q) {
-			return q, live, true
+			return q, walked, live, true
 		}
 		if !g.passThrough(q.image) {
-			return q, live, false
+			return q, walked, live, false
 		}
 		top, topAlive, haveTop = q, live, true
 		if q.ppid == pid {
@@ -284,9 +323,9 @@ func (g *Guard) initiator(p ProcessStart) (ini proc, alive, protected bool) {
 		pid = q.ppid
 	}
 	if haveTop {
-		return top, topAlive, false
+		return top, walked, topAlive, false
 	}
-	return proc{pid: p.PID, ppid: p.PPID, image: p.Image}, true, false
+	return proc{pid: p.PID, ppid: p.PPID, image: p.Image, cmdline: p.CommandLine}, walked, true, false
 }
 
 // find looks pid up in the feed's starts and the live process table. A
@@ -303,8 +342,11 @@ func (g *Guard) find(pid uint32, look procLookup) (proc, bool, bool) {
 	case live && inSeen && l.image != "" && !sameImage(c.image, l.image):
 		return c, true, false
 	case live:
-		if l.image == "" && inSeen {
-			l.image = c.image
+		if inSeen {
+			l.cmdline = c.cmdline // the live table has no command line
+			if l.image == "" {
+				l.image = c.image
+			}
 		}
 		return l, true, true
 	case inSeen:

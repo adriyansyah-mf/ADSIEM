@@ -116,11 +116,29 @@ Everyday admin commands stay quiet: `vssadmin list`, `vssadmin create shadow`, r
 
 After a `boot_tamper` hit the change is undone with `bcdedit` (`recoveryenabled yes`, `bootstatuspolicy displayallfailures`, `/deletevalue safeboot`, on the entry the command named), 1 s after the kill; the line says `Reverted=`. The host is isolated when `isolate` (or the policy) asks, as for any confirmed detection.
 
-One line per initiator in 10 minutes: `detection=precursor confirmed=true response=killed Precursor=<category> CommandLine=... PrecursorImage=... PrecursorPID=... Image=<initiator> PID=<initiator> ... Killed=<n>`. Later precursors from the same initiator are still stopped, without a new line. In `report_only` the line says `response=none` and nothing is killed or reverted; with the policy `off`, or an initiator or precursor excluded by the ransomware policy, nothing is done or reported (the process-start telemetry still is).
+Every kill is reported, one line each: `detection=precursor confirmed=true response=killed Precursor=<category> CommandLine=... PrecursorImage=... PrecursorPID=... Image=<initiator> PID=<initiator> ... Killed=<n>` (the alert rule's own suppression keeps one incident one alert). In `report_only` the line says `response=none`, nothing is killed or reverted, and repeats from the same initiator are logged once in 10 minutes. With the policy `off` nothing is done or reported (the process-start telemetry still is).
+
+**Exclusions.** The group policy's exclusions with scope `ransomware` apply. They are matched against the precursor process (image and command line) and every process walked up to the initiator, including the shell running a script and the initiator itself. Kinds `image` (program name or full path), `path_prefix` and `command_line` (case-insensitive substring) work here. `sha256` does not: no hash is computed for process starts. An excluded precursor is not killed or reverted, and is logged with `response=excluded`, once per initiator in 10 minutes. The *Ransomware Activity On Endpoint* rule ignores `response=excluded`.
 
 **Safe Mode.** At start, when running as the Windows service with the guard on, the agent registers `SIEMAgent` under `HKLM\SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal` and `\Network` (default value `Service`), so it also runs if ransomware manages to reboot into Safe Mode. Idempotent.
 
-**False-positive cost.** These are commands admins also run. In stop mode, an admin's `vssadmin delete shadows /all`, `bcdedit /set {current} safeboot minimal` (it is reverted) or a cron script's `lvremove vg/x_snap` is killed (the shell or console behind it is protected, so only the command dies) and raises the critical alert. A program run from a user-writable place that runs such a command loses its whole tree. Exclude the program through the ransomware policy, or use `report_only`.
+**Admin tasks.** In stop mode, these everyday admin commands trip a precursor. They are killed and raise the critical alert. Only the command dies, because the console, shell, cron or service behind it is protected. A program run from a user-writable place (Downloads, a portable tool) loses its whole tree.
+
+| Task | Trips |
+|---|---|
+| Purging all shadow copies: `vssadmin delete shadows /all`, `/for=X:` without `/oldest`, `wmic shadowcopy delete` | `shadow_delete` |
+| Shrinking shadow storage below 1 GB | `shadow_delete` |
+| `wbadmin delete catalog`; deleting backups without `-keepVersions:N` or `-deleteOldest` | `backup_delete` |
+| Booting into Safe Mode with `bcdedit /set {current} safeboot minimal` (also reverted); turning recovery off on kiosks or VDI images | `boot_tamper` |
+| Installing a driver with `sc create ... type= kernel` from a user-writable folder, or with the `.sys` outside System32\drivers | `byovd` |
+| Snapshot rotation scripts: `lvremove vg/*snap*`, `zfs destroy pool@snap`, `btrfs subvolume delete .../snapshots/...` | `snapshot_delete` |
+| `insmod` of a module built under `/home` or `/tmp` | `kernel_module` |
+| Three or more of: stopping or disabling Defender or another security service, adding Defender exclusions, turning the firewall off (within a minute, from one program) | `defense_tamper` |
+
+To allow them, either:
+
+- add a ransomware-scope exclusion to the group's policy. A `command_line` exclusion with the script's path (`/usr/local/sbin/rotate-snapshots.sh`) or the exact command (`vssadmin delete shadows /for=E: /quiet`) matches when that script runs the command or that command runs. An `image` exclusion allows a whole program. Keep command-line values specific: an exclusion matches any command line that contains it.
+- or set the group's `ransomware_mode` to `report`, for servers whose admins run these routinely.
 
 ## Configuration
 

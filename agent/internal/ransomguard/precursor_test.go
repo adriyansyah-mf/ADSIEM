@@ -326,14 +326,26 @@ func TestPrecursorReportOnlyIsolateDedupe(t *testing.T) {
 		t.Fatalf("isolated %d, lines %q", r.isolated, r.lines())
 	}
 
-	// One line per initiator in 10 minutes; the precursors are still stopped.
+	// Every kill is reported, also within the 10-minute window: never a
+	// silent kill (the alert rule's own suppression keeps it one alert).
 	r = newPrecursorRig(t, "windows", winTree)
 	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
 	p := winStart(3201, 3100, wbadminExe, `wbadmin delete catalog -quiet`)
 	p.Time = t0.Add(5 * time.Minute)
 	r.g.ObserveProcess(p)
-	if l := r.lines(); len(l) != 1 || len(r.killed) != 2 {
+	if l := r.lines(); len(l) != 2 || len(r.killed) != 2 ||
+		!strings.Contains(l[1], "response=killed Precursor=backup_delete") || !strings.Contains(l[1], "PrecursorPID=3201") {
 		t.Fatalf("lines %q killed %v", l, r.killed)
+	}
+
+	// Lines where nothing was done (report_only) are one per initiator in
+	// 10 minutes.
+	r = newPrecursorRig(t, "windows", winTree)
+	r.g.SetRuntime(Runtime{Kill: false})
+	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
+	r.g.ObserveProcess(p) // +5 min
+	if l := r.lines(); len(l) != 1 {
+		t.Fatalf("report_only repeats: %q", l)
 	}
 	p.Time = t0.Add(11 * time.Minute)
 	r.g.ObserveProcess(p)
@@ -341,16 +353,78 @@ func TestPrecursorReportOnlyIsolateDedupe(t *testing.T) {
 		t.Fatalf("after 10 min: lines %q", l)
 	}
 
-	// Policy off, an excluded initiator, the agent's own commands: nothing.
+	// Policy off, the agent's own commands: nothing.
 	r = newPrecursorRig(t, "windows", winTree)
 	r.g.SetRuntime(Runtime{Off: true})
-	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
-	r.g.SetRuntime(Runtime{Kill: true, Excluded: func(image string) bool { return strings.HasSuffix(image, `9f2c1e.exe`) }})
 	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
 	r.g.SetRuntime(Runtime{Kill: true})
 	r.g.ObserveProcess(winStart(3200, 9999, bcdeditExe, `bcdedit /set {default} safeboot minimal`))
 	if l := r.lines(); len(l) != 0 || len(r.killed) != 0 {
 		t.Fatalf("lines %q killed %v", l, r.killed)
+	}
+}
+
+// Group-policy exclusions (scope ransomware) apply to precursors: matched
+// on the initiator (image, command line) and on the precursor (image,
+// command line). Excluded: no kill, no revert, response=excluded, once per
+// initiator in 10 minutes.
+func TestPrecursorPolicyExclusions(t *testing.T) {
+	type check func(image, cmd string) bool
+	cases := []struct {
+		name string
+		ex   check
+	}{
+		{"initiator image", func(image, _ string) bool { return strings.EqualFold(image, `C:\Users\bob\Desktop\9f2c1e.exe`) }},
+		{"precursor image", func(image, _ string) bool { return strings.EqualFold(image, bcdeditExe) }},
+		{"exact command line", func(_, cmd string) bool {
+			return strings.Contains(strings.ToLower(cmd), "bcdedit /set {current} safeboot minimal")
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := newPrecursorRig(t, "windows", winTree)
+			r.g.SetRuntime(Runtime{Kill: true, ExcludedProcess: c.ex})
+			for i := 0; i < 2; i++ {
+				r.g.ObserveProcess(winStart(3200+uint32(i), 3100, bcdeditExe, `bcdedit /set {current} safeboot minimal`))
+			}
+			if len(r.killed) != 0 || len(r.cmds) != 0 {
+				t.Fatalf("excluded: killed %v cmds %v", r.killed, r.cmds)
+			}
+			l := r.lines()
+			if len(l) != 1 || !strings.HasPrefix(l[0], "detection=precursor confirmed=true response=excluded Precursor=boot_tamper") {
+				t.Fatalf("lines %q", l)
+			}
+			// another command line from the same program is not excluded by
+			// a command-line exclusion
+			r.g.ObserveProcess(winStart(3300, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
+			if c.name == "exact command line" && len(r.killed) != 1 {
+				t.Fatalf("other command not stopped: killed %v", r.killed)
+			}
+		})
+	}
+
+	// A command-line exclusion for one Linux cron script: the script's own
+	// command line (the initiator shell's) is matched too.
+	tree := map[uint32]proc{}
+	for k, v := range linTree {
+		tree[k] = v
+	}
+	r := newPrecursorRig(t, "linux", tree)
+	r.g.ObserveProcess(linStart(1600, 1500, "/usr/bin/sh", "/bin/sh /usr/local/sbin/rotate-snapshots.sh"))
+	r.g.SetRuntime(Runtime{Kill: true, ExcludedProcess: func(_, cmd string) bool {
+		return strings.Contains(cmd, "/usr/local/sbin/rotate-snapshots.sh")
+	}})
+	r.g.ObserveProcess(linStart(1700, 1600, "/usr/sbin/lvremove", "lvremove -f vg0/home_snap"))
+	if l := r.lines(); len(r.killed) != 0 || len(l) != 1 || !strings.Contains(l[0], "response=excluded") {
+		t.Fatalf("cron script excluded: killed %v lines %q", r.killed, l)
+	}
+
+	// The image-only callback (older policy plumbing) still excludes.
+	r = newPrecursorRig(t, "windows", winTree)
+	r.g.SetRuntime(Runtime{Kill: true, Excluded: func(image string) bool { return strings.HasSuffix(image, `9f2c1e.exe`) }})
+	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
+	if l := r.lines(); len(r.killed) != 0 || len(l) != 1 || !strings.Contains(l[0], "response=excluded") {
+		t.Fatalf("image exclusion: killed %v lines %q", r.killed, l)
 	}
 }
 

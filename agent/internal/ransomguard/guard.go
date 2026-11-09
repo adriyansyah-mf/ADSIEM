@@ -51,6 +51,10 @@ type Runtime struct {
 	Kill     bool // with the local Kill (report_only there wins)
 	Isolate  bool // or the local isolate
 	Excluded func(image string) bool
+	// ExcludedProcess matches a process (image and command line) against
+	// the policy's ransomware exclusions (path, program, command line):
+	// the precursor checks. Nil: Excluded on the image.
+	ExcludedProcess func(image, commandLine string) bool
 }
 
 type Guard struct {
