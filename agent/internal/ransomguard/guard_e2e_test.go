@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -114,7 +115,27 @@ func TestRansomwareEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go g.Run(ctx)
-	sensor, err := linsensor.Start(linsensor.Options{Push: func(string, string) {}, OnFile: g.Observe})
+	// Diagnostics for the in-place case: what reaches the guard under the
+	// documents directory, printed when the fopen("wb") encryptor survives.
+	var diagMu sync.Mutex
+	diag := map[string]int{}
+	var diagSamples []string
+	sensor, err := linsensor.Start(linsensor.Options{Push: func(string, string) {}, OnFile: func(e linsensor.FileEvent) {
+		if strings.Contains(e.Path, "siem-ransom-e2e-") {
+			diagMu.Lock()
+			diag[e.Action]++
+			if len(diagSamples) < 10 {
+				diagSamples = append(diagSamples, fmt.Sprintf("%s pid=%d comm=%s %s", e.Action, e.PID, e.Comm, e.Path))
+			}
+			diagMu.Unlock()
+		}
+		g.Observe(e)
+	}})
+	logDiag := func() {
+		diagMu.Lock()
+		defer diagMu.Unlock()
+		t.Logf("guard events under the documents dir by action %v; samples:\n  %s", diag, strings.Join(diagSamples, "\n  "))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,6 +203,8 @@ func TestRansomwareEndToEnd(t *testing.T) {
 	out.mu.Unlock()
 	wb := helper(t, "inplace-wb", "RANSOM_DIR="+docs)
 	if err := wb.Wait(); !killedBySignal(err) {
+		logDiag()
+		t.Logf("guard lines: %q", out.wait(t, 0))
 		t.Fatalf("fopen(\"wb\") encryptor not killed: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(docs, "FINISHED")); err == nil {
