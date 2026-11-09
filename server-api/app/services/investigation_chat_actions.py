@@ -27,7 +27,9 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import structlog
 from fastapi import HTTPException
@@ -270,9 +272,28 @@ def normalize_ioc(kind: str, value: str) -> str:
         except DomainError:
             raise bad from None
     if kind == "url":
-        if not _URL.match(raw):
+        low = raw.lower()
+        if not _URL.match(low):
             raise bad
-        return raw.lower()
+        try:
+            parts = urlsplit(low)
+            host = parts.hostname
+        except ValueError:
+            raise bad from None
+        if not host:
+            raise bad
+        try:
+            ipaddress.ip_address(host)
+            return low
+        except ValueError:
+            pass
+        try:
+            ascii_host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            raise bad from None
+        if ascii_host != host:  # the worker keys alert-derived URLs with the punycode host
+            return urlunsplit(parts._replace(netloc=parts.netloc.replace(host, ascii_host, 1)))
+        return low
     if kind in _HASH_LEN:
         low = raw.lower()
         if len(low) != _HASH_LEN[kind] or not _HEX.match(low):
@@ -587,12 +608,15 @@ async def flow_states(db: AsyncSession, actions) -> dict[uuid.UUID, dict]:
             for fid, status, rows_, error in rows}
 
 
-async def _audit(user, action: str, resource_type: str, resource_id: str, detail: dict) -> None:
-    """audit_log, but a failing audit store never strands an action half-way (it is logged instead)."""
+async def _audit(actor, action: str, resource_type: str, resource_id: str, detail: dict) -> None:
+    """audit_log, but a failing audit store never strands an action half-way: the
+    entry is logged at error level, in full, instead."""
     try:
-        await audit_log(None, user.id, action, resource_type, resource_id, detail)
-    except Exception:
-        log.exception("chat_action_audit_failed", audit_action=action, resource_id=resource_id)
+        await audit_log(None, actor.id, action, resource_type, resource_id, detail)
+    except Exception as exc:
+        log.error("chat_action_audit_failed", audit_action=action, actor_id=str(actor.id),
+                  resource_type=resource_type, resource_id=resource_id, detail=detail,
+                  error=f"{type(exc).__name__}: {exc}", exc_info=True)
 
 
 def _detail(action: InvestigationChatAction, user, note: str | None, **extra) -> dict:
@@ -616,6 +640,13 @@ async def decide(db: AsyncSession, redis, action_id: uuid.UUID, user, group_filt
     if not may_decide(user, action.tool):
         raise DecisionError(403, f"Insufficient permissions: {PERMISSIONS[PROPOSAL_TOOLS[action.tool].permission]} "
                                  f"is needed to decide {action.tool}")
+    # `user` is usually a User on this request's session: a rollback below expires it and a later
+    # attribute read would lazy-load (MissingGreenlet). Only this snapshot is used from here on.
+    user = SimpleNamespace(id=user.id, username=user.username)
+    inv = await db.get(CaseInvestigation, action.investigation_id)
+    case = await db.get(Case, inv.case_id) if inv is not None else None
+    if case is None or case.group_id != action.group_id or inv.group_id != action.group_id:
+        raise DecisionError(409, "This action does not match its case's group; it cannot run")
 
     now = datetime.now(timezone.utc)
     approver = await web_blocks.actor_id(db, user)
@@ -650,14 +681,12 @@ async def decide(db: AsyncSession, redis, action_id: uuid.UUID, user, group_filt
 
     await _audit(user, "ai_chat_action_approved", "investigation_chat_action", str(action.id),
                  _detail(action, user, note))
-    inv = await db.get(CaseInvestigation, action.investigation_id)
-    case = await db.get(Case, inv.case_id)
     run = _Run(db=db, redis=redis, user=user, approver=approver, action_id=action.id, inv_id=inv.id,
                tool=action.tool, target=action.target, params=dict(action.params or {}),
                reason=action.reason or "", case_id=case.id, group=case.group_id, severity=case.severity or "",
                alert_id=case.alert_id)
     group_id = action.group_id  # plain value: a failed executor rolls the session back
-    result, error = None, None
+    result, error, unknown = None, None, False
     try:
         result = await EXECUTORS[action.tool](run)
     except ActionFailed as exc:
@@ -665,8 +694,10 @@ async def decide(db: AsyncSession, redis, action_id: uuid.UUID, user, group_filt
     except HTTPException as exc:
         error = str(exc.detail)
     except Exception as exc:  # recorded on the row; the approval stands, so it never re-runs
-        log.exception("chat_action_failed", action_id=str(action.id), tool=action.tool)
-        error = f"{type(exc).__name__}: {exc}"[:500]
+        log.exception("chat_action_failed", action_id=str(run.action_id), tool=run.tool)
+        unknown = True
+        error = (f"outcome unknown — it may have been applied; check {run.target}. "
+                 f"{type(exc).__name__}: {exc}")[:500]
     if error is not None:
         await db.rollback()
 
@@ -676,6 +707,8 @@ async def decide(db: AsyncSession, redis, action_id: uuid.UUID, user, group_filt
                      .execution_options(synchronize_session=False))
     if error is None:
         content = f"{who} approved {what}: done — {result.get('summary', 'ok')}."
+    elif unknown:
+        content = f"{who} approved {what}, but the outcome is unknown: {error}"
     else:
         content = f"{who} approved {what}, but it failed: {error}"
     if note:

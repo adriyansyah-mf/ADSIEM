@@ -62,7 +62,7 @@ async def act(monkeypatch):
         async with engine.begin() as db:
             await db.run_sync(Base.metadata.create_all)
         async with sessions() as db:
-            role = models.Role(name="analyst")
+            role = models.Role(name="analyst", permissions=[models.Permission(name=n) for n in BOTH])
             db.add(role)
             await db.flush()
             users = {}
@@ -103,7 +103,7 @@ async def act(monkeypatch):
 
         env = SimpleNamespace(sessions=sessions, users=users, agents=agents, case=case.id, inv=inv.id,
                               evidence=ev.id, other_evidence=other_ev.id, audits=[], es_index=[], es_delete=[],
-                              es_fail=None, redis=_Redis(), models=models, actions=actions)
+                              es_fail=None, redis=_Redis(), models=models, actions=actions, real_user=None)
         env.user = _user(users["approver"])
 
         async def database():
@@ -137,7 +137,19 @@ async def act(monkeypatch):
         app.include_router(investigation_chat.router)
         app.dependency_overrides[get_db] = database
         app.dependency_overrides[get_redis] = redis
-        app.dependency_overrides[get_current_user] = lambda: env.user
+        from fastapi import Depends
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        async def current_user(db=Depends(get_db)):
+            if env.real_user is None:
+                return env.user
+            # like get_current_user: a real User on the request's own session
+            return (await db.execute(select(models.User).options(
+                selectinload(models.User.role).selectinload(models.Role.permissions))
+                .where(models.User.id == env.real_user))).scalar_one()
+
+        app.dependency_overrides[get_current_user] = current_user
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             env.client = client
             yield env
@@ -296,6 +308,80 @@ async def test_concurrent_decisions_execute_once(act):
     results = await asyncio.gather(*(decide(act, aid) for _ in range(4)))
     assert sorted(r.status_code for r in results) == [200, 409, 409, 409]
     assert len(await tasks(act)) == 1
+
+
+async def test_failed_approval_by_a_real_session_user_is_recorded(act):
+    """A failing executor rolls the request session back; the User loaded on it must not be read afterwards."""
+    act.real_user = act.users["approver"]
+    a = str(act.agents["blue-host"])
+    off = await propose(act, "isolate_host", {"agent_id": str(act.agents["blue-off"]), "reason": "x"})
+    private = await propose(act, "block_ip", {"agent_ids": [a], "ip": "10.0.0.5", "duration_seconds": 3600,
+                                              "reason": "x"})
+    allowed = await propose(act, "block_domain", {"domain": "raw.github.com", "reason": "x"})
+    for aid in (off, private, allowed):
+        r = await decide(act, aid)
+        assert r.status_code == 200, r.text
+        assert r.json()["action"]["status"] == "failed"
+        assert "approver approved" in r.json()["message"]["content"]
+    failed = [a for a in act.audits if a[1] == "ai_chat_action_failed"]
+    assert [a[2] for a in failed] == [str(off), str(private), str(allowed)]
+    assert all(a[0] == act.users["approver"] and a[3]["approver"] == str(act.users["approver"]) for a in failed)
+
+    ok = await propose(act, "isolate_host", {"agent_id": a, "reason": "x"})
+    assert (await decide(act, ok)).json()["action"]["status"] == "executed"
+    no = await propose(act, "kill_process", {"agent_id": a, "pid": 5, "reason": "x"})
+    assert (await decide(act, no, approve=False)).json()["action"]["status"] == "rejected"
+
+
+async def test_unexpected_executor_error_is_an_unknown_outcome(act, monkeypatch):
+    async def boom(run):
+        raise RuntimeError("connection reset")
+
+    monkeypatch.setitem(act.actions.EXECUTORS, "kill_process", boom)
+    aid = await propose(act, "kill_process", {"agent_id": str(act.agents["blue-host"]), "pid": 5, "reason": "x"})
+    r = await decide(act, aid)
+    action = r.json()["action"]
+    assert action["status"] == "failed"
+    assert "outcome unknown" in action["error"] and "connection reset" in action["error"]
+    assert "it may have been applied" in r.json()["message"]["content"]
+    # a definite refusal stays a plain failure
+    monkeypatch.setitem(act.actions.EXECUTORS, "kill_process", act.actions._kill_process)
+    off = await propose(act, "kill_process", {"agent_id": str(act.agents["blue-off"]), "pid": 5, "reason": "x"})
+    r = await decide(act, off)
+    assert r.json()["action"]["status"] == "failed"
+    assert "outcome unknown" not in r.json()["action"]["error"]
+
+
+async def test_audit_failure_is_logged_with_its_detail(act, monkeypatch):
+    calls = []
+
+    async def broken(*a, **kw):
+        raise RuntimeError("audit store down")
+
+    monkeypatch.setattr(act.actions, "audit_log", broken)
+    monkeypatch.setattr(act.actions.log, "error", lambda event, **kw: calls.append((event, kw)))
+    aid = await propose(act, "isolate_host", {"agent_id": str(act.agents["blue-host"]), "reason": "x"})
+    r = await decide(act, aid)
+    assert r.json()["action"]["status"] == "executed"
+    events = [(e, kw["audit_action"]) for e, kw in calls]
+    assert events == [("chat_action_audit_failed", "ai_chat_action_approved"),
+                      ("chat_action_audit_failed", "ai_chat_action_executed")]
+    assert calls[1][1]["detail"]["target"] == str(act.agents["blue-host"])
+    assert "task_id" in calls[1][1]["detail"]["result"]
+
+
+async def test_action_and_case_group_must_agree(act):
+    from sqlalchemy import update
+    aid = await propose(act, "isolate_host", {"agent_id": str(act.agents["blue-host"]), "reason": "x"})
+    async with act.sessions() as db:
+        await db.execute(update(act.models.InvestigationChatAction)
+                         .where(act.models.InvestigationChatAction.id == aid).values(group_id="red"))
+        await db.commit()
+    act.user = _user(act.users["approver"], perms=(), role="superadmin", group=None)
+    r = await decide(act, aid)
+    assert r.status_code == 409
+    [still] = await row(act, act.models.InvestigationChatAction, id=aid)
+    assert still.status == "proposed" and await tasks(act) == []
 
 
 # ─── endpoint executors ─────────────────────────────────────────
@@ -496,6 +582,12 @@ async def test_add_and_remove_case_iocs_normalised(act):
     # the case-scoped Threat IoC doc is deleted too (alert-derived ones are not)
     want = hashlib.sha1(f"case:{act.case}|ip|203.0.113.9".encode()).hexdigest()
     assert act.es_delete == [want]
+
+
+def test_url_iocs_use_an_ascii_host_like_the_worker():
+    from app.services.investigation_chat_actions import normalize_ioc
+    assert normalize_ioc("url", "HTTPS://Bücher.Example/Path?q=1") == "https://xn--bcher-kva.example/path?q=1"
+    assert normalize_ioc("url", "http://45.33.32.156:8080/x") == "http://45.33.32.156:8080/x"
 
 
 async def test_add_threat_ioc_writes_the_case_scoped_doc(act):
