@@ -342,18 +342,10 @@ func run(configPath string, stop <-chan struct{}) {
 		}
 	}
 
-	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
-	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
-	// Producers are stopped explicitly at shutdown, before the durable journal closes.
-	var stopProducers []func()
-	if procMon, err := procexec.StartWith(buf, func(ex procexec.Exec) { scripts.OfferExec(ex.PID, ex.Image, ex.Args) }); err != nil {
-		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
-	} else {
-		stopProducers = append(stopProducers, procMon.Stop)
-	}
-
-	// Ransomware protection: canary files everywhere; on Linux also the
-	// bulk-encryption heuristics fed by the sensor below.
+	// Ransomware protection: canary files everywhere, the bulk-encryption
+	// heuristics fed by the file sensors below, and the precursors
+	// (shadow copies deleted, boot recovery off, BYOVD, security products
+	// stopped) fed by the process starts (procexec / ETW).
 	var onFile func(linsensor.FileEvent)
 	var guard *ransomguard.Guard
 	if !cfg.Ransomware.Disabled {
@@ -373,6 +365,17 @@ func run(configPath string, stop <-chan struct{}) {
 		guard = ransomguard.New(opts)
 		go guard.Run(flowCtx)
 		onFile = guard.Observe
+		hardenSafeMode()
+	}
+
+	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
+	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
+	// Producers are stopped explicitly at shutdown, before the durable journal closes.
+	var stopProducers []func()
+	if procMon, err := procexec.StartWith(buf, linuxExecFeed(scripts, guard)); err != nil {
+		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
+	} else {
+		stopProducers = append(stopProducers, procMon.Stop)
 	}
 
 	// File, kernel module, ptrace, privilege, memfd/fileless and exit
@@ -411,7 +414,7 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Info("ETW sensor off: Sysmon is installed (set etw.mode: on to run both)")
 		} else if sensor, err := winsensor.StartWith(buf, winsensor.Options{
 			Disabled: cfg.ETW.DisabledEvents, OnFile: windowsFileFeed(onFile),
-			OnProcess: windowsProcessFeed(preventer),
+			OnProcess: windowsProcessFeed(preventer), OnCommandLine: windowsCommandFeed(guard),
 			OnScript: func(a winsensor.AMSIScript) {
 				scripts.Offer(scriptscan.Script{PID: a.PID, Image: a.Image, App: a.App, Name: a.Name, Content: a.Content})
 			}}); err != nil {
@@ -871,8 +874,6 @@ func mustHostname() string {
 	return h
 }
 
-// windowsProcessFeed hands the ETW sensor's process starts to execution
-// prevention; nil when prevention is off.
 // applyPolicy hands the group policy to the protections running here (nil
 // ones did not start: their local config turned them off, which stays).
 func applyPolicy(s policy.Settings, pm *prevent.Manager, n *notify.Notifier, g *ransomguard.Guard) {
@@ -890,12 +891,39 @@ func applyPolicy(s policy.Settings, pm *prevent.Manager, n *notify.Notifier, g *
 	}
 }
 
+// windowsProcessFeed hands the ETW sensor's process starts to execution
+// prevention; nil when prevention is off.
 func windowsProcessFeed(pm *prevent.Manager) func(winsensor.ProcessStart) {
 	if pm == nil {
 		return nil
 	}
 	return func(p winsensor.ProcessStart) {
 		pm.ObserveExec(prevent.ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image, ParentImage: p.ParentImage})
+	}
+}
+
+// windowsCommandFeed hands the ETW sensor's process starts, with their
+// command lines, to the anti-ransomware precursor checks; nil when the
+// guard is off.
+func windowsCommandFeed(g *ransomguard.Guard) func(winsensor.ProcessStart) {
+	if g == nil {
+		return nil
+	}
+	return func(p winsensor.ProcessStart) {
+		g.ObserveProcess(ransomguard.ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image,
+			CommandLine: p.CommandLine, Time: time.Now()})
+	}
+}
+
+// linuxExecFeed hands the eBPF exec events to the script scanner and to the
+// anti-ransomware precursor checks (nil guard: off).
+func linuxExecFeed(scripts *scriptscan.Scanner, g *ransomguard.Guard) func(procexec.Exec) {
+	return func(ex procexec.Exec) {
+		scripts.OfferExec(ex.PID, ex.Image, ex.Args)
+		if g != nil {
+			g.ObserveProcess(ransomguard.ProcessStart{PID: ex.PID, PPID: ex.PPID, Image: ex.Image,
+				CommandLine: strings.Join(ex.Args, " "), Time: time.Now()})
+		}
 	}
 }
 

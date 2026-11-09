@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"github.com/siem-platform/agent/internal/ransomguard"
 )
 
 const (
@@ -100,6 +102,20 @@ const (
 	lockedServiceSDDL  = "D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCLCSWRPLOCRRC;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"
 	defaultServiceSDDL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"
 )
+
+// hardenSafeMode registers the agent's service to start in Safe Mode
+// (ransomware sets safeboot and reboots to run without security software).
+// Only when running as the service; idempotent.
+func hardenSafeMode() {
+	if isService, err := svc.IsWindowsService(); err != nil || !isService {
+		return
+	}
+	if changed, err := ransomguard.RegisterSafeMode(serviceName); err != nil {
+		slog.Warn("ransomguard: safe mode registration failed", "err", err)
+	} else if len(changed) > 0 {
+		slog.Info("ransomguard: registered for safe mode", "keys", changed)
+	}
+}
 
 // protectService applies the locked (or, with anti_tamper.unlock_service,
 // the default) DACL to the agent's service. Only when running as the service.
