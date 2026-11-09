@@ -42,6 +42,11 @@
           </ServiceInstall>
           <ServiceControl Id="AgentServiceControl" Name="SIEMAgent" Start="install" Stop="both"
                           Remove="uninstall" Wait="yes" />
+          <!-- The agent registers itself to start in Safe Mode (ransomguard); gone with it. -->
+          <RemoveRegistryKey Id="SafeBootMinimal" Root="HKLM" Action="removeOnUninstall"
+                             Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\SIEMAgent" />
+          <RemoveRegistryKey Id="SafeBootNetwork" Root="HKLM" Action="removeOnUninstall"
+                             Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Network\SIEMAgent" />
         </Component>
       </Directory>
     </StandardDirectory>

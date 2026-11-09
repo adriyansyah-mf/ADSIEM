@@ -37,6 +37,29 @@ INPLACE = ('detection=inplace_modify confirmed=true response=killed Files=50 '
 INPLACE_UNCONFIRMED = ('detection=inplace_modify confirmed=false response=none Files=50 '
                        'TargetFilename="C:\\\\Users\\\\bob\\\\Pictures\\\\IMG_0059.jpg" Entropy=7.95 '
                        'Image="C:\\\\Program Files\\\\Editor\\\\editor.exe" Comm="editor.exe" PID=67 PPID=0 User=0 Isolated=false')
+# As TestWindowsCriticalPrecursorsKillTheInitiator: IronChain's shadow-copy
+# deletion; the Desktop sample (the initiator) and its tree were killed.
+PRECURSOR = ('detection=precursor confirmed=true response=killed Precursor=shadow_delete '
+             'CommandLine="vssadmin delete shadows /all /quiet" '
+             'PrecursorImage="C:\\\\Windows\\\\System32\\\\vssadmin.exe" PrecursorPID=3200 '
+             'Image="C:\\\\Users\\\\bob\\\\Desktop\\\\9f2c1e.exe" Comm="9f2c1e.exe" PID=3000 PPID=2000 User=0 '
+             'Killed=3 Isolated=false')
+# As TestProtectedInitiatorKillsOnlyThePrecursor / TestBootTamperIsReverted:
+# from services.exe (protected), only bcdedit was killed, the change undone.
+PRECURSOR_PROTECTED = ('detection=precursor confirmed=true response=killed Precursor=boot_tamper '
+                       'CommandLine="bcdedit /set {default} safeboot minimal" '
+                       'PrecursorImage="C:\\\\Windows\\\\System32\\\\bcdedit.exe" PrecursorPID=5200 '
+                       'Image="C:\\\\Windows\\\\System32\\\\services.exe" Comm="services.exe" PID=600 PPID=500 User=0 '
+                       'Killed=1 Isolated=false InitiatorProtected=true Reverted="safeboot"')
+# report_only on Linux.
+PRECURSOR_REPORT = ('detection=precursor confirmed=true response=none Precursor=snapshot_delete '
+                    'CommandLine="lvremove -f vg0/home_snap" PrecursorImage="/usr/sbin/lvremove" PrecursorPID=1200 '
+                    'Image="/tmp/.x/locker" Comm="locker" PID=1000 PPID=900 User=0 Isolated=false')
+# As TestPrecursorPolicyExclusions: an admin task the group policy excludes:
+# logged, not stopped, no alert.
+PRECURSOR_EXCLUDED = ('detection=precursor confirmed=true response=excluded Precursor=snapshot_delete '
+                      'CommandLine="lvremove -f vg0/home_snap" PrecursorImage="/usr/sbin/lvremove" PrecursorPID=1700 '
+                      'Image="/usr/sbin/cron" Comm="cron" PID=1500 PPID=1 User=0 Isolated=false InitiatorProtected=true')
 RETIRED = ('detection=canary_retired confirmed=false response=none Canary="/srv/app/.siem-canary.pdf" '
            'Image="/usr/bin/rsync" Comm="rsync" PID=900 PPID=1 User=0 Isolated=false')
 
@@ -79,6 +102,24 @@ def test_decode(decoders):
     assert event["ransomware.detection"] == "inplace_modify" and event["ransomware.files"] == "50"
 
 
+def test_decode_precursor(decoders):
+    event, name = decoders.decode_named("ransomware_activity", PRECURSOR)
+    assert name == "ransomware_activity"
+    assert event["ransomware.detection"] == "precursor"
+    assert event["ransomware.precursor"] == "shadow_delete"
+    assert event["ransomware.command_line"] == "vssadmin delete shadows /all /quiet"
+    assert event["ransomware.precursor_image"] == "C:\\Windows\\System32\\vssadmin.exe"
+    assert event["ransomware.precursor_pid"] == "3200"
+    assert event["process.executable"] == "C:\\Users\\bob\\Desktop\\9f2c1e.exe"
+    assert event["ransomware.killed"] == "3"
+    # the command line is the precursor's, not the initiator's: kept out of
+    # process.command_line so process-creation rules do not fire on it again
+    assert "process.command_line" not in event
+    event, _ = decoders.decode_named("ransomware_activity", PRECURSOR_PROTECTED)
+    assert event["ransomware.initiator_protected"] == "true"
+    assert event["ransomware.reverted"] == "safeboot"
+
+
 @pytest.mark.parametrize("line,expected", [
     (CANARY, [("Ransomware Activity On Endpoint", "critical")]),
     (EXT, [("Ransomware Activity On Endpoint", "critical")]),
@@ -89,11 +130,90 @@ def test_decode(decoders):
     (INPLACE, [("Ransomware Activity On Endpoint", "critical")]),
     (INPLACE_UNCONFIRMED, []),
     (RETIRED, [("Ransomware Canary Retired", "medium")]),
+    (PRECURSOR, [("Ransomware Activity On Endpoint", "critical")]),
+    (PRECURSOR_PROTECTED, [("Ransomware Activity On Endpoint", "critical")]),
+    (PRECURSOR_REPORT, [("Ransomware Activity On Endpoint", "critical")]),
+    (PRECURSOR_EXCLUDED, []),
 ])
 def test_alerts(decoders, rules, line, expected):
     event, _ = decoders.decode_named("ransomware_activity", line)
     view = dict(event, raw_message=line, log_type="ransomware_activity", hostname="fs01")
     assert [(m["title"], m["level"]) for m in asyncio.run(rules.evaluate(view))] == expected
+
+
+def test_ignored_exclusion_is_decoded_and_alerts(decoders):
+    """As TestCommandLineExclusionNeedsATrustedInitiator: a command-line exclusion
+    matched, but the initiator runs from the Desktop: killed, alerted."""
+    line = PRECURSOR + " exclusion_ignored=untrusted_initiator"
+    event, _ = decoders.decode_named("ransomware_activity", line)
+    assert event["ransomware.exclusion_ignored"] == "untrusted_initiator"
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    view = dict(event, raw_message=line, log_type="ransomware_activity", hostname="ws12")
+    assert [m["title"] for m in asyncio.run(sig.evaluate(view))] == ["Ransomware Activity On Endpoint"]
+
+
+def test_precursor_hardening_fields(decoders):
+    """As the precursor_hardening tests: a spoofed parent, AMSI content, a removed driver."""
+    line = ('detection=precursor confirmed=true response=killed Precursor=byovd '
+            'CommandLine="sc create ThrottleStop type= kernel binPath= C:\\\\Users\\\\bob\\\\x.sys" '
+            'PrecursorImage="C:\\\\Windows\\\\System32\\\\sc.exe" PrecursorPID=3160 '
+            'Image="C:\\\\Users\\\\bob\\\\Desktop\\\\9f2c1e.exe" Comm="9f2c1e.exe" PID=3000 PPID=2000 User=0 '
+            'Killed=3 Isolated=false Reverted="service:throttlestop,service:ironchainsvc" ParentSpoofed=true '
+            'Source=amsi Removed="c:/users/bob/x.sys"')
+    event, _ = decoders.decode_named("ransomware_activity", line)
+    assert event["ransomware.parent_spoofed"] == "true"
+    assert event["ransomware.source"] == "amsi"
+    assert event["ransomware.removed"] == "c:/users/bob/x.sys"
+    assert event["ransomware.reverted"] == "service:throttlestop,service:ironchainsvc"
+
+
+# As TestSnapshotRotationIsReportOnly: zfs-auto-snapshot from cron.
+DOWNGRADED = ('detection=precursor confirmed=true response=none Precursor=snapshot_delete '
+              'CommandLine="zfs destroy -d tank/data@zfs-auto-snap_hourly-2026-11-09-0900" '
+              'PrecursorImage="/usr/sbin/zfs" PrecursorPID=1620 Image="/usr/sbin/cron" Comm="cron" PID=1500 PPID=1 '
+              'User=0 Isolated=false InitiatorProtected=true downgraded=rotation_tool')
+
+
+def test_downgraded_precursor_is_a_lower_alert(decoders):
+    """Routine tooling (snapshot rotation, an installed program stopping an AV) is
+    reported, not stopped: a medium alert, not the critical one."""
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    event, _ = decoders.decode_named("ransomware_activity", DOWNGRADED)
+    assert event["ransomware.downgraded"] == "rotation_tool"
+    view = dict(event, raw_message=DOWNGRADED, log_type="ransomware_activity", hostname="pve01")
+    assert [(m["title"], m["level"]) for m in asyncio.run(sig.evaluate(view))] == [
+        ("Ransomware Precursor From Routine Tooling", "medium")]
+
+
+def test_unconfirmed_byovd_raises_no_alert(decoders):
+    """A kernel service on a driver in System32\\drivers the initiator did not bring:
+    logged (never silent), no alert."""
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    line = ('detection=precursor confirmed=false response=none Precursor=byovd '
+            'CommandLine="sc create npcap type= kernel binPath= C:\\\\Windows\\\\System32\\\\drivers\\\\npcap.sys" '
+            'PrecursorImage="C:\\\\Windows\\\\System32\\\\sc.exe" PrecursorPID=7100 '
+            'Image="C:\\\\Program Files\\\\Tool\\\\tool.exe" Comm="tool.exe" PID=7000 PPID=2000 User=0 Isolated=false')
+    event, _ = decoders.decode_named("ransomware_activity", line)
+    view = dict(event, raw_message=line, log_type="ransomware_activity", hostname="ws13")
+    assert asyncio.run(sig.evaluate(view)) == []
+
+
+def test_excluded_precursor_raises_no_alert(decoders):
+    """Fresh engine: nothing is suppressed, so silence means the rule does not match."""
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    event, _ = decoders.decode_named("ransomware_activity", PRECURSOR_EXCLUDED)
+    assert event["ransomware.response"] == "excluded"
+    view = dict(event, raw_message=PRECURSOR_EXCLUDED, log_type="ransomware_activity", hostname="db01")
+    assert asyncio.run(sig.evaluate(view)) == []
+    # the same line, stopped, does alert
+    killed = PRECURSOR_EXCLUDED.replace("response=excluded", "response=killed")
+    event, _ = decoders.decode_named("ransomware_activity", killed)
+    view = dict(event, raw_message=killed, log_type="ransomware_activity", hostname="db01")
+    assert [m["title"] for m in asyncio.run(sig.evaluate(view))] == ["Ransomware Activity On Endpoint"]
 
 
 def test_encrypted_canary_is_one_critical_alert(decoders):

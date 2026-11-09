@@ -8,13 +8,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/siem-platform/agent/internal/linsensor"
+	"github.com/siem-platform/agent/internal/ownproc"
 )
 
 // LogType of detection lines (decoders/ransomware_activity.yaml).
@@ -49,6 +52,12 @@ type Runtime struct {
 	Kill     bool // with the local Kill (report_only there wins)
 	Isolate  bool // or the local isolate
 	Excluded func(image string) bool
+	// The precursor checks' exclusions: ExcludedImage matches a full image
+	// path (policy image exclusions with a path, path prefixes; never a bare
+	// program name), ExcludedCommandLine a command line (honoured only for
+	// an initiator in a system or program location, precursor.go).
+	ExcludedImage       func(image string) bool
+	ExcludedCommandLine func(commandLine string) bool
 }
 
 type Guard struct {
@@ -65,6 +74,28 @@ type Guard struct {
 	writeWait time.Duration
 	// signed checks a Microsoft Authenticode signature (trust.go).
 	signed atomic.Pointer[func(string) bool]
+
+	// Precursors (precursor.go): goos picks the rules, self is the agent's
+	// PID, async runs responses on their own goroutine, live returns a
+	// process table lookup, cwd a process's working directory (Linux),
+	// runCmd runs a system command (bcdedit) after revertDelay.
+	pre         *precursors
+	goos        string
+	self        uint32
+	async       bool
+	revertDelay time.Duration
+	live        func() procLookup
+	cwd         func(pid uint32) string
+	runCmd      func(name string, args ...string) ([]byte, error)
+	// own reports a process the agent itself started (ownproc); origName
+	// a Windows image's PE OriginalFilename ("" when none); removeFile
+	// deletes a dropped driver.
+	own        func(pid uint32) bool
+	origName   func(image string) string
+	removeFile func(path string) error
+	// rootOwned reports whether a file is owned by root (Linux; the trust
+	// in an initiator's location for command-line exclusions).
+	rootOwned func(path string) bool
 }
 
 func New(opts Options) *Guard {
@@ -74,6 +105,19 @@ func New(opts Options) *Guard {
 		det:       newDetector(opts.AllowImages),
 		response:  killTree,
 		writeWait: time.Second,
+
+		pre:         newPrecursors(),
+		goos:        runtime.GOOS,
+		self:        uint32(os.Getpid()),
+		async:       true,
+		revertDelay: time.Second,
+		live:        liveProcs,
+		cwd:         procCwd,
+		runCmd:      runSystemCmd,
+		rootOwned:   fileRootOwned,
+		own:         ownproc.Has,
+		origName:    originalFilename,
+		removeFile:  os.Remove,
 	}
 	g.setSigned(microsoftSigned)
 	g.det.trusted = g.trusted
@@ -126,6 +170,7 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 	if rt.Off {
 		return
 	}
+	g.observeDrop(ev.PID, ev.Image, ev.Action, ev.Path, ev.From, ev.Time)
 	for _, name := range []string{ev.Path, ev.From} {
 		if name == "" {
 			continue
@@ -292,6 +337,23 @@ type detection struct {
 	killed         int
 	isolated       bool
 	err            string
+	// precursor detections: the category, the precursor process (its
+	// command line, image, PID), whether the initiator (image, pid) is
+	// protected (then the precursor alone was killed), what was reverted.
+	precursor, cmdline string
+	preImage           string
+	prePID             uint32
+	iniProtected       bool
+	reverted           string
+	// exclIgnored: a policy exclusion matched but did not apply, and why.
+	exclIgnored string
+	// parentSpoofed: the claimed parent is not the creator; source: where
+	// the precursor was seen (amsi); downgraded: why only reported; removed:
+	// a dropped driver file deleted.
+	parentSpoofed bool
+	source        string
+	downgraded    string
+	removed       string
 }
 
 // protectedImages are never killed (basenames, lower case). On Windows
@@ -305,40 +367,52 @@ func (g *Guard) SetRuntime(r Runtime) { g.rt.Store(&r) }
 func (g *Guard) act(d detection) {
 	d.response = "none"
 	rt := g.rt.Load()
-	excluded := d.pid != 0 && rt.Excluded != nil && rt.Excluded(d.image)
+	if excluded := d.pid != 0 && rt.Excluded != nil && rt.Excluded(d.image); !excluded {
+		g.respond(&d, d.pid, d.image)
+	}
+	g.report(d)
+}
+
+// respond stops process pid (image) with its tree and isolates the host
+// when the configuration and the policy say so, recording the outcome in
+// d. It reports whether the stop mode applied (false: report only).
+func (g *Guard) respond(d *detection, pid uint32, image string) bool {
+	d.response = "none"
+	rt := g.rt.Load()
+	if !g.opts.Kill || !rt.Kill || !d.confirmed {
+		return false
+	}
 	// A confirmed detection without a process (the periodic check found a
 	// canary encrypted) has nothing to kill: isolating is the only response.
-	if g.opts.Kill && rt.Kill && !excluded && d.confirmed {
-		switch {
-		case d.pid == 0:
-		case g.response == nil:
-			d.response = "unsupported"
-		case d.pid == 1 || protectedImages[strings.ToLower(filepath.Base(d.image))]:
-			d.response = "kill_refused"
-		default:
-			n, err := g.response(d.pid)
-			d.killed = n
-			d.response = "killed"
-			if err != nil {
-				d.response, d.err = "kill_failed", err.Error()
-			}
+	switch {
+	case pid == 0:
+	case g.response == nil:
+		d.response = "unsupported"
+	case pid == 1 || protectedImages[strings.ToLower(filepath.Base(image))]:
+		d.response = "kill_refused"
+	default:
+		n, err := g.response(pid)
+		d.killed = n
+		d.response = "killed"
+		if err != nil {
+			d.response, d.err = "kill_failed", err.Error()
 		}
-		isolate := g.opts.Isolate
-		if isolate == nil && rt.Isolate {
-			isolate = g.opts.IsolateFunc
-		}
-		if isolate != nil {
-			if err := isolate(); err != nil {
-				d.err = strings.TrimSpace(d.err + " isolate: " + err.Error())
-			} else {
-				d.isolated = true
-				if d.pid == 0 {
-					d.response = "isolated"
-				}
+	}
+	isolate := g.opts.Isolate
+	if isolate == nil && rt.Isolate {
+		isolate = g.opts.IsolateFunc
+	}
+	if isolate != nil {
+		if err := isolate(); err != nil {
+			d.err = strings.TrimSpace(d.err + " isolate: " + err.Error())
+		} else {
+			d.isolated = true
+			if pid == 0 {
+				d.response = "isolated"
 			}
 		}
 	}
-	g.report(d)
+	return true
 }
 
 func kv(s string) string {
@@ -351,6 +425,10 @@ func kv(s string) string {
 func (d detection) line() string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "detection=%s confirmed=%t response=%s", d.kind, d.confirmed, d.response)
+	if d.precursor != "" {
+		fmt.Fprintf(&sb, " Precursor=%s CommandLine=%s PrecursorImage=%s PrecursorPID=%d",
+			d.precursor, kv(d.cmdline), kv(d.preImage), d.prePID)
+	}
 	if d.canary != "" {
 		fmt.Fprintf(&sb, " Canary=%s", kv(d.canary))
 	}
@@ -373,6 +451,27 @@ func (d detection) line() string {
 		fmt.Fprintf(&sb, " Killed=%d", d.killed)
 	}
 	fmt.Fprintf(&sb, " Isolated=%t", d.isolated)
+	if d.iniProtected {
+		sb.WriteString(" InitiatorProtected=true")
+	}
+	if d.reverted != "" {
+		fmt.Fprintf(&sb, " Reverted=%s", kv(d.reverted))
+	}
+	if d.exclIgnored != "" {
+		fmt.Fprintf(&sb, " exclusion_ignored=%s", d.exclIgnored)
+	}
+	if d.parentSpoofed {
+		sb.WriteString(" ParentSpoofed=true")
+	}
+	if d.source != "" {
+		fmt.Fprintf(&sb, " Source=%s", d.source)
+	}
+	if d.downgraded != "" {
+		fmt.Fprintf(&sb, " downgraded=%s", d.downgraded)
+	}
+	if d.removed != "" {
+		fmt.Fprintf(&sb, " Removed=%s", kv(d.removed))
+	}
 	if d.err != "" {
 		fmt.Fprintf(&sb, " Error=%s", kv(d.err))
 	}

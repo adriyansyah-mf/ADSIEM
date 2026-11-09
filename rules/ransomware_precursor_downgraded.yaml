@@ -1,0 +1,31 @@
+title: Ransomware Precursor From Routine Tooling
+id: rule-ransomware-precursor-downgraded
+description: >-
+  A ransomware precursor (snapshot deletion, stopping or disabling a security
+  product) ran from routine tooling, so the agent only reported it instead of
+  stopping it (ransomware.downgraded) - a known snapshot-rotation tool, a
+  root-owned job started by cron or a systemd timer, or an installed program
+  in a system location such as an antivirus updater or a remote-management
+  agent. Check that the job or program is expected on this host
+  (ransomware.command_line, process.executable). If it is not, exclude
+  nothing and investigate it as the start of an attack.
+logsource:
+  product: ransomware
+  service: activity
+detection:
+  selection:
+    event.action: ransomware
+    ransomware.detection: precursor
+    ransomware.downgraded:
+      - rotation_tool
+      - scheduled
+      - trusted_initiator
+  condition: selection
+# Rotation runs every hour: one alert per program and precursor per host a day.
+suppression:
+  group_by: [hostname, process.executable, ransomware.precursor]
+  timewindow: 86400
+level: medium
+tags:
+  - attack.impact
+  - attack.t1490

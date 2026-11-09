@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/siem-platform/agent/internal/ownproc"
 )
 
 // exec runs one program for a command an operator approved on the server
@@ -65,7 +67,7 @@ func pluginExec(ctx context.Context, args map[string]any, emit func(map[string]a
 	cmd.WaitDelay = 2 * time.Second // a grandchild holding the pipes can't hang the flow
 
 	started := time.Now()
-	err := cmd.Run()
+	err := ownproc.Run(cmd) // recorded: the ransomware guard knows its own commands
 	elapsed := time.Since(started).Milliseconds()
 	var exitErr *exec.ExitError
 	if err != nil && !errors.As(err, &exitErr) && cctx.Err() == nil {

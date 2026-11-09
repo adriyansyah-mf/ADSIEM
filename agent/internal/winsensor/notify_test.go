@@ -63,3 +63,71 @@ func TestOnStartFallsBackToTheEmit(t *testing.T) {
 		t.Fatalf("after the join window: %+v", got)
 	}
 }
+
+// The anti-ransomware precursor checks need the command line, which only
+// the kernel logger half has: onCommand fires on that half, once, even
+// when the provider half came first (and onStart went without it).
+func TestOnCommandFiresOnTheKernelHalfAfterTheProvider(t *testing.T) {
+	j := joiner()
+	var starts, cmds []ProcessStart
+	j.onStart = func(p ProcessStart) { starts = append(starts, p) }
+	j.onCommand = func(p ProcessStart) { cmds = append(cmds, p) }
+	now := time.Now()
+	j.provider(providerStart("2336", "1012", `\Device\HarddiskVolume3\Windows\System32\vssadmin.exe`), now)
+	if len(starts) != 1 || starts[0].CommandLine != "" || len(cmds) != 0 {
+		t.Fatalf("provider half: starts %+v cmds %+v", starts, cmds)
+	}
+	j.kernel(kernelStart("0x920", "0x3F4", "vssadmin delete shadows /all /quiet"), now)
+	if len(cmds) != 1 || cmds[0].CommandLine != "vssadmin delete shadows /all /quiet" ||
+		cmds[0].Image != `C:\Windows\System32\vssadmin.exe` || cmds[0].PID != 0x920 || cmds[0].PPID != 0x3F4 {
+		t.Fatalf("kernel half: %+v", cmds)
+	}
+	j.flush(now.Add(joinWindow))
+	if len(cmds) != 1 || len(starts) != 1 {
+		t.Fatalf("fired again: starts %d cmds %d", len(starts), len(cmds))
+	}
+}
+
+// The creator: the Kernel-Process start event is logged by the process
+// that creates the new one, so its header PID is the real creator; the
+// ParentProcessID field can be spoofed (PROC_THREAD_ATTRIBUTE_PARENT_PROCESS).
+// onCommand waits for both halves (or the join window) to carry it.
+func TestOnCommandCarriesTheCreatorPID(t *testing.T) {
+	j := joiner()
+	var cmds []ProcessStart
+	j.onCommand = func(p ProcessStart) { cmds = append(cmds, p) }
+	now := time.Now()
+	j.kernel(kernelStart("0x920", "0x3F4", "vssadmin delete shadows /all /quiet"), now)
+	if len(cmds) != 0 {
+		t.Fatalf("fired before the creator was known: %+v", cmds)
+	}
+	prov := providerStart("2336", "1012", `\Device\HarddiskVolume3\Windows\System32\vssadmin.exe`)
+	prov.PID = 4242 // the real creator; ParentProcessID says 1012 (0x3F4)
+	j.provider(prov, now)
+	if len(cmds) != 1 || cmds[0].CreatorPID != 4242 || cmds[0].PPID != 0x3F4 || cmds[0].CommandLine == "" {
+		t.Fatalf("cmds %+v", cmds)
+	}
+
+	// The provider half never comes: after the join window, without a creator.
+	j = joiner()
+	cmds = nil
+	j.onCommand = func(p ProcessStart) { cmds = append(cmds, p) }
+	j.kernel(kernelStart("0x930", "0x3F4", "bcdedit /set {default} recoveryenabled no"), now)
+	j.flush(now.Add(joinWindow))
+	if len(cmds) != 1 || cmds[0].CreatorPID != 0 || cmds[0].PID != 0x930 {
+		t.Fatalf("after the window: %+v", cmds)
+	}
+}
+
+func TestOnCommandFiresOnTheKernelHalfFirst(t *testing.T) {
+	j := joiner()
+	j.fullImage = func(uint32) string { return `C:\Windows\System32\bcdedit.exe` }
+	var cmds []ProcessStart
+	j.onCommand = func(p ProcessStart) { cmds = append(cmds, p) }
+	now := time.Now()
+	j.kernel(kernelStart("0x920", "0x3F4", "bcdedit /set {default} recoveryenabled no"), now)
+	j.provider(providerStart("2336", "1012", `\Device\HarddiskVolume3\Windows\System32\bcdedit.exe`), now)
+	if len(cmds) != 1 || cmds[0].Image != `C:\Windows\System32\bcdedit.exe` || cmds[0].CommandLine == "" {
+		t.Fatalf("cmds %+v", cmds)
+	}
+}

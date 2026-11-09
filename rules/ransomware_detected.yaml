@@ -1,6 +1,6 @@
 title: Ransomware Activity On Endpoint
 id: rule-ransomware-detected
-description: A process touched a canary file, or renamed or rewrote many files in a minute and the result looks encrypted (ransomware.detection, ransomware.entropy). ransomware.response says whether the agent killed it (ransomware.killed processes) and ransomware.isolated whether it cut the host off.
+description: A process touched a canary file, renamed or rewrote many files in a minute and the result looks encrypted (ransomware.detection, ransomware.entropy), or ran a ransomware precursor such as shadow-copy deletion, boot-recovery tampering, a vulnerable driver or stopping security products (ransomware.detection=precursor, ransomware.precursor, ransomware.command_line). ransomware.response says whether the agent killed it (ransomware.killed processes) and ransomware.isolated whether it cut the host off.
 logsource:
   product: ransomware
   service: activity
@@ -8,7 +8,16 @@ detection:
   selection:
     event.action: ransomware
     ransomware.confirmed: 'true'
-  condition: selection
+  # an admin task the group policy excludes (precursors): logged, not an incident
+  excluded:
+    ransomware.response: excluded
+  # routine tooling (ransomware_precursor_downgraded.yaml, medium)
+  downgraded:
+    ransomware.downgraded:
+      - rotation_tool
+      - scheduled
+      - trusted_initiator
+  condition: selection and not excluded and not downgraded
 # One alert per program per host in 10 minutes: several canaries touched by
 # the same encryptor are one incident. Another binary still alerts.
 suppression:

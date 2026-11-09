@@ -48,6 +48,30 @@ func TestExclusionKinds(t *testing.T) {
 	}
 }
 
+// ExcludedPath: only exclusions that name a location (an image by full
+// path, a path prefix) match; a bare program name never does.
+func TestExcludedPath(t *testing.T) {
+	s := Settings{Exclusions: []Exclusion{
+		{Kind: "image", Value: "veeam.exe", Scopes: []string{ScopeRansomware}},
+		{Kind: "image", Value: "/usr/bin/restic", Scopes: []string{ScopeRansomware}},
+		{Kind: "path_prefix", Value: "/opt/backup/", Scopes: []string{ScopeRansomware}},
+		{Kind: "command_line", Value: "restic", Scopes: []string{ScopeRansomware}},
+		{Kind: "image", Value: "/usr/bin/borg", Scopes: []string{ScopeYara}},
+	}}
+	for image, want := range map[string]bool{
+		`C:\Users\bob\Desktop\veeam.exe`: false,
+		"/usr/bin/restic":                true,
+		"/tmp/restic":                    false,
+		"/opt/backup/bin/snap":           true,
+		"/usr/bin/borg":                  false, // other scope
+		"":                               false,
+	} {
+		if got := s.ExcludedPath(ScopeRansomware, image); got != want {
+			t.Errorf("%q: got %v", image, got)
+		}
+	}
+}
+
 type server struct {
 	body Policy
 	n    int

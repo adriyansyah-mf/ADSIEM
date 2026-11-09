@@ -142,6 +142,25 @@ func (s Settings) Excluded(scope string, m Match) bool {
 	return false
 }
 
+// ExcludedPath reports whether an exclusion with scope that names a
+// location matches image: an image exclusion by full path or a path prefix.
+// A bare program name (anyone can name a binary veeam.exe) never matches.
+func (s Settings) ExcludedPath(scope, image string) bool {
+	if image == "" {
+		return false
+	}
+	for _, e := range s.Exclusions {
+		if !e.has(scope) {
+			continue
+		}
+		if (e.Kind == "image" && strings.ContainsAny(e.Value, `/\`) || e.Kind == "path_prefix") &&
+			e.matches(Match{Image: image}) {
+			return true
+		}
+	}
+	return false
+}
+
 // For keeps the exclusions of one scope (what the fanotify helper needs).
 func (s Settings) For(scope string) []Exclusion {
 	var out []Exclusion
