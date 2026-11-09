@@ -27,6 +27,8 @@ const (
 	// several directories, without renames (encrypt each file over itself).
 	minInplace     = 50
 	minInplaceDirs = 3
+	// maxInplaceDirs bounds the directories remembered per process window.
+	maxInplaceDirs = 64
 	// renames to one new extension that make an in-place hit confirmable
 	// without a lost header (fewer than extension_change needs).
 	minUniformRenames = 5
@@ -227,9 +229,16 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 			if len(w.created) < 4*minWrites {
 				w.created[ev.Path] = true
 			}
-		} else if !w.created[ev.Path] && !w.inplace[ev.Path] && len(w.inplace) < 4*minInplace && !d.ignore(ev.Path) {
-			w.inplace[ev.Path] = true
-			w.inplaceDirs[dir(ev.Path)] = true
+		} else if !w.created[ev.Path] && !w.inplace[ev.Path] && !d.ignore(ev.Path) {
+			// Directories are counted past the file cap: ransomware walks a
+			// tree folder by folder, so the first 4*minInplace files can all
+			// sit in one or two of them.
+			if len(w.inplaceDirs) < maxInplaceDirs {
+				w.inplaceDirs[dir(ev.Path)] = true
+			}
+			if len(w.inplace) < 4*minInplace {
+				w.inplace[ev.Path] = true
+			}
 			w.inTargets = appendRecent(w.inTargets, ev.Path)
 			if _, ok := headerOf[ext(ev.Path)]; ok {
 				w.inHeaded = appendRecent(w.inHeaded, ev.Path)
