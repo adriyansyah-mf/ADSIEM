@@ -188,7 +188,7 @@ async def test_turn_reads_evidence_proposes_isolation_and_keeps_history(chat):
     assert "ip:203.0.113.9" in context and agent in context
     assert {"list_evidence", "get_evidence", "list_hypotheses", "case_iocs", "search_events",
             "isolate_host", "block_domain", "add_threat_ioc", "run_live_response"} <= chat.model.tool_names
-    assert "run_command" not in chat.model.tool_names and "ti_lookup" not in chat.model.tool_names
+    assert "run_command" not in chat.model.tool_names and "ti_lookup" in chat.model.tool_names
 
     # the next turn sees the conversation so far; GET returns everything
     r = await chat.client.post(_url(chat), json={"message": "status?"})
@@ -411,3 +411,165 @@ async def test_model_failure_is_a_system_message(chat):
     user_msg, note = r.json()["messages"]
     assert user_msg["content"] == "hi"
     assert note["role"] == "system" and "provider down" in note["content"]
+
+
+# ─── ti_lookup (bridge to the worker over Redis) ─────────────────
+
+class FakeRedis:
+    """What the worker does is simulated: with `answer`, a pushed job gets its result key at once."""
+
+    def __init__(self, answer=None):
+        self.answer, self.store, self.pushed, self.ttl = answer, {}, [], {}
+
+    async def rpush(self, key, raw):
+        self.pushed.append((key, json.loads(raw)))
+        if self.answer is not None:
+            self.store["siem:ti:result:" + json.loads(raw)["id"]] = json.dumps(self.answer)
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def set(self, key, value, ex=None):
+        self.store[key] = value
+        self.ttl[key] = ex
+
+
+MALICIOUS = {"iocs": [], "reputation": [{"ioc_value": "198.41.0.4", "ioc_type": "ip", "score": 0.9,
+                                         "malicious": True, "sources": ["virustotal"]}],
+             "provider_bullets": ["virustotal: 12 engines flag it"], "overall_risk": 0.9, "triage_hints": []}
+
+
+@pytest.fixture
+def ti(monkeypatch):
+    from app.services import investigation_ti
+
+    def install(answer=None):
+        redis = FakeRedis(answer)
+
+        async def get_redis():
+            return redis
+        monkeypatch.setattr(investigation_ti, "get_redis", get_redis)
+        monkeypatch.setattr(investigation_ti, "WAIT_SECONDS", 0.3)
+        monkeypatch.setattr(investigation_ti, "POLL_SECONDS", 0.02)
+        return redis
+    return install
+
+
+async def _evidence(chat, evidence_type="ti_result"):
+    from sqlalchemy import select
+
+    from app.models.models import InvestigationEvidence
+    async with chat.sessions() as db:
+        return (await db.execute(select(InvestigationEvidence).where(
+            InvestigationEvidence.evidence_type == evidence_type))).scalars().all()
+
+
+async def test_ti_lookup_returns_result_and_records_evidence_once(chat, ti):
+    redis = ti(MALICIOUS)
+    seen = []
+
+    def script(turn, results, messages):
+        if turn in (1, 3):
+            return "ti_lookup", {"value": "198.41.0.4"}
+        if turn == 2:
+            seen.append(results[-1])
+            return "ti_lookup", {"value": "198.41.0.4"}
+        seen.append(results[-1])
+        return "malicious per virustotal"
+
+    chat.model = Scripted(script)
+    r = await chat.client.post(_url(chat), json={"message": "is 198.41.0.4 bad?"})
+    assert r.status_code == 200, r.text
+    assert "ti_lookup" in chat.model.tool_names
+    assert seen[0]["overall_risk"] == 0.9 and seen[0]["reputation"][0]["malicious"] is True
+    assert seen[0]["evidence_id"]
+    assert len(redis.pushed) == 1, "the second identical lookup is served from the cache"
+    key, job = redis.pushed[0]
+    assert key == "siem:ti:lookup" and job["value"] == "198.41.0.4" and job["group"] == "blue" and job["id"]
+    assert seen[1]["overall_risk"] == 0.9 and seen[1]["evidence_id"] == seen[0]["evidence_id"]
+    [ev] = await _evidence(chat)
+    assert str(ev.id) == seen[0]["evidence_id"] and "198.41.0.4" in ev.title
+    assert ev.group_id == "blue" and ev.investigation_id == chat.invs[("blue", "finished")]
+    assert redis.ttl["siem:ti:cache:" + __import__("hashlib").sha1(b"198.41.0.4").hexdigest()] == 600
+
+
+async def test_ti_lookup_pending_when_the_worker_is_slow(chat, ti):
+    ti(None)
+    out = []
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return "ti_lookup", {"value": "evil.example.com"}
+        out.append(results[-1])
+        return "still waiting"
+
+    chat.model = Scripted(script)
+    r = await chat.client.post(_url(chat), json={"message": "check evil.example.com"})
+    assert r.status_code == 200, r.text
+    assert out[0] == {"status": "pending", "note": "ask again in a moment"}
+    assert await _evidence(chat) == []
+
+
+async def test_ti_lookup_late_result_is_found_on_the_next_ask(chat, ti):
+    redis = ti(None)
+    out = []
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return "ti_lookup", {"value": "evil.example.com"}
+        out.append(results[-1])
+        return "ok"
+
+    chat.model = Scripted(script)
+    await chat.client.post(_url(chat), json={"message": "check"})
+    job_id = redis.pushed[0][1]["id"]
+    redis.store["siem:ti:result:" + job_id] = json.dumps(MALICIOUS)  # the worker finished late
+
+    def script2(turn, results, messages):
+        if turn == 1:
+            return "ti_lookup", {"value": "evil.example.com"}
+        out.append(results[-1])
+        return "ok"
+
+    chat.model = Scripted(script2)
+    await chat.client.post(_url(chat), json={"message": "again"})
+    assert len(redis.pushed) == 1, "the pending job is reused, not queued twice"
+    assert out[-1]["overall_risk"] == 0.9
+
+
+async def test_ti_lookup_worker_error_and_bad_value(chat, ti):
+    redis = ti({"error": "lookup failed: provider down"})
+    out = []
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return [("ti_lookup", {"value": "8.8.8.8"}), ("ti_lookup", {"value": "free text about 8.8.8.8"}),
+                    ("ti_lookup", {"value": "10.0.0.5"})]
+        out.extend(results[-3:])
+        return "done"
+
+    chat.model = Scripted(script)
+    r = await chat.client.post(_url(chat), json={"message": "check"})
+    assert r.status_code == 200, r.text
+    assert out[0] == {"error": "lookup failed: provider down"}
+    assert "error" in out[1] and "error" in out[2]
+    assert len(redis.pushed) == 1, "bad values are never queued"
+    assert await _evidence(chat) == []
+
+
+async def test_ti_lookup_limited_to_three_per_turn(chat, ti):
+    redis = ti(MALICIOUS)
+    out = []
+
+    def script(turn, results, messages):
+        if turn == 1:
+            return [("ti_lookup", {"value": v}) for v in ("1.1.1.1", "8.8.8.8", "9.9.9.9", "4.4.4.4")]
+        out.extend(results[-4:])
+        return "done"
+
+    chat.model = Scripted(script)
+    r = await chat.client.post(_url(chat), json={"message": "check them all"})
+    assert r.status_code == 200, r.text
+    assert all("overall_risk" in o for o in out[:3])
+    assert "limit" in out[3]["error"]
+    assert len(redis.pushed) == 3
