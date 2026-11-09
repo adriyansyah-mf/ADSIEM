@@ -13,17 +13,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// criticalImages never die, when they run from the system directory:
-// terminating them crashes or locks up Windows (the same list as the
-// kill_process task, internal/task/response_windows.go). The same name
-// anywhere else is not the real thing and may be killed.
-var criticalImages = map[string]bool{
-	"smss.exe": true, "csrss.exe": true, "wininit.exe": true, "winlogon.exe": true,
-	"services.exe": true, "lsass.exe": true, "lsaiso.exe": true, "svchost.exe": true,
-	"fontdrvhost.exe": true, "dwm.exe": true, "lsm.exe": true, "memcompression": true,
-	"registry": true, "secure system": true,
-}
-
 // killTree terminates pid, then its descendants, children before the
 // snapshot can change much: TerminateProcess is immediate, so the root
 // stops encrypting first. It refuses System (4), critical processes, the
@@ -108,7 +97,7 @@ func critical(pid uint32) bool {
 		return true
 	}
 	image := windows.UTF16ToString(buf[:n])
-	if !criticalImages[strings.ToLower(filepath.Base(image))] {
+	if !criticalNames[strings.ToLower(filepath.Base(image))] {
 		return false
 	}
 	sys, err := windows.GetSystemDirectory()

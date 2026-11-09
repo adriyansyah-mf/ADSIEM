@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -56,6 +57,16 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	case "canary-overwrite":
 		overwrite(os.Getenv("RANSOM_CANARY"))
+		time.Sleep(15 * time.Second) // waits to be killed
+		os.Exit(0)
+	case "precursor":
+		// A shadow-copy deletion through cmd, as IronChain ran it. The CI
+		// job is elevated: /for= names a volume that does not exist, so
+		// vssadmin fails harmlessly; the command line is what counts.
+		sys, _ := windows.GetSystemDirectory()
+		c := exec.Command(filepath.Join(sys, "cmd.exe"))
+		c.SysProcAttr = &syscall.SysProcAttr{CmdLine: `cmd /c "vssadmin delete shadows /for=Z: /quiet"`}
+		c.Run()
 		time.Sleep(15 * time.Second) // waits to be killed
 		os.Exit(0)
 	}
@@ -250,6 +261,53 @@ func TestRansomwareEndToEndWindows(t *testing.T) {
 			strings.Contains(l, "FileAction=write") && strings.Contains(l, want)
 	}); l == "" {
 		t.Errorf("no canary write kill line: %q", out.wait(t, 1))
+	}
+}
+
+// A precursor (vssadmin delete shadows, run through cmd /c) stops the
+// program that ran it, with its tree, before anything is encrypted.
+func TestPrecursorEndToEndWindows(t *testing.T) {
+	if os.Getenv("SIEM_NATIVE_EVENTLOG") != "1" {
+		t.Skip("native Windows test: set SIEM_NATIVE_EVENTLOG=1 in an elevated prompt")
+	}
+	var out sink
+	g := New(Options{Push: out.push, CanaryDirs: []string{filepath.Join(t.TempDir(), "none")}, Kill: true})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var starts sync.Map // process starts the guard saw, for diagnostics
+	sensor, err := winsensor.StartWith(buffer.New(100000), winsensor.Options{OnCommandLine: func(p winsensor.ProcessStart) {
+		starts.Store(p.PID, fmt.Sprintf("pid=%d ppid=%d image=%s cmd=%s", p.PID, p.PPID, p.Image, p.CommandLine))
+		g.ObserveProcess(ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image, CommandLine: p.CommandLine, Time: time.Now()})
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sensor.Stop()
+	time.Sleep(2 * time.Second) // sessions running
+
+	hctx, hcancel := context.WithTimeout(ctx, 60*time.Second)
+	defer hcancel()
+	start := time.Now()
+	h := helperWin(t, hctx, "precursor")
+	err = h.Wait()
+	t.Logf("precursor helper: %v after %v", err, time.Since(start))
+	if !terminated(err) {
+		t.Errorf("precursor helper not terminated by the guard: %v", err)
+	}
+	want := fmt.Sprintf(" PID=%d ", h.Process.Pid)
+	if l := waitLine(t, &out, func(l string) bool {
+		return strings.HasPrefix(l, "detection=precursor confirmed=true response=killed Precursor=shadow_delete") &&
+			strings.Contains(l, want)
+	}); l == "" {
+		out.mu.Lock()
+		t.Errorf("no precursor kill line for the helper; lines: %q", out.lines)
+		out.mu.Unlock()
+		starts.Range(func(_, v any) bool {
+			if s := v.(string); strings.Contains(strings.ToLower(s), "vssadmin") || strings.Contains(s, fmt.Sprintf("pid=%d ", h.Process.Pid)) {
+				t.Logf("start: %s", s)
+			}
+			return true
+		})
 	}
 }
 
