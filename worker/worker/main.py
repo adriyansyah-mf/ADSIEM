@@ -31,6 +31,7 @@ from worker.knowledge import knowledge_loop
 from worker.malware_feed import malware_feed_loop
 from worker.webblock_feeds import webblock_feeds_loop
 from worker.soar.engine import soar_loop
+from worker.ti_lookup import ti_lookup_loop
 from worker.es_client import ensure_index as ensure_es_index
 from worker.alert_iocs import ensure_index as ensure_alert_iocs_index, backfill_once as alert_iocs_backfill
 
@@ -189,6 +190,7 @@ async def main():
         _supervise("knowledge", knowledge_loop),
         _supervise("malware_feed", malware_feed_loop),
         _supervise("webblock_feeds", webblock_feeds_loop),
+        _supervise("ti_lookup", ti_lookup_loop),
         _supervise("health_probe", health_probe_loop),
         alert_iocs_backfill(),
         return_exceptions=True,

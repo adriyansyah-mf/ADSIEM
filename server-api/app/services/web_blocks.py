@@ -7,12 +7,18 @@ allowlist filters the whole set)."""
 from __future__ import annotations
 
 import time
+from datetime import datetime
+from uuid import UUID
 
+from fastapi import HTTPException
 from sqlalchemy import func, or_, select, text, update
+from sqlalchemy.exc import IntegrityError
 
-from app.models.models import Agent, PlatformSetting, WebAllowRule, WebBlockEntry, WebBlockPolicy, _web_block_seq
+from app.models.models import (
+    Agent, PlatformSetting, User, WebAllowRule, WebBlockEntry, WebBlockPolicy, _web_block_seq,
+)
 from app.services.web_page import DEFAULT_PAGE_HTML
-from worker.web_domains import BUILTIN_ALLOWLIST, WEB_BLOCK_SEQ_LOCK, allow_match
+from worker.web_domains import BUILTIN_ALLOWLIST, WEB_BLOCK_SEQ_LOCK, DomainError, allow_match, normalize
 
 FEED_GROUP = "*"
 RULES_SEQ_KEY = "web_block_rules_seq"
@@ -56,6 +62,49 @@ async def allow_rules(db, group_id: str) -> list[tuple[str, bool]]:
     rows = (await db.execute(select(WebAllowRule.domain, WebAllowRule.include_subdomains).where(
         WebAllowRule.enabled.is_(True), WebAllowRule.group_id.in_((group_id, FEED_GROUP))))).all()
     return [(domain, include) for domain, include in rows]
+
+
+async def commit_or_conflict(db, before_commit=None) -> None:
+    """Commit; a concurrent upsert of the same unique key loses with 409, never 500.
+
+    `before_commit` runs inside the guard after the pending inserts are flushed (a query would autoflush them)."""
+    try:
+        await db.flush()
+        if before_commit is not None:
+            await before_commit(db)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="This item was changed at the same time; try again")
+
+
+async def actor_id(db, user) -> UUID | None:
+    """created_by is a foreign key to users; tolerate a caller without a users row (the audit log still names them)."""
+    return user.id if await db.get(User, user.id) is not None else None
+
+
+async def block_domain(db, user, group: str, value: str, reason: str, expires_at: datetime | None) -> WebBlockEntry:
+    """Block one domain for `group` as a manual entry (dashboard and approved chat actions).
+    Commits. Raises HTTPException: 422 not a domain, 409 allowlisted or a concurrent change.
+    The caller audits (web_block.add)."""
+    await lock_seq_writes(db)
+    try:
+        domain = normalize(value)
+    except DomainError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    rule = allow_match(domain, await allow_rules(db, group))
+    if rule:
+        raise HTTPException(status_code=409, detail=f"{domain} is allowlisted ({rule})")
+    row = (await db.execute(select(WebBlockEntry).where(
+        WebBlockEntry.group_id == group, WebBlockEntry.domain == domain, WebBlockEntry.source == "manual"))).scalar_one_or_none()
+    if row is None:
+        row = WebBlockEntry(domain=domain, group_id=group, source="manual", created_by=await actor_id(db, user))
+        db.add(row)
+    row.status, row.reason, row.expires_at, row.seq = "active", reason.strip(), expires_at, next_seq()
+    await commit_or_conflict(db)
+    await db.refresh(row)
+    invalidate()
+    return row
 
 
 async def mark_rules_changed(db, group_id: str) -> None:

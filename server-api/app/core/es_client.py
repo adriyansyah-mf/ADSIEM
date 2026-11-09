@@ -128,3 +128,33 @@ async def search_iocs(body: dict) -> dict:
         return {}
     resp.raise_for_status()
     return resp.json()
+
+
+_KEYWORD = {"type": "keyword"}
+# Mirrors worker/worker/alert_iocs.py MAPPING (the worker package is not importable here).
+IOCS_MAPPING = {"mappings": {"properties": {
+    "alert_id": _KEYWORD, "group_id": _KEYWORD, "type": _KEYWORD, "value": _KEYWORD, "ioc_key": _KEYWORD,
+    "severity": _KEYWORD, "severity_rank": {"type": "byte"}, "hostname": _KEYWORD, "agent_id": _KEYWORD,
+    "rule_title": _KEYWORD, "ai_verdict": _KEYWORD, "origin": _KEYWORD, "created_at": {"type": "date"},
+}}}
+
+
+async def index_ioc(doc_id: str, doc: dict) -> None:
+    """Write one alert_iocs document under `doc_id` (overwrites), creating the index with
+    the worker's mapping if nothing wrote one yet. Raises on an Elasticsearch error."""
+    client = _get_client()
+    if (await client.head(f"/{IOCS_INDEX}")).status_code == 404:
+        resp = await client.put(f"/{IOCS_INDEX}", json=IOCS_MAPPING)
+        if resp.status_code not in (200, 201, 400):  # 400: the worker created it in between
+            resp.raise_for_status()
+    resp = await client.put(f"/{IOCS_INDEX}/_doc/{doc_id}", json=doc, params={"refresh": "wait_for"})
+    resp.raise_for_status()
+
+
+async def delete_ioc(doc_id: str) -> bool:
+    """Delete one alert_iocs document; False when it (or the index) does not exist."""
+    resp = await _get_client().delete(f"/{IOCS_INDEX}/_doc/{doc_id}", params={"refresh": "wait_for"})
+    if resp.status_code == 404:
+        return False
+    resp.raise_for_status()
+    return True
