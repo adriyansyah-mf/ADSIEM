@@ -22,6 +22,9 @@ const LogType = "ransomware_activity"
 
 const verifyEvery = 30 * time.Second
 
+// confirmRetry is the wait before a heuristic hit's files are sampled again.
+const confirmRetry = 300 * time.Millisecond
+
 // Options configure the Guard.
 type Options struct {
 	Push        func(logType, line string)
@@ -57,15 +60,23 @@ type Guard struct {
 	det *detector
 	// response is the platform's kill; nil where there is none.
 	response func(pid uint32) (killed int, err error)
+	// writeWait is how long a canary write event waits for the canary's
+	// content to change (on Linux the event is the open, before the data).
+	writeWait time.Duration
+	// signed checks a Microsoft Authenticode signature (trust.go).
+	signed atomic.Pointer[func(string) bool]
 }
 
 func New(opts Options) *Guard {
 	g := &Guard{
-		opts:     opts,
-		can:      newCanaries(opts.CanaryDirs, opts.CanaryNames, opts.CanaryVisible),
-		det:      newDetector(opts.AllowImages),
-		response: killTree,
+		opts:      opts,
+		can:       newCanaries(opts.CanaryDirs, opts.CanaryNames, opts.CanaryVisible),
+		det:       newDetector(opts.AllowImages),
+		response:  killTree,
+		writeWait: time.Second,
 	}
+	g.setSigned(microsoftSigned)
+	g.det.trusted = g.trusted
 	g.rt.Store(&Runtime{Kill: true})
 	return g
 }
@@ -82,15 +93,29 @@ func (g *Guard) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			for _, p := range g.can.verify() {
-				g.report(detection{kind: "canary_changed", canary: p})
-				if g.can.strike(p) {
-					g.report(detection{kind: "canary_retired", canary: p})
-				}
-			}
-			g.can.plant()
+			g.checkCanaries()
 		}
 	}
+}
+
+// checkCanaries is the periodic check: changed canaries are reported and
+// planted again. One that now looks encrypted is ransomware with no process
+// known (it overwrote the canary between two checks without a file event):
+// confirmed, so the critical rule fires, and the host is isolated when the
+// configuration or the policy asks for it. Only clear-text changes and
+// removals count toward retirement.
+func (g *Guard) checkCanaries() {
+	for _, c := range g.can.verify() {
+		if c.state == canaryDestroyed {
+			g.canaryDamaged(c.path)
+			continue
+		}
+		g.report(detection{kind: "canary_changed", canary: c.path})
+		if g.can.strike(c.path) {
+			g.report(detection{kind: "canary_retired", canary: c.path})
+		}
+	}
+	g.can.plant()
 }
 
 // Observe takes one file event from the Linux sensor (or the Windows ETW
@@ -106,15 +131,24 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 			continue
 		}
 		if p, ok := g.can.canaryPath(name); ok {
-			retired := g.can.strike(p)
-			go func() {
-				g.act(detection{kind: "canary", pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
-					comm: ev.Comm, canary: p, action: ev.Action, confirmed: true})
-				if retired {
-					g.report(detection{kind: "canary_retired", canary: p, image: ev.Image, comm: ev.Comm,
-						pid: ev.PID, ppid: ev.PPID, uid: ev.UID})
-				}
-			}()
+			if (ev.Action == "write" || ev.Action == "create") && name == ev.Path {
+				// Every writer is kept: if the canary turns out destroyed,
+				// each untrusted one is stopped, not just the first seen.
+				g.can.addWriter(p, writer{pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
+					comm: ev.Comm, action: ev.Action})
+				go g.canaryWrite(p)
+				return
+			}
+			g.can.forget(p)
+			if (ev.Action == "rename" || ev.Action == "delete") && g.trusted(ev.Image) {
+				go func() {
+					g.report(detection{kind: "canary_sync", canary: p, action: ev.Action, image: ev.Image,
+						comm: ev.Comm, pid: ev.PID, ppid: ev.PPID, uid: ev.UID})
+					g.can.plant()
+				}()
+				return
+			}
+			go g.canaryHit(ev, p)
 			return
 		}
 	}
@@ -128,7 +162,13 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 		return
 	}
 	go func() {
-		ok, e := confirm(f.targets)
+		ok, e := f.check()
+		if !ok {
+			// The newest file may still be being written (on Linux the event
+			// is the open): look once more before calling it benign.
+			time.Sleep(confirmRetry)
+			ok, e = f.check()
+		}
 		sample := ""
 		if len(f.targets) > 0 {
 			sample = f.targets[len(f.targets)-1]
@@ -136,6 +176,107 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 		g.act(detection{kind: f.kind, pid: f.pid, ppid: f.ppid, uid: f.uid, image: f.image, comm: f.comm,
 			files: f.files, ext: f.ext, sample: sample, entropy: e, confirmed: ok})
 	}()
+}
+
+// canaryHit stops the process that changed, renamed or deleted canary p and
+// counts the change toward retirement unless it was encryption.
+func (g *Guard) canaryHit(ev linsensor.FileEvent, p string) {
+	g.act(detection{kind: "canary", pid: ev.PID, ppid: ev.PPID, uid: ev.UID, image: ev.Image,
+		comm: ev.Comm, canary: p, action: ev.Action, confirmed: true})
+	// Read once the process is stopped: what it left is final. The new
+	// content is at Path (a rename of the canary or over it); a delete
+	// leaves nothing to read. Destruction is never a step toward retirement.
+	if ev.Action != "delete" && contentDestroyed(ev.Path) {
+		return
+	}
+	if g.can.strike(p) {
+		g.report(detection{kind: "canary_retired", canary: p, image: ev.Image, comm: ev.Comm,
+			pid: ev.PID, ppid: ev.PPID, uid: ev.UID})
+	}
+}
+
+// contentDestroyed reports whether the file at path holds no canary text
+// any more, or looks encrypted (a renamed canary's new content).
+func contentDestroyed(path string) bool {
+	data, err := readCanary(path)
+	if err != nil {
+		return false
+	}
+	return !strings.HasPrefix(string(data), canaryMarker) || looksEncrypted(data)
+}
+
+// writeStep is the read-back interval of a canary write.
+const writeSteps = 4
+
+// canaryWrite follows writes to canary p: a hit only once the content is no
+// longer the canary (encrypted, wiped, or the canary text gone). The canary
+// is read back every writeWait/4 for writeWait; a read blocked by a lock is
+// tried again, never taken for "unchanged". Destruction is acted on at
+// once. Otherwise the last state counts: other canary text is adopted when
+// every recent writer is a trusted sync client and else left to the
+// periodic check; unchanged or unreadable content is handed to the periodic
+// check too, with the writers kept: damage it finds within writerWindow of
+// a write stops those writers. One follow-up runs per canary; writers that
+// arrive meanwhile are recorded (addWriter), not dropped.
+func (g *Guard) canaryWrite(p string) {
+	want, ok := g.can.watch(p)
+	if !ok {
+		return
+	}
+	defer g.can.unwatch(p)
+	// A rewrite in progress (truncated, half written) also reads as
+	// destroyed for a moment: destruction counts once the same content is
+	// read twice in a row, or is still there at the last step.
+	st, sum, lastBad := canaryUnchanged, "", ""
+	for i := 0; i <= writeSteps; i++ {
+		if i > 0 {
+			time.Sleep(g.writeWait / writeSteps)
+		}
+		st, sum = canaryState(p, want)
+		if st != canaryDestroyed {
+			lastBad = ""
+			continue
+		}
+		if sum == lastBad || i == writeSteps {
+			g.canaryDamaged(p)
+			return
+		}
+		lastBad = sum
+	}
+	if st == canaryText {
+		ws := g.can.writersOf(p)
+		trusted := len(ws) > 0
+		for _, w := range ws {
+			trusted = trusted && g.trusted(w.image)
+		}
+		if trusted {
+			g.can.adopt(p, want, sum)
+		}
+	}
+}
+
+// canaryDamaged acts on canary p found destroyed: every untrusted process
+// that wrote it within writerWindow is stopped, trusted sync clients are
+// reported (response=trusted) and never killed. With no untrusted writer
+// known, it is a confirmed detection without a process (isolate when asked).
+// Destruction is never a retirement strike.
+func (g *Guard) canaryDamaged(p string) {
+	g.can.forget(p)
+	acted := false
+	for _, w := range g.can.takeWriters(p) {
+		d := detection{kind: "canary", pid: w.pid, ppid: w.ppid, uid: w.uid, image: w.image, comm: w.comm,
+			canary: p, action: w.action, confirmed: true}
+		if g.trusted(w.image) {
+			d.response = "trusted"
+			g.report(d)
+			continue
+		}
+		g.act(d)
+		acted = true
+	}
+	if !acted {
+		g.act(detection{kind: "canary_changed", canary: p, confirmed: true})
+	}
 }
 
 type detection struct {
@@ -164,9 +305,12 @@ func (g *Guard) SetRuntime(r Runtime) { g.rt.Store(&r) }
 func (g *Guard) act(d detection) {
 	d.response = "none"
 	rt := g.rt.Load()
-	excluded := rt.Excluded != nil && rt.Excluded(d.image)
-	if g.opts.Kill && rt.Kill && !excluded && d.confirmed && d.pid != 0 {
+	excluded := d.pid != 0 && rt.Excluded != nil && rt.Excluded(d.image)
+	// A confirmed detection without a process (the periodic check found a
+	// canary encrypted) has nothing to kill: isolating is the only response.
+	if g.opts.Kill && rt.Kill && !excluded && d.confirmed {
 		switch {
+		case d.pid == 0:
 		case g.response == nil:
 			d.response = "unsupported"
 		case d.pid == 1 || protectedImages[strings.ToLower(filepath.Base(d.image))]:
@@ -188,6 +332,9 @@ func (g *Guard) act(d detection) {
 				d.err = strings.TrimSpace(d.err + " isolate: " + err.Error())
 			} else {
 				d.isolated = true
+				if d.pid == 0 {
+					d.response = "isolated"
+				}
 			}
 		}
 	}

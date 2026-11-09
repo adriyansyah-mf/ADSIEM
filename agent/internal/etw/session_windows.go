@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -27,6 +28,71 @@ type Session struct {
 	id           uintptr
 	once         sync.Once
 	decodeErrors atomic.Uint64
+	fast         map[uint16]fastDecoder // Config.Fast by event ID
+}
+
+type fastDecoder struct {
+	offset func(pointerSize int) int
+	gate   *fastGate
+}
+
+// decodeFast decodes an event configured in Config.Fast: fast when its
+// version's layout is known and the self-check has not switched it off,
+// with TDH as well during the self-check, else with TDH alone. Event.Value
+// holds the field either way.
+func (s *Session) decodeFast(rec *eventRecord, f fastDecoder) *Event {
+	fast, check := f.gate.plan(rec.EventHeader.EventDescriptor.Version)
+	if fast && !check {
+		return fastDecode(rec, f.offset)
+	}
+	ev, err := decode(rec)
+	if err != nil {
+		s.decodeErrors.Add(1)
+	}
+	if ev == nil {
+		return nil
+	}
+	v, ok := uint64(0), false
+	if str, has := ev.Get(f.gate.field); has {
+		if n, err := strconv.ParseUint(str, 0, 64); err == nil {
+			v, ok = n, true
+		}
+	}
+	if check {
+		f.gate.result(v, fastDecode(rec, f.offset).Value, ok)
+	}
+	ev.Value = v
+	return ev
+}
+
+// FastStats reports the fast decode's self-check (summed over Config.Fast).
+func (s *Session) FastStats() FastStats {
+	var st FastStats
+	for _, f := range s.fast {
+		v, m, off := f.gate.stats()
+		st.Verified += v
+		st.Mismatches += m
+		st.Off = st.Off || off
+	}
+	return st
+}
+
+// fastDecode is the Config.Fast decode: the header's IDs and PID/TID and
+// one pointer-sized field read in place from the user data. No TDH call,
+// no provider string, no time conversion: it runs for every write on the host.
+func fastDecode(rec *eventRecord, offset func(pointerSize int) int) *Event {
+	h := rec.EventHeader
+	ev := &Event{ID: h.EventDescriptor.ID, Version: h.EventDescriptor.Version, Opcode: h.EventDescriptor.Opcode,
+		Task: h.EventDescriptor.Task, PID: h.ProcessID, TID: h.ThreadID}
+	ptr := 8
+	if h.Flags&eventHeaderFlag32BitHeader != 0 {
+		ptr = 4
+	}
+	// UserData is a pointer ETW keeps valid during the callback.
+	if p := *(*unsafe.Pointer)(unsafe.Pointer(&rec.UserData)); p != nil && rec.UserDataLength > 0 {
+		ev.Value, _ = fastValue(unsafe.Slice((*byte)(p), rec.UserDataLength), ptr, offset(ptr))
+	}
+	return ev
 }
 
 var (
@@ -40,6 +106,12 @@ var (
 		s := sessions[rec.UserContext]
 		sessionsMu.Unlock()
 		if s != nil {
+			if f, ok := s.fast[rec.EventHeader.EventDescriptor.ID]; ok {
+				if ev := s.decodeFast(rec, f); ev != nil {
+					s.handler(ev)
+				}
+				return 0
+			}
 			ev, err := decode(rec)
 			if err != nil {
 				s.decodeErrors.Add(1)
@@ -67,6 +139,12 @@ func Start(cfg Config, handle func(*Event)) (*Session, error) {
 		return nil, err
 	}
 	s := &Session{name: cfg.Name, nameW: nameW, handler: handle, done: make(chan struct{})}
+	if len(cfg.Fast) > 0 {
+		s.fast = map[uint16]fastDecoder{}
+		for _, f := range cfg.Fast {
+			s.fast[f.ID] = fastDecoder{offset: f.Offset, gate: newFastGate(f)}
+		}
+	}
 	err = s.start(cfg)
 	if errors.Is(err, errorAlreadyExists) { // left running by a process that died
 		stopByName(nameW)

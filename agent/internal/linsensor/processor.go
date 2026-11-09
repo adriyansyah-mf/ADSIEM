@@ -79,12 +79,20 @@ type processor struct {
 	// canary, when set, claims the sensor's own end-to-end check file: it
 	// returns true for that path and the event goes no further.
 	canary func(path string) bool
+
+	// birth is a file's creation time (statx btime; fileBirth). It tells
+	// an O_CREAT open that rewrote an existing file from one that made it.
+	birth func(path string) (time.Time, bool)
 }
+
+// rewriteAge: an O_CREAT open of a file born longer ago than this rewrote
+// an existing file (the open that creates a file sees it born just now).
+const rewriteAge = 2 * time.Second
 
 func newProcessor(push func(string, string), onFile func(FileEvent), disabled map[string]bool, proc procFS) *processor {
 	return &processor{
 		push: push, onFile: onFile, disabled: disabled, proc: proc, now: time.Now,
-		images: map[uint32]string{}, files: map[uint32]*fileWindowState{}, seen: map[string]time.Time{},
+		images: map[uint32]string{}, files: map[uint32]*fileWindowState{}, seen: map[string]time.Time{}, birth: fileBirth,
 	}
 }
 
@@ -280,7 +288,16 @@ func (p *processor) handleFile(ev rawEvent) {
 	}
 	fe.Image = p.image(ev.tgid, ev.comm)
 	if p.onFile != nil {
-		p.onFile(fe)
+		g := fe
+		// fopen("wb"), open(p, "wb"): O_CREAT|O_TRUNC of an existing file is
+		// an in-place rewrite, not a new file. The guard gets "write" (as
+		// Windows reports it); the SIEM line keeps what the flags say.
+		if fe.Action == "create" && ev.kind == kindOpen && ev.arg0&oExcl == 0 && p.birth != nil {
+			if b, ok := p.birth(fe.Path); ok && p.now().Sub(b) > rewriteAge {
+				g.Action = "write"
+			}
+		}
+		p.onFile(g)
 	}
 
 	w := p.files[ev.tgid]

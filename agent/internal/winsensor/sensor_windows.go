@@ -5,10 +5,8 @@ package winsensor
 import (
 	"log/slog"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -21,34 +19,17 @@ import (
 // Sensor runs the ETW sessions and pushes telemetry lines into the buffer.
 type Sensor struct {
 	sessions []*etw.Session
-	events   chan source
+	q        *eventQueue  // SIEM events, and the guard's opens and writes apart
+	writeSes *etw.Session // the guard's Kernel-File session, nil when not running
 	stop     chan struct{}
 	done     chan struct{}
 	once     sync.Once
-	dropped  atomic.Uint64 // events lost because the agent was behind
 	onScript func(AMSIScript)
 }
 
-type kind int
-
-const (
-	kernelProcess kind = iota
-	providerProcess
-	networkEvent
-	dnsEvent
-	fileEvent
-	imageEvent
-	accessEvent
-	amsiEvent
-)
-
-type source struct {
-	kind kind
-	ev   *etw.Event
-}
-
-// LogTypeStatus reports the sensor's own losses (events dropped because the
-// agent fell behind), so they are visible on the server.
+// LogTypeStatus reports the sensor's own losses (SIEM events, and the
+// guard's file writes apart, dropped because the agent fell behind), so they
+// are visible on the server.
 const LogTypeStatus = "windows_etw_status"
 
 // Start begins process, network, DNS, file and image telemetry: a private
@@ -67,16 +48,8 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 	for _, g := range opts.Disabled {
 		off[g] = true
 	}
-	s := &Sensor{events: make(chan source, 8192), stop: make(chan struct{}), done: make(chan struct{})}
-	push := func(k kind) func(*etw.Event) {
-		return func(ev *etw.Event) {
-			select {
-			case s.events <- source{k, ev}:
-			default: // the agent is behind: count and drop rather than stall the ETW consumer
-				s.dropped.Add(1)
-			}
-		}
-	}
+	s := &Sensor{q: newEventQueue(eventQueueSize, writeQueueSize), stop: make(chan struct{}), done: make(chan struct{})}
+	push := s.q.push
 	// Remote threads come in the process session: one session keeps a new
 	// process's start ahead of its first thread, which its parent creates.
 	procKeywords, procEvents := uint64(0x10), []uint16{1} // WINEVENT_KEYWORD_PROCESS, ProcessStart
@@ -119,6 +92,21 @@ func StartWith(buf *buffer.Buffer, opts Options) (*Sensor, error) {
 		}
 		s.sessions = append(s.sessions, ses)
 	}
+	// File writes for the ransomware guard: a session of their own (their own
+	// ETW buffers, consumer and queue), so their volume never costs the SIEM
+	// sessions an event. Optional: without it the guard has canary checks
+	// and the create/rename/delete heuristics.
+	if opts.OnFile != nil && !off[GroupFile] {
+		p, fast := writeProvider()
+		ses, err := etw.Start(etw.Config{Name: "SIEMAgent-FileWrite", Providers: []etw.Provider{p}, Fast: fast},
+			push(writeEvent))
+		if err != nil {
+			slog.Warn("etw: file writes for the ransomware guard unavailable", "err", err)
+		} else {
+			s.writeSes = ses
+			s.sessions = append(s.sessions, ses)
+		}
+	}
 	// AMSI content for the script scanner: optional too.
 	if opts.OnScript != nil && !off[GroupAMSI] {
 		ses, err := etw.Start(etw.Config{Name: "SIEMAgent-AMSI", Providers: []etw.Provider{{GUID: amsiProvider,
@@ -157,7 +145,8 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker
 	defer tick.Stop()
 	report := time.NewTicker(time.Minute)
 	defer report.Stop()
-	var reported uint64
+	var reported, reportedWrites, reportedOpens, reportedUnresolved uint64
+	var reportedFastOff bool
 	emit := func(logType string, lines ...string) {
 		for _, l := range lines {
 			if l != "" {
@@ -165,16 +154,17 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker
 			}
 		}
 	}
-	for {
-		select {
-		case <-s.stop:
+	s.q.loop(s.stop, tick.C, report.C, loopHooks{
+		stop: func() {
 			emit(LogTypeProcess, j.flush(time.Now().Add(joinWindow))...)
 			emitOut(buf, files.flushAll())
 			emit(LogTypeAccess, access.flushAll()...)
-			return
-		case src := <-s.events:
+		},
+		handle: func(src source) {
 			now := time.Now()
 			switch src.kind {
+			case writeEvent:
+				files.writeSession(src.ev)
 			case kernelProcess:
 				emit(LogTypeProcess, j.kernel(src.ev, now)...)
 			case providerProcess:
@@ -198,19 +188,34 @@ func (s *Sensor) run(j *processJoiner, files *fileTracker, access *accessTracker
 			case imageEvent:
 				emitOut(buf, files.image(src.ev))
 			}
-		case now := <-tick.C:
+		},
+		tick: func(now time.Time) {
 			emit(LogTypeProcess, j.flush(now)...)
 			emitOut(buf, files.tick())
 			emit(LogTypeAccess, access.tick(now)...)
-		case <-report.C:
-			if d := s.dropped.Load(); d != reported {
-				slog.Warn("etw sensor dropped events: the agent fell behind", "dropped", d-reported)
-				emit(LogTypeStatus, line(255, [][2]string{{"Channel", "ETW"}, {"Provider", "SIEMAgent"},
-					{"Dropped", strconv.FormatUint(d-reported, 10)}, {"DroppedTotal", strconv.FormatUint(d, 10)}}))
-				reported = d
+		},
+		report: func() {
+			// Anything that makes the SIEM feed or the guard's writes
+			// unreliable is reported: drops, writes through unknown
+			// objects, the fast decode's self-check.
+			d, w, o := s.q.dropped.Load(), s.q.writesDropped.Load(), s.q.opensDropped.Load()
+			var fast etw.FastStats
+			if s.writeSes != nil {
+				fast = s.writeSes.FastStats()
 			}
-		}
-	}
+			st := status{dropped: d - reported, droppedTotal: d, writes: w - reportedWrites, writesTotal: w,
+				opens: o - reportedOpens, unresolved: files.unresolvedWrites - reportedUnresolved,
+				fastMismatches: fast.Mismatches, fastOff: fast.Off}
+			if st.dropped+st.writes+st.opens+st.unresolved > 0 || fast.Off != reportedFastOff {
+				slog.Warn("etw sensor health", "dropped", st.dropped, "writes_dropped", st.writes,
+					"opens_dropped", st.opens, "writes_unresolved", st.unresolved, "fast_mismatches", fast.Mismatches,
+					"fast_decode_off", fast.Off)
+				emit(LogTypeStatus, statusLine(st))
+				reported, reportedWrites, reportedOpens = d, w, o
+				reportedUnresolved, reportedFastOff = files.unresolvedWrites, fast.Off
+			}
+		},
+	})
 }
 
 func emitOut(buf *buffer.Buffer, lines []out) {
@@ -240,8 +245,13 @@ func longPathName(p string) string {
 	return filepath.Join(windows.UTF16ToString(buf[:n]), base)
 }
 
-// Dropped is the number of events lost because the agent fell behind.
-func (s *Sensor) Dropped() uint64 { return s.dropped.Load() }
+// Dropped is the number of SIEM events lost because the agent fell behind
+// (the guard's file writes are counted apart, WritesDropped).
+func (s *Sensor) Dropped() uint64 { return s.q.dropped.Load() }
+
+// WritesDropped is the number of the guard's file writes lost because the
+// agent fell behind.
+func (s *Sensor) WritesDropped() uint64 { return s.q.writesDropped.Load() }
 
 // Stop ends the sessions and flushes what is pending.
 func (s *Sensor) Stop() {
