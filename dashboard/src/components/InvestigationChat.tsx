@@ -140,8 +140,19 @@ export default function InvestigationChat({ invId }: { invId: string }) {
     send.mutate(t, { onError: () => setText(t) })
   }
 
+  const known = new Set(messages.map(m => m.id))
+  const orphans = actions.filter(a => !a.message_id || !known.has(a.message_id))
+  const card = (a: ChatAction) => (
+    <ProposalCard key={a.id} action={a} busy={decide.isPending}
+      onDecide={(approve, note) => decide.mutate({ actionId: a.id, approve, note })} />
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+        Ask the AI to look things up or propose actions. Every action that changes data or touches an endpoint waits for
+        your approval. Chat IP blocks can target any agent in this case&apos;s group and any public IP.
+      </div>
       <div role="log" aria-live="polite" aria-label="Investigation chat"
         style={{ border: '1px solid var(--border)', borderRadius: '4px', padding: '10px', maxHeight: '420px', minHeight: '120px', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {isLoading && <div style={{ ...mono, fontSize: '12px', color: 'var(--text-muted)' }}>Loading</div>}
@@ -155,14 +166,17 @@ export default function InvestigationChat({ invId }: { invId: string }) {
             {m.role === 'assistant' ? (
               <div style={{ maxWidth: '92%', fontSize: '13px' }}>
                 <MarkdownNote content={m.content} style={{ fontFamily: 'Exo 2, sans-serif', fontSize: '13px', color: 'var(--text-primary)' }} />
-                {actions.filter(a => a.message_id === m.id).map(a => (
-                  <ProposalCard key={a.id} action={a} busy={decide.isPending}
-                    onDecide={(approve, note) => decide.mutate({ actionId: a.id, approve, note })} />
-                ))}
+                {actions.filter(a => a.message_id === m.id).map(card)}
               </div>
             ) : <Bubble m={m} />}
           </div>
         ))}
+        {orphans.length > 0 && (
+          <div>
+            <span style={label}>Other proposals</span>
+            {orphans.map(card)}
+          </div>
+        )}
         {sending && <div style={{ ...mono, fontSize: '11px', color: 'var(--text-muted)' }}>Thinking...</div>}
         <div ref={endRef} />
       </div>
