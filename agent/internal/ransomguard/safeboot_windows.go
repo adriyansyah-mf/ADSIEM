@@ -36,4 +36,12 @@ func (regBootStore) set(key, value string) error {
 	return k.SetStringValue("", value)
 }
 
+func (regBootStore) del(key string) error {
+	err := registry.DeleteKey(registry.LOCAL_MACHINE, key)
+	if errors.Is(err, registry.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
 var platformBootStore bootStore = regBootStore{}

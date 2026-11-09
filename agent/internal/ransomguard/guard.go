@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/siem-platform/agent/internal/linsensor"
+	"github.com/siem-platform/agent/internal/ownproc"
 )
 
 // LogType of detection lines (decoders/ransomware_activity.yaml).
@@ -85,7 +86,13 @@ type Guard struct {
 	revertDelay time.Duration
 	live        func() procLookup
 	cwd         func(pid uint32) string
-	runCmd      func(name string, args ...string) error
+	runCmd      func(name string, args ...string) ([]byte, error)
+	// own reports a process the agent itself started (ownproc); origName
+	// a Windows image's PE OriginalFilename ("" when none); removeFile
+	// deletes a dropped driver.
+	own        func(pid uint32) bool
+	origName   func(image string) string
+	removeFile func(path string) error
 	// rootOwned reports whether a file is owned by root (Linux; the trust
 	// in an initiator's location for command-line exclusions).
 	rootOwned func(path string) bool
@@ -108,6 +115,9 @@ func New(opts Options) *Guard {
 		cwd:         procCwd,
 		runCmd:      runSystemCmd,
 		rootOwned:   fileRootOwned,
+		own:         ownproc.Has,
+		origName:    originalFilename,
+		removeFile:  os.Remove,
 	}
 	g.setSigned(microsoftSigned)
 	g.det.trusted = g.trusted
@@ -337,6 +347,13 @@ type detection struct {
 	reverted           string
 	// exclIgnored: a policy exclusion matched but did not apply, and why.
 	exclIgnored string
+	// parentSpoofed: the claimed parent is not the creator; source: where
+	// the precursor was seen (amsi); downgraded: why only reported; removed:
+	// a dropped driver file deleted.
+	parentSpoofed bool
+	source        string
+	downgraded    string
+	removed       string
 }
 
 // protectedImages are never killed (basenames, lower case). On Windows
@@ -442,6 +459,18 @@ func (d detection) line() string {
 	}
 	if d.exclIgnored != "" {
 		fmt.Fprintf(&sb, " exclusion_ignored=%s", d.exclIgnored)
+	}
+	if d.parentSpoofed {
+		sb.WriteString(" ParentSpoofed=true")
+	}
+	if d.source != "" {
+		fmt.Fprintf(&sb, " Source=%s", d.source)
+	}
+	if d.downgraded != "" {
+		fmt.Fprintf(&sb, " downgraded=%s", d.downgraded)
+	}
+	if d.removed != "" {
+		fmt.Fprintf(&sb, " Removed=%s", kv(d.removed))
 	}
 	if d.err != "" {
 		fmt.Fprintf(&sb, " Error=%s", kv(d.err))

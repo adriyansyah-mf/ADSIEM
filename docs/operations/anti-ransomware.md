@@ -95,13 +95,13 @@ Measured with the real sensor: a test encryptor was stopped after 20 of 400 file
 
 ## Precursors (Linux and Windows)
 
-Before it encrypts, ransomware deletes shadow copies and backups, turns boot recovery off, loads a vulnerable signed driver (BYOVD) and stops security products. In the IronChain field case (2026-11-08) all of it ran in about 6 seconds through `cmd /c`, `sc` and `net`. The guard sees every process start: on Windows the ETW sensor's starts with their command line (`OnCommandLine`, fired from the kernel-logger half, the only one that carries it), on Linux the eBPF exec events. It matches the command line case-insensitively, command by command (`cmd /c "a & b"` is two commands; `^` escapes are dropped; PowerShell `-EncodedCommand` is decoded). The wrapping `cmd /c ...` matches as early as the command itself.
+Before it encrypts, ransomware deletes shadow copies and backups, turns boot recovery off, loads a vulnerable signed driver (BYOVD) and stops security products. In the IronChain field case (2026-11-08) all of it ran in about 6 seconds through `cmd /c`, `sc` and `net`. The guard sees every process start: on Windows the ETW sensor's starts with their command line (`OnCommandLine`, fired from the kernel-logger half, the only one that carries it), on Linux the eBPF exec events. A rule matches only on the process that **is** the tool: its image, or on Windows the PE `OriginalFilename` (so a renamed `vssadmin.exe` is still `vssadmin`). Shells (`cmd`, `bash`, `sh`) are never matched on words in their command line: `git commit -m "vssadmin delete shadows"`, `notepad bcdedit ... safeboot` and `grep "zfs destroy x@y"` stay quiet, and the tool's own process start is what counts. PowerShell rules (`Win32_ShadowCopy`, `Set-/Add-MpPreference`, `Stop-Service` on security services) match only on `powershell`/`pwsh` command lines, after decoding `-EncodedCommand` in any dash form or prefix, and on AMSI script content. Before matching, command lines are normalised: case, carets, quotes, repeated spaces, Unicode dashes (`–`, `—`) as `-`, and `sc \\host` / `sc \\.` server arguments.
 
 **Critical (one is enough):**
 
 | Precursor | Windows | Linux |
 |---|---|---|
-| `shadow_delete` | `vssadmin delete shadows` (not `/oldest`); `vssadmin resize shadowstorage /maxsize=` under 1 GB; `wmic shadowcopy ... delete`; `Win32_ShadowCopy` with Delete / `Remove-CimInstance` / `Remove-WmiObject` | |
+| `shadow_delete` | `vssadmin delete shadows` in any form (`/all`, `/for=`, `/oldest`, `/shadow=`: a loop of `/oldest` deletes them all); `vssadmin resize shadowstorage /maxsize=` under 1 GB; `wmic shadowcopy ... delete`; `Win32_ShadowCopy` with Delete / `Remove-CimInstance` / `Remove-WmiObject` | |
 | `backup_delete` | `wbadmin delete catalog`; `wbadmin delete systemstatebackup` or `backup` without `-keepVersions:N` (N ≥ 1), `-deleteOldest` or `-version:` | |
 | `boot_tamper` | `bcdedit /set ... recoveryenabled no`, `bootstatuspolicy ignore*`, `safeboot` / `safemode` | |
 | `byovd` | `sc create ... type= kernel` (or `filesys`) `binPath= X` or `New-Service -BinaryPathName X.sys`: X outside `System32\drivers` and `System32\DriverStore\FileRepository`; or inside, and the initiator runs from a user-writable place (Users, ProgramData, Windows\Temp, another drive, a share) or the `.sys` was written there in the last 10 min by the initiator or from a user-writable place | |
@@ -127,7 +127,20 @@ Every kill is reported, one line each: `detection=precursor confirmed=true respo
 - Anyone can put the excluded text in a command line, ransomware included. So a program in a user profile, Desktop, Downloads, Temp, `/home`, `/tmp`, `/var/tmp` or `/dev/shm` gets no benefit: it is stopped as usual, and the line says `exclusion_ignored=untrusted_initiator` (and alerts).
 - `sha256` does not apply here: no hash is computed for process starts. An excluded precursor is not killed or reverted, and is logged with `response=excluded`, once per initiator in 10 minutes. The *Ransomware Activity On Endpoint* rule ignores `response=excluded`.
 
-**Safe Mode.** At start, when running as the Windows service with the guard on, the agent registers `SIEMAgent` under `HKLM\SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal` and `\Network` (default value `Service`), so it also runs if ransomware manages to reboot into Safe Mode. Idempotent.
+**Parent spoofing.** The creating process is taken from the ETW event header, which a process cannot forge, not from the `ParentId` field it can set. When the two differ the line says `ParentSpoofed=true`. Only processes the agent itself started are exempt, never "anything whose parent is the agent".
+
+**BYOVD response.** On a `byovd` hit the guard also runs `sc stop` and `sc delete` for that kernel service, and for every service the same initiator tree created in the window (IronChain's persistence service). A `.sys` written by the initiator's tree in the window, a `cmd /c copy` child included, is removed. Driver drops are matched by process tree, whatever the initiator's location, and every case is reported. The real BYOVD prevention is Windows' own: enable the **Microsoft vulnerable driver blocklist** (Memory Integrity / HVCI, or a WDAC policy), which refuses known vulnerable drivers such as the ones IronChain loads.
+
+**Routine tooling (report only).** `snapshot_delete` from known rotation tools (zfs-auto-snapshot, sanoid/syncoid, vzdump and other `pve*` tools, snapper, timeshift), or from a root-owned initiator in a system location started by cron or a systemd timer, is reported (`response=none downgraded=...`) instead of killed. The same applies to scored `defense_tamper` hits whose initiator is in a trusted location (Program Files, the Windows directory, root-owned `/usr`, ...), such as an AV vendor's updater or an RMM agent replacing an antivirus. The downgrade is lost when the same initiator also hits another category. Initiators in user-writable places, including `Windows\Temp` and `Windows\SystemTemp`, are always killed.
+
+**Safe Mode.** At start, when running as the Windows service with the guard on, the agent registers `SIEMAgent` under `HKLM\SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal` and `\Network` (default value `Service`), so it also runs if ransomware manages to reboot into Safe Mode. This is idempotent, and the MSI removes both keys on uninstall. The `bcdedit` revert targets the default store and is idempotent.
+
+**Known limits.** These stay invisible to the precursor checks, because no process starts:
+- shadow copies deleted in-process through the VSS COM API or `DeviceIoControl`;
+- WMI method calls that start no child;
+- services and drivers created directly with `CreateService`.
+
+The bulk-encryption heuristics and canaries remain the backstop. Trust is judged on the initiator, so a command-line exclusion reached through a protected system process (WMI, a scheduled task, cron) that malware set up is honoured; that already needs admin rights. The Windows location check is by path, with no ACL check.
 
 **Admin tasks.** In stop mode, these everyday admin commands trip a precursor. They are killed and raise the critical alert. Only the command dies, because the console, shell, cron or service behind it is protected. A program run from a user-writable place (Downloads, a portable tool) loses its whole tree.
 

@@ -11,9 +11,15 @@ import (
 
 // Precursor rules: what ransomware runs before it encrypts (backups and
 // shadow copies deleted, boot recovery turned off, a vulnerable driver
-// loaded, security products stopped). Matching is on the command line,
-// lower case, command by command (cmd /c "a & b" is two commands), so the
-// shell that wraps a command matches as early as the command itself.
+// loaded, security products stopped). A tool rule matches only the process
+// that IS the tool (its image, or on Windows its PE OriginalFilename), on its
+// own arguments: a tool named as a word of another program's command line
+// (cmd /c ..., git commit -m ..., grep ...) is not that tool running, and the
+// tool's own start is seen anyway. PowerShell rules match PowerShell
+// processes (the decoded -EncodedCommand included) and AMSI script content.
+// Before matching, a command line is lower-cased, cmd's ^ escapes and
+// quotes handled, Unicode dashes made '-', and on Windows a switch's '-' made
+// '/' (bcdedit -set is /set).
 //
 // A critical precursor is enough on its own. A score precursor (stopping or
 // weakening a security product) needs scoreNeeded distinct indicators from
@@ -45,6 +51,10 @@ type hit struct {
 	// reverted their names (the Reverted= field).
 	revert   [][]string
 	reverted []string
+	// svc is the BYOVD hit's service name; services are the services any
+	// sc create names (the initiator's persistence, removed on a BYOVD hit).
+	svc      string
+	services []string
 }
 
 func (h *hit) critical(cat string) {
@@ -78,16 +88,37 @@ func (h *hit) addRevert(name string, args ...string) {
 }
 
 func (h *hit) result() *hit {
-	if h.category == "" {
+	if h.category == "" && len(h.services) == 0 {
 		return nil
 	}
 	return h
 }
 
+// dashes are the Unicode dashes PowerShell and many tools take for '-'.
+var dashes = strings.NewReplacer("\u2010", "-", "\u2011", "-", "\u2012", "-", "\u2013", "-", "\u2014", "-", "\u2015", "-")
+
+// normalize lower-cases a command line, drops cmd's ^ escapes and turns
+// Unicode dashes into '-'.
+func normalize(s string) string {
+	return dashes.Replace(strings.ToLower(strings.ReplaceAll(s, "^", "")))
+}
+
+// switches makes every '-' switch a '/' one (Windows tools take both).
+func switches(args []string) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		if strings.HasPrefix(a, "-") {
+			a = "/" + strings.TrimLeft(a, "-")
+		}
+		out[i] = a
+	}
+	return out
+}
+
 // commands splits a command line into its commands, each into words: lower
 // case, cmd's ^ escapes dropped, split at & | ; and line breaks.
 func commands(cmdline string) [][]string {
-	s := strings.ToLower(strings.ReplaceAll(cmdline, "^", ""))
+	s := normalize(cmdline)
 	var out [][]string
 	for _, seg := range strings.FieldsFunc(s, func(r rune) bool {
 		return r == '&' || r == '|' || r == ';' || r == '\n' || r == '\r'
@@ -99,10 +130,8 @@ func commands(cmdline string) [][]string {
 	return out
 }
 
-// words splits one command at blanks. A quoted word stays whole (a path
-// with spaces) unless it is itself a command line (cmd /c "vssadmin ...":
-// its first word is not a path), which is split too. Unbalanced quotes
-// (a split inside cmd /c "...") are dropped.
+// words splits one command at blanks; a quoted word stays whole (a path
+// with spaces). Unbalanced quotes are dropped.
 func words(seg string) []string {
 	if strings.Count(seg, `"`)%2 == 1 {
 		seg = strings.ReplaceAll(seg, `"`, " ")
@@ -116,12 +145,7 @@ func words(seg string) []string {
 		if w == "" && !quoted {
 			return
 		}
-		q := quoted
 		quoted = false
-		if f := strings.Fields(w); q && len(f) > 1 && !strings.ContainsAny(f[0], `\/:`) {
-			out = append(out, words(w)...)
-			return
-		}
 		out = append(out, w)
 	}
 	for _, r := range seg {
@@ -141,7 +165,7 @@ func words(seg string) []string {
 
 // toolName is a word's program name: no directory, no .exe.
 func toolName(w string) string {
-	return strings.TrimSuffix(base(w), ".exe")
+	return strings.TrimSuffix(strings.ToLower(base(w)), ".exe")
 }
 
 func hasWord(args []string, w string) bool {
@@ -178,7 +202,7 @@ func value(args []string, key string) string {
 
 // encoded finds PowerShell's -EncodedCommand (any abbreviation of it) and
 // its base64 UTF-16 script.
-var encoded = regexp.MustCompile(`(?i)\s[-/](?:e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\s+["']?([A-Za-z0-9+/=]{8,})`)
+var encoded = regexp.MustCompile(`(?i)(?:^|\s)[-/\x{2010}-\x{2015}](?:e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\s+["']?([A-Za-z0-9+/=]{8,})`)
 
 func decodeEncoded(cmdline string) string {
 	var out []string
@@ -261,136 +285,55 @@ func tinyShadowStorage(v string) bool {
 	return n*m < 1<<30
 }
 
-// classifyWindows matches a Windows process start's command line.
-func classifyWindows(cmdline string) *hit {
-	text := cmdline
-	if d := decodeEncoded(cmdline); d != "" {
-		text += "\n" + d
-	}
+// classifyWindows matches the start of tool (the process's own program,
+// toolName form) with its command line.
+func classifyWindows(tool, cmdline string) *hit {
 	h := &hit{}
-	lower := strings.ToLower(text)
-	if strings.Contains(lower, "win32_shadowcopy") && strings.Contains(lower, "delete") ||
-		strings.Contains(lower, "win32_shadowcopy") && (strings.Contains(lower, "remove-ciminstance") || strings.Contains(lower, "remove-wmiobject")) {
-		h.critical(catShadow)
-	}
-	for _, cmd := range commands(text) {
-		for i, w := range cmd {
-			windowsCommand(h, toolName(w), cmd[i+1:])
+	switch tool {
+	case "powershell", "pwsh":
+		text := cmdline
+		if d := decodeEncoded(cmdline); d != "" {
+			text += "\n" + d
 		}
+		powershellRules(h, text)
+	default:
+		w := words(normalize(cmdline))
+		if len(w) == 0 {
+			return nil
+		}
+		windowsCommand(h, tool, switches(w[1:]))
 	}
 	return h.result()
 }
 
-func windowsCommand(h *hit, tool string, args []string) {
-	switch tool {
-	case "vssadmin":
-		if next(args, "delete") == "shadows" && !hasWord(args, "/oldest") {
-			h.critical(catShadow)
+// classifyScript matches script content (AMSI) with the PowerShell rules.
+func classifyScript(content string) *hit {
+	h := &hit{}
+	powershellRules(h, content)
+	return h.result()
+}
+
+// powershellRules: shadow copies deleted through WMI/CIM, Defender
+// weakened, security services stopped, kernel services created.
+func powershellRules(h *hit, text string) {
+	// quotes are script syntax here (strings, -c "..."): words are what count
+	lower := strings.NewReplacer(`"`, " ", `'`, " ", "`", "").Replace(normalize(text))
+	if strings.Contains(lower, "win32_shadowcopy") && (strings.Contains(lower, "delete") ||
+		strings.Contains(lower, "remove-ciminstance") || strings.Contains(lower, "remove-wmiobject")) {
+		h.critical(catShadow)
+	}
+	for _, seg := range strings.FieldsFunc(lower, func(r rune) bool {
+		return r == '&' || r == '|' || r == ';' || r == '\n' || r == '\r' || r == '{' || r == '}' || r == '(' || r == ')'
+	}) {
+		w := words(seg)
+		for i, c := range w {
+			powershellCmdlet(h, c, w[i+1:])
 		}
-		if next(args, "resize") == "shadowstorage" {
-			for _, a := range args {
-				if v, ok := strings.CutPrefix(a, "/maxsize="); ok && tinyShadowStorage(v) {
-					h.critical(catShadow)
-				}
-			}
-		}
-	case "wmic":
-		if hasWord(args, "shadowcopy") && hasWord(args, "delete") {
-			h.critical(catShadow)
-		}
-	case "wbadmin":
-		switch next(args, "delete") {
-		case "catalog":
-			h.critical(catBackup)
-		case "systemstatebackup", "backup":
-			keep := false
-			for _, a := range args {
-				a = strings.TrimLeft(a, "-/")
-				if v, ok := strings.CutPrefix(a, "keepversions:"); ok {
-					n, err := strconv.Atoi(v)
-					keep = keep || err == nil && n > 0
-				}
-				keep = keep || a == "deleteoldest" || strings.HasPrefix(a, "version:")
-			}
-			if !keep {
-				h.critical(catBackup)
-			}
-		}
-	case "bcdedit":
-		if !hasWord(args, "/set") && !hasWord(args, "-set") {
-			return
-		}
-		id := "{current}" // bcdedit's default entry when none is named
-		for _, a := range args {
-			if strings.HasPrefix(a, "{") {
-				id = a
-				break
-			}
-		}
-		for j, a := range args {
-			v := ""
-			if j+1 < len(args) {
-				v = args[j+1]
-			}
-			switch a {
-			case "recoveryenabled":
-				if v == "no" || v == "off" || falseValue(v) {
-					h.critical(catBoot)
-					h.addRevert("recoveryenabled", "/set", id, "recoveryenabled", "yes")
-				}
-			case "bootstatuspolicy":
-				if strings.HasPrefix(v, "ignore") {
-					h.critical(catBoot)
-					h.addRevert("bootstatuspolicy", "/set", id, "bootstatuspolicy", "displayallfailures")
-				}
-			case "safeboot", "safemode":
-				h.critical(catBoot)
-				h.addRevert("safeboot", "/deletevalue", id, "safeboot")
-			}
-		}
-	case "sc":
-		if len(args) == 0 {
-			return
-		}
-		switch args[0] {
-		case "create":
-			t := value(args, "type=")
-			if bin := value(args, "binpath="); (t == "kernel" || t == "filesys") && bin != "" {
-				byovd(h, bin)
-			}
-		case "stop", "delete":
-			if len(args) > 1 && securityTarget(args[1]) {
-				h.addScore(args[0] + ":" + targetKey(args[1]))
-			}
-		case "config":
-			if len(args) > 1 && securityTarget(args[1]) && value(args, "start=") == "disabled" {
-				h.addScore("disable:" + targetKey(args[1]))
-			}
-		}
-	case "net", "net1":
-		if len(args) > 1 && args[0] == "stop" && securityTarget(args[1]) {
-			h.addScore("stop:" + targetKey(args[1]))
-		}
-	case "taskkill":
-		if hasWord(args, "/f") || hasWord(args, "-f") {
-			for _, f := range []string{"/im", "-im"} {
-				if t := next(args, f); t != "" && securityTarget(t) {
-					h.addScore("kill:" + targetKey(t))
-				}
-			}
-		}
-	case "reg":
-		if len(args) > 0 && args[0] == "add" {
-			v, d := next(args, "/v"), next(args, "/d")
-			if defenderValues[strings.Trim(v, `"'`)] && d != "" && !falseValue(d) {
-				h.addScore("reg:" + v)
-			}
-		}
-	case "netsh":
-		if hasWord(args, "advfirewall") && hasWord(args, "set") && next(args, "state") == "off" ||
-			hasWord(args, "firewall") && next(args, "opmode") == "disable" {
-			h.addScore("firewall:off")
-		}
+	}
+}
+
+func powershellCmdlet(h *hit, cmdlet string, args []string) {
+	switch cmdlet {
 	case "add-mppreference":
 		for _, a := range args {
 			if strings.HasPrefix(a, "-exclusion") {
@@ -425,21 +368,165 @@ func windowsCommand(h *hit, tool string, args []string) {
 			}
 		}
 	case "new-service":
-		if bin := next(args, "-binarypathname"); strings.Contains(bin, ".sys") {
-			byovd(h, bin)
+		name, bin := next(args, "-name"), ""
+		for j, a := range args {
+			if strings.HasPrefix(a, "-bin") && j+1 < len(args) {
+				bin = args[j+1]
+			}
+		}
+		if name == "" {
+			for _, a := range args {
+				if !strings.HasPrefix(a, "-") {
+					name = a
+					break
+				}
+			}
+		}
+		if name != "" {
+			h.services = append(h.services, strings.Trim(name, `"'`))
+		}
+		if strings.Contains(bin, ".sys") {
+			byovd(h, bin, strings.Trim(name, `"'`))
+		}
+	}
+}
+
+func windowsCommand(h *hit, tool string, args []string) {
+	switch tool {
+	case "vssadmin":
+		if next(args, "delete") == "shadows" { // any form: /all, /for=, /oldest, /shadow=
+			h.critical(catShadow)
+		}
+		if next(args, "resize") == "shadowstorage" {
+			for _, a := range args {
+				if v, ok := strings.CutPrefix(a, "/maxsize="); ok && tinyShadowStorage(v) {
+					h.critical(catShadow)
+				}
+			}
+		}
+	case "wmic":
+		if (hasWord(args, "shadowcopy") || hasWord(args, "win32_shadowcopy")) && hasWord(args, "delete") {
+			h.critical(catShadow)
+		}
+	case "wbadmin":
+		switch next(args, "delete") {
+		case "catalog":
+			h.critical(catBackup)
+		case "systemstatebackup", "backup":
+			keep := false
+			for _, a := range args {
+				a = strings.TrimLeft(a, "-/")
+				if v, ok := strings.CutPrefix(a, "keepversions:"); ok {
+					n, err := strconv.Atoi(v)
+					keep = keep || err == nil && n > 0
+				}
+				keep = keep || a == "deleteoldest" || strings.HasPrefix(a, "version:")
+			}
+			if !keep {
+				h.critical(catBackup)
+			}
+		}
+	case "bcdedit":
+		if !hasWord(args, "/set") {
+			return
+		}
+		// The revert deletes the element (its default is the safe value), on
+		// the entry and in the store the command named.
+		var store []string
+		if s := next(args, "/store"); s != "" {
+			store = []string{"/store", s}
+		}
+		del := func(id, element string) []string {
+			return append(append(append([]string{}, store...), "/deletevalue", id), element)
+		}
+		id := "{current}" // bcdedit's default entry when none is named
+		for _, a := range args {
+			if strings.HasPrefix(a, "{") {
+				id = a
+				break
+			}
+		}
+		for j, a := range args {
+			v := ""
+			if j+1 < len(args) {
+				v = args[j+1]
+			}
+			switch a {
+			case "recoveryenabled":
+				if v == "no" || v == "off" || falseValue(v) {
+					h.critical(catBoot)
+					h.addRevert("recoveryenabled", del(id, "recoveryenabled")...)
+				}
+			case "bootstatuspolicy":
+				if strings.HasPrefix(v, "ignore") {
+					h.critical(catBoot)
+					h.addRevert("bootstatuspolicy", del(id, "bootstatuspolicy")...)
+				}
+			case "safeboot", "safemode":
+				h.critical(catBoot)
+				h.addRevert("safeboot", del(id, "safeboot")...)
+			}
+		}
+	case "sc":
+		if len(args) > 0 && strings.HasPrefix(args[0], `\\`) {
+			args = args[1:] // sc \\server (\\. or \\localhost is this host)
+		}
+		if len(args) == 0 {
+			return
+		}
+		switch args[0] {
+		case "create":
+			if len(args) < 2 {
+				return
+			}
+			h.services = append(h.services, args[1])
+			t := value(args, "type=")
+			if bin := value(args, "binpath="); (t == "kernel" || t == "filesys") && bin != "" {
+				byovd(h, bin, args[1])
+			}
+		case "stop", "delete":
+			if len(args) > 1 && securityTarget(args[1]) {
+				h.addScore(args[0] + ":" + targetKey(args[1]))
+			}
+		case "config":
+			if len(args) > 1 && securityTarget(args[1]) && value(args, "start=") == "disabled" {
+				h.addScore("disable:" + targetKey(args[1]))
+			}
+		}
+	case "net", "net1":
+		if len(args) > 1 && args[0] == "stop" && securityTarget(args[1]) {
+			h.addScore("stop:" + targetKey(args[1]))
+		}
+	case "taskkill":
+		if hasWord(args, "/f") {
+			if t := next(args, "/im"); t != "" && securityTarget(t) {
+				h.addScore("kill:" + targetKey(t))
+			}
+		}
+	case "reg":
+		if len(args) > 0 && args[0] == "add" {
+			v, d := next(args, "/v"), next(args, "/d")
+			if defenderValues[strings.Trim(v, `"'`)] && d != "" && !falseValue(d) {
+				h.addScore("reg:" + v)
+			}
+		}
+	case "netsh":
+		if hasWord(args, "advfirewall") && hasWord(args, "set") && next(args, "state") == "off" ||
+			hasWord(args, "firewall") && next(args, "opmode") == "disable" {
+			h.addScore("firewall:off")
 		}
 	}
 }
 
 // byovd records a kernel driver service: outside the system driver
 // directories it is a hit at once; inside, the initiator decides.
-func byovd(h *hit, bin string) {
+func byovd(h *hit, bin, svc string) {
 	l := driverPath(bin)
 	if h.driver != "" && !h.inDrivers {
 		return // an outside driver already decided it
 	}
 	h.critical(catBYOVD)
-	h.driver, h.inDrivers = l, inDriverDirs(l)
+	h.driver, h.inDrivers, h.svc = l, inDriverDirs(l), svc
 }
 
 // driverPath is a service binary path, lower case with forward slashes and
@@ -487,15 +574,15 @@ func abbrev(w, word string, min int) bool {
 	return len(w) >= min && strings.HasPrefix(word, w)
 }
 
-// classifyLinux matches a Linux exec's command line; cwd resolves a
-// relative module path (called only for one).
-func classifyLinux(cmdline string, cwd func() string) *hit {
-	h := &hit{}
-	for _, cmd := range commands(cmdline) {
-		for i, w := range cmd {
-			linuxCommand(h, toolName(w), cmd[i+1:], cwd)
-		}
+// classifyLinux matches the exec of tool (the program's base name) with its
+// command line; cwd resolves a relative module path (called only for one).
+func classifyLinux(tool, cmdline string, cwd func() string) *hit {
+	w := words(normalize(cmdline))
+	if len(w) == 0 {
+		return nil
 	}
+	h := &hit{}
+	linuxCommand(h, tool, w[1:], cwd)
 	return h.result()
 }
 

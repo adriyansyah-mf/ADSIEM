@@ -153,6 +153,54 @@ def test_ignored_exclusion_is_decoded_and_alerts(decoders):
     assert [m["title"] for m in asyncio.run(sig.evaluate(view))] == ["Ransomware Activity On Endpoint"]
 
 
+def test_precursor_hardening_fields(decoders):
+    """As the precursor_hardening tests: a spoofed parent, AMSI content, a removed driver."""
+    line = ('detection=precursor confirmed=true response=killed Precursor=byovd '
+            'CommandLine="sc create ThrottleStop type= kernel binPath= C:\\\\Users\\\\bob\\\\x.sys" '
+            'PrecursorImage="C:\\\\Windows\\\\System32\\\\sc.exe" PrecursorPID=3160 '
+            'Image="C:\\\\Users\\\\bob\\\\Desktop\\\\9f2c1e.exe" Comm="9f2c1e.exe" PID=3000 PPID=2000 User=0 '
+            'Killed=3 Isolated=false Reverted="service:throttlestop,service:ironchainsvc" ParentSpoofed=true '
+            'Source=amsi Removed="c:/users/bob/x.sys"')
+    event, _ = decoders.decode_named("ransomware_activity", line)
+    assert event["ransomware.parent_spoofed"] == "true"
+    assert event["ransomware.source"] == "amsi"
+    assert event["ransomware.removed"] == "c:/users/bob/x.sys"
+    assert event["ransomware.reverted"] == "service:throttlestop,service:ironchainsvc"
+
+
+# As TestSnapshotRotationIsReportOnly: zfs-auto-snapshot from cron.
+DOWNGRADED = ('detection=precursor confirmed=true response=none Precursor=snapshot_delete '
+              'CommandLine="zfs destroy -d tank/data@zfs-auto-snap_hourly-2026-11-09-0900" '
+              'PrecursorImage="/usr/sbin/zfs" PrecursorPID=1620 Image="/usr/sbin/cron" Comm="cron" PID=1500 PPID=1 '
+              'User=0 Isolated=false InitiatorProtected=true downgraded=rotation_tool')
+
+
+def test_downgraded_precursor_is_a_lower_alert(decoders):
+    """Routine tooling (snapshot rotation, an installed program stopping an AV) is
+    reported, not stopped: a medium alert, not the critical one."""
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    event, _ = decoders.decode_named("ransomware_activity", DOWNGRADED)
+    assert event["ransomware.downgraded"] == "rotation_tool"
+    view = dict(event, raw_message=DOWNGRADED, log_type="ransomware_activity", hostname="pve01")
+    assert [(m["title"], m["level"]) for m in asyncio.run(sig.evaluate(view))] == [
+        ("Ransomware Precursor From Routine Tooling", "medium")]
+
+
+def test_unconfirmed_byovd_raises_no_alert(decoders):
+    """A kernel service on a driver in System32\\drivers the initiator did not bring:
+    logged (never silent), no alert."""
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    line = ('detection=precursor confirmed=false response=none Precursor=byovd '
+            'CommandLine="sc create npcap type= kernel binPath= C:\\\\Windows\\\\System32\\\\drivers\\\\npcap.sys" '
+            'PrecursorImage="C:\\\\Windows\\\\System32\\\\sc.exe" PrecursorPID=7100 '
+            'Image="C:\\\\Program Files\\\\Tool\\\\tool.exe" Comm="tool.exe" PID=7000 PPID=2000 User=0 Isolated=false')
+    event, _ = decoders.decode_named("ransomware_activity", line)
+    view = dict(event, raw_message=line, log_type="ransomware_activity", hostname="ws13")
+    assert asyncio.run(sig.evaluate(view)) == []
+
+
 def test_excluded_precursor_raises_no_alert(decoders):
     """Fresh engine: nothing is suppressed, so silence means the rule does not match."""
     sig = SigmaEngine()

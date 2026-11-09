@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/siem-platform/agent/internal/ownproc"
 )
 
 // Windows implementations of the plugins that read /proc and /etc on Linux.
@@ -31,7 +33,6 @@ func init() {
 	Plugins["open_files"] = unsupported("open_files is not available on Windows")
 }
 
-
 // emitPowerShell runs a script whose output is a JSON array of objects (from
 // ConvertTo-Json -InputObject @(...)) and emits each object as a row.
 func emitPowerShell(ctx context.Context, script string, emit func(map[string]any) error) error {
@@ -45,7 +46,7 @@ func emitPowerShell(ctx context.Context, script string, emit func(map[string]any
 			"\nexit 0")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	out, err := ownproc.Output(cmd)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()

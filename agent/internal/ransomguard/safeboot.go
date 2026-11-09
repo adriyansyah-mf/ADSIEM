@@ -11,6 +11,7 @@ const safeBootKey = `SYSTEM\CurrentControlSet\Control\SafeBoot\`
 type bootStore interface {
 	get(key string) (value string, ok bool, err error)
 	set(key, value string) error
+	del(key string) error
 }
 
 // ensureSafeMode registers service for Safe Mode (Minimal and Network);
@@ -41,4 +42,24 @@ func RegisterSafeMode(service string) ([]string, error) {
 		return nil, nil
 	}
 	return ensureSafeMode(platformBootStore, service)
+}
+
+// removeSafeMode deletes the service's Safe Mode registration (uninstall);
+// keys already gone are fine.
+func removeSafeMode(s bootStore, service string) error {
+	for _, mode := range []string{"Minimal", "Network"} {
+		if err := s.del(safeBootKey + mode + `\` + service); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UnregisterSafeMode removes the agent service's Safe Mode registration
+// (the uninstall path); nothing to do elsewhere.
+func UnregisterSafeMode(service string) error {
+	if platformBootStore == nil {
+		return nil
+	}
+	return removeSafeMode(platformBootStore, service)
 }

@@ -276,8 +276,9 @@ func TestPrecursorEndToEndWindows(t *testing.T) {
 	defer cancel()
 	var starts sync.Map // process starts the guard saw, for diagnostics
 	sensor, err := winsensor.StartWith(buffer.New(100000), winsensor.Options{OnCommandLine: func(p winsensor.ProcessStart) {
-		starts.Store(p.PID, fmt.Sprintf("pid=%d ppid=%d image=%s cmd=%s", p.PID, p.PPID, p.Image, p.CommandLine))
-		g.ObserveProcess(ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image, CommandLine: p.CommandLine, Time: time.Now()})
+		starts.Store(p.PID, fmt.Sprintf("pid=%d ppid=%d creator=%d image=%s cmd=%s", p.PID, p.PPID, p.CreatorPID, p.Image, p.CommandLine))
+		g.ObserveProcess(ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image, CommandLine: p.CommandLine,
+			Time: time.Now(), CreatorPID: p.CreatorPID})
 	}})
 	if err != nil {
 		t.Fatal(err)

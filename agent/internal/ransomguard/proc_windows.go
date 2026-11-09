@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/siem-platform/agent/internal/ownproc"
 )
 
 // liveProcs looks processes up in one Toolhelp snapshot (taken at the
@@ -49,13 +51,14 @@ func procCwd(uint32) string { return "" }
 // fileRootOwned: the location alone decides on Windows (trustedLocation).
 var fileRootOwned func(string) bool
 
-// runSystemCmd runs a program from the system directory (bcdedit.exe).
-var runSystemCmd = func(name string, args ...string) error {
+// runSystemCmd runs a program from the system directory (bcdedit.exe,
+// sc.exe), recorded as the agent's own (ownproc), and returns its output.
+var runSystemCmd = func(name string, args ...string) ([]byte, error) {
 	sys, err := windows.GetSystemDirectory()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, filepath.Join(sys, name+".exe"), args...).Run()
+	return ownproc.CombinedOutput(exec.CommandContext(ctx, filepath.Join(sys, name+".exe"), args...))
 }

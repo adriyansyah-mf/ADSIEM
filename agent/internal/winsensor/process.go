@@ -48,6 +48,9 @@ type process struct {
 	haveKernel, haveProv bool
 	notified             bool // onStart already called for this start
 	cmdNotified          bool // onCommand already called
+	// creator is the Kernel-Process event's header PID: the process that
+	// really created this one (ParentProcessID can be spoofed).
+	creator uint32
 }
 
 // processJoiner merges the two halves of each process start and remembers
@@ -80,6 +83,9 @@ type ProcessStart struct {
 	ParentImage string
 	CommandLine string
 	User        string
+	// CreatorPID is the process that really created this one (0: unknown);
+	// it differs from PPID when the parent was spoofed. Set for OnCommandLine.
+	CreatorPID uint32
 }
 
 func newProcessJoiner(fullImage func(uint32) string, dosPath func(string) string) *processJoiner {
@@ -113,7 +119,6 @@ func (j *processJoiner) kernel(ev *etw.Event, now time.Time) []string {
 		}
 		p.haveKernel = true
 		j.notify(p)
-		j.notifyCommand(p)
 		return j.complete(pid)
 	}
 	return nil
@@ -138,6 +143,7 @@ func (j *processJoiner) provider(ev *etw.Event, now time.Time) []string {
 	if label, ok := ev.Get("MandatoryLabel"); ok {
 		p.integrityLevel = integrityLevel(label)
 	}
+	p.creator = ev.PID
 	p.haveProv = true
 	j.notify(p)
 	return j.complete(pid)
@@ -197,6 +203,9 @@ func (j *processJoiner) emit(pid uint32) []string {
 			parent.image = full
 		}
 	}
+	if p.haveKernel {
+		j.notifyCommand(p)
+	}
 	if j.onStart != nil && !p.notified {
 		p.notified = true
 		ps := ProcessStart{PID: p.pid, PPID: p.ppid, Image: p.image, CommandLine: p.commandLine, User: p.user}
@@ -208,9 +217,10 @@ func (j *processJoiner) emit(pid uint32) []string {
 	return []string{processLine(p, parent)}
 }
 
-// notifyCommand hands a start to onCommand when its command line arrives
-// (the kernel logger half), once, with the full image path when it is
-// known by then (from the provider half or the live process).
+// notifyCommand hands a start to onCommand once it is joined (both halves,
+// or the kernel logger half alone after joinWindow): with its command line
+// (kernel logger half), the creator PID (Kernel-Process half) and the full
+// image path when it is known.
 func (j *processJoiner) notifyCommand(p *process) {
 	if j.onCommand == nil || p.cmdNotified {
 		return
@@ -221,7 +231,8 @@ func (j *processJoiner) notifyCommand(p *process) {
 			p.image = full
 		}
 	}
-	ps := ProcessStart{PID: p.pid, PPID: p.ppid, Image: p.image, CommandLine: p.commandLine, User: p.user}
+	ps := ProcessStart{PID: p.pid, PPID: p.ppid, Image: p.image, CommandLine: p.commandLine, User: p.user,
+		CreatorPID: p.creator}
 	if parent := j.known[p.ppid]; parent != nil {
 		ps.ParentImage = parent.image
 	}

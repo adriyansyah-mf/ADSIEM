@@ -417,6 +417,9 @@ func run(configPath string, stop <-chan struct{}) {
 			OnProcess: windowsProcessFeed(preventer), OnCommandLine: windowsCommandFeed(guard),
 			OnScript: func(a winsensor.AMSIScript) {
 				scripts.Offer(scriptscan.Script{PID: a.PID, Image: a.Image, App: a.App, Name: a.Name, Content: a.Content})
+				if guard != nil { // what the script really ran: the precursor PowerShell rules
+					guard.ObserveScript(a.PID, a.Image, a.Content)
+				}
 			}}); err != nil {
 			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
 		} else {
@@ -917,7 +920,7 @@ func windowsCommandFeed(g *ransomguard.Guard) func(winsensor.ProcessStart) {
 	}
 	return func(p winsensor.ProcessStart) {
 		g.ObserveProcess(ransomguard.ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image,
-			CommandLine: p.CommandLine, Time: time.Now()})
+			CommandLine: p.CommandLine, Time: time.Now(), CreatorPID: p.CreatorPID})
 	}
 }
 

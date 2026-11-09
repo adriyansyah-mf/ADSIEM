@@ -11,7 +11,13 @@ detection:
   # an admin task the group policy excludes (precursors): logged, not an incident
   excluded:
     ransomware.response: excluded
-  condition: selection and not excluded
+  # routine tooling (ransomware_precursor_downgraded.yaml, medium)
+  downgraded:
+    ransomware.downgraded:
+      - rotation_tool
+      - scheduled
+      - trusted_initiator
+  condition: selection and not excluded and not downgraded
 # One alert per program per host in 10 minutes: several canaries touched by
 # the same encryptor are one incident. Another binary still alerts.
 suppression:

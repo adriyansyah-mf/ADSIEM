@@ -9,4 +9,4 @@ func procCwd(uint32) string { return "" }
 
 var fileRootOwned func(string) bool
 
-var runSystemCmd func(name string, args ...string) error
+var runSystemCmd func(name string, args ...string) ([]byte, error)

@@ -31,6 +31,7 @@ var winTree = map[uint32]proc{
 	7000: {pid: 7000, ppid: 2000, image: `C:\Program Files\Tool\tool.exe`},
 	7500: {pid: 7500, ppid: 600, image: `C:\Program Files\BackupTool\backup.exe`},
 	7700: {pid: 7700, ppid: 600, image: `C:\Windows\Temp\upd.exe`},
+	7900: {pid: 7900, ppid: 600, image: `C:\Windows\SystemTemp\x.exe`},
 }
 
 var linTree = map[uint32]proc{
@@ -52,7 +53,11 @@ type precursorRig struct {
 	mu       sync.Mutex
 	killed   []uint32
 	cmds     [][]string
+	removed  []string
 	isolated int
+	// cmdOut/cmdErr: what the fake runner answers (by first argument).
+	cmdOut map[string]string
+	cmdErr map[string]error
 }
 
 func newPrecursorRig(t *testing.T, goos string, tree map[uint32]proc) *precursorRig {
@@ -74,12 +79,22 @@ func newPrecursorRig(t *testing.T, goos string, tree map[uint32]proc) *precursor
 		r.mu.Unlock()
 		return 3, nil
 	}
-	g.runCmd = func(name string, args ...string) error {
+	r.cmdOut, r.cmdErr = map[string]string{}, map[string]error{}
+	g.runCmd = func(name string, args ...string) ([]byte, error) {
 		r.mu.Lock()
+		defer r.mu.Unlock()
 		r.cmds = append(r.cmds, append([]string{name}, args...))
+		key := name + " " + args[0]
+		return []byte(r.cmdOut[key]), r.cmdErr[key]
+	}
+	g.removeFile = func(p string) error {
+		r.mu.Lock()
+		r.removed = append(r.removed, p)
 		r.mu.Unlock()
 		return nil
 	}
+	g.own = func(uint32) bool { return false }
+	g.origName = nil
 	r.g = g
 	return r
 }
@@ -102,6 +117,9 @@ const (
 	netExe      = `C:\Windows\System32\net.exe`
 	net1Exe     = `C:\Windows\System32\net1.exe`
 	cmdExe      = `C:\Windows\System32\cmd.exe`
+	regExe      = `C:\Windows\System32\reg.exe`
+	taskkillExe = `C:\Windows\System32\taskkill.exe`
+	netshExe    = `C:\Windows\System32\netsh.exe`
 	wmicExe     = `C:\Windows\System32\wbem\WMIC.exe`
 	psExe       = `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
 )
@@ -123,24 +141,32 @@ func TestWindowsCriticalPrecursorsKillTheInitiator(t *testing.T) {
 		image, cmd, category string
 	}{
 		{vssadminExe, `vssadmin delete shadows /all /quiet`, "shadow_delete"},
-		{cmdExe, `C:\Windows\system32\cmd.exe /c vssadmin delete shadows /all /quiet`, "shadow_delete"},
-		{cmdExe, `cmd /c "vssadmin delete shadows /all /quiet & wmic shadowcopy delete"`, "shadow_delete"},
+		{vssadminExe, `"C:\Windows\system32\vssadmin.exe"  Delete   Shadows /All`, "shadow_delete"},
+		{vssadminExe, `vssadmin delete shadows /for=c: /oldest /quiet`, "shadow_delete"},
+		{vssadminExe, `vssadmin delete shadows /shadow={c5f1e7a2-0000-4000-8000-000000000001}`, "shadow_delete"},
 		{vssadminExe, `vssadmin resize shadowstorage /for=c: /on=c: /maxsize=401MB`, "shadow_delete"},
 		{wmicExe, `wmic shadowcopy delete`, "shadow_delete"},
 		{wmicExe, `wmic.exe SHADOWCOPY /nointeractive DELETE`, "shadow_delete"},
+		{wmicExe, `wmic path win32_shadowcopy delete`, "shadow_delete"},
 		{psExe, `powershell -c "Get-WmiObject Win32_Shadowcopy | ForEach-Object {$_.Delete();}"`, "shadow_delete"},
 		{psExe, `powershell.exe -NoP -enc ` + encodedPS(`Get-CimInstance Win32_ShadowCopy | Remove-CimInstance`), "shadow_delete"},
-		{cmdExe, `cmd /c v^ssadmin del^ete shadows /all /quiet`, "shadow_delete"},
+		{psExe, `powershell.exe –EncodedCommand ` + encodedPS(`Get-WmiObject Win32_ShadowCopy | Remove-WmiObject`), "shadow_delete"},
+		{psExe, `pwsh —encodedc ` + encodedPS(`gwmi Win32_ShadowCopy | % { $_.Delete() }`), "shadow_delete"},
 		{wbadminExe, `wbadmin delete catalog -quiet`, "backup_delete"},
-		{wbadminExe, `wbadmin delete systemstatebackup -keepVersions:0`, "backup_delete"},
+		{wbadminExe, `wbadmin delete catalog /quiet`, "backup_delete"},
+		{wbadminExe, `wbadmin delete systemstatebackup –keepVersions:0`, "backup_delete"},
 		{wbadminExe, `wbadmin DELETE BACKUP`, "backup_delete"},
 		{bcdeditExe, `bcdedit /set {default} recoveryenabled no`, "boot_tamper"},
 		{bcdeditExe, `bcdedit /set {default} bootstatuspolicy ignoreallfailures`, "boot_tamper"},
 		{bcdeditExe, `bcdedit /set {default} safeboot minimal`, "boot_tamper"},
 		{bcdeditExe, `bcdedit /set {default} safemode minimal`, "boot_tamper"},
+		{bcdeditExe, `bcdedit -set {default} recoveryenabled No`, "boot_tamper"},
+		{bcdeditExe, `bcdedit ^/set {default} rec^overyenabled no`, "boot_tamper"},
 		{scExe, `sc create BdApiUtil type= kernel binPath= C:\Windows\System32\drivers\BdApiUtil.sys`, "byovd"},
 		{scExe, `sc create ThrottleStop type= kernel binPath= "C:\Users\bob\AppData\Local\Temp\_MEI53122\ThrottleStop.sys"`, "byovd"},
 		{scExe, `sc.exe create kx type=kernel binpath=\??\C:\ProgramData\kx.sys`, "byovd"},
+		{scExe, `sc \\. create kx type= kernel binPath= C:\ProgramData\kx.sys`, "byovd"},
+		{scExe, `sc \\localhost create kx type= kernel binPath= C:\ProgramData\kx.sys`, "byovd"},
 	}
 	for _, c := range cases {
 		t.Run(c.cmd, func(t *testing.T) {
@@ -171,7 +197,6 @@ func TestWindowsEverydayAdminCommandsAreQuiet(t *testing.T) {
 		{vssadminExe, `vssadmin resize shadowstorage /for=C: /on=C: /maxsize=10%`},
 		{vssadminExe, `vssadmin resize shadowstorage /for=C: /on=C: /maxsize=20GB`},
 		{vssadminExe, `vssadmin resize shadowstorage /for=C: /on=C: /maxsize=UNBOUNDED`},
-		{vssadminExe, `vssadmin delete shadows /for=C: /oldest`},
 		{vssadminExe, `vssadmin create shadow /for=C:`},
 		{wmicExe, `wmic shadowcopy list brief`},
 		{wmicExe, `wmic shadowcopy call create Volume=C:\`},
@@ -190,17 +215,23 @@ func TestWindowsEverydayAdminCommandsAreQuiet(t *testing.T) {
 		{scExe, `sc qc windefend`},
 		{scExe, `sc start WinDefend`},
 		{scExe, `sc create MySvc binPath= "C:\Program Files\My\svc.exe" start= auto`},
-		{scExe, `sc create npcap type= kernel binPath= C:\Windows\System32\drivers\npcap.sys`},
 		{netExe, `net start`},
 		{netExe, `net start w32time`},
 		{netExe, `net stop spooler`},
 		{scExe, `sc stop spooler`},
 		{psExe, `powershell Set-MpPreference -DisableRealtimeMonitoring $false`},
 		{psExe, `powershell Get-MpPreference`},
-		{cmdExe, `reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 0 /f`},
-		{cmdExe, `taskkill /f /im notepad.exe`},
-		{cmdExe, `netsh advfirewall set allprofiles state on`},
-		{cmdExe, `notepad C:\docs\backup-plan.txt`},
+		{regExe, `reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 0 /f`},
+		{taskkillExe, `taskkill /f /im notepad.exe`},
+		{netshExe, `netsh advfirewall set allprofiles state on`},
+		{`C:\Windows\System32\notepad.exe`, `notepad C:\docs\backup-plan.txt`},
+		// A tool named only as a word of another program's command line is
+		// not that tool running (the tool's own start is what counts).
+		{`C:\Program Files\Git\cmd\git.exe`, `git commit -m "detect vssadmin delete shadows /all"`},
+		{`C:\Windows\System32\notepad.exe`, `notepad.exe bcdedit /set {default} safeboot minimal`},
+		{cmdExe, `cmd /c "vssadmin delete shadows /all /quiet & wmic shadowcopy delete"`},
+		{cmdExe, `cmd /c net stop WinDefend & sc config WinDefend start= disabled & sc delete WinDefend`},
+		{`C:\Program Files\Python312\python.exe`, `python -c "import os; os.system('bcdedit /set recoveryenabled no')"`},
 	}
 	for _, q := range quiet {
 		// From an admin's console (explorer -> cmd) and from a program in
@@ -242,12 +273,12 @@ func TestWindowsScorePrecursorsNeedThree(t *testing.T) {
 
 	// Defender tampering counts too.
 	r = newPrecursorRig(t, "windows", winTree)
-	for i, c := range []string{
-		`powershell -c "Add-MpPreference -ExclusionPath C:\Users\bob\AppData\Local\Temp"`,
-		`powershell Set-MpPreference -DisableRealtimeMonitoring $true`,
-		`netsh advfirewall set allprofiles state off`,
+	for i, c := range []struct{ image, cmd string }{
+		{psExe, `powershell -c "Add-MpPreference -ExclusionPath C:\Users\bob\AppData\Local\Temp"`},
+		{psExe, `powershell Set-MpPreference –DisableRealtimeMonitoring $true`},
+		{netshExe, `netsh advfirewall set allprofiles state off`},
 	} {
-		r.g.ObserveProcess(winStart(3300+uint32(i), 3100, psExe, c))
+		r.g.ObserveProcess(winStart(3300+uint32(i), 3100, c.image, c.cmd))
 	}
 	if l := r.lines(); len(l) != 1 || !strings.Contains(l[0], "Precursor=defense_tamper") {
 		t.Fatalf("lines = %q", l)
@@ -255,12 +286,12 @@ func TestWindowsScorePrecursorsNeedThree(t *testing.T) {
 
 	// Others: taskkill, reg add, the agent's own service, a third-party AV.
 	r = newPrecursorRig(t, "windows", winTree)
-	for i, c := range []string{
-		`taskkill /F /IM MsMpEng.exe`,
-		`reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f`,
-		`net stop SIEMAgent`,
+	for i, c := range []struct{ image, cmd string }{
+		{taskkillExe, `taskkill /F /IM MsMpEng.exe`},
+		{regExe, `reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f`},
+		{scExe, `sc \\localhost stop SIEMAgent`},
 	} {
-		r.g.ObserveProcess(winStart(3400+uint32(i), 3100, cmdExe, c))
+		r.g.ObserveProcess(winStart(3400+uint32(i), 3100, c.image, c.cmd))
 	}
 	if l := r.lines(); len(l) != 1 {
 		t.Fatalf("lines = %q", l)
@@ -358,12 +389,10 @@ func TestPrecursorReportOnlyIsolateDedupe(t *testing.T) {
 		t.Fatalf("after 10 min: lines %q", l)
 	}
 
-	// Policy off, the agent's own commands: nothing.
+	// Policy off: nothing. (The agent's own commands: TestOnlyTheAgentsOwnChildrenAreExempt.)
 	r = newPrecursorRig(t, "windows", winTree)
 	r.g.SetRuntime(Runtime{Off: true})
 	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
-	r.g.SetRuntime(Runtime{Kill: true})
-	r.g.ObserveProcess(winStart(3200, 9999, bcdeditExe, `bcdedit /set {default} safeboot minimal`))
 	if l := r.lines(); len(l) != 0 || len(r.killed) != 0 {
 		t.Fatalf("lines %q killed %v", l, r.killed)
 	}
@@ -449,6 +478,13 @@ func TestCommandLineExclusionNeedsATrustedInitiator(t *testing.T) {
 	if len(r.killed) != 1 {
 		t.Fatalf("Windows\\Temp initiator: killed %v", r.killed)
 	}
+	// Windows\SystemTemp too (any user-writable folder under the Windows directory).
+	r = newPrecursorRig(t, "windows", winTree)
+	r.g.SetRuntime(rt)
+	r.g.ObserveProcess(winStart(7950, 7900, vssadminExe, cmd))
+	if l := r.lines(); len(r.killed) != 1 || r.killed[0] != 7900 || !strings.Contains(l[0], "exclusion_ignored=untrusted_initiator") {
+		t.Fatalf("Windows\\SystemTemp initiator: killed %v lines %q", r.killed, l)
+	}
 
 	// Linux: /home/u/x is killed, root-owned /usr/local/bin/snapclean is
 	// excluded; the same path owned by a user is not trusted.
@@ -484,25 +520,40 @@ func TestCommandLineExclusionNeedsATrustedInitiator(t *testing.T) {
 	}
 }
 
-// After a boot-configuration precursor the change is undone.
+// After a boot-configuration precursor the change is undone: the element
+// is deleted (its default is the safe value), on the entry and store the
+// command named. Deleting an element that is not set is success.
 func TestBootTamperIsReverted(t *testing.T) {
-	r := newPrecursorRig(t, "windows", winTree)
-	r.g.ObserveProcess(winStart(3200, 3100, cmdExe,
-		`cmd /c bcdedit /set {default} recoveryenabled no & bcdedit /set {default} bootstatuspolicy ignoreallfailures & bcdedit /set {current} safeboot minimal`))
-	want := [][]string{
-		{"bcdedit", "/set", "{default}", "recoveryenabled", "yes"},
-		{"bcdedit", "/set", "{default}", "bootstatuspolicy", "displayallfailures"},
-		{"bcdedit", "/deletevalue", "{current}", "safeboot"},
+	cases := []struct {
+		cmd      string
+		want     string
+		reverted string
+	}{
+		{`bcdedit /set {default} recoveryenabled no`, "bcdedit /deletevalue {default} recoveryenabled", "recoveryenabled"},
+		{`bcdedit /set {default} bootstatuspolicy ignoreallfailures`, "bcdedit /deletevalue {default} bootstatuspolicy", "bootstatuspolicy"},
+		{`bcdedit /set {current} safeboot minimal`, "bcdedit /deletevalue {current} safeboot", "safeboot"},
+		{`bcdedit /set safemode minimal`, "bcdedit /deletevalue {current} safeboot", "safeboot"},
+		{`bcdedit /store C:\Boot\BCD /set {default} recoveryenabled no`,
+			`bcdedit /store c:\boot\bcd /deletevalue {default} recoveryenabled`, "recoveryenabled"},
 	}
-	if len(r.cmds) != len(want) {
-		t.Fatalf("cmds = %q", r.cmds)
-	}
-	for i := range want {
-		if strings.Join(r.cmds[i], " ") != strings.Join(want[i], " ") {
-			t.Fatalf("cmd %d = %q, want %q", i, r.cmds[i], want[i])
+	for _, c := range cases {
+		r := newPrecursorRig(t, "windows", winTree)
+		r.cmdErr["bcdedit /deletevalue"] = errFake
+		r.cmdOut["bcdedit /deletevalue"] = "An error has occurred setting the element data.\r\nElement not found.\r\n"
+		r.g.ObserveProcess(winStart(3200, 3100, bcdeditExe, c.cmd))
+		if len(r.cmds) != 1 || strings.Join(r.cmds[0], " ") != c.want {
+			t.Fatalf("%s: cmds = %q, want %q", c.cmd, r.cmds, c.want)
+		}
+		if l := r.lines(); len(l) != 1 || !strings.Contains(l[0], `Reverted="`+c.reverted+`"`) || strings.Contains(l[0], "Error=") {
+			t.Fatalf("%s: lines = %q", c.cmd, l)
 		}
 	}
-	if l := r.lines(); len(l) != 1 || !strings.Contains(l[0], `Reverted="recoveryenabled,bootstatuspolicy,safeboot"`) {
+	// A real failure is reported.
+	r := newPrecursorRig(t, "windows", winTree)
+	r.cmdErr["bcdedit /deletevalue"] = errFake
+	r.cmdOut["bcdedit /deletevalue"] = "Access is denied."
+	r.g.ObserveProcess(winStart(3200, 3100, bcdeditExe, `bcdedit /set {default} recoveryenabled no`))
+	if l := r.lines(); len(l) != 1 || strings.Contains(l[0], "Reverted=") || !strings.Contains(l[0], "revert recoveryenabled") {
 		t.Fatalf("lines = %q", l)
 	}
 }
@@ -513,10 +564,12 @@ func TestBYOVDDriverDroppedIntoDrivers(t *testing.T) {
 	const drv = `C:\Windows\System32\drivers\BdApiUtil.sys`
 	cmd := `sc create BdApiUtil type= kernel binPath= ` + drv
 
+	// Not acted on, but never silent: an unconfirmed line (no alert).
 	r := newPrecursorRig(t, "windows", winTree)
 	r.g.ObserveProcess(winStart(7100, 7000, scExe, cmd))
-	if l := r.lines(); len(l) != 0 {
-		t.Fatalf("installed tool, driver not dropped: %q", l)
+	if l := r.lines(); len(r.killed) != 0 || len(l) != 1 ||
+		!strings.HasPrefix(l[0], "detection=precursor confirmed=false response=none Precursor=byovd") {
+		t.Fatalf("installed tool, driver not dropped: killed %v lines %q", r.killed, l)
 	}
 
 	r = newPrecursorRig(t, "windows", winTree)
@@ -545,7 +598,7 @@ func TestLinuxCriticalPrecursors(t *testing.T) {
 		{"/usr/sbin/zfs", "zfs destroy -r tank/data@daily-2026-11-01", "snapshot_delete"},
 		{"/usr/bin/btrfs", "btrfs subvolume delete /.snapshots/12/snapshot", "snapshot_delete"},
 		{"/usr/bin/btrfs", "btrfs sub del /mnt/@snapshots/home-1", "snapshot_delete"},
-		{"/usr/bin/sh", "sh -c lvremove -y /dev/vg0/root-snap", "snapshot_delete"},
+		{"/usr/sbin/lvremove", "lvremove -y /dev/vg0/root-snap", "snapshot_delete"},
 		{"/usr/sbin/insmod", "insmod /tmp/.x/rk.ko", "kernel_module"},
 		{"/usr/sbin/modprobe", "modprobe /dev/shm/x.ko.xz", "kernel_module"},
 		{"/usr/sbin/insmod", "insmod /home/bob/../../var/tmp/m.ko", "kernel_module"},
@@ -594,6 +647,10 @@ func TestLinuxEverydayAdminCommandsAreQuiet(t *testing.T) {
 		{"/usr/bin/systemctl", "systemctl stop nginx"},
 		{"/usr/bin/systemctl", "systemctl status auditd"},
 		{"/usr/bin/systemctl", "systemctl restart siem-agent"},
+		// words of another program's command line
+		{"/usr/bin/grep", `grep -r "zfs destroy tank@x" /var/log`},
+		{"/usr/bin/sh", "sh -c lvremove -y /dev/vg0/root-snap"},
+		{"/usr/bin/git", `git commit -m "insmod /tmp/rk.ko"`},
 	} {
 		r := newPrecursorRig(t, "linux", linTree)
 		r.g.response = func(uint32) (int, error) { t.Errorf("%q killed", q.cmd); return 0, nil }
@@ -618,11 +675,11 @@ func TestLinuxScoreAndProtected(t *testing.T) {
 		t.Fatalf("lines %q killed %v", l, r.killed)
 	}
 
-	// A nightly cron script removing an LVM snapshot: cron is protected,
-	// only lvremove dies (the documented false-positive cost).
+	// A nightly cron script removing an LVM snapshot: scheduled by a
+	// root-owned system program, so report only (TestSnapshotRotation...).
 	r = newPrecursorRig(t, "linux", linTree)
 	r.g.ObserveProcess(linStart(1700, 1600, "/usr/sbin/lvremove", "lvremove -f vg0/home_snap"))
-	if len(r.killed) != 1 || r.killed[0] != 1700 || !strings.Contains(r.lines()[0], "InitiatorProtected=true") {
+	if len(r.killed) != 0 || !strings.Contains(r.lines()[0], "downgraded=scheduled") {
 		t.Fatalf("killed %v lines %q", r.killed, r.lines())
 	}
 	// An admin over ssh: sshd is protected.
@@ -671,6 +728,7 @@ type fakeBootStore struct{ m map[string]string }
 
 func (f *fakeBootStore) get(key string) (string, bool, error) { v, ok := f.m[key]; return v, ok, nil }
 func (f *fakeBootStore) set(key, value string) error          { f.m[key] = value; return nil }
+func (f *fakeBootStore) del(key string) error                 { delete(f.m, key); return nil }
 
 func TestSafeModeRegistration(t *testing.T) {
 	s := &fakeBootStore{m: map[string]string{
@@ -688,5 +746,16 @@ func TestSafeModeRegistration(t *testing.T) {
 	}
 	if changed, err := ensureSafeMode(s, "SIEMAgent"); err != nil || len(changed) != 0 {
 		t.Fatalf("second run changed %v err %v", changed, err)
+	}
+	// Uninstall removes both keys, and only the agent's.
+	s.m[`SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\Other`] = "Service"
+	if err := removeSafeMode(s, "SIEMAgent"); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.m) != 1 {
+		t.Fatalf("after removal: %v", s.m)
+	}
+	if err := removeSafeMode(s, "SIEMAgent"); err != nil {
+		t.Fatalf("second removal: %v", err)
 	}
 }

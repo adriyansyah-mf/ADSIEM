@@ -178,6 +178,9 @@ func manageService(install bool, configPath string) error {
 			}
 			return err
 		}
+		if err := ransomguard.UnregisterSafeMode(serviceName); err != nil {
+			fmt.Println("warning: safe mode registration not removed:", err)
+		}
 		fmt.Println("service removed")
 		return nil
 	}

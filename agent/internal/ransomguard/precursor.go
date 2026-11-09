@@ -2,10 +2,12 @@ package ransomguard
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,6 +45,11 @@ type ProcessStart struct {
 	Image       string // full path
 	CommandLine string
 	Time        time.Time
+	// CreatorPID is the process that really created this one (Windows: the
+	// ETW event header PID); when it differs from PPID the parent was
+	// spoofed, and the creator is walked instead. 0: unknown (Linux exec
+	// events carry the real parent in PPID).
+	CreatorPID uint32
 }
 
 // proc is a process in the tree walk; cmdline is known only for a start
@@ -82,11 +89,96 @@ type precursors struct {
 	drops    map[string]drop // .sys files written, by driverPath
 	scores   map[string][]scoreMark
 	reported map[string]time.Time
+	// services: the services each initiator created (sc create), removed
+	// on a BYOVD hit; cats: the categories each initiator hit (a downgrade
+	// needs a single one).
+	services map[string][]svcMark
+	cats     map[string]map[string]time.Time
+	// jobs feed precursorWorkers responders (a bounded pool); dropped
+	// counts the jobs a full queue refused.
+	jobs       chan job
+	workers    sync.Once
+	queueDrops uint64
+}
+
+type svcMark struct {
+	name string
+	at   time.Time
+}
+
+// job is one matched start for the responders.
+type job struct {
+	p       ProcessStart
+	h       *hit
+	spoofed bool   // the walk starts at the creator, not the claimed parent
+	source  string // "amsi" for script content
 }
 
 func newPrecursors() *precursors {
 	return &precursors{seen: map[uint32]seenProc{}, drops: map[string]drop{},
-		scores: map[string][]scoreMark{}, reported: map[string]time.Time{}}
+		scores: map[string][]scoreMark{}, reported: map[string]time.Time{},
+		services: map[string][]svcMark{}, cats: map[string]map[string]time.Time{},
+		jobs: make(chan job, precursorQueue)}
+}
+
+// addServices records services an initiator created.
+func (s *precursors) addServices(key string, names []string, now time.Time) {
+	if len(names) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.services) >= maxKeys {
+		s.services = map[string][]svcMark{}
+	}
+	var keep []svcMark
+	for _, m := range s.services[key] {
+		if absDur(now.Sub(m.at)) < dropWindow {
+			keep = append(keep, m)
+		}
+	}
+	for _, n := range names {
+		keep = append(keep, svcMark{name: n, at: now})
+	}
+	if len(keep) > 64 {
+		keep = keep[len(keep)-64:]
+	}
+	s.services[key] = keep
+}
+
+// servicesOf is what the initiator created within dropWindow.
+func (s *precursors) servicesOf(key string, now time.Time) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, m := range s.services[key] {
+		if absDur(now.Sub(m.at)) < dropWindow {
+			out = append(out, m.name)
+		}
+	}
+	return out
+}
+
+// markCategory records that initiator key hit cat and reports whether it
+// hit another category within precursorDedupe.
+func (s *precursors) markCategory(key, cat string, now time.Time) (other bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.cats) >= maxKeys {
+		s.cats = map[string]map[string]time.Time{}
+	}
+	m := s.cats[key]
+	if m == nil {
+		m = map[string]time.Time{}
+		s.cats[key] = m
+	}
+	for c, at := range m {
+		if c != cat && absDur(now.Sub(at)) < precursorDedupe {
+			other = true
+		}
+	}
+	m[cat] = now
+	return other
 }
 
 func absDur(d time.Duration) time.Duration {
@@ -96,6 +188,7 @@ func absDur(d time.Duration) time.Duration {
 	return d
 }
 
+// remember records a start; p.PPID is the real parent (the creator).
 func (s *precursors) remember(p ProcessStart) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -184,27 +277,54 @@ func (s *precursors) firstQuiet(key string, now time.Time) bool {
 	return true
 }
 
+// knownTools are the programs the rules match (toolName form).
+var knownTools = map[string]bool{"vssadmin": true, "wbadmin": true, "bcdedit": true, "sc": true, "net": true,
+	"net1": true, "taskkill": true, "wmic": true, "netsh": true, "reg": true, "powershell": true, "pwsh": true,
+	"lvremove": true, "zfs": true, "btrfs": true, "insmod": true, "modprobe": true, "systemctl": true,
+	"service": true, "pkill": true, "killall": true, "auditctl": true, "setenforce": true}
+
+// toolOf names the program a process runs: its image, or on Windows, for an
+// image that is no known tool outside the system directory (a renamed
+// copy), the PE OriginalFilename.
+func (g *Guard) toolOf(image, cmdline string) string {
+	if image == "" {
+		if w := words(normalize(cmdline)); len(w) > 0 {
+			return toolName(w[0])
+		}
+		return ""
+	}
+	t := toolName(image)
+	if g.goos == "windows" && !knownTools[t] && g.origName != nil && !winSystemDir(winPath(image)) {
+		if o := g.origName(image); o != "" {
+			return toolName(o)
+		}
+	}
+	return t
+}
+
 // ObserveProcess takes one process start. It must stay cheap: only the
-// command line is matched here; the tree walk and the response run on
-// their own goroutine.
+// command line is matched here; the tree walk and the response run on a
+// bounded pool of responders.
 func (g *Guard) ObserveProcess(p ProcessStart) {
 	if p.Time.IsZero() {
 		p.Time = time.Now()
 	}
+	// A creator equal to the process itself is no creator (unknown).
+	spoofed := p.CreatorPID != 0 && p.CreatorPID != p.PID && p.CreatorPID != p.PPID
+	if spoofed {
+		p.PPID = p.CreatorPID // walk (and remember) the real creator
+	}
 	g.pre.remember(p)
-	if g.rt.Load().Off || p.PID == g.self || p.PPID == g.self {
-		return // the agent's own commands (a bcdedit revert, live response)
+	if g.rt.Load().Off || p.PID == g.self {
+		return
 	}
-	cmdline := p.CommandLine
-	if cmdline == "" {
-		cmdline = p.Image
-	}
+	tool := g.toolOf(p.Image, p.CommandLine)
 	var h *hit
 	switch g.goos {
 	case "windows":
-		h = classifyWindows(cmdline)
+		h = classifyWindows(tool, p.CommandLine)
 	case "linux":
-		h = classifyLinux(cmdline, func() string {
+		h = classifyLinux(tool, p.CommandLine, func() string {
 			if g.cwd == nil {
 				return ""
 			}
@@ -214,10 +334,63 @@ func (g *Guard) ObserveProcess(p ProcessStart) {
 	if h == nil {
 		return
 	}
-	if g.async {
-		go g.precursor(p, h)
-	} else {
-		g.precursor(p, h)
+	g.enqueue(job{p: p, h: h, spoofed: spoofed})
+}
+
+// maxScriptLine bounds the script text a line carries.
+const maxScriptLine = 512
+
+// ObserveScript takes script content AMSI scanned in process pid (Windows):
+// the PowerShell rules see what the script really ran, whatever the launch
+// command line looked like.
+func (g *Guard) ObserveScript(pid uint32, image string, content []byte) {
+	if g.rt.Load().Off || pid == g.self || g.goos != "windows" {
+		return
+	}
+	h := classifyScript(string(content))
+	if h == nil || h.category == "" {
+		return
+	}
+	text := strings.ToValidUTF8(string(content), "?")
+	if len(text) > maxScriptLine {
+		text = text[:maxScriptLine]
+	}
+	p := ProcessStart{PID: pid, Image: image, CommandLine: text, Time: time.Now()}
+	if c, ok := g.pre.lookup(pid); ok {
+		p.PPID = c.ppid
+		if p.Image == "" {
+			p.Image = c.image
+		}
+	}
+	g.enqueue(job{p: p, h: h, source: "amsi"})
+}
+
+const (
+	precursorQueue   = 256
+	precursorWorkers = 4
+)
+
+// enqueue hands a job to the responders (inline when not async). A full
+// queue drops the job and counts it: never an unbounded goroutine per event.
+func (g *Guard) enqueue(j job) {
+	if !g.async {
+		g.precursor(j)
+		return
+	}
+	g.pre.workers.Do(func() {
+		for i := 0; i < precursorWorkers; i++ {
+			go func() {
+				for j := range g.pre.jobs {
+					g.precursor(j)
+				}
+			}()
+		}
+	})
+	select {
+	case g.pre.jobs <- j:
+	default:
+		n := atomic.AddUint64(&g.pre.queueDrops, 1)
+		slog.Warn("ransomguard: precursor queue full, start dropped", "pid", j.p.PID, "image", j.p.Image, "dropped", n)
 	}
 }
 
@@ -234,19 +407,35 @@ func (g *Guard) observeDrop(pid uint32, image, action, p, from string, at time.T
 	g.pre.dropped(driverPath(p), drop{pid: pid, image: image, from: from, at: at})
 }
 
-func (g *Guard) precursor(p ProcessStart, h *hit) {
+func (g *Guard) precursor(j job) {
+	p, h := j.p, j.h
 	rt := g.rt.Load()
 	ini, walked, alive, protected := g.initiator(p)
-	if h.inDrivers && !g.userWritable(ini.image) && !g.droppedBy(h.driver, ini, p.Time) {
-		return // a kernel service on a driver the initiator did not bring
+	if g.ownCommand(p, walked) {
+		return // started by the agent itself (live response, its own reverts)
 	}
 	key := fmt.Sprintf("%d|%s", ini.pid, strings.ToLower(ini.image))
-	if !g.pre.count(key, h, p.Time) {
-		return
+	g.pre.addServices(key, h.services, p.Time)
+	if h.category == "" {
+		return // a plain service created: kept for a BYOVD hit's cleanup
 	}
 	d := detection{kind: "precursor", confirmed: true, precursor: h.category, cmdline: p.CommandLine,
 		preImage: p.Image, prePID: p.PID, pid: ini.pid, ppid: ini.ppid, image: ini.image, comm: base(ini.image),
-		iniProtected: protected}
+		iniProtected: protected, parentSpoofed: j.spoofed, source: j.source}
+	dropped := h.inDrivers && g.droppedByTree(h.driver, ini, p.Time)
+	if h.inDrivers && !g.userWritable(ini.image) && !dropped {
+		// A kernel service on a driver in System32\drivers the initiator did
+		// not bring: not acted on, never silent (unconfirmed: no alert).
+		d.confirmed = false
+		if g.pre.firstQuiet(key+"|byovd", p.Time) {
+			g.report(d)
+		}
+		return
+	}
+	if !g.pre.count(key, h, p.Time) {
+		return
+	}
+	other := g.pre.markCategory(key, h.category, p.Time)
 	excluded, ignored := g.excluded(rt, p, ini, walked)
 	d.exclIgnored = ignored
 	if excluded {
@@ -257,12 +446,26 @@ func (g *Guard) precursor(p ProcessStart, h *hit) {
 		}
 		return
 	}
+	if !j.spoofed && !other {
+		if d.downgraded = g.downgrade(h, ini, walked); d.downgraded != "" {
+			// Routine tooling: reported (a lower alert), not stopped.
+			if g.pre.firstQuiet(key, p.Time) {
+				g.report(d)
+			}
+			return
+		}
+	}
 	target, image := ini.pid, ini.image
 	if protected || !alive {
 		target, image = p.PID, p.Image
 	}
-	if g.respond(&d, target, image) && len(h.revert) > 0 {
-		g.revert(&d, h)
+	if g.respond(&d, target, image) {
+		if len(h.revert) > 0 {
+			g.revert(&d, h)
+		}
+		if h.category == catBYOVD {
+			g.removeDriver(&d, h, key, !h.inDrivers || dropped, p.Time)
+		}
 	}
 	// Every kill is reported; a line where nothing was done (report_only)
 	// once per initiator in precursorDedupe.
@@ -314,7 +517,7 @@ var programDirs = func() []string {
 
 // winWritable are directories under the Windows directory that standard
 // users can write.
-var winWritable = []string{"/temp/", "/tasks/", "/tracing/", "/debug/", "/registration/crmlog/",
+var winWritable = []string{"/temp/", "/systemtemp/", "/tasks/", "/tracing/", "/debug/", "/registration/crmlog/",
 	"/system32/tasks/", "/system32/spool/", "/system32/com/dmp/", "/system32/fxstmp/",
 	"/syswow64/tasks/", "/syswow64/com/dmp/", "/syswow64/fxstmp/", "/servicing/sessions/"}
 
@@ -373,6 +576,12 @@ func (g *Guard) initiator(p ProcessStart) (ini proc, walked []proc, alive, prote
 	pid := p.PPID
 	for i := 0; i < maxWalk && pid != 0; i++ {
 		q, ok, live := g.find(pid, look)
+		if ancestors[pid] && !ok {
+			// the agent (or its service host), even when the table cannot
+			// read it: protected, never walked past
+			q, live = proc{pid: pid}, true
+			return q, append(walked, q), live, true
+		}
 		if !ok {
 			break
 		}
@@ -599,17 +808,182 @@ func (g *Guard) userWritable(image string) bool {
 			return true
 		}
 	}
-	return strings.HasPrefix(l, sysRoot+"/temp/")
+	return strings.HasPrefix(l, sysRoot+"/temp/") || strings.HasPrefix(l, sysRoot+"/systemtemp/")
 }
 
-// droppedBy: driver was written within dropWindow by the initiator (same
-// PID or program) or from a user-writable place.
-func (g *Guard) droppedBy(driver string, ini proc, now time.Time) bool {
+// droppedByTree: driver was written within dropWindow by the initiator's
+// tree (the initiator, any process under it such as a cmd /c copy, the same
+// program) or from a user-writable place.
+func (g *Guard) droppedByTree(driver string, ini proc, now time.Time) bool {
 	d, ok := g.pre.dropOf(driver, now)
 	if !ok {
 		return false
 	}
-	return d.pid == ini.pid || sameImage(d.image, ini.image) || g.userWritable(d.image) || g.userWritable(d.from)
+	return d.pid == ini.pid || sameImage(d.image, ini.image) || g.userWritable(d.image) ||
+		g.userWritable(d.from) || g.descends(d.pid, ini.pid)
+}
+
+// descends reports whether pid is under ancestor (start cache, then the
+// live table).
+func (g *Guard) descends(pid, ancestor uint32) bool {
+	var look procLookup
+	if g.live != nil {
+		look = g.live()
+	}
+	for i := 0; i < maxWalk && pid != 0; i++ {
+		q, ok, _ := g.find(pid, look)
+		if !ok || q.ppid == pid {
+			return false
+		}
+		if q.ppid == ancestor {
+			return true
+		}
+		pid = q.ppid
+	}
+	return false
+}
+
+// ownCommand: the precursor, or a process walked up to its initiator, is
+// one the agent started (ownproc), checked against the start cache so a
+// reused PID does not borrow it. On Linux a direct child of the agent also
+// counts: an exec's parent cannot be spoofed there, and the exec event can
+// beat the registration of the PID.
+func (g *Guard) ownCommand(p ProcessStart, walked []proc) bool {
+	if g.goos == "linux" && p.PPID == g.self {
+		return true
+	}
+	if g.own == nil {
+		return false
+	}
+	mine := func(pid uint32) bool {
+		if !g.own(pid) {
+			return false
+		}
+		c, ok := g.pre.lookup(pid)
+		return !ok || c.ppid == g.self
+	}
+	if mine(p.PID) {
+		return true
+	}
+	for _, q := range walked {
+		if mine(q.pid) || g.goos == "linux" && q.ppid == g.self {
+			return true
+		}
+	}
+	return false
+}
+
+// rotationTools rotate snapshots routinely (by base name; "pve" prefix:
+// the Proxmox schedulers).
+var rotationTools = map[string]bool{"zfs-auto-snapshot": true, "sanoid": true, "syncoid": true, "vzdump": true,
+	"snapper": true, "timeshift": true, "pyznap": true, "zrepl": true, "pve-zsync": true}
+
+func rotationTool(name string) bool { return rotationTools[name] || strings.HasPrefix(name, "pve") }
+
+// interpreters run a script named as their first operand.
+func interpreter(name string) bool {
+	switch name {
+	case "sh", "bash", "dash", "perl", "ruby":
+		return true
+	}
+	return strings.HasPrefix(name, "python")
+}
+
+// downgrade says why a hit is only reported: snapshot rotation by known
+// tooling or on a schedule from a root-owned system program, or a security
+// product stopped by an installed program. Critical shadow, backup, boot
+// and driver precursors are never downgraded.
+func (g *Guard) downgrade(h *hit, ini proc, walked []proc) string {
+	switch h.category {
+	case catSnapshot:
+		for _, q := range walked {
+			b := base(q.image)
+			if rotationTool(b) && g.trustedLocation(q.image) {
+				return "rotation_tool"
+			}
+			if interpreter(b) && g.trustedLocation(q.image) {
+				if s := firstOperand(q.cmdline); strings.HasPrefix(s, "/") && rotationTool(base(s)) && g.trustedLocation(s) {
+					return "rotation_tool"
+				}
+			}
+		}
+		if g.scheduled(ini) {
+			return "scheduled"
+		}
+	case catDefense:
+		if g.trustedLocation(ini.image) {
+			return "trusted_initiator"
+		}
+	}
+	return ""
+}
+
+// firstOperand is a command line's first word after the program that is
+// not a switch (the script an interpreter runs).
+func firstOperand(cmdline string) string {
+	f := strings.Fields(cmdline)
+	for _, a := range f[min(1, len(f)):] {
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return ""
+}
+
+var schedulers = map[string]bool{"cron": true, "crond": true, "anacron": true, "atd": true, "systemd": true}
+
+// scheduled: a root-owned system program started by cron, at or systemd
+// (a timer's service), or one of them.
+func (g *Guard) scheduled(ini proc) bool {
+	if g.goos != "linux" || !g.trustedLocation(ini.image) {
+		return false
+	}
+	if schedulers[base(ini.image)] || ini.ppid == 1 {
+		return true
+	}
+	var look procLookup
+	if g.live != nil {
+		look = g.live()
+	}
+	parent, ok, _ := g.find(ini.ppid, look)
+	return ok && schedulers[base(parent.image)] && g.trustedLocation(parent.image)
+}
+
+// removeDriver undoes a BYOVD install: the driver's service and every
+// service the initiator created in dropWindow are stopped and deleted, and
+// the driver file is removed when it is the initiator's (outside the driver
+// directories, or dropped there by its tree).
+func (g *Guard) removeDriver(d *detection, h *hit, key string, removeFile bool, now time.Time) {
+	var names []string
+	seen := map[string]bool{}
+	for _, n := range append([]string{h.svc}, g.pre.servicesOf(key, now)...) {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			names = append(names, n)
+		}
+	}
+	var done []string
+	if g.runCmd != nil {
+		for _, n := range names {
+			g.runCmd("sc", "stop", n) // not running: fine
+			out, err := g.runCmd("sc", "delete", n)
+			if err != nil && !strings.Contains(string(out), "1060") { // 1060: no such service
+				d.err = strings.TrimSpace(d.err + " revert service:" + n + ": " + err.Error())
+				continue
+			}
+			done = append(done, "service:"+n)
+		}
+	}
+	if len(done) > 0 {
+		d.reverted = strings.TrimPrefix(d.reverted+","+strings.Join(done, ","), ",")
+	}
+	if removeFile && h.driver != "" && g.removeFile != nil {
+		if err := g.removeFile(h.driver); err != nil && !os.IsNotExist(err) {
+			d.err = strings.TrimSpace(d.err + " remove " + h.driver + ": " + err.Error())
+		} else {
+			d.removed = h.driver
+		}
+	}
 }
 
 // revert undoes a boot configuration change with bcdedit.
@@ -622,7 +996,8 @@ func (g *Guard) revert(d *detection, h *hit) {
 	}
 	var done []string
 	for i, args := range h.revert {
-		if err := g.runCmd("bcdedit", args...); err != nil {
+		out, err := g.runCmd("bcdedit", args...)
+		if err != nil && !strings.Contains(strings.ToLower(string(out)), "not found") { // not set: already the default
 			d.err = strings.TrimSpace(d.err + " revert " + h.reverted[i] + ": " + err.Error())
 			continue
 		}

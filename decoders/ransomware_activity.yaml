@@ -18,6 +18,13 @@
 #                             Reverted= the boot settings put back;
 #                             exclusion_ignored=untrusted_initiator: a command-line exclusion
 #                             matched, but the initiator runs from a user-writable place.
+#                             ParentSpoofed=true: the claimed parent is not the real creator
+#                             (walked from the creator); Source=amsi: seen in script content;
+#                             downgraded=rotation_tool|scheduled|trusted_initiator: routine
+#                             tooling, reported (medium rule) not stopped; Removed= a dropped
+#                             driver deleted; Reverted=service:<name> services deleted (BYOVD).
+#                             confirmed=false Precursor=byovd: a kernel service on a driver in
+#                             System32\drivers the initiator did not bring (logged, no alert).
 # response: killed, kill_refused, kill_failed, isolated (confirmed, no process to kill),
 #           trusted (a trusted sync client among a destroyed canary's writers: not killed),
 #           none (report only / not confirmed),
@@ -44,6 +51,10 @@ fields:
   ransomware.initiator_protected: InitiatorProtected
   ransomware.reverted: Reverted
   ransomware.exclusion_ignored: exclusion_ignored
+  ransomware.parent_spoofed: ParentSpoofed
+  ransomware.source: Source
+  ransomware.downgraded: downgraded
+  ransomware.removed: Removed
   file.path: TargetFilename
   file.action: FileAction
   Image: Image
