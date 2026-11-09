@@ -12,6 +12,7 @@ import MarkdownNote from '@/components/MarkdownNote'
 import { HashEnrichmentEvidence } from '@/components/HashEnrichmentEvidence'
 import { ActionApprovals, EvidenceView, HypothesesView, QueueView } from '@/components/InvestigationLedger'
 import MalwareDrafts from '@/components/MalwareDrafts'
+import InvestigationChat from '@/components/InvestigationChat'
 
 interface Step {
   ts: string
@@ -272,7 +273,7 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
   })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showReasoning, setShowReasoning] = useState(false)
-  const [tab, setTab] = useState<'activity' | 'queue' | 'evidence' | 'hypotheses'>('activity')
+  const [tab, setTab] = useState<'activity' | 'queue' | 'evidence' | 'hypotheses' | 'chat'>('activity')
   const current = runs.find(r => r.id === selectedId) ?? runs[0]
   const active = current ? ACTIVE.has(current.status) : false
   const ledger = useInvestigationLedger(caseId, current?.id, active)
@@ -357,7 +358,9 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
           Reads the case and its alerts, searches the logs, and collects evidence from the case&apos;s hosts with
           live-response artifacts (writing new ones if needed). When AI commands are enabled in Settings, it can
           also ask to run a program on a host — you approve each one here first. The findings are added to the case as a note.
-          Response actions — isolate, kill, quarantine, block — are left to you.
+          After the run, the Chat tab can propose response actions — isolate, kill, quarantine, block — and each one always
+          needs your approval. Chat IP blocks can target any agent in the case&apos;s group and any public IP, which is
+          broader than the case remediation button.
         </div>
       )}
 
@@ -377,6 +380,7 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
               ['queue', `Queue (${ledger.actions.length})`],
               ['evidence', `Evidence (${ledger.evidence.length})`],
               ['hypotheses', `Hypotheses (${ledger.hypotheses.length})`],
+              ...(active ? [] : [['chat', 'Chat'] as const]),
             ] as const).map(([key, text]) => (
               <button key={key} onClick={() => setTab(key)}
                 style={{ ...label, padding: '4px 0', color: tab === key ? 'var(--accent-cyan)' : 'var(--text-muted)',
@@ -400,6 +404,7 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
           {tab === 'hypotheses' && (
             <HypothesesView caseId={caseId} invId={current.id} hypotheses={ledger.hypotheses} evidence={ledger.evidence} />
           )}
+          {tab === 'chat' && !active && <InvestigationChat key={current.id} invId={current.id} />}
           {current.report && (
             <>
               <span style={label}>Report</span>
