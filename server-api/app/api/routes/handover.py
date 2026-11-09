@@ -1,4 +1,5 @@
 # server-api/app/api/routes/handover.py
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query
@@ -27,13 +28,10 @@ class HandoverOut(BaseModel):
     open_alerts: int
     open_cases: int
     escalations: int
-    created_at: str | None = None
+    # the row's timestamp; JSON carries it as an ISO 8601 string
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
-
-    def model_post_init(self, __context):
-        if self.created_at and hasattr(self.created_at, "isoformat"):
-            object.__setattr__(self, "created_at", self.created_at.isoformat())
 
 
 @router.get("", response_model=list[HandoverOut])
@@ -56,7 +54,8 @@ async def create_handover(
     user: Annotated[User, Depends(get_current_user)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    gid = group_filter or user.group_id
+    # a superadmin without a group files into "default" (group_id is NOT NULL)
+    gid = group_filter or user.group_id or "default"
 
     open_alerts = (await db.execute(
         select(func.count()).select_from(Alert)
