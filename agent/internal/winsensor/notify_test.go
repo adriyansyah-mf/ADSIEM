@@ -63,3 +63,40 @@ func TestOnStartFallsBackToTheEmit(t *testing.T) {
 		t.Fatalf("after the join window: %+v", got)
 	}
 }
+
+// The anti-ransomware precursor checks need the command line, which only
+// the kernel logger half has: onCommand fires on that half, once, even
+// when the provider half came first (and onStart went without it).
+func TestOnCommandFiresOnTheKernelHalfAfterTheProvider(t *testing.T) {
+	j := joiner()
+	var starts, cmds []ProcessStart
+	j.onStart = func(p ProcessStart) { starts = append(starts, p) }
+	j.onCommand = func(p ProcessStart) { cmds = append(cmds, p) }
+	now := time.Now()
+	j.provider(providerStart("2336", "1012", `\Device\HarddiskVolume3\Windows\System32\vssadmin.exe`), now)
+	if len(starts) != 1 || starts[0].CommandLine != "" || len(cmds) != 0 {
+		t.Fatalf("provider half: starts %+v cmds %+v", starts, cmds)
+	}
+	j.kernel(kernelStart("0x920", "0x3F4", "vssadmin delete shadows /all /quiet"), now)
+	if len(cmds) != 1 || cmds[0].CommandLine != "vssadmin delete shadows /all /quiet" ||
+		cmds[0].Image != `C:\Windows\System32\vssadmin.exe` || cmds[0].PID != 0x920 || cmds[0].PPID != 0x3F4 {
+		t.Fatalf("kernel half: %+v", cmds)
+	}
+	j.flush(now.Add(joinWindow))
+	if len(cmds) != 1 || len(starts) != 1 {
+		t.Fatalf("fired again: starts %d cmds %d", len(starts), len(cmds))
+	}
+}
+
+func TestOnCommandFiresOnTheKernelHalfFirst(t *testing.T) {
+	j := joiner()
+	j.fullImage = func(uint32) string { return `C:\Windows\System32\bcdedit.exe` }
+	var cmds []ProcessStart
+	j.onCommand = func(p ProcessStart) { cmds = append(cmds, p) }
+	now := time.Now()
+	j.kernel(kernelStart("0x920", "0x3F4", "bcdedit /set {default} recoveryenabled no"), now)
+	j.provider(providerStart("2336", "1012", `\Device\HarddiskVolume3\Windows\System32\bcdedit.exe`), now)
+	if len(cmds) != 1 || cmds[0].Image != `C:\Windows\System32\bcdedit.exe` || cmds[0].CommandLine == "" {
+		t.Fatalf("cmds %+v", cmds)
+	}
+}

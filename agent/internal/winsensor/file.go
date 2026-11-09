@@ -128,6 +128,9 @@ type Options struct {
 	OnFile func(FileEvent)
 	// OnProcess, if set, sees every process start (execution prevention).
 	OnProcess func(ProcessStart)
+	// OnCommandLine, if set, sees every process start once its command
+	// line is known (OnProcess may fire before: anti-ransomware precursors).
+	OnCommandLine func(ProcessStart)
 	// OnScript, if set, gets what AMSI scanned (the script scanner); the
 	// AMSI session only runs when it is set.
 	OnScript func(AMSIScript)

@@ -47,6 +47,7 @@ type process struct {
 	started              time.Time
 	haveKernel, haveProv bool
 	notified             bool // onStart already called for this start
+	cmdNotified          bool // onCommand already called
 }
 
 // processJoiner merges the two halves of each process start and remembers
@@ -64,6 +65,11 @@ type processJoiner struct {
 	// onStart, when set, sees every process start as it is emitted (the
 	// Windows execution prevention engine).
 	onStart func(ProcessStart)
+	// onCommand, when set, sees every process start once with its command
+	// line, from the kernel logger half (the provider half has none), so
+	// it is not held back by onStart firing first (the anti-ransomware
+	// precursor checks).
+	onCommand func(ProcessStart)
 }
 
 // ProcessStart is one process start, joined: Image is the full path when the
@@ -107,6 +113,7 @@ func (j *processJoiner) kernel(ev *etw.Event, now time.Time) []string {
 		}
 		p.haveKernel = true
 		j.notify(p)
+		j.notifyCommand(p)
 		return j.complete(pid)
 	}
 	return nil
@@ -199,6 +206,26 @@ func (j *processJoiner) emit(pid uint32) []string {
 		j.onStart(ps)
 	}
 	return []string{processLine(p, parent)}
+}
+
+// notifyCommand hands a start to onCommand when its command line arrives
+// (the kernel logger half), once, with the full image path when it is
+// known by then (from the provider half or the live process).
+func (j *processJoiner) notifyCommand(p *process) {
+	if j.onCommand == nil || p.cmdNotified {
+		return
+	}
+	p.cmdNotified = true
+	if !strings.ContainsRune(p.image, '\\') {
+		if full := j.fullImage(p.pid); full != "" {
+			p.image = full
+		}
+	}
+	ps := ProcessStart{PID: p.pid, PPID: p.ppid, Image: p.image, CommandLine: p.commandLine, User: p.user}
+	if parent := j.known[p.ppid]; parent != nil {
+		ps.ParentImage = parent.image
+	}
+	j.onCommand(ps)
 }
 
 // notify hands a start to onStart as soon as its full image path is known,
