@@ -247,7 +247,9 @@ func (g *Guard) precursor(p ProcessStart, h *hit) {
 	d := detection{kind: "precursor", confirmed: true, precursor: h.category, cmdline: p.CommandLine,
 		preImage: p.Image, prePID: p.PID, pid: ini.pid, ppid: ini.ppid, image: ini.image, comm: base(ini.image),
 		iniProtected: protected}
-	if g.excluded(rt, p, walked) {
+	excluded, ignored := g.excluded(rt, p, ini, walked)
+	d.exclIgnored = ignored
+	if excluded {
 		// An admin task the policy allows: reported (no alert), not stopped.
 		d.response = "excluded"
 		if g.pre.firstQuiet(key, p.Time) {
@@ -271,20 +273,85 @@ func (g *Guard) precursor(p ProcessStart, h *hit) {
 
 // excluded matches the precursor and every process walked up to the
 // initiator (the shells running an admin's script included) against the
-// policy's ransomware exclusions: by image (path, program) and command line.
-func (g *Guard) excluded(rt *Runtime, p ProcessStart, walked []proc) bool {
-	match := func(image, cmd string) bool {
-		if rt.ExcludedProcess != nil {
-			return rt.ExcludedProcess(image, cmd)
-		}
-		return rt.Excluded != nil && rt.Excluded(image)
+// policy's ransomware exclusions. An image exclusion (a full path, never a
+// bare program name) excludes. A command-line exclusion excludes only when
+// the initiator runs from a location a standard user cannot write: anyone
+// can put an excluded string in a command line, ransomware included;
+// otherwise ignored says why ("untrusted_initiator").
+func (g *Guard) excluded(rt *Runtime, p ProcessStart, ini proc, walked []proc) (bool, string) {
+	image := func(img string) bool { return img != "" && rt.ExcludedImage != nil && rt.ExcludedImage(img) }
+	cmd := func(c string) bool { return c != "" && rt.ExcludedCommandLine != nil && rt.ExcludedCommandLine(c) }
+	if image(p.Image) {
+		return true, ""
 	}
-	if match(p.Image, p.CommandLine) {
-		return true
-	}
+	cmdHit := cmd(p.CommandLine)
 	for _, q := range walked {
-		if match(q.image, q.cmdline) {
+		if image(q.image) {
+			return true, ""
+		}
+		cmdHit = cmdHit || cmd(q.cmdline)
+	}
+	if !cmdHit {
+		return false, ""
+	}
+	if g.trustedLocation(ini.image) {
+		return true, ""
+	}
+	return false, "untrusted_initiator"
+}
+
+// programDirs are the Windows program directories (lower case, forward
+// slashes, trailing slash).
+var programDirs = func() []string {
+	out := []string{systemDrive + "/program files/", systemDrive + "/program files (x86)/"}
+	for _, v := range []string{"ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"} {
+		if d := os.Getenv(v); d != "" {
+			out = append(out, strings.TrimSuffix(winPath(d), "/")+"/")
+		}
+	}
+	return out
+}()
+
+// winWritable are directories under the Windows directory that standard
+// users can write.
+var winWritable = []string{"/temp/", "/tasks/", "/tracing/", "/debug/", "/registration/crmlog/",
+	"/system32/tasks/", "/system32/spool/", "/system32/com/dmp/", "/system32/fxstmp/",
+	"/syswow64/tasks/", "/syswow64/com/dmp/", "/syswow64/fxstmp/", "/servicing/sessions/"}
+
+// trustedLocation: the image is installed where a standard user cannot
+// write. Windows: under the Windows directory (not its user-writable
+// folders) or a Program Files directory, as a full long path (an 8.3 or
+// unresolved \Device\ path is not trusted). Linux: under /usr, /bin, /sbin,
+// /lib*, /opt or /etc, and owned by root.
+func (g *Guard) trustedLocation(image string) bool {
+	switch g.goos {
+	case "windows":
+		l := winPath(image)
+		if !winDrivePath(l) || strings.Contains(l, "/../") || strings.Contains(l, "/./") || strings.Contains(l, "~") {
+			return false
+		}
+		if rest, ok := strings.CutPrefix(l, sysRoot+"/"); ok {
+			for _, w := range winWritable {
+				if strings.HasPrefix("/"+rest, w) {
+					return false
+				}
+			}
 			return true
+		}
+		for _, d := range programDirs {
+			if strings.HasPrefix(l, d) {
+				return true
+			}
+		}
+		return false
+	case "linux":
+		if image == "" || image != path.Clean(image) || !strings.HasPrefix(image, "/") {
+			return false
+		}
+		for _, d := range []string{"/usr/", "/bin/", "/sbin/", "/lib/", "/lib32/", "/lib64/", "/libx32/", "/opt/", "/etc/"} {
+			if strings.HasPrefix(image, d) {
+				return g.rootOwned == nil || g.rootOwned(image)
+			}
 		}
 	}
 	return false

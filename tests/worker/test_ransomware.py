@@ -141,6 +141,18 @@ def test_alerts(decoders, rules, line, expected):
     assert [(m["title"], m["level"]) for m in asyncio.run(rules.evaluate(view))] == expected
 
 
+def test_ignored_exclusion_is_decoded_and_alerts(decoders):
+    """As TestCommandLineExclusionNeedsATrustedInitiator: a command-line exclusion
+    matched, but the initiator runs from the Desktop: killed, alerted."""
+    line = PRECURSOR + " exclusion_ignored=untrusted_initiator"
+    event, _ = decoders.decode_named("ransomware_activity", line)
+    assert event["ransomware.exclusion_ignored"] == "untrusted_initiator"
+    sig = SigmaEngine()
+    sig.load_from_yaml_list(_load("rules/*.yaml"))
+    view = dict(event, raw_message=line, log_type="ransomware_activity", hostname="ws12")
+    assert [m["title"] for m in asyncio.run(sig.evaluate(view))] == ["Ransomware Activity On Endpoint"]
+
+
 def test_excluded_precursor_raises_no_alert(decoders):
     """Fresh engine: nothing is suppressed, so silence means the rule does not match."""
     sig = SigmaEngine()

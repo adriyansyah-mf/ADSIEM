@@ -51,10 +51,12 @@ type Runtime struct {
 	Kill     bool // with the local Kill (report_only there wins)
 	Isolate  bool // or the local isolate
 	Excluded func(image string) bool
-	// ExcludedProcess matches a process (image and command line) against
-	// the policy's ransomware exclusions (path, program, command line):
-	// the precursor checks. Nil: Excluded on the image.
-	ExcludedProcess func(image, commandLine string) bool
+	// The precursor checks' exclusions: ExcludedImage matches a full image
+	// path (policy image exclusions with a path, path prefixes; never a bare
+	// program name), ExcludedCommandLine a command line (honoured only for
+	// an initiator in a system or program location, precursor.go).
+	ExcludedImage       func(image string) bool
+	ExcludedCommandLine func(commandLine string) bool
 }
 
 type Guard struct {
@@ -84,6 +86,9 @@ type Guard struct {
 	live        func() procLookup
 	cwd         func(pid uint32) string
 	runCmd      func(name string, args ...string) error
+	// rootOwned reports whether a file is owned by root (Linux; the trust
+	// in an initiator's location for command-line exclusions).
+	rootOwned func(path string) bool
 }
 
 func New(opts Options) *Guard {
@@ -102,6 +107,7 @@ func New(opts Options) *Guard {
 		live:        liveProcs,
 		cwd:         procCwd,
 		runCmd:      runSystemCmd,
+		rootOwned:   fileRootOwned,
 	}
 	g.setSigned(microsoftSigned)
 	g.det.trusted = g.trusted
@@ -329,6 +335,8 @@ type detection struct {
 	prePID             uint32
 	iniProtected       bool
 	reverted           string
+	// exclIgnored: a policy exclusion matched but did not apply, and why.
+	exclIgnored string
 }
 
 // protectedImages are never killed (basenames, lower case). On Windows
@@ -431,6 +439,9 @@ func (d detection) line() string {
 	}
 	if d.reverted != "" {
 		fmt.Fprintf(&sb, " Reverted=%s", kv(d.reverted))
+	}
+	if d.exclIgnored != "" {
+		fmt.Fprintf(&sb, " exclusion_ignored=%s", d.exclIgnored)
 	}
 	if d.err != "" {
 		fmt.Fprintf(&sb, " Error=%s", kv(d.err))

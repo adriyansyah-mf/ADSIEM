@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // liveProcs looks processes up in /proc: the parent from stat, the image
@@ -36,6 +37,17 @@ func liveProcs() procLookup {
 func procCwd(pid uint32) string {
 	d, _ := os.Readlink("/proc/" + strconv.FormatUint(uint64(pid), 10) + "/cwd")
 	return d
+}
+
+// fileRootOwned reports whether p is a file owned by root (false when it
+// cannot be read).
+func fileRootOwned(p string) bool {
+	info, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Uid == 0
 }
 
 // runSystemCmd: nothing to revert on Linux.

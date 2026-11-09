@@ -46,6 +46,9 @@ func imagePath(pid uint32) string {
 
 func procCwd(uint32) string { return "" }
 
+// fileRootOwned: the location alone decides on Windows (trustedLocation).
+var fileRootOwned func(string) bool
+
 // runSystemCmd runs a program from the system directory (bcdedit.exe).
 var runSystemCmd = func(name string, args ...string) error {
 	sys, err := windows.GetSystemDirectory()

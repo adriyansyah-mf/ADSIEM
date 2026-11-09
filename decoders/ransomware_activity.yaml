@@ -15,7 +15,9 @@
 #                             confirmed. Image/PID are the initiator (the program behind the
 #                             shells), PrecursorImage/PrecursorPID/CommandLine the command;
 #                             InitiatorProtected=true: only the command was killed;
-#                             Reverted= the boot settings put back.
+#                             Reverted= the boot settings put back;
+#                             exclusion_ignored=untrusted_initiator: a command-line exclusion
+#                             matched, but the initiator runs from a user-writable place.
 # response: killed, kill_refused, kill_failed, isolated (confirmed, no process to kill),
 #           trusted (a trusted sync client among a destroyed canary's writers: not killed),
 #           none (report only / not confirmed),
@@ -41,6 +43,7 @@ fields:
   ransomware.precursor_pid: PrecursorPID
   ransomware.initiator_protected: InitiatorProtected
   ransomware.reverted: Reverted
+  ransomware.exclusion_ignored: exclusion_ignored
   file.path: TargetFilename
   file.action: FileAction
   Image: Image

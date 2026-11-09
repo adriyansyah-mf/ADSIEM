@@ -887,8 +887,11 @@ func applyPolicy(s policy.Settings, pm *prevent.Manager, n *notify.Notifier, g *
 			Excluded: func(image string) bool {
 				return s.Excluded(policy.ScopeRansomware, policy.Match{Image: image})
 			},
-			ExcludedProcess: func(image, commandLine string) bool {
-				return s.Excluded(policy.ScopeRansomware, policy.Match{Image: image, CommandLine: commandLine})
+			ExcludedImage: func(image string) bool {
+				return s.ExcludedPath(policy.ScopeRansomware, image)
+			},
+			ExcludedCommandLine: func(commandLine string) bool {
+				return s.Excluded(policy.ScopeRansomware, policy.Match{CommandLine: commandLine})
 			},
 		})
 	}

@@ -29,6 +29,8 @@ var winTree = map[uint32]proc{
 	6100: {pid: 6100, ppid: 3000, image: `C:\Users\bob\AppData\Local\Temp\cmd.exe`},
 	// an installed tool, not user-writable
 	7000: {pid: 7000, ppid: 2000, image: `C:\Program Files\Tool\tool.exe`},
+	7500: {pid: 7500, ppid: 600, image: `C:\Program Files\BackupTool\backup.exe`},
+	7700: {pid: 7700, ppid: 600, image: `C:\Windows\Temp\upd.exe`},
 }
 
 var linTree = map[uint32]proc{
@@ -40,6 +42,8 @@ var linTree = map[uint32]proc{
 	// cron -> sh: a nightly script
 	1500: {pid: 1500, ppid: 1, image: "/usr/sbin/cron"},
 	1600: {pid: 1600, ppid: 1500, image: "/usr/bin/sh"},
+	2000: {pid: 2000, ppid: 900, image: "/home/u/x"},
+	2100: {pid: 2100, ppid: 1, image: "/usr/local/bin/snapclean"},
 }
 
 type precursorRig struct {
@@ -63,6 +67,7 @@ func newPrecursorRig(t *testing.T, goos string, tree map[uint32]proc) *precursor
 		return func(pid uint32) (proc, bool) { p, ok := tree[pid]; return p, ok }
 	}
 	g.cwd = func(uint32) string { return "" }
+	g.rootOwned = func(string) bool { return true }
 	g.response = func(pid uint32) (int, error) {
 		r.mu.Lock()
 		r.killed = append(r.killed, pid)
@@ -364,26 +369,28 @@ func TestPrecursorReportOnlyIsolateDedupe(t *testing.T) {
 	}
 }
 
-// Group-policy exclusions (scope ransomware) apply to precursors: matched
-// on the initiator (image, command line) and on the precursor (image,
-// command line). Excluded: no kill, no revert, response=excluded, once per
+// cmdExclusion is a policy command_line exclusion (substring, any case).
+func cmdExclusion(v string) func(string) bool {
+	return func(cmd string) bool { return strings.Contains(strings.ToLower(cmd), strings.ToLower(v)) }
+}
+
+// fullPathExclusion is a policy image exclusion by full path.
+func fullPathExclusion(p string) func(string) bool {
+	return func(image string) bool { return strings.EqualFold(image, p) }
+}
+
+// Group-policy exclusions (scope ransomware) apply to precursors. Image
+// exclusions (full path) match the precursor or any process walked up to the
+// initiator. Excluded: no kill, no revert, response=excluded, once per
 // initiator in 10 minutes.
 func TestPrecursorPolicyExclusions(t *testing.T) {
-	type check func(image, cmd string) bool
-	cases := []struct {
-		name string
-		ex   check
-	}{
-		{"initiator image", func(image, _ string) bool { return strings.EqualFold(image, `C:\Users\bob\Desktop\9f2c1e.exe`) }},
-		{"precursor image", func(image, _ string) bool { return strings.EqualFold(image, bcdeditExe) }},
-		{"exact command line", func(_, cmd string) bool {
-			return strings.Contains(strings.ToLower(cmd), "bcdedit /set {current} safeboot minimal")
-		}},
-	}
-	for _, c := range cases {
+	for _, c := range []struct{ name, path string }{
+		{"initiator image", `C:\Users\bob\Desktop\9f2c1e.exe`},
+		{"precursor image", bcdeditExe},
+	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := newPrecursorRig(t, "windows", winTree)
-			r.g.SetRuntime(Runtime{Kill: true, ExcludedProcess: c.ex})
+			r.g.SetRuntime(Runtime{Kill: true, ExcludedImage: fullPathExclusion(c.path)})
 			for i := 0; i < 2; i++ {
 				r.g.ObserveProcess(winStart(3200+uint32(i), 3100, bcdeditExe, `bcdedit /set {current} safeboot minimal`))
 			}
@@ -394,37 +401,86 @@ func TestPrecursorPolicyExclusions(t *testing.T) {
 			if len(l) != 1 || !strings.HasPrefix(l[0], "detection=precursor confirmed=true response=excluded Precursor=boot_tamper") {
 				t.Fatalf("lines %q", l)
 			}
-			// another command line from the same program is not excluded by
-			// a command-line exclusion
-			r.g.ObserveProcess(winStart(3300, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
-			if c.name == "exact command line" && len(r.killed) != 1 {
-				t.Fatalf("other command not stopped: killed %v", r.killed)
-			}
 		})
 	}
 
-	// A command-line exclusion for one Linux cron script: the script's own
-	// command line (the initiator shell's) is matched too.
-	tree := map[uint32]proc{}
-	for k, v := range linTree {
-		tree[k] = v
+	// The image-only callback the file heuristics use (it also matches bare
+	// program names) does not exclude precursors.
+	r := newPrecursorRig(t, "windows", winTree)
+	r.g.SetRuntime(Runtime{Kill: true, Excluded: func(image string) bool { return strings.HasSuffix(image, `9f2c1e.exe`) }})
+	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
+	if len(r.killed) != 1 {
+		t.Fatalf("basename-style exclusion excluded a precursor: killed %v", r.killed)
 	}
-	r := newPrecursorRig(t, "linux", tree)
+}
+
+// A command-line exclusion is honoured only when the initiator runs from a
+// place a standard user cannot write: IronChain on the Desktop running the
+// excluded command is killed all the same (exclusion_ignored), the backup
+// tool in Program Files is excluded.
+func TestCommandLineExclusionNeedsATrustedInitiator(t *testing.T) {
+	const cmd = `vssadmin delete shadows /all /quiet`
+	rt := Runtime{Kill: true, ExcludedCommandLine: cmdExclusion(cmd)}
+
+	r := newPrecursorRig(t, "windows", winTree)
+	r.g.SetRuntime(rt)
+	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, cmd))
+	l := r.lines()
+	if len(r.killed) != 1 || r.killed[0] != 3000 || len(l) != 1 ||
+		!strings.Contains(l[0], "response=killed") || !strings.Contains(l[0], "exclusion_ignored=untrusted_initiator") {
+		t.Fatalf("Desktop initiator: killed %v lines %q", r.killed, l)
+	}
+
+	r = newPrecursorRig(t, "windows", winTree)
+	r.g.SetRuntime(rt)
+	r.g.ObserveProcess(winStart(7600, 7500, vssadminExe, cmd))
+	if l := r.lines(); len(r.killed) != 0 || len(l) != 1 || !strings.Contains(l[0], "response=excluded") {
+		t.Fatalf("Program Files initiator: killed %v lines %q", r.killed, l)
+	}
+	// ...but only for that command line
+	r.g.ObserveProcess(winStart(7601, 7500, wbadminExe, `wbadmin delete catalog -quiet`))
+	if len(r.killed) != 1 {
+		t.Fatalf("other command: killed %v", r.killed)
+	}
+	// Windows\Temp is under the Windows directory, and user-writable.
+	r = newPrecursorRig(t, "windows", winTree)
+	r.g.SetRuntime(rt)
+	r.g.ObserveProcess(winStart(7800, 7700, vssadminExe, cmd))
+	if len(r.killed) != 1 {
+		t.Fatalf("Windows\\Temp initiator: killed %v", r.killed)
+	}
+
+	// Linux: /home/u/x is killed, root-owned /usr/local/bin/snapclean is
+	// excluded; the same path owned by a user is not trusted.
+	lrt := Runtime{Kill: true, ExcludedCommandLine: cmdExclusion("lvremove -f vg0/home_snap")}
+	r = newPrecursorRig(t, "linux", linTree)
+	r.g.SetRuntime(lrt)
+	r.g.ObserveProcess(linStart(2050, 2000, "/usr/sbin/lvremove", "lvremove -f vg0/home_snap"))
+	if l := r.lines(); len(r.killed) != 1 || r.killed[0] != 2000 || !strings.Contains(l[0], "exclusion_ignored=untrusted_initiator") {
+		t.Fatalf("/home initiator: killed %v lines %q", r.killed, l)
+	}
+	r = newPrecursorRig(t, "linux", linTree)
+	r.g.SetRuntime(lrt)
+	r.g.ObserveProcess(linStart(2150, 2100, "/usr/sbin/lvremove", "lvremove -f vg0/home_snap"))
+	if l := r.lines(); len(r.killed) != 0 || !strings.Contains(l[0], "response=excluded") {
+		t.Fatalf("/usr/local/bin initiator: killed %v lines %q", r.killed, l)
+	}
+	r = newPrecursorRig(t, "linux", linTree)
+	r.g.rootOwned = func(string) bool { return false }
+	r.g.SetRuntime(lrt)
+	r.g.ObserveProcess(linStart(2150, 2100, "/usr/sbin/lvremove", "lvremove -f vg0/home_snap"))
+	if len(r.killed) != 1 {
+		t.Fatalf("user-owned /usr/local/bin initiator: killed %v", r.killed)
+	}
+
+	// A cron script excluded by its path: the walked shell's command line
+	// matches, and cron (the initiator) is a system program.
+	r = newPrecursorRig(t, "linux", linTree)
 	r.g.ObserveProcess(linStart(1600, 1500, "/usr/bin/sh", "/bin/sh /usr/local/sbin/rotate-snapshots.sh"))
-	r.g.SetRuntime(Runtime{Kill: true, ExcludedProcess: func(_, cmd string) bool {
-		return strings.Contains(cmd, "/usr/local/sbin/rotate-snapshots.sh")
-	}})
+	r.g.SetRuntime(Runtime{Kill: true, ExcludedCommandLine: cmdExclusion("/usr/local/sbin/rotate-snapshots.sh")})
 	r.g.ObserveProcess(linStart(1700, 1600, "/usr/sbin/lvremove", "lvremove -f vg0/home_snap"))
 	if l := r.lines(); len(r.killed) != 0 || len(l) != 1 || !strings.Contains(l[0], "response=excluded") {
 		t.Fatalf("cron script excluded: killed %v lines %q", r.killed, l)
-	}
-
-	// The image-only callback (older policy plumbing) still excludes.
-	r = newPrecursorRig(t, "windows", winTree)
-	r.g.SetRuntime(Runtime{Kill: true, Excluded: func(image string) bool { return strings.HasSuffix(image, `9f2c1e.exe`) }})
-	r.g.ObserveProcess(winStart(3200, 3100, vssadminExe, `vssadmin delete shadows /all /quiet`))
-	if l := r.lines(); len(r.killed) != 0 || len(l) != 1 || !strings.Contains(l[0], "response=excluded") {
-		t.Fatalf("image exclusion: killed %v lines %q", r.killed, l)
 	}
 }
 

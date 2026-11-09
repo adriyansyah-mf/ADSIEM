@@ -118,7 +118,14 @@ After a `boot_tamper` hit the change is undone with `bcdedit` (`recoveryenabled 
 
 Every kill is reported, one line each: `detection=precursor confirmed=true response=killed Precursor=<category> CommandLine=... PrecursorImage=... PrecursorPID=... Image=<initiator> PID=<initiator> ... Killed=<n>` (the alert rule's own suppression keeps one incident one alert). In `report_only` the line says `response=none`, nothing is killed or reverted, and repeats from the same initiator are logged once in 10 minutes. With the policy `off` nothing is done or reported (the process-start telemetry still is).
 
-**Exclusions.** The group policy's exclusions with scope `ransomware` apply. They are matched against the precursor process (image and command line) and every process walked up to the initiator, including the shell running a script and the initiator itself. Kinds `image` (program name or full path), `path_prefix` and `command_line` (case-insensitive substring) work here. `sha256` does not: no hash is computed for process starts. An excluded precursor is not killed or reverted, and is logged with `response=excluded`, once per initiator in 10 minutes. The *Ransomware Activity On Endpoint* rule ignores `response=excluded`.
+**Exclusions.** The group policy's exclusions with scope `ransomware` apply. They are matched against the precursor process and every process walked up to the initiator, including the shell running a script and the initiator itself.
+
+- `image` exclusions count only with a full path (`C:\Program Files\Veeam\veeam.exe`), never a bare program name (anyone can name a binary `veeam.exe`). `path_prefix` exclusions count too.
+- **`command_line` exclusions only cover tools installed in system or program locations.** They are honoured only when the initiator's image is somewhere a standard user cannot write:
+  - Windows: under the Windows directory (not `Windows\Temp`, `Tasks`, `Tracing` or the other user-writable folders) or Program Files, as a full long path;
+  - Linux: under `/usr`, `/bin`, `/sbin`, `/lib*`, `/opt` or `/etc`, and owned by root.
+- Anyone can put the excluded text in a command line, ransomware included. So a program in a user profile, Desktop, Downloads, Temp, `/home`, `/tmp`, `/var/tmp` or `/dev/shm` gets no benefit: it is stopped as usual, and the line says `exclusion_ignored=untrusted_initiator` (and alerts).
+- `sha256` does not apply here: no hash is computed for process starts. An excluded precursor is not killed or reverted, and is logged with `response=excluded`, once per initiator in 10 minutes. The *Ransomware Activity On Endpoint* rule ignores `response=excluded`.
 
 **Safe Mode.** At start, when running as the Windows service with the guard on, the agent registers `SIEMAgent` under `HKLM\SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal` and `\Network` (default value `Service`), so it also runs if ransomware manages to reboot into Safe Mode. Idempotent.
 
@@ -137,7 +144,7 @@ Every kill is reported, one line each: `detection=precursor confirmed=true respo
 
 To allow them, either:
 
-- add a ransomware-scope exclusion to the group's policy. A `command_line` exclusion with the script's path (`/usr/local/sbin/rotate-snapshots.sh`) or the exact command (`vssadmin delete shadows /for=E: /quiet`) matches when that script runs the command or that command runs. An `image` exclusion allows a whole program. Keep command-line values specific: an exclusion matches any command line that contains it.
+- add a ransomware-scope exclusion to the group's policy. A `command_line` exclusion with the script's path (`/usr/local/sbin/rotate-snapshots.sh`) or the exact command (`vssadmin delete shadows /for=E: /quiet`) matches when that script runs the command or that command runs. This works only when the tool runs from a system or program location: a script started by cron, a service or a scheduled task, or a tool in Program Files, `/usr/local/bin` or `/opt`. An `image` exclusion by full path allows a whole program. Keep command-line values specific: an exclusion matches any command line that contains it.
 - or set the group's `ransomware_mode` to `report`, for servers whose admins run these routinely.
 
 ## Configuration
