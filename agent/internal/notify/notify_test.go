@@ -83,3 +83,14 @@ func TestDedupeAndRateLimit(t *testing.T) {
 	var nilNotifier *Notifier
 	nilNotifier.Observe("known_malware", line("z")) // no platform: nothing, no panic
 }
+
+func TestEnsureLogo(t *testing.T) {
+	path := EnsureLogo()
+	if path == "" {
+		t.Fatal("EnsureLogo returned empty path")
+	}
+	if len(LogoPNG) == 0 {
+		t.Fatal("embedded logo.png is empty")
+	}
+}
+

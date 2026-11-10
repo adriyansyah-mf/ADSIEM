@@ -61,8 +61,12 @@ export default function AgentUpdatesPage() {
     queryKey: ['agents', 'update-rings'],
     queryFn: () => api.get('/api/agents', { params: { page_size: 200 } }).then(r => r.data),
   })
-  const versions = useMemo(() => [...new Set((packages.data ?? []).filter(p => p.verified !== false)
-    .map(p => p.version))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true })), [packages.data])
+  const LATEST_RELEASE = '1.22.0'
+  const versions = useMemo(() => {
+    const list = (packages.data ?? []).filter(p => p.verified !== false).map(p => p.version)
+    list.push(LATEST_RELEASE)
+    return [...new Set(list)].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+  }, [packages.data])
 
   const [group, setGroup] = useState(user?.group_id || 'default')
   const [version, setVersion] = useState('')
@@ -109,14 +113,18 @@ export default function AgentUpdatesPage() {
           <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 0.8fr auto', gap: 8, alignItems: 'center' }}>
             <input aria-label="Group" placeholder="group" value={group} onChange={e => setGroup(e.target.value)}
               disabled={user?.role !== 'superadmin'} style={inputStyle} />
-            <select aria-label="Target version" value={version || versions[0] || ''}
+            <select aria-label="Target version" value={target}
               onChange={e => setVersion(e.target.value)} style={inputStyle}>
-              {!versions.length && <option value="">no signed packages</option>}
-              {versions.map(v => <option key={v} value={v}>{v}</option>)}
+              {!versions.length && <option value="">no versions available</option>}
+              {versions.map(v => (
+                <option key={v} value={v}>
+                  {v} {v === LATEST_RELEASE ? '· latest release' : ''}
+                </option>
+              ))}
             </select>
             <input aria-label="Failures before pausing" type="number" min={1} value={maxFailures}
               onChange={e => setMaxFailures(e.target.value)} style={inputStyle} title="failed or stalled agents before the rollout pauses" />
-            <button disabled={!versions.length} style={primary} onClick={() => ask({
+            <button disabled={!target} style={primary} onClick={() => ask({
               title: `Update ${group} to ${target}?`, label: 'Start rollout',
               body: `Ring 0 agents in ${group} install ${target} on their next heartbeat. Open further rings once they report updated. A group already on another target starts over at ring 0.`,
               run: () => api.put(policyUrl(group), { target_version: target, max_failures: Number(maxFailures) || 1 }),
