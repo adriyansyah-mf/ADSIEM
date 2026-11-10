@@ -73,6 +73,8 @@ services:
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/adsiem-https.conf:/etc/nginx/adsiem-https.conf:ro
+      - ./nginx/acme:/var/www/certbot:ro
     deploy:
       resources:
         limits:
