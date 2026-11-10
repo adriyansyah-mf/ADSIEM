@@ -1,7 +1,6 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package notify
 
-// platformShow is nil: there is no desktop to notify (Linux hosts are
-// mostly servers; a tray app would do this per user).
+// platformShow is nil: there is no desktop to notify on unsupported platforms.
 var platformShow func(title, message string) error

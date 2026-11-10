@@ -75,9 +75,21 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
   })
 
   // Windows: the MSI when the server has one, else the zip + install.ps1
-  const pkg = (target === 'windows' ? packages.find(p => p.type === 'msi') : undefined)
-    ?? packages.find(p => p.type === target && (p.arch === 'amd64' || p.arch === 'x86_64'))
-    ?? packages.find(p => p.type === target)
+  const availableVersions = useMemo(() => {
+    const vers = [...new Set(packages.map(p => p.version).filter(Boolean))]
+    return vers.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+  }, [packages])
+
+  const [selectedVersion, setSelectedVersion] = useState<string>('')
+  const activeVersion = selectedVersion || availableVersions[0] || ''
+
+  const filteredPackages = useMemo(() => {
+    return activeVersion ? packages.filter(p => p.version === activeVersion) : packages
+  }, [packages, activeVersion])
+
+  const pkg = (target === 'windows' ? filteredPackages.find(p => p.type === 'msi') : undefined)
+    ?? filteredPackages.find(p => p.type === target && (p.arch === 'amd64' || p.arch === 'x86_64'))
+    ?? filteredPackages.find(p => p.type === target)
   const serverClean = server.trim().replace(/\/+$/, '')
   const command = useMemo(
     () => (pkg && key
@@ -101,11 +113,33 @@ export default function DeployAgentModal({ onClose }: { onClose: () => void }) {
         <div className="space-y-5 text-sm">
           {/* 1. OS */}
           <div>
-            <div className={label_}>1. Operating system</div>
+            <div className="flex items-center justify-between mb-1">
+              <div className={label_}>1. Operating system</div>
+              {availableVersions.length > 0 && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-muted-foreground">Version:</span>
+                  {availableVersions.length === 1 ? (
+                    <span className="font-mono text-muted-foreground font-semibold">v{availableVersions[0]} (latest)</span>
+                  ) : (
+                    <select
+                      value={activeVersion}
+                      onChange={e => setSelectedVersion(e.target.value)}
+                      className="ui-input py-0.5 px-2 text-xs font-mono"
+                    >
+                      {availableVersions.map((v, idx) => (
+                        <option key={v} value={v}>
+                          v{v} {idx === 0 ? '(latest)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {TARGETS.map(t => {
-                const p = (t.value === 'windows' ? packages.find(x => x.type === 'msi') : undefined)
-                  ?? packages.find(x => x.type === t.value)
+                const p = (t.value === 'windows' ? filteredPackages.find(x => x.type === 'msi') : undefined)
+                  ?? filteredPackages.find(x => x.type === t.value)
                 return (
                   <button key={t.value} onClick={() => setTarget(t.value)} disabled={!p}
                     aria-pressed={target === t.value}
