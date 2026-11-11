@@ -10,6 +10,7 @@ import { CaseEvidencePanel } from '@/components/CaseEvidencePanel'
 import { CaseRemediations } from '@/components/CaseRemediations'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
+import CaseGalaxy from '@/components/CaseGalaxy'
 import { api } from '@/api/client'
 import type { Alert } from '@/types'
 import MarkdownNote from '@/components/MarkdownNote'
@@ -230,7 +231,7 @@ export default function CaseDetailPage() {
           </Box>
 
           {/* Campaign: the attacker's IOCs and the hosts they touched */}
-          {(campaign.hosts.length > 0 || campaign.keys.length > 0 || campaign.mergedInto) && (
+          {(campaign.hosts.length > 0 || campaign.keys.length > 0 || campaign.related.length > 0 || campaign.mergedInto) && (
             <Box title="Campaign">
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
                 {campaign.mergedInto && (
@@ -270,14 +271,11 @@ export default function CaseDetailPage() {
                   </div>
                 )}
                 {campaign.related.length > 0 && (
-                  <div style={{ color: 'var(--text-muted)' }}>
-                    Related cases:{' '}
-                    {campaign.related.map((id, i) => (
-                      <span key={id}>
-                        {i > 0 && ', '}
-                        <button onClick={() => navigate(`/cases/${id}`)} style={{ color: 'var(--accent-cyan)', textDecoration: 'underline' }}>{id.slice(0, 8)}</button>
-                      </span>
-                    ))}
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', marginBottom: '6px' }}>
+                      RELATED CASES ({campaign.related.length})
+                    </div>
+                    <CaseGalaxy center={caseData} relatedIds={campaign.related} onOpen={cid => navigate(`/cases/${cid}`)} />
                   </div>
                 )}
               </div>
