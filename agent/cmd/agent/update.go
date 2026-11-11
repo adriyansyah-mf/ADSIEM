@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 
 	"github.com/siem-platform/agent/internal/client"
@@ -39,16 +38,9 @@ func newUpdater(cfg *config.Config, c *client.Client) *update.Updater {
 		if !strings.HasPrefix(path, "/api/agent/update/package/") {
 			return fmt.Errorf("offer names %q, not an update package path", path)
 		}
-		resp, err := c.GetContext(ctx, path)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("server answered %s", resp.Status)
-		}
-		_, err = io.Copy(w, resp.Body)
-		return err
+		// resumes after a dropped connection (Range): a lossy link cut a
+		// 7.5 MB MSI at 48% and the whole attempt failed (2026-11-11)
+		return c.Download(ctx, path, client.WriterErrors(w))
 	}
 	u := update.New(cfg.Agent.StateDir, Version, keys, kind, kindErr, fetch, update.InstallPackage)
 	if !cfg.Update.Disabled {
