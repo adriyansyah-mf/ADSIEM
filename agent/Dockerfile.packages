@@ -4,42 +4,29 @@ FROM golang:1.25-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends clang llvm rpm zip \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+# Go modules and the build cache live in BuildKit cache mounts, so a rebuild
+# after a code change recompiles only what changed instead of every
+# dependency, three times (deb, rpm, Windows).
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY . .
-RUN clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
-    -I internal/procexec/bpf/include \
-    -c internal/procexec/bpf/execve.bpf.c \
-    -o internal/procexec/bpf/execve.bpf.o \
- && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
-    -I internal \
-    -c internal/netwatch/bpf/netwatch.bpf.c \
-    -o internal/netwatch/bpf/netwatch.bpf.o \
- && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
-    -I internal \
-    -c internal/linsensor/bpf/linsensor.bpf.c \
-    -o internal/linsensor/bpf/linsensor.bpf.o \
- && clang -O2 -g -target bpf -D__TARGET_ARCH_x86 \
-    -c internal/prevent/bpf/prevent.bpf.c \
-    -o internal/prevent/bpf/prevent.bpf.o
 # Public keys built into these agents for self-update (base64 ed25519, comma
 # separated). Sign with SIEM_UPDATE_SIGNING_KEY at run time (see CMD).
 ARG UPDATE_KEYS=""
 ENV UPDATE_KEYS=${UPDATE_KEYS}
-RUN go build -o /usr/local/bin/siem-update-sign ./cmd/siem-update-sign
-RUN export VERSION="$(cat VERSION)" \
-    && bash packaging/build-deb.sh >/dev/null \
-    && ARCH=x86_64 bash packaging/build-rpm.sh >/dev/null \
-    && ARCH=amd64 bash packaging/build-windows.sh
-# Serve the release's signed deb/rpm/msi for this version when it exists
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    go build -o /usr/local/bin/siem-update-sign ./cmd/siem-update-sign
+# Serve the release's signed deb/rpm/msi/zip for this version when it exists
 # (packaging/fetch-release.sh): the release workflow built, tested and signed
 # them with a key that stays in GitHub, and their agents trust it, so
-# self-update works with no signing key on this server. The MSI needs WiX on
-# Windows, so it only ever comes from a release; without one the dashboard
-# offers the Windows zip. Without a release the local builds above are served
-# unsigned.
+# self-update works with no signing key on this server. A complete release
+# skips the local build entirely (packaging/build-packages.sh). The MSI needs
+# WiX on Windows, so it only ever comes from a release; without one the
+# dashboard offers the Windows zip. Without a release the local builds are
+# served unsigned.
 ARG AGENT_REPO=adriyansyah-mf/ADSIEM
-RUN sh packaging/fetch-release.sh "$(cat VERSION)" dist/packages
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    sh packaging/build-packages.sh
 # /output is the agent_packages volume. SIEM_UPDATE_SIGNING_KEY in the
 # environment would also sign local builds (packaging/publish-packages.sh);
 # not needed when the release's packages are served.
