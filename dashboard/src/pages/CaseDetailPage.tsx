@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ArrowLeft, Bot } from 'lucide-react'
@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
 import CaseRelationGraph from '@/components/CaseRelationGraph'
 import { api } from '@/api/client'
-import type { Alert } from '@/types'
+import type { Alert, CaseNote } from '@/types'
 import MarkdownNote from '@/components/MarkdownNote'
 import AttackGraph from '@/components/AttackGraph'
 import AlertDetailModal from '@/components/AlertDetailModal'
@@ -100,6 +100,18 @@ export default function CaseDetailPage() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
   const [noteText, setNoteText] = useState('')
+  const [olderNotes, setOlderNotes] = useState<CaseNote[]>([])
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  useEffect(() => { setOlderNotes([]) }, [id])
+  const loadOlderNotes = async (offset: number) => {
+    setLoadingOlder(true)
+    try {
+      const page = await api.get<CaseNote[]>(`/api/cases/${id}/notes`, { params: { offset, limit: 100 } }).then(r => r.data)
+      setOlderNotes(prev => [...prev, ...page])
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
   const [timelineView, setTimelineView] = useState<'graph' | 'linear'>('graph')
   const [showLinkedAlert, setShowLinkedAlert] = useState(false)
 
@@ -155,9 +167,12 @@ export default function CaseDetailPage() {
     return true
   })
   const searchResults = caseData.search_intel?.results ?? []
-  const sortedNotes = [...(caseData.notes ?? [])].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  )
+  // the case carries its newest notes; older ones load a page at a time
+  const seenNotes = new Set<string>()
+  const sortedNotes = [...(caseData.notes ?? []), ...olderNotes]
+    .filter(n => !seenNotes.has(n.id) && !!seenNotes.add(n.id))
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  const notesTotal = Math.max(caseData.notes_total ?? 0, sortedNotes.length)
 
   return (
     <div className="workspace case-page">
@@ -408,6 +423,14 @@ export default function CaseDetailPage() {
                   />
                 </div>
               ))}
+              {sortedNotes.length < notesTotal && (
+                <button
+                  onClick={() => { void loadOlderNotes(sortedNotes.length) }}
+                  disabled={loadingOlder}
+                  style={{ alignSelf: 'center', color: 'var(--accent-cyan)', textDecoration: 'underline', fontSize: '12px' }}>
+                  {loadingOlder ? 'Loading…' : `Showing ${sortedNotes.length} of ${notesTotal} notes — load older`}
+                </button>
+              )}
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
               <textarea

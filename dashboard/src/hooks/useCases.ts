@@ -25,9 +25,10 @@ export function useCases(page = 1, filters: CaseFilters = {}) {
 
 /** Cases whose primary alert is this one (the AI's or an analyst's). */
 export function useAlertCases(alertId: string) {
-  return useQuery<PaginatedResponse<Case>>({
+  // summary: the full form carries every note of every case (hundreds on a campaign case)
+  return useQuery<PaginatedResponse<CaseSummary>>({
     queryKey: ['cases', 'by-alert', alertId],
-    queryFn: () => api.get('/api/cases', { params: { alert_id: alertId, page_size: 5 } }).then(r => r.data),
+    queryFn: () => api.get('/api/cases', { params: { alert_id: alertId, page_size: 5, summary: true } }).then(r => r.data),
   })
 }
 

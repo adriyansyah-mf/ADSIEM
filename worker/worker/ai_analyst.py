@@ -278,6 +278,11 @@ async def _set_alert_verdict(alert_id: str, verdict: str) -> None:
         log.warning("set_alert_verdict_failed", alert_id=alert_id, error=str(exc))
 
 
+# A new case lists at most this many related open cases in its note, and
+# back-links only the newest RELATED_BACKLINK_MAX of them (see _create_case).
+RELATED_NOTE_MAX = 10
+RELATED_BACKLINK_MAX = 5
+
 UEBA_CONTEXT_ANOMALIES = 5
 UEBA_CONTEXT_RELATED_HOURS = 24
 
@@ -415,7 +420,7 @@ async def _active_campaign_cases(group_id: str) -> list[Case]:
         rows = (await db.execute(select(Case).where(
             Case.group_id == group_id,
             Case.status == "open", Case.updated_at >= since,
-        ))).scalars().all()
+        ).order_by(Case.updated_at))).scalars().all()  # oldest first: related_cases ends with the newest
     return [c for c in rows if not (c.ioc_data or {}).get("digest") and not (c.ioc_data or {}).get("merged_into")]
 
 
@@ -776,16 +781,26 @@ async def _create_case_from_verdict(
             is_ai_generated=True,
         )
         db.add(note)
-        for r in related:
-            label = r["family"].replace("_", " ")
+        # One summary note here and a back-link on only the newest related cases:
+        # a busy host has hundreds of open cases, and two notes per related case
+        # (one here, one there) grew case_notes quadratically (~1,400 notes per
+        # new case, ~800 notes per case) and made every case page slow. The full
+        # list stays in ioc_data["related_cases"].
+        if related:
             new_label = (family or "other").replace("_", " ")
+            labels = sorted({r["family"].replace("_", " ") for r in related})
+            listed = "\n".join(f"- [{r['title']}](/cases/{r['case_id']}) ({r['family'].replace('_', ' ')})"
+                               for r in related[::-1][:RELATED_NOTE_MAX])  # newest first
+            more = len(related) - RELATED_NOTE_MAX
             db.add(CaseNote(case_id=case.id, author_id=None, is_ai_generated=True, content=(
-                f"**Related open case** on the same IP/host: [{r['title']}](/cases/{r['case_id']}) ({label})"
-                + (f"\n\n**Escalated:** this case is **{new_label}** after **{label}** on the same target — the earlier "
-                   "activity may have succeeded; severity raised to critical." if escalated else ""))))
-            db.add(CaseNote(case_id=uuid.UUID(r["case_id"]), author_id=None, is_ai_generated=True, content=(
-                f"**New related case** on the same IP/host: [{prefix} {title}](/cases/{case.id}) "
-                f"({new_label})")))
+                f"**Related open case{'s' if len(related) > 1 else ''}** on the same IP/host ({len(related)}):\n{listed}"
+                + (f"\n- … and {more} more (see Related cases)" if more > 0 else "")
+                + (f"\n\n**Escalated:** this case is **{new_label}** after **{', '.join(labels)}** on the same target "
+                   "— the earlier activity may have succeeded; severity raised to critical." if escalated else ""))))
+            for r in related[-RELATED_BACKLINK_MAX:]:
+                db.add(CaseNote(case_id=uuid.UUID(r["case_id"]), author_id=None, is_ai_generated=True, content=(
+                    f"**New related case** on the same IP/host: [{prefix} {title}](/cases/{case.id}) "
+                    f"({new_label})")))
         await db.commit()
         log.info("case_created_by_ai_l1",
                  case_id=str(case.id),

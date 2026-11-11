@@ -304,6 +304,8 @@ export interface Case {
   created_at: string
   updated_at: string
   notes: CaseNote[]
+  /** all notes of the case; `notes` holds the newest page */
+  notes_total?: number
 }
 
 export type CaseSummary = Pick<Case,
