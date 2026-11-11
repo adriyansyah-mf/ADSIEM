@@ -109,7 +109,9 @@ func TestFanotifyEndToEnd(t *testing.T) {
 	}
 	select {
 	case l := <-got:
-		if !strings.Contains(l, "store=ssh_key") || !strings.Contains(l, `/cat"`) {
+		// image is /proc/<pid>/exe, or the comm name when cat already
+		// exited before the event was read.
+		if !strings.Contains(l, "store=ssh_key") || !(strings.Contains(l, `/cat"`) || strings.Contains(l, `image="cat"`)) {
 			t.Fatalf("line = %s", l)
 		}
 	case <-time.After(5 * time.Second):
