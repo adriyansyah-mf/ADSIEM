@@ -1,11 +1,15 @@
 import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Info, KeyRound, ShieldCheck } from 'lucide-react'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
 // Same surfaces, type and controls as the workspace (DESIGN.md): neutral
 // panels, system fonts, the blue action accent, no decorative motion.
+
+// Demo deployment: the account shown on the sign-in page.
+const DEMO_USER = 'admin'
+const DEMO_PASSWORD = 'admin123'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
@@ -44,6 +48,12 @@ export default function LoginPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const useDemo = () => {
+    setUsername(DEMO_USER)
+    setPassword(DEMO_PASSWORD)
+    setError('')
   }
 
   const backToPassword = () => {
@@ -123,6 +133,22 @@ export default function LoginPage() {
               </button>
             )}
           </form>
+
+          {!mfaRequired && (
+            <div className="login-demo" role="note" aria-label="Demo access">
+              <Info size={16} aria-hidden="true" />
+              <div className="login-demo__body">
+                <strong>Demo access</strong>
+                <span>
+                  Username <code>{DEMO_USER}</code> · Password <code>{DEMO_PASSWORD}</code>
+                </span>
+              </div>
+              <button type="button" className="ui-button ui-button--quiet login-demo__fill" onClick={useDemo}
+                disabled={loading}>
+                Use demo account
+              </button>
+            </div>
+          )}
         </div>
 
         <footer className="login-footer">
