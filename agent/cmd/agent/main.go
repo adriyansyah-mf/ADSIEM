@@ -20,6 +20,7 @@ import (
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
+	"github.com/siem-platform/agent/internal/credwatch"
 	"github.com/siem-platform/agent/internal/detect"
 	"github.com/siem-platform/agent/internal/enrollment"
 	"github.com/siem-platform/agent/internal/fim"
@@ -414,6 +415,18 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Warn("linux sensor unavailable, continuing without it", "err", err)
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
+		}
+	}
+
+	// Credential stores (browser passwords, cookies and key, wallets, SSH
+	// keys, cloud tokens) opened by programs that do not own them: fanotify
+	// marks on Linux (Windows reports them from its ETW file sensor).
+	// linux_sensor.disabled_events: [credential] turns it off.
+	if runtime.GOOS == "linux" && !cfg.LinuxSensor.Disabled && !hasString(cfg.LinuxSensor.DisabledEvents, "credential") {
+		if cw, err := credwatch.Start(func(logType, line string) { buf.Push(tailer.Encode(logType, line)) }); err != nil {
+			slog.Warn("credential store watch unavailable, continuing without it", "err", err)
+		} else {
+			stopProducers = append(stopProducers, cw.Stop)
 		}
 	}
 
@@ -971,4 +984,13 @@ func windowsFileFeed(onFile func(linsensor.FileEvent)) func(winsensor.FileEvent)
 		onFile(linsensor.FileEvent{Time: e.Time, PID: e.PID, PPID: e.PPID, Image: e.Image,
 			Comm: filepath.Base(e.Image), Action: e.Action, Path: e.Path, From: e.From})
 	}
+}
+
+func hasString(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }

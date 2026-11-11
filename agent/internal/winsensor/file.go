@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/siem-platform/agent/internal/credwatch"
 	"github.com/siem-platform/agent/internal/etw"
 )
 
@@ -181,6 +182,8 @@ type fileTracker struct {
 	// deferred lines wait for their process's start, which comes through
 	// another session: a short-lived child's file event often arrives first.
 	deferred []deferredLine
+	// cred: credential store opens reported (once per process and store kind)
+	cred *credwatch.Limiter
 }
 
 // fileJoinWindow bounds how long a file or image line waits for its
@@ -208,7 +211,7 @@ func newFileTracker(j *processJoiner, self uint32, longPath func(string) string)
 	return &fileTracker{j: j, self: self, longPath: longPath, now: time.Now,
 		objects: map[string]string{}, writes: map[writeKey]time.Time{}, writeObjects: map[uint64]string{},
 		windows: map[uint32]*fileWindowState{},
-		images:  map[string]time.Time{}}
+		images:  map[string]time.Time{}, cred: credwatch.NewLimiter(0)}
 }
 
 // out is one line for the buffer.
@@ -229,12 +232,13 @@ func (t *fileTracker) file(ev *etw.Event) []out {
 			}
 			t.objects[obj] = name
 		}
+		res := t.credential(ev.PID, name)
 		// An open with FILE_DELETE_ON_CLOSE deletes the file when its last
 		// handle closes, without a DeletePath event.
 		if opts, ok := number(ev, "CreateOptions"); ok && opts&fileDeleteOnClose != 0 && opts&fileDirectoryOp == 0 {
-			return t.emit(ev.PID, "delete", t.long(t.path(name)), "")
+			return append(res, t.emit(ev.PID, "delete", t.long(t.path(name)), "")...)
 		}
-		return nil
+		return res
 	case fileCreateNew:
 		if opts, ok := number(ev, "CreateOptions"); ok && opts&fileDirectoryOp != 0 {
 			return nil
@@ -254,6 +258,34 @@ func (t *fileTracker) file(ev *etw.Event) []out {
 		return t.emit(ev.PID, "delete", t.path(name), "")
 	}
 	return nil
+}
+
+// credential reports an open of a credential store (a browser's passwords,
+// cookies or key, a wallet, an SSH key, cloud tokens) by a program that does
+// not own it (internal/credwatch): what an infostealer, or the payload of a
+// fake recruiter's "coding test", reads first. Every open (reads too) comes
+// as fileCreate, so no session of its own is needed.
+func (t *fileTracker) credential(pid uint32, name string) []out {
+	if name == "" {
+		return nil
+	}
+	path := t.path(name)
+	kind, ok := credwatch.Classify(path)
+	if !ok || !t.cred.Allow(pid, kind) {
+		return nil
+	}
+	var ppid uint32
+	if p := t.j.known[pid]; p != nil {
+		ppid = p.ppid
+	} else if p := t.j.pending[pid]; p != nil {
+		ppid = p.ppid
+	}
+	return t.withOwner(pid, credwatch.LogType, func(image, user string) string {
+		if credwatch.Expected(kind, image) {
+			return "" // the browser opening its own profile, ssh its key
+		}
+		return credwatch.Line(kind, path, image, pid, ppid, user)
+	})
 }
 
 // writeSession takes an event of the guard's own Kernel-File session

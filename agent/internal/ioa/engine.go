@@ -305,8 +305,10 @@ func (e *Engine) handle(ev Event, p *proc, now time.Time, anchor bool) {
 	for q, i := p, 0; q != nil && i < maxAncestors; q, i = q.parent, i+1 {
 		cont = append(cont, e.byRoot[q]...)
 	}
-	// keyed steps: a file a step before named (dropped, then run)
-	if k := eventKey(ev); k != "" {
+	// keyed steps: a file a step before named (dropped, then run, or
+	// handed to an interpreter)
+	keys := eventKeys(ev)
+	for _, k := range keys {
 		cont = append(cont, e.byKey[baseName(k)]...)
 	}
 	seen := make(map[*mark]bool, len(cont))
@@ -323,7 +325,7 @@ func (e *Engine) handle(ev Event, p *proc, now time.Time, anchor bool) {
 			continue
 		}
 		if st.Keyed {
-			if !keyMatch(m.key, eventKey(ev)) {
+			if !keyMatch(m.key, eventKey(ev)) && !(st.Args && anyKeyMatch(m.key, keys)) {
 				continue
 			}
 		} else if !under(p, m.root) {
@@ -420,6 +422,8 @@ func describe(ev Event, step string) string {
 		return fmt.Sprintf("%s: %s %s %s", step, img, ev.Action, baseName(ev.TargetImage))
 	case KindPriv:
 		return fmt.Sprintf("%s: %s %s(%s)", step, img, ev.Action, ev.IDs)
+	case KindCred:
+		return fmt.Sprintf("%s: %s opened %s (%s)", step, img, ev.Path, ev.Action)
 	}
 	return step
 }
@@ -533,6 +537,62 @@ func eventKey(ev Event) string {
 		return normKey(ev.Path)
 	}
 	return ""
+}
+
+// eventKeys: the event's file and, for a process, the paths in its command
+// line (an interpreter runs the dropped file as an argument:
+// python ~/.n2/pay, node C:\Users\a\.npl\x.js).
+func eventKeys(ev Event) []string {
+	var out []string
+	if k := eventKey(ev); k != "" {
+		out = append(out, k)
+	}
+	if ev.Kind == KindProc {
+		for _, a := range argPaths(ev.CommandLine) {
+			out = append(out, normKey(a))
+		}
+	}
+	return out
+}
+
+// argPaths: the command line's arguments that look like paths (quotes
+// respected; --opt=path split at =), at most 32.
+func argPaths(cmd string) []string {
+	var out []string
+	var cur strings.Builder
+	quoted := false
+	flush := func() {
+		t := cur.String()
+		cur.Reset()
+		if i := strings.LastIndexByte(t, '='); i >= 0 && strings.HasPrefix(t, "-") {
+			t = t[i+1:]
+		}
+		if len(out) < 32 && strings.ContainsAny(t, `/\`) {
+			out = append(out, t)
+		}
+	}
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		switch {
+		case c == '"' || c == '\'':
+			quoted = !quoted
+		case (c == ' ' || c == '\t') && !quoted:
+			flush()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	return out
+}
+
+func anyKeyMatch(want string, keys []string) bool {
+	for _, k := range keys {
+		if keyMatch(want, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // keyMatch: got names the captured file. A Linux exec may name it relative

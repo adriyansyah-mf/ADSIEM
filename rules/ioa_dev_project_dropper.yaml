@@ -1,0 +1,17 @@
+title: "IOA: Project code run by an interpreter dropped a hidden program and ran it"
+id: rule-ioa-dev-project-dropper
+description: >-
+  An interpreter running a project (node, npm, python, bun, deno) wrote a script or program into a hidden folder of the home directory or a temp folder, and it was then run (as a program or as the interpreter's argument): the second stage of a fake recruiter's coding test or a poisoned package. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_dev_project_dropper
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.007
