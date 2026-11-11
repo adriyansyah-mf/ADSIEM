@@ -1,0 +1,17 @@
+title: "IOA: Program from a temp folder run by a user became root"
+id: rule-ioa-tmp-exec-root
+description: >-
+  A program a non-root user ran from /tmp, /dev/shm or /var/tmp set its user or group id to root: a local privilege escalation exploit. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_tmp_exec_root
+  condition: selection
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1068

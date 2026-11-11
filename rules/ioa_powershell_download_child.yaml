@@ -1,0 +1,17 @@
+title: "IOA: Obfuscated or download PowerShell reached the internet and started a program"
+id: rule-ioa-powershell-download-child
+description: >-
+  PowerShell started with encoded, hidden or download-cradle arguments reached the internet, then started a program or wrote one. Admin tooling can look like this. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_powershell_download_child
+  condition: selection
+level: medium
+tags:
+  - attack.execution
+  - attack.t1059.001

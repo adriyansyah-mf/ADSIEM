@@ -1,0 +1,17 @@
+title: "IOA: Program started from a shell or a user folder read LSASS memory"
+id: rule-ioa-lsass-access-from-shell
+description: >-
+  A program started from a shell, a script host or a user-writable folder opened LSASS with memory read access: credential dumping. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_lsass_access_from_shell
+  condition: selection
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.001

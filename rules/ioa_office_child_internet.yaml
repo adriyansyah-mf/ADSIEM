@@ -1,0 +1,17 @@
+title: "IOA: Office app started a script host that reached the internet"
+id: rule-ioa-office-child-internet
+description: >-
+  An Office application started a script host or LOLBin (PowerShell, cmd, mshta, rundll32, ...) and that process tree connected to a public address: the usual shape of a malicious document. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_office_child_internet
+  condition: selection
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1566.001

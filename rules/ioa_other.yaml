@@ -1,0 +1,28 @@
+title: "IOA: Behaviour chain detected"
+id: rule-ioa-other
+description: >-
+  An IOA chain from an agent rule this server has no dedicated rule for
+  (a newer agent). ioa.title, ioa.severity and ioa.chain describe it.
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+  known:
+    ioa.rule:
+      - ioa_office_child_internet
+      - ioa_office_drop_exec
+      - ioa_script_host_download_exec
+      - ioa_powershell_download_child
+      - ioa_lsass_access_from_shell
+      - ioa_userdir_exe_injection
+      - ioa_download_then_exec
+      - ioa_webserver_shell
+      - ioa_reverse_shell
+      - ioa_tmp_exec_injection
+      - ioa_tmp_exec_root
+  condition: selection and not known
+level: high
+tags:
+  - attack.execution

@@ -22,7 +22,7 @@ DEFAULT_GROUP = "default"
 CACHE_SECONDS = 30.0
 MAX_EXCLUSIONS = 500
 
-Scope = Literal["prevention", "malware", "yara", "ransomware", "script", "ml", "alerts"]
+Scope = Literal["prevention", "malware", "yara", "ransomware", "script", "ml", "ioa", "alerts"]
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _HHMM = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _SCHEDULE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun|daily) ([01][0-9]|2[0-3]):[0-5][0-9]$")
@@ -67,6 +67,9 @@ class PolicySettings(BaseModel):
     # static ML on scanned files (EMBER model for PE, heuristic for ELF):
     # block quarantines files over the malicious threshold
     ml_action: Literal["off", "detect", "block"] = "detect"
+    # indicators of attack: behaviour chains in a process tree (agent/internal/ioa),
+    # reported as alerts; detect only for now (nothing is stopped)
+    ioa: Literal["off", "detect"] = "detect"
     # scheduled file scans (agent local time): quick every day at HH:MM;
     # full on "<mon..sun> HH:MM" or "daily HH:MM". "" is off.
     quick_scan_time: str = Field(default="", max_length=32)

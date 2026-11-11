@@ -75,6 +75,13 @@ def test_validation():
     p = agent_policy.PolicySettings.model_validate({"ml_action": "block", "exclusions": [
         {"kind": "path_prefix", "value": "C:\\Build\\", "scopes": ["ml"]}]})
     assert p.ml_action == "block" and p.exclusions[0].scopes == ["ml"]
+    # IOA: detect unless off; no block mode yet; its own exclusion scope
+    assert agent_policy.PolicySettings.model_validate({}).ioa == "detect"
+    with pytest.raises(ValidationError):
+        agent_policy.PolicySettings.model_validate({"ioa": "block"})
+    p = agent_policy.PolicySettings.model_validate({"ioa": "off", "exclusions": [
+        {"kind": "image", "value": "sccm.exe", "scopes": ["ioa"]}]})
+    assert p.ioa == "off" and p.exclusions[0].scopes == ["ioa"]
 
 
 async def test_policy_api_scope_and_fallback(api):

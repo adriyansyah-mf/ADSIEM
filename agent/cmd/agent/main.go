@@ -27,6 +27,7 @@ import (
 	"github.com/siem-platform/agent/internal/fullscan"
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
+	"github.com/siem-platform/agent/internal/ioa"
 	"github.com/siem-platform/agent/internal/linsensor"
 	"github.com/siem-platform/agent/internal/malhash"
 	"github.com/siem-platform/agent/internal/memscan"
@@ -257,11 +258,28 @@ func run(configPath string, stop <-chan struct{}) {
 	var notifier *notify.Notifier
 	if n := notify.New(); n != nil && !cfg.Notify.Disabled {
 		notifier = n
-		buf.SetObserver(func(entry string) {
-			logType, _, line := tailer.Decode(entry)
-			n.Observe(logType, line)
-		})
 	}
+	// Indicators of attack: behaviour chains over the sensors' lines
+	// (Office → script host → internet, web server → shell → recon, ...).
+	// Detect only; the group policy's ioa setting turns it off.
+	ioaEngine := ioa.New(ioa.Options{
+		Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		Mode: func() string { return polStore.Current().Settings.IOA },
+		Excluded: func(image, commandLine string) bool {
+			return polStore.Current().Settings.Excluded(policy.ScopeIOA,
+				policy.Match{Image: image, Path: image, CommandLine: commandLine})
+		},
+		Self: uint32(os.Getpid()),
+	})
+	ioaEngine.Start()
+	slog.Info("ioa engine started", "rules", ioaEngine.RuleCount())
+	buf.SetObserver(func(entry string) {
+		ioaEngine.Observe(entry)
+		if notifier != nil {
+			logType, _, line := tailer.Decode(entry)
+			notifier.Observe(logType, line)
+		}
+	})
 	mgr := tailer.NewManager(buf)
 	if durable != nil && durable.journal != nil {
 		mgr = tailer.NewDurableManager(durable.journal, durable.publisher) // files resume from durable cursors
@@ -745,7 +763,7 @@ func wait(ctx context.Context, d time.Duration) bool {
 var urgentLogTypes = map[string]bool{
 	malhash.LogType: true, webblock.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
 	ransomguard.LogType: true, mlscan.LogType: true, "local_detection": true, "linux_sensor_health": true,
-	scriptscan.LogType: true,
+	scriptscan.LogType: true, ioa.LogType: true,
 }
 
 func isUrgentEntry(entry string) bool {
