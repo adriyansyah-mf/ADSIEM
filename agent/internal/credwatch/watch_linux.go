@@ -34,7 +34,11 @@ type Watcher struct {
 
 // Start marks the stores and reports until Stop. push sends one line.
 func Start(push func(logType, line string)) (*Watcher, error) {
-	fd, err := unix.FanotifyInit(unix.FAN_CLASS_NOTIF|unix.FAN_CLOEXEC, unix.O_RDONLY|unix.O_LARGEFILE|unix.O_CLOEXEC)
+	// FAN_NONBLOCK: os.NewFile then puts the fd in the runtime poller, so
+	// Close wakes a Read waiting for events (a blocking fd's Read never
+	// returns on Close and Stop would hang).
+	fd, err := unix.FanotifyInit(unix.FAN_CLASS_NOTIF|unix.FAN_CLOEXEC|unix.FAN_NONBLOCK,
+		unix.O_RDONLY|unix.O_LARGEFILE|unix.O_CLOEXEC)
 	if err != nil {
 		return nil, fmt.Errorf("fanotify: %w", err)
 	}
