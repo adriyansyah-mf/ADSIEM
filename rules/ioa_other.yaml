@@ -21,6 +21,9 @@ detection:
       - ioa_webserver_shell
       - ioa_reverse_shell
       - ioa_tmp_exec_injection
+      - ioa_dev_project_dropper
+      - ioa_dev_odd_port
+      - ioa_dev_credential_read
       - ioa_tmp_exec_root
   condition: selection and not known
 level: high

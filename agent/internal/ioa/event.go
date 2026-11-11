@@ -16,6 +16,7 @@ const (
 	KindAccess                  // another process's memory opened, read or written (or ptrace)
 	KindThread                  // a thread created in another process
 	KindPriv                    // a set*id / capset call (Linux)
+	KindCred                    // a credential store opened by a program that does not own it (credwatch)
 )
 
 // Event is one sensor line, the same shape on Linux and Windows.
@@ -48,6 +49,7 @@ var logTypes = map[string]bool{
 	"windows_etw_access": true,
 	"linux_process_exec": true, "linux_network_connect": true, "linux_file_event": true,
 	"linux_process_access": true, "linux_ptrace": true, "linux_privilege_change": true,
+	"credential_access": true,
 }
 
 // Wanted reports whether the engine reads lines of logType.
@@ -181,6 +183,9 @@ func normalize(logType, line string) (Event, bool) {
 	case "linux_process_access", "linux_ptrace":
 		return Event{Kind: KindAccess, PID: u32(f["PID"]), PPID: u32(f["PPID"]), Image: f["Image"], User: f["User"],
 			TargetPID: u32(f["TargetPID"]), TargetImage: f["TargetImage"], Action: f["action"]}, true
+	case "credential_access":
+		return Event{Kind: KindCred, PID: u32(f["pid"]), PPID: u32(f["ppid"]), Image: f["image"], User: f["user"],
+			Path: f["target"], Action: f["store"]}, true
 	case "linux_privilege_change":
 		return Event{Kind: KindPriv, PID: u32(f["PID"]), PPID: u32(f["PPID"]), Image: f["Image"], User: f["User"],
 			ParentImage: f["ParentImage"], Action: f["action"], IDs: f["IDs"]}, true

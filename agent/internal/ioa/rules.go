@@ -36,6 +36,9 @@ type Step struct {
 	// Keyed: matched by the captured file (a process started from it),
 	// whichever process it comes from.
 	Keyed bool
+	// Args (with Keyed): a process whose command line names the captured
+	// file matches too (python ~/.n2/pay).
+	Args bool
 }
 
 // ─── matching helpers ────────────────────────────────────────────────
@@ -151,6 +154,70 @@ func execFile(p string) bool {
 }
 
 func lsass(p string) bool { return baseName(p) == "lsass.exe" }
+
+// devInterpreters run a developer's project: what a fake recruiter's
+// "coding test" (npm install, npm start, python main.py) runs as.
+var devInterpreters = set("node", "node.exe", "nodejs", "bun", "bun.exe", "deno", "deno.exe", "python*", "pythonw.exe",
+	"py.exe", "pip*", "ruby", "ruby.exe", "npm", "npx", "yarn", "pnpm")
+
+// hiddenHome: a dot folder directly in a user's home (~/.n2/, C:\Users\a\.npl\),
+// where a dropped stage hides; build and package caches excluded.
+func hiddenHome(p string) bool {
+	l := strings.ToLower(strings.ReplaceAll(p, `\`, "/"))
+	var rest string
+	switch {
+	case strings.HasPrefix(l, "/home/"):
+		rest = l[len("/home/"):]
+	case strings.HasPrefix(l, "/root/"):
+		rest = "root/" + l[len("/root/"):]
+	case len(l) > 9 && l[1] == ':' && strings.HasPrefix(l[2:], "/users/"):
+		rest = l[len("c:/users/"):]
+	default:
+		return false
+	}
+	i := strings.IndexByte(rest, '/')
+	if i < 0 || i+1 >= len(rest) || rest[i+1] != '.' {
+		return false
+	}
+	dir := rest[i+1:]
+	if j := strings.IndexByte(dir, '/'); j >= 0 {
+		dir = dir[:j]
+	} else {
+		return false // a dotfile in home, not in a dot folder
+	}
+	switch dir {
+	case ".cache", ".npm", ".yarn", ".pnpm-store", ".local", ".cargo", ".rustup", ".m2", ".gradle", ".nvm",
+		".pyenv", ".vscode", ".vscode-server", ".cursor", ".config", ".mozilla", ".gnupg", ".ssh", ".docker",
+		".kube", ".bun", ".deno", ".dotnet", ".nuget", ".android", ".gem", ".bundle", ".rbenv", ".sdkman",
+		".conda", ".ipython", ".jupyter", ".node-gyp", ".electron", ".expo", ".rye", ".poetry", ".virtualenvs",
+		".git", ".idea", ".continue", ".codeium", ".copilot", ".wdm", ".matplotlib", ".pki", ".thumbnails":
+		return false
+	}
+	return true
+}
+
+// buildTemp: temp folders package managers and build tools run their own
+// code from (pip builds an sdist's setup.py, node-gyp, PyInstaller).
+func buildTemp(p string) bool {
+	return hasAny(p, "/pip-", `\pip-`, "/npm-", `\npm-`, "node-gyp", "/go-build", `\go-build`, "_mei", "esbuild",
+		"/tmp/tmp", "/.tmp", "/yarn--", `\yarn--`, "/bunx-", "/uv-", `\uv-`, "/poetry-", "/pyright")
+}
+
+// scriptOrProgram: a file an interpreter or the loader can run.
+func scriptOrProgram(p string) bool {
+	if execFile(p) {
+		return true
+	}
+	return hasAny(strings.ToLower(p), ".py", ".js", ".mjs", ".cjs", ".ps1", ".sh")
+}
+
+// devPorts: where a project normally connects (web, git, DNS, NTP, the
+// usual databases and queues); anything else from an interpreter running a
+// project is worth a look (BeaverTail-style stealers use 1224, 1244, 1245).
+var devPorts = map[int]bool{80: true, 443: true, 8080: true, 8443: true, 22: true, 53: true, 123: true, 853: true,
+	9418: true, 5432: true, 3306: true, 27017: true, 6379: true, 5672: true, 5671: true, 9092: true, 9093: true,
+	9200: true, 9243: true, 11211: true, 1433: true, 1521: true, 25: true, 465: true, 587: true, 993: true,
+	995: true, 6443: true, 2376: true, 4222: true, 7687: true, 8000: true, 8081: true, 3478: true}
 
 const (
 	procVMRead       = 0x0010
@@ -303,6 +370,38 @@ func Rules() []*Rule {
 					}
 					return false
 				}},
+			},
+		},
+		{
+			ID: "ioa_dev_project_dropper", Title: "Project code run by an interpreter dropped a hidden program and ran it",
+			Severity: "high", Tactic: "execution", Technique: "T1059.007", Window: 15 * time.Minute,
+			Steps: []Step{
+				{Name: "project interpreter", Kinds: KindProc, Match: func(ev *Event, _ *proc) bool { return in(devInterpreters, ev.Image) }},
+				{Name: "dropped", Kinds: KindFile, Capture: path, Match: func(ev *Event, _ *proc) bool {
+					return (hiddenHome(ev.Path) || userWritable(ev.Path)) && !buildTemp(ev.Path) && scriptOrProgram(ev.Path) &&
+						!hasAny(ev.Path, "node_modules", "site-packages", "__pycache__")
+				}},
+				{Name: "ran it", Kinds: KindProc, Keyed: true, Args: true},
+			},
+		},
+		{
+			ID: "ioa_dev_odd_port", Title: "Project interpreter connected to a public address on an unusual port",
+			Severity: "medium", Tactic: "command-and-control", Technique: "T1571", Window: 30 * time.Minute,
+			Steps: []Step{
+				{Name: "project interpreter", Kinds: KindProc, Match: func(ev *Event, _ *proc) bool { return in(devInterpreters, ev.Image) }},
+				{Name: "unusual port", Kinds: KindNet, Match: func(ev *Event, _ *proc) bool {
+					return ev.Public && ev.DestPort > 0 && !devPorts[ev.DestPort]
+				}},
+			},
+		},
+		{
+			ID: "ioa_dev_credential_read", Title: "Project interpreter or user-folder program read a credential store",
+			Severity: "high", Tactic: "credential-access", Technique: "T1555.003", Window: 30 * time.Minute,
+			Steps: []Step{
+				{Name: "interpreter or user-folder program", Kinds: KindProc, Match: func(ev *Event, _ *proc) bool {
+					return in(devInterpreters, ev.Image) || userWritable(ev.Image) || hiddenHome(ev.Image)
+				}},
+				{Name: "credential store", Kinds: KindCred},
 			},
 		},
 		{

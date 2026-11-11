@@ -196,3 +196,31 @@ func TestFileLineWaitsForItsProcess(t *testing.T) {
 		t.Fatalf("nothing should be left: %v", got)
 	}
 }
+
+func TestCredentialStoreOpens(t *testing.T) {
+	tr, _ := newTestTracker()
+	tr.j.remember(&process{pid: 30, ppid: 7, image: `C:\Program Files\nodejs\node.exe`, user: `CORP\alice`})
+	tr.j.remember(&process{pid: 31, image: `C:\Program Files\Google\Chrome\Application\chrome.exe`})
+	login := vol + `\Users\alice\AppData\Local\Google\Chrome\User Data\Default\Login Data`
+	got := tr.file(kf(fileCreate, 30, "FileObject", "0x1", "FileName", login))
+	want := `event=credential_access store=browser_passwords target="C:\\Users\\alice\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Login Data" image="C:\\Program Files\\nodejs\\node.exe" pid=30 ppid=7 user="CORP\\alice"`
+	if len(got) != 1 || got[0].logType != "credential_access" || got[0].line != want {
+		t.Fatalf("node opening Login Data = %v\nwant %s", got, want)
+	}
+	// the same process and kind again: once per window
+	if got := tr.file(kf(fileCreate, 30, "FileObject", "0x2", "FileName", login)); got != nil {
+		t.Fatalf("repeat = %v", got)
+	}
+	// Chrome opening its own profile: nothing
+	if got := tr.file(kf(fileCreate, 31, "FileObject", "0x3", "FileName", login)); got != nil {
+		t.Fatalf("chrome = %v", got)
+	}
+	// an ordinary file: nothing
+	if got := tr.file(kf(fileCreate, 30, "FileObject", "0x4", "FileName", vol+`\Users\alice\project\index.js`)); got != nil {
+		t.Fatalf("project file = %v", got)
+	}
+	// the agent itself: nothing
+	if got := tr.file(kf(fileCreate, 99, "FileObject", "0x5", "FileName", vol+`\Users\alice\.ssh\id_rsa`)); got != nil {
+		t.Fatalf("agent = %v", got)
+	}
+}
