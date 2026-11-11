@@ -93,4 +93,3 @@ func TestEnsureLogo(t *testing.T) {
 		t.Fatal("embedded logo.png is empty")
 	}
 }
-
