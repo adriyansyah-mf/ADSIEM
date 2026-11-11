@@ -1,0 +1,17 @@
+title: "IOA: Web server started a shell that ran recon or reached out"
+id: rule-ioa-webserver-shell
+description: >-
+  A web server process started a shell that then ran recon tools, connected to a public address or wrote a program: a web shell. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_webserver_shell
+  condition: selection
+level: high
+tags:
+  - attack.persistence
+  - attack.t1505.003

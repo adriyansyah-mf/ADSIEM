@@ -1,0 +1,32 @@
+# Indicators of attack from the agent (agent/internal/ioa): an ordered chain
+# of behaviour in one process tree (Office → script host → internet, web
+# server → shell → recon, a downloaded file run, ...). Linux and Windows.
+# action: detected (detect mode; nothing was stopped).
+name: ioa_detection
+log_type: ioa_detection
+type: kv
+priority: 3
+enabled: true
+match: 'event=ioa '
+fields:
+  ioa.action: action
+  ioa.rule: rule
+  ioa.severity: severity
+  ioa.tactic: tactic
+  ioa.technique: technique
+  ioa.title: title
+  ioa.chain: chain
+  process.executable: image
+  Image: image
+  process.pid: pid
+  process.command_line: command_line
+  CommandLine: command_line
+  user.name: user
+  ioa.anchor_image: anchor_image
+  ioa.anchor_pid: anchor_pid
+  ioa.anchor_command_line: anchor_command_line
+  process.parent.executable: parent_image
+  ParentImage: parent_image
+static_fields:
+  event.category: intrusion_detection
+  event.action: ioa

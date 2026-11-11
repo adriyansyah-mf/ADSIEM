@@ -1,0 +1,17 @@
+title: "IOA: Downloader wrote a program that was then run"
+id: rule-ioa-download-then-exec
+description: >-
+  A downloader (certutil, bitsadmin, curl, wget, ...) wrote a file to a user-writable or temp folder and that file was then run. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_download_then_exec
+  condition: selection
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1105

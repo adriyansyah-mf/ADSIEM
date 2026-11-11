@@ -1,0 +1,17 @@
+title: "IOA: Reverse shell: a shell or interpreter with socket arguments connected out"
+id: rule-ioa-reverse-shell
+description: >-
+  A shell or interpreter started with socket arguments (/dev/tcp, nc -e, pty.spawn, TCPClient, ...) and connected out. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_reverse_shell
+  condition: selection
+level: critical
+tags:
+  - attack.execution
+  - attack.t1059

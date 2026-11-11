@@ -117,8 +117,12 @@ try {
         eventcreate /T INFORMATION /ID 999 /L APPLICATION /SO SIEMSmoke /D $marker | Out-Null
         Start-Sleep 5
         if (Test-Path (Join-Path $mockOut $received)) {
+            # The marker is also in eventcreate's own command line, which the
+            # Security log (4688, auditing on) can ship first: take the
+            # Application event.
             $line = Get-Content (Join-Path $mockOut $received) | ConvertFrom-Json |
-                Where-Object { $_.raw_message -like "*$marker*" } | Select-Object -First 1
+                Where-Object { $_.raw_message -like "*$marker*" -and $_.log_type -eq "windows_application" } |
+                Select-Object -First 1
         }
     }
     if ($Durable) {

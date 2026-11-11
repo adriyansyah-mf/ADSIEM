@@ -33,6 +33,8 @@ const (
 	ScopeRansomware = "ransomware"
 	ScopeScript     = "script"
 	ScopeML         = "ml"
+	// ScopeIOA: the behaviour chains of internal/ioa.
+	ScopeIOA = "ioa"
 )
 
 // Exclusion: Kind path_prefix, image (full path, or a file name in any
@@ -55,6 +57,9 @@ type Settings struct {
 	// off, detect or block (quarantine malicious files); empty (a server
 	// from before it) is detect.
 	MLAction string `json:"ml_action"`
+	// IOA: behaviour chains (internal/ioa): off or detect; empty (a server
+	// from before it) is detect.
+	IOA string `json:"ioa"`
 	// QuickScanTime "HH:MM" (every day) and FullScanSchedule "<day> HH:MM"
 	// or "daily HH:MM": scheduled file scans (internal/fullscan); "" is off.
 	QuickScanTime    string      `json:"quick_scan_time"`
@@ -73,7 +78,7 @@ type Policy struct {
 // before policies existed.
 func Default() *Policy {
 	return &Policy{Group: "built-in", Settings: Settings{PreventionEnabled: true, YaraOnAccess: true,
-		RansomwareMode: "stop", NotifyUser: true, ScriptScan: "detect", MLAction: "detect"}}
+		RansomwareMode: "stop", NotifyUser: true, ScriptScan: "detect", MLAction: "detect", IOA: "detect"}}
 }
 
 // fold: Windows paths compare case-insensitively.

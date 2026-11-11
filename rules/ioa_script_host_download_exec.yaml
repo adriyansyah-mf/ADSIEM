@@ -1,0 +1,17 @@
+title: "IOA: Script host reached the internet and started a program"
+id: rule-ioa-script-host-download-exec
+description: >-
+  wscript, cscript or mshta ran a script from a user folder or a URL, reached the internet and started a program. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_script_host_download_exec
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.t1059.005

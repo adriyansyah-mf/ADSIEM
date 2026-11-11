@@ -1,0 +1,17 @@
+title: "IOA: Program from a temp folder attached to or wrote into another process"
+id: rule-ioa-tmp-exec-injection
+description: >-
+  A program run from /tmp, /dev/shm or /var/tmp attached to (ptrace) or wrote into another process's memory. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_tmp_exec_injection
+  condition: selection
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1055

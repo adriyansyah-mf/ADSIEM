@@ -4,7 +4,7 @@ import { Loader2, Plus, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-reac
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 
-type Scope = 'prevention' | 'malware' | 'yara' | 'ransomware' | 'script' | 'ml' | 'alerts'
+type Scope = 'prevention' | 'malware' | 'yara' | 'ransomware' | 'script' | 'ml' | 'ioa' | 'alerts'
 type Kind = 'path_prefix' | 'image' | 'sha256' | 'command_line'
 
 interface Exclusion { kind: Kind; value: string; scopes: Scope[]; comment: string }
@@ -18,6 +18,7 @@ interface Settings {
   notify_user: boolean
   script_scan: 'off' | 'detect' | 'block'
   ml_action: 'off' | 'detect' | 'block'
+  ioa: 'off' | 'detect'
   quick_scan_time: string
   full_scan_schedule: string
   exclusions: Exclusion[]
@@ -41,6 +42,7 @@ const SCOPES: { value: Scope; label: string }[] = [
   { value: 'ransomware', label: 'Ransomware' },
   { value: 'script', label: 'Script scanning' },
   { value: 'ml', label: 'Static ML' },
+  { value: 'ioa', label: 'Behaviour (IOA)' },
   { value: 'alerts', label: 'Alerts' },
 ]
 
@@ -181,6 +183,17 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
           </select>
           <span className="block text-xs text-muted-foreground">
             Scores Windows programs (PE) with a model trained on EMBER and Linux programs (ELF) with heuristics, in the YARA watched folders. Exclude false positives with the Static ML scope.
+          </span>
+        </label>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">Behaviour chains (IOA)</span>
+          <select value={s.ioa ?? 'detect'} onChange={e => set({ ioa: e.target.value as Settings['ioa'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="detect">Detect: alert only</option>
+            <option value="off">Off</option>
+          </select>
+          <span className="block text-xs text-muted-foreground">
+            Follows a process tree for attack chains (Office starting PowerShell that reaches the internet, a web server's shell running recon, a downloaded file being run). Nothing is stopped yet. Exclude false positives with the Behaviour (IOA) scope.
           </span>
         </label>
         <label className="rounded border border-border p-3 space-y-1">

@@ -1,0 +1,17 @@
+title: "IOA: Program from a user folder injected into another process"
+id: rule-ioa-userdir-exe-injection
+description: >-
+  A program running from a user-writable folder created a thread in, or opened for write and thread creation, another program. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_userdir_exe_injection
+  condition: selection
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1055

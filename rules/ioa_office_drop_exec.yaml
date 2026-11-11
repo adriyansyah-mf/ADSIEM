@@ -1,0 +1,17 @@
+title: "IOA: Office app wrote a program that was then run"
+id: rule-ioa-office-drop-exec
+description: >-
+  An Office application wrote an executable or script file and that file was then started: a document that drops its payload. Reported by the agent's IOA engine in detect mode
+  (ioa.chain lists each step).
+logsource:
+  product: ioa
+  service: detection
+detection:
+  selection:
+    event.action: ioa
+    ioa.rule: ioa_office_drop_exec
+  condition: selection
+level: high
+tags:
+  - attack.execution
+  - attack.t1204.002
