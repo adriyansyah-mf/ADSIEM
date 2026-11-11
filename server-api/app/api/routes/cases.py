@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 from app.core.database import get_db
@@ -42,11 +43,24 @@ async def _push_feedback_reindex(feedback_id: str) -> None:
     except Exception as exc:
         structlog.get_logger().warning("feedback_reindex_push_failed", feedback_id=feedback_id, error=str(exc))
 
-def _case_q(group_filter):
-    q = select(Case).options(selectinload(Case.notes))
-    if group_filter:
-        q = q.where(Case.group_id == group_filter)
-    return q
+# A campaign case can carry hundreds of AI notes; the case page gets the newest
+# CASE_NOTES_LIMIT and pages older ones through GET /api/cases/{id}/notes.
+CASE_NOTES_LIMIT = 100
+
+
+async def _case_out(db: AsyncSession, case: Case) -> CaseOut:
+    notes = (await db.execute(
+        select(CaseNote).where(CaseNote.case_id == case.id)
+        .order_by(CaseNote.created_at.desc(), CaseNote.id.desc()).limit(CASE_NOTES_LIMIT)
+    )).scalars().all()
+    total = (await db.execute(
+        select(func.count()).select_from(CaseNote).where(CaseNote.case_id == case.id)
+    )).scalar_one()
+    set_committed_value(case, "notes", list(notes))  # no lazy load of every note
+    out = CaseOut.model_validate(case)
+    out.notes_total = total
+    return out
+
 
 @router.get("/api/cases", response_model=PaginatedResponse)
 async def list_cases(
@@ -151,9 +165,9 @@ async def create_case(
                      + (f", host {alert.hostname}" if alert.hostname else "") + ")."),
         ))
     await db.commit()
-    case = await fetch_scoped(db, Case, case.id, None, options=[selectinload(Case.notes)], detail="Case not found")
+    case = await fetch_scoped(db, Case, case.id, None, detail="Case not found")
     background.add_task(audit_log, db, current_user.id, "case_created", "case", str(case.id))
-    return CaseOut.model_validate(case)
+    return await _case_out(db, case)
 
 @router.get("/api/cases/{case_id}", response_model=CaseOut)
 async def get_case(
@@ -162,11 +176,28 @@ async def get_case(
     current_user: Annotated[User, Depends(get_current_user)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
 ):
-    result = await db.execute(select(Case).options(selectinload(Case.notes)).where(Case.id == case_id))
-    case = result.scalar_one_or_none()
+    case = (await db.execute(select(Case).where(Case.id == case_id))).scalar_one_or_none()
     if not case or (group_filter and case.group_id != group_filter):
         raise HTTPException(status_code=404, detail="Case not found")
-    return CaseOut.model_validate(case)
+    return await _case_out(db, case)
+
+
+@router.get("/api/cases/{case_id}/notes", response_model=list[CaseNoteOut])
+async def list_case_notes(
+    case_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(CASE_NOTES_LIMIT, ge=1, le=500),
+):
+    """Notes newest first, a page at a time."""
+    await fetch_scoped(db, Case, case_id, group_filter, detail="Case not found")
+    notes = (await db.execute(
+        select(CaseNote).where(CaseNote.case_id == case_id)
+        .order_by(CaseNote.created_at.desc(), CaseNote.id.desc()).offset(offset).limit(limit)
+    )).scalars().all()
+    return [CaseNoteOut.model_validate(n) for n in notes]
 
 @router.put("/api/cases/{case_id}", response_model=CaseOut)
 async def update_case(
@@ -176,10 +207,7 @@ async def update_case(
     current_user: Annotated[User, Depends(require_permission("cases:manage"))],
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
-    case = await fetch_scoped(
-        db, Case, case_id, group_filter,
-        options=[selectinload(Case.notes)], detail="Case not found",
-    )
+    case = await fetch_scoped(db, Case, case_id, group_filter, detail="Case not found")
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(case, field, value)
     await db.commit()
@@ -187,7 +215,7 @@ async def update_case(
     background.add_task(audit_log, db, current_user.id, "case_updated", "case", str(case_id))
     if body.status in ("resolved", "closed"):
         background.add_task(_push_rag_reindex, str(case_id))
-    return CaseOut.model_validate(case)
+    return await _case_out(db, case)
 
 @router.post("/api/cases/{case_id}/escalate", response_model=CaseOut)
 async def escalate_case(
@@ -198,16 +226,13 @@ async def escalate_case(
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
 ):
     from datetime import datetime
-    case = await fetch_scoped(
-        db, Case, case_id, group_filter,
-        options=[selectinload(Case.notes)], detail="Case not found",
-    )
+    case = await fetch_scoped(db, Case, case_id, group_filter, detail="Case not found")
     case.status = "escalated"
     case.escalated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(case)
     background.add_task(audit_log, db, current_user.id, "case_escalated", "case", str(case_id))
-    return CaseOut.model_validate(case)
+    return await _case_out(db, case)
 
 @router.post("/api/cases/{case_id}/notes", response_model=CaseNoteOut, status_code=201)
 async def add_note(

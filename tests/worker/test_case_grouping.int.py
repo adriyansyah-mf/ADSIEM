@@ -222,3 +222,24 @@ def test_a_host_only_case_stops_collecting_once_it_is_old(db):
     assert _run(ai_analyst._find_campaign_case([], "demo-siem", "g6")) == (fresh, [])
     case, _ = _case(fresh)
     assert case.ioc_data["related_cases"] == [old]
+
+
+def test_related_cases_get_one_summary_note_not_one_note_each(db):
+    # A busy host had hundreds of open cases and every new case wrote two notes
+    # per related case (one here, one there): ~1,400 notes per new case.
+    from worker import ai_analyst
+
+    older = [_new(ai_analyst, f"Probe {i}", "reconnaissance", "busy01", [f"ip:203.0.113.{i}"], "g7") for i in range(20)]
+    related = _run(ai_analyst._related_open_cases(None, "busy01", "g7"))
+    assert [r["case_id"] for r in related] == older  # oldest first, newest last
+
+    new = _new(ai_analyst, "Web Shell Upload", "initial_access", "busy01", ["ip:198.51.100.9"], "g7", related=related)
+    case, notes = _case(new)
+    assert case.ioc_data["related_cases"] == older  # the full list is kept
+    assert len(notes) == 2  # triage report + one related-cases summary
+    summary = next(n for n in notes if "Related open cases" in n)
+    assert "(20)" in summary and "… and 10 more" in summary
+    assert f"/cases/{older[-1]}" in summary and f"/cases/{older[0]}" not in summary  # newest listed first
+
+    backlinked = [cid for cid in older if any("New related case" in n for n in _case(cid)[1])]
+    assert backlinked == older[-ai_analyst.RELATED_BACKLINK_MAX:]

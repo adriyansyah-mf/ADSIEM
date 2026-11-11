@@ -750,6 +750,8 @@ class CaseOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     notes: list[CaseNoteOut] = []
+    # notes holds the newest CASE_NOTES_LIMIT; GET /api/cases/{id}/notes pages the rest
+    notes_total: int = 0
     model_config = {"from_attributes": True}
 
 class CaseCreate(BaseModel):
