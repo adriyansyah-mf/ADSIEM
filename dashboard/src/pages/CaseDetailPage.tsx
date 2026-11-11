@@ -10,7 +10,7 @@ import { CaseEvidencePanel } from '@/components/CaseEvidencePanel'
 import { CaseRemediations } from '@/components/CaseRemediations'
 import { useAuthStore } from '@/stores/auth'
 import { useQuery } from '@tanstack/react-query'
-import CaseGalaxy from '@/components/CaseGalaxy'
+import CaseRelationGraph from '@/components/CaseRelationGraph'
 import { api } from '@/api/client'
 import type { Alert } from '@/types'
 import MarkdownNote from '@/components/MarkdownNote'
@@ -275,7 +275,7 @@ export default function CaseDetailPage() {
                     <div style={{ fontFamily: 'var(--font-ui)', fontWeight: 700, fontSize: '12px', color: 'var(--text-muted)', letterSpacing: 'normal', marginBottom: '6px' }}>
                       RELATED CASES ({campaign.related.length})
                     </div>
-                    <CaseGalaxy center={caseData} relatedIds={campaign.related} onOpen={cid => navigate(`/cases/${cid}`)} />
+                    <CaseRelationGraph center={caseData} relatedIds={campaign.related} onOpen={cid => navigate(`/cases/${cid}`)} />
                   </div>
                 )}
               </div>
