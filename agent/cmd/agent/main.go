@@ -182,6 +182,13 @@ func run(configPath string, stop <-chan struct{}) {
 		slog.Error("failed to load config", "err", err)
 		os.Exit(1)
 	}
+	if changed := config.Migrate(cfg); len(changed) > 0 {
+		if err := config.Save(configPath, cfg); err != nil {
+			slog.Warn("config migrated in memory but not saved", "changes", changed, "err", err)
+		} else {
+			slog.Info("config migrated", "changes", changed)
+		}
+	}
 
 	enrollToken := cfg.Agent.EnrollmentToken
 	if enrollToken == "" {

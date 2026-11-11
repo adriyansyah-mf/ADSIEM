@@ -10,6 +10,17 @@ server:
   url: http://your-siem-server:8000
   heartbeat_interval: 30
 
+config_version: 1
+
+# Containment (block_ip / isolate from the console or SOAR) through Windows
+# Firewall, with persistence, expiry and an anti-lockout guard (the server's
+# address is never blocked). Off: block_ip calls netsh directly, without them.
+firewall:
+  enabled: true
+  backend: auto          # netsh
+  dry_run: false         # true: log what would be blocked, enforce nothing
+  protected_ips: []      # extra addresses/CIDRs never blocked (admin, VPN)
+
 # Windows Event Log channels: path is "eventlog:<channel name>" as shown by
 #   wevtutil el
 # Sysmon and PowerShell/Operational only produce events once Sysmon is

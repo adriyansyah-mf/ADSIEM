@@ -10,6 +10,16 @@ server:
   url: http://your-siem-server:8000
   heartbeat_interval: 30
 
+config_version: 1
+
+# Containment (block_ip / isolate from the console or SOAR). Off means those
+# tasks fail instead of being applied; the server's address is never blocked.
+firewall:
+  enabled: true
+  backend: auto          # Linux: nft, Windows: netsh
+  dry_run: false         # true: log what would be blocked, enforce nothing
+  protected_ips: []      # extra addresses/CIDRs never blocked (admin, VPN)
+
 # Common log paths by distro:
 #   Debian/Ubuntu (with rsyslog): /var/log/auth.log, /var/log/syslog
 #   RHEL/Fedora:                  /var/log/secure, /var/log/messages
