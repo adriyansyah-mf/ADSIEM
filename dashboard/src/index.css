@@ -452,44 +452,46 @@ a.metric-card:hover { background: var(--bg-hover); }
   .attack-map__arc { stroke-dasharray: none; }
 }
 
-/* Related cases galaxy (components/CaseGalaxy.tsx) */
-.case-galaxy { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 0.8fr); gap: 16px; align-items: center; }
-@media (max-width: 720px) { .case-galaxy { grid-template-columns: 1fr; } }
-.case-galaxy__sky { width: 100%; max-width: 380px; aspect-ratio: 1; justify-self: center; border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, #0d1220 0%, #070a12 70%, transparent 71%); overflow: visible; }
-.case-galaxy__ring { fill: none; stroke: var(--border-default); stroke-width: 1; stroke-dasharray: 2 5; opacity: 0.7; }
-.case-galaxy__orbit { transform-box: view-box; transform-origin: 200px 200px; animation: case-galaxy-spin 120s linear infinite; }
-.case-galaxy__orbit--1 { animation-duration: 180s; }
-.case-galaxy__orbit--2 { animation-duration: 260s; animation-direction: reverse; }
-.case-galaxy:hover .case-galaxy__orbit, .case-galaxy:focus-within .case-galaxy__orbit { animation-play-state: paused; }
-.case-galaxy__planet { cursor: pointer; }
-/* focus shows as the halo ring drawn around the planet, not the global square outline */
-.case-galaxy__planet:focus, .case-galaxy__planet:focus-visible { outline: none !important; }
-.case-galaxy__planet:focus-visible .case-galaxy__halo, .case-galaxy__halo { fill: none; stroke: var(--text-primary); stroke-width: 1.5; }
-.case-galaxy__corona { transform-box: view-box; transform-origin: 200px 200px; animation: case-galaxy-breathe 5s ease-in-out infinite; }
-.case-galaxy__twinkle { animation: case-galaxy-twinkle 3.5s ease-in-out infinite; }
-.case-galaxy__pulse { animation: case-galaxy-twinkle 1.2s ease-in-out infinite; }
-.case-galaxy__info { display: flex; flex-direction: column; gap: 8px; font-size: 12px; min-width: 0; }
-.case-galaxy__title { font-weight: 700; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
-.case-galaxy__meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-muted); }
-.case-galaxy__status { text-transform: capitalize; }
-.case-galaxy__shared { color: var(--text-muted); overflow-wrap: anywhere; font-family: var(--font-mono); }
-.case-galaxy__shared b { color: var(--accent-cyan); font-weight: 600; }
-.case-galaxy__muted { color: var(--text-muted); line-height: 1.5; }
-.case-galaxy__open { align-self: flex-start; color: var(--accent-cyan); text-decoration: underline; }
-.case-galaxy__link { color: var(--accent-cyan); text-decoration: underline; font-family: var(--font-mono); }
-.case-galaxy__legend { display: flex; flex-wrap: wrap; gap: 10px; color: var(--text-muted); font-size: 11px; text-transform: capitalize; }
-.case-galaxy__legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
-.case-galaxy__legend-faded { background: var(--text-muted); opacity: 0.4; }
-@keyframes case-galaxy-spin { to { transform: rotate(360deg); } }
-@keyframes case-galaxy-breathe { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.08); opacity: 1; } }
-@keyframes case-galaxy-twinkle { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.95; } }
-@media (prefers-reduced-motion: reduce) {
-  .case-galaxy__orbit, .case-galaxy__corona, .case-galaxy__twinkle, .case-galaxy__pulse { animation: none; }
-}
-.case-galaxy__belt { transform-box: view-box; transform-origin: 200px 200px; animation: case-galaxy-spin 400s linear infinite; }
-.case-galaxy:hover .case-galaxy__belt, .case-galaxy:focus-within .case-galaxy__belt { animation-play-state: paused; }
-.case-galaxy__belt-list summary { cursor: pointer; color: var(--text-muted); }
-.case-galaxy__belt-ids { display: flex; flex-wrap: wrap; gap: 4px 10px; max-height: 140px; overflow: auto; margin-top: 6px; padding: 6px;
+/* Related cases network graph (components/CaseRelationGraph.tsx) */
+.case-graph { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(200px, 0.8fr); gap: 16px; align-items: center; }
+@media (max-width: 720px) { .case-graph { grid-template-columns: 1fr; } }
+.case-graph__scroll { min-width: 0; overflow-x: auto; }
+@media (max-width: 720px) { .case-graph__canvas { min-width: 560px; } }
+.case-graph__canvas { width: 100%; max-height: 520px; aspect-ratio: 1; background: var(--bg-base); border: 1px solid var(--border-default); border-radius: 8px; }
+.case-graph__edge { stroke: var(--border-default); stroke-width: 1.5; pointer-events: none; transition: opacity 150ms, stroke 150ms; }
+.case-graph__edge--campaign { stroke-dasharray: 5 5; }
+.case-graph__edge--lit { stroke: var(--accent-cyan); stroke-width: 2; }
+.case-graph__node { cursor: default; transition: opacity 150ms; }
+.case-graph__node:focus, .case-graph__node:focus-visible { outline: none !important; }
+.case-graph__case:not(.case-graph__case--center) { cursor: pointer; }
+.case-graph__box { fill: var(--bg-card); stroke-width: 1.5; }
+.case-graph__case--center .case-graph__box { fill: var(--bg-panel); stroke-width: 2.5; }
+.case-graph__case--faded { opacity: 0.5; }
+.case-graph__title { fill: var(--text-primary); font: 600 12px var(--font-ui, sans-serif); }
+.case-graph__case--center .case-graph__title { font-size: 13.5px; }
+.case-graph__sub { fill: var(--text-muted); font: 11px var(--font-ui, sans-serif); }
+.case-graph__entity-shape { fill: var(--bg-panel); stroke-width: 1.5; }
+.case-graph__entity--host .case-graph__entity-shape { stroke: var(--accent-cyan); }
+.case-graph__entity--ioc .case-graph__entity-shape { stroke: var(--accent-yellow); }
+.case-graph__entity-label { fill: var(--text-muted); font: 11px var(--font-mono, monospace); paint-order: stroke; stroke: var(--bg-base); stroke-width: 4px; stroke-linejoin: round; }
+.case-graph__ring { fill: none; stroke: var(--text-primary); stroke-width: 1.5; }
+.case-graph__info { display: flex; flex-direction: column; gap: 8px; font-size: 12px; min-width: 0; }
+.case-graph__info-title { font-weight: 700; font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
+.case-graph__mono { font-family: var(--font-mono); color: var(--accent-cyan); }
+.case-graph__meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-muted); }
+.case-graph__status { text-transform: capitalize; }
+.case-graph__shared { color: var(--text-muted); overflow-wrap: anywhere; font-family: var(--font-mono); }
+.case-graph__shared b { color: var(--accent-cyan); font-weight: 600; }
+.case-graph__muted { color: var(--text-muted); line-height: 1.5; }
+.case-graph__open { align-self: flex-start; color: var(--accent-cyan); text-decoration: underline; }
+.case-graph__link { color: var(--accent-cyan); text-decoration: underline; font-family: var(--font-mono); }
+.case-graph__legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--text-muted); font-size: 11px; }
+.case-graph__legend i { display: inline-block; width: 10px; height: 10px; margin-right: 5px; vertical-align: middle; border: 1.5px solid; }
+.case-graph__legend-case { border-color: var(--text-muted) !important; border-radius: 3px; }
+.case-graph__legend-host { border-color: var(--accent-cyan) !important; border-radius: 2px; }
+.case-graph__legend-ioc { border-color: var(--accent-yellow) !important; transform: rotate(45deg) scale(0.8); }
+.case-graph__legend-campaign { width: 16px !important; height: 0 !important; border-width: 0 0 1.5px 0 !important; border-style: dashed !important; border-color: var(--text-muted) !important; }
+.case-graph__older summary { cursor: pointer; color: var(--text-muted); }
+.case-graph__older-ids { display: flex; flex-wrap: wrap; gap: 4px 10px; max-height: 140px; overflow: auto; margin-top: 6px; padding: 6px;
   border: 1px solid var(--border-default); border-radius: var(--radius-control, 4px); }
-@media (prefers-reduced-motion: reduce) { .case-galaxy__belt { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .case-graph__edge, .case-graph__node { transition: none; } }
