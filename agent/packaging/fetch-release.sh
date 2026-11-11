@@ -25,7 +25,9 @@ api="${GITHUB_API:-https://api.github.com}/repos/${repo}/releases/tags/agent-v${
 
 # A stalled transfer must not hang the image build: bounded and retried,
 # then the local packages are served.
-fetch() { curl -fsSL --connect-timeout 20 --max-time 300 --retry 3 --retry-delay 2 "$@"; }
+# --retry-all-errors: a reset connection (curl 35/56, common on GitHub's
+# asset CDN) is retried too, not only timeouts and 5xx.
+fetch() { curl -fsSL --connect-timeout 20 --max-time 300 --retry 5 --retry-delay 2 --retry-all-errors "$@"; }
 
 keep_local() {
   if [ "${FETCH_REQUIRE_FULL:-}" = 1 ]; then
