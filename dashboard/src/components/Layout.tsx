@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, Menu, Search, Wifi, WifiOff } from 'lucide-react'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import AssistantWidget from '@/components/AssistantWidget'
+import { QueryState } from '@/components/Workspace'
 import { AppSidebar, pageLabel } from '@/components/AppSidebar'
 import type { Alert, Case } from '@/types'
 
@@ -135,7 +136,9 @@ export default function Layout() {
             <span className="workspace-scope__group">{user?.role === 'superadmin' ? 'All groups' : user?.group_id}</span>
           </div>
         </header>
-        <main id="workspace-content" className="app-content" tabIndex={-1}><Outlet /></main>
+        <main id="workspace-content" className="app-content" tabIndex={-1}>
+          <Suspense fallback={<QueryState kind="loading" title="Loading…" description="Fetching this page." />}><Outlet /></Suspense>
+        </main>
       </div>
       <AssistantWidget />
     </div>

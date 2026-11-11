@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth'
 import { api } from '@/api/client'
@@ -6,43 +6,45 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 import Layout from '@/components/Layout'
 import Toaster from '@/components/Toaster'
 import LoginPage from '@/pages/LoginPage'
-import DashboardPage from '@/pages/DashboardPage'
-import CommandCenterPage from '@/pages/CommandCenterPage'
-import AgentsPage from '@/pages/AgentsPage'
-import LogSourcesPage from '@/pages/LogSourcesPage'
-import FirewallPage from '@/pages/FirewallPage'
-import AgentUpdatesPage from '@/pages/AgentUpdatesPage'
-import LogsPage from '@/pages/LogsPage'
-import EventsPage from '@/pages/EventsPage'
-import LiveEventsPage from '@/pages/LiveEventsPage'
-import AlertsPage from '@/pages/AlertsPage'
-import AlertDetailPage from '@/pages/AlertDetailPage'
-import RulesPage from '@/pages/RulesPage'
-import DecodersPage from '@/pages/DecodersPage'
-import UsersPage from '@/pages/UsersPage'
-import WebhooksPage from '@/pages/WebhooksPage'
-import CasesPage from '@/pages/CasesPage'
-import CaseDetailPage from '@/pages/CaseDetailPage'
-import SettingsPage from '@/pages/SettingsPage'
-import HygienePage from '@/pages/HygienePage'
-import UEBAPage from '@/pages/UEBAPage'
-import FimPage from '@/pages/FimPage'
-import HuntsPage from '@/pages/HuntsPage'
-import ReportsPage from '@/pages/ReportsPage'
-import SopPage from '@/pages/SopPage'
-import KnowledgePage from '@/pages/KnowledgePage'
-import HandoverPage from '@/pages/HandoverPage'
-import LiveResponsePage from '@/pages/LiveResponsePage'
-import YaraPage from '@/pages/YaraPage'
-import PreventionPage from '@/pages/PreventionPage'
-import MalwareHashesPage from '@/pages/MalwareHashesPage'
-import ThreatIocsPage from '@/pages/ThreatIocsPage'
-import WebProtectionPage from '@/pages/WebProtectionPage'
-import PoliciesPage from '@/pages/PoliciesPage'
-import AuditLogsPage from '@/pages/AuditLogsPage'
-import SoarPage from '@/pages/SoarPage'
-import SoarEditorPage from '@/pages/SoarEditorPage'
-import MitreHeatmapPage from '@/pages/MitreHeatmapPage'
+
+// Pages load on first visit: one bundle of every page was 733 kB gzipped
+const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
+const CommandCenterPage = lazy(() => import('@/pages/CommandCenterPage'))
+const AgentsPage = lazy(() => import('@/pages/AgentsPage'))
+const LogSourcesPage = lazy(() => import('@/pages/LogSourcesPage'))
+const FirewallPage = lazy(() => import('@/pages/FirewallPage'))
+const AgentUpdatesPage = lazy(() => import('@/pages/AgentUpdatesPage'))
+const LogsPage = lazy(() => import('@/pages/LogsPage'))
+const EventsPage = lazy(() => import('@/pages/EventsPage'))
+const LiveEventsPage = lazy(() => import('@/pages/LiveEventsPage'))
+const AlertsPage = lazy(() => import('@/pages/AlertsPage'))
+const AlertDetailPage = lazy(() => import('@/pages/AlertDetailPage'))
+const RulesPage = lazy(() => import('@/pages/RulesPage'))
+const DecodersPage = lazy(() => import('@/pages/DecodersPage'))
+const UsersPage = lazy(() => import('@/pages/UsersPage'))
+const WebhooksPage = lazy(() => import('@/pages/WebhooksPage'))
+const CasesPage = lazy(() => import('@/pages/CasesPage'))
+const CaseDetailPage = lazy(() => import('@/pages/CaseDetailPage'))
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+const HygienePage = lazy(() => import('@/pages/HygienePage'))
+const UEBAPage = lazy(() => import('@/pages/UEBAPage'))
+const FimPage = lazy(() => import('@/pages/FimPage'))
+const HuntsPage = lazy(() => import('@/pages/HuntsPage'))
+const ReportsPage = lazy(() => import('@/pages/ReportsPage'))
+const SopPage = lazy(() => import('@/pages/SopPage'))
+const KnowledgePage = lazy(() => import('@/pages/KnowledgePage'))
+const HandoverPage = lazy(() => import('@/pages/HandoverPage'))
+const LiveResponsePage = lazy(() => import('@/pages/LiveResponsePage'))
+const YaraPage = lazy(() => import('@/pages/YaraPage'))
+const PreventionPage = lazy(() => import('@/pages/PreventionPage'))
+const MalwareHashesPage = lazy(() => import('@/pages/MalwareHashesPage'))
+const ThreatIocsPage = lazy(() => import('@/pages/ThreatIocsPage'))
+const WebProtectionPage = lazy(() => import('@/pages/WebProtectionPage'))
+const PoliciesPage = lazy(() => import('@/pages/PoliciesPage'))
+const AuditLogsPage = lazy(() => import('@/pages/AuditLogsPage'))
+const SoarPage = lazy(() => import('@/pages/SoarPage'))
+const SoarEditorPage = lazy(() => import('@/pages/SoarEditorPage'))
+const MitreHeatmapPage = lazy(() => import('@/pages/MitreHeatmapPage'))
 
 export default function App() {
   const { accessToken, setUser, logout } = useAuthStore()
@@ -55,6 +57,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <Suspense fallback={null}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<ProtectedRoute minRole="viewer" />}>
@@ -101,6 +104,7 @@ export default function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
       <Toaster />
     </BrowserRouter>
   )
