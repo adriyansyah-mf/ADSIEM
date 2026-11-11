@@ -152,7 +152,12 @@ type UpdateConfig struct {
 	TrustedKeys []string `yaml:"trusted_keys"`
 }
 
+// CurrentVersion is the config_version Migrate brings a config up to.
+const CurrentVersion = 1
+
 type Config struct {
+	// Version records which one-time migrations (Migrate) the file has had.
+	Version      int                `yaml:"config_version"`
 	Agent        AgentConfig        `yaml:"agent"`
 	Server       ServerConfig       `yaml:"server"`
 	Logs         []LogSource        `yaml:"logs"`
@@ -211,6 +216,33 @@ func Load(path string) (*Config, error) {
 		cfg.Agent.ConfigPath = path
 	}
 	return &cfg, nil
+}
+
+// Migrate applies the one-time fixes a config older than CurrentVersion
+// needs and returns what it changed (nothing: the config is current). The
+// caller saves the config when the list is not empty.
+//
+// Version 1: before 1.22.2 the installer wrote "firewall: enabled: false"
+// (the packaged templates had no firewall section and the zero value was
+// saved at enrollment), so every block_ip and isolate went to the no-op
+// backend while reporting success. Turn the firewall on unless the operator
+// chose dry-run.
+func Migrate(cfg *Config) []string {
+	var changed []string
+	if cfg.Version < 1 {
+		if !cfg.Firewall.Enabled && !cfg.Firewall.DryRun {
+			cfg.Firewall.Enabled = true
+			changed = append(changed, "firewall.enabled: false -> true")
+		}
+		if cfg.Firewall.Backend == "" {
+			cfg.Firewall.Backend = "auto"
+		}
+	}
+	if cfg.Version < CurrentVersion {
+		cfg.Version = CurrentVersion
+		changed = append(changed, fmt.Sprintf("config_version -> %d", CurrentVersion))
+	}
+	return changed
 }
 
 func Save(path string, cfg *Config) error {

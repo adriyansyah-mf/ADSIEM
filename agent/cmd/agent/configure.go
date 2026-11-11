@@ -40,6 +40,8 @@ func configure(configPath string, o configureOptions) error {
 		return fmt.Errorf("read %s: %w", configPath, err)
 	}
 
+	config.Migrate(cfg)
+
 	if o.server != "" {
 		u, err := url.Parse(o.server)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -75,8 +77,10 @@ func configure(configPath string, o configureOptions) error {
 }
 
 func defaultConfig() *config.Config {
-	cfg := &config.Config{}
+	cfg := &config.Config{Version: config.CurrentVersion}
 	cfg.Agent.Group = "default"
+	cfg.Firewall.Enabled = true // block_ip / isolate enforce; anti-lockout guard keeps the server reachable
+	cfg.Firewall.Backend = "auto"
 	cfg.Agent.BufferSize = 10000
 	cfg.Server.HeartbeatInterval = 30
 	cfg.Logs = defaultLogSources()
