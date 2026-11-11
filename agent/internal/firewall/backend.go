@@ -13,9 +13,9 @@ type Backend interface {
 }
 
 type plannedOp struct {
-	Op    string
-	Rule  Rule
-	Argv  []string
+	Op   string
+	Rule Rule
+	Argv [][]string
 }
 
 type NoopBackend struct {
@@ -39,12 +39,12 @@ func (n *NoopBackend) Available() bool { return false }
 func (n *NoopBackend) Ensure() error { return nil }
 
 func (n *NoopBackend) Apply(rule Rule) error {
-	n.ops = append(n.ops, plannedOp{Op: "apply", Rule: rule, Argv: nftApplyArgv(rule)})
+	n.ops = append(n.ops, plannedOp{Op: "apply", Rule: rule, Argv: nftApplyArgvs(rule)})
 	return nil
 }
 
 func (n *NoopBackend) Remove(rule Rule) error {
-	n.ops = append(n.ops, plannedOp{Op: "remove", Rule: rule, Argv: nftRemoveArgv(rule)})
+	n.ops = append(n.ops, plannedOp{Op: "remove", Rule: rule, Argv: nftRemoveArgvs(rule)})
 	return nil
 }
 
@@ -66,7 +66,9 @@ func (n *NoopBackend) Flush() error {
 func (n *NoopBackend) PlannedCommands() []string {
 	out := make([]string, 0, len(n.ops))
 	for _, op := range n.ops {
-		out = append(out, fmt.Sprintf("nft %v", op.Argv))
+		for _, argv := range op.Argv {
+			out = append(out, fmt.Sprintf("nft %v", argv))
+		}
 	}
 	return out
 }

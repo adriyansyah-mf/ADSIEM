@@ -1,6 +1,9 @@
 package firewall
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,24 +76,77 @@ func TestParseRule(t *testing.T) {
 	}
 }
 
-func TestSetElement(t *testing.T) {
+func TestSetElements(t *testing.T) {
 	cases := []struct {
-		name  string
-		rule  Rule
-		set   string
-		key   string
+		name string
+		rule Rule
+		sets []string
+		key  string
 	}{
-		{"ip inbound", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirInbound}.normalize(), setIPIn, "203.0.113.5"},
-		{"ip outbound", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirOutbound}.normalize(), setIPOut, "203.0.113.5"},
-		{"ip both prefers input set", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirBoth}.normalize(), setIPIn, "203.0.113.5"},
-		{"svc inbound", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Proto: "tcp", Port: 22, Direction: DirInbound}.normalize(), setSvcIn, "203.0.113.5 . tcp . 22"},
-		{"svc outbound", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Proto: "udp", Port: 53, Direction: DirOutbound}.normalize(), setSvcOut, "203.0.113.5 . udp . 53"},
+		{"ip inbound", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirInbound}.normalize(), []string{setIPIn}, "203.0.113.5"},
+		{"ip outbound", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirOutbound}.normalize(), []string{setIPOut}, "203.0.113.5"},
+		{"ip both blocks both ways", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirBoth}.normalize(), []string{setIPIn, setIPOut}, "203.0.113.5"},
+		{"svc inbound", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Proto: "tcp", Port: 22, Direction: DirInbound}.normalize(), []string{setSvcIn}, "203.0.113.5 . tcp . 22"},
+		{"svc outbound", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Proto: "udp", Port: 53, Direction: DirOutbound}.normalize(), []string{setSvcOut}, "203.0.113.5 . udp . 53"},
+		{"svc both", Rule{Action: ActionBlock, CIDR: "203.0.113.5", Proto: "tcp", Port: 443, Direction: DirBoth}.normalize(), []string{setSvcIn, setSvcOut}, "203.0.113.5 . tcp . 443"},
+		// isolate allows the SIEM server with DirBoth: it must never land in a drop set
+		{"allow goes nowhere", Rule{Action: ActionAllow, CIDR: "198.51.100.7", Direction: DirBoth}.normalize(), nil, ""},
 	}
 	for _, c := range cases {
-		key, set := setElement(c.rule)
-		if set != c.set || key != c.key {
-			t.Errorf("%s: got (%q,%q) want (%q,%q)", c.name, set, key, c.set, c.key)
+		key, sets := setElements(c.rule)
+		if key != c.key || strings.Join(sets, ",") != strings.Join(c.sets, ",") {
+			t.Errorf("%s: got (%q,%v) want (%q,%v)", c.name, key, sets, c.key, c.sets)
 		}
+	}
+}
+
+func TestNftBackendBothDirections(t *testing.T) {
+	var calls []string
+	b := NewNftWithRunner(func(_ context.Context, argv ...string) (string, error) {
+		calls = append(calls, strings.Join(argv, " "))
+		return "", nil
+	})
+	r := Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirBoth, TTL: time.Hour}.normalize()
+	if err := b.Apply(r); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"add element inet siem_fw blocked_v4_in { 203.0.113.5 timeout 3600s }",
+		"add element inet siem_fw blocked_v4_out { 203.0.113.5 timeout 3600s }",
+	}
+	if strings.Join(calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("apply: got %q want %q", calls, want)
+	}
+	if err := b.Apply(Rule{Action: ActionAllow, CIDR: "198.51.100.7", Direction: DirBoth}.normalize()); err != nil || len(calls) != 2 {
+		t.Fatalf("allow must not touch nft: err %v, calls %q", err, calls)
+	}
+}
+
+// A both-ways rule applied by an older agent sits only in the input set:
+// removing it must not fail on the missing output element (the TTL sweep
+// would retry forever).
+func TestNftBackendRemoveToleratesMissingElement(t *testing.T) {
+	var calls []string
+	b := NewNftWithRunner(func(_ context.Context, argv ...string) (string, error) {
+		calls = append(calls, strings.Join(argv, " "))
+		if strings.Contains(strings.Join(argv, " "), setIPOut) {
+			return "", errors.New("Error: Could not process rule: No such file or directory")
+		}
+		return "", nil
+	})
+	r := Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirBoth}.normalize()
+	if err := b.Remove(r); err != nil {
+		t.Fatalf("missing element must be ignored: %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("both sets must be cleared, calls %q", calls)
+	}
+
+	b = NewNftWithRunner(func(_ context.Context, _ ...string) (string, error) {
+		return "", errors.New("Error: Operation not permitted")
+	})
+	if err := b.Remove(r); err == nil {
+		t.Fatal("a real nft failure must be reported")
 	}
 }
 
@@ -105,7 +161,7 @@ func TestTimeoutSuffix(t *testing.T) {
 
 func TestApplyArgvIncludesTimeout(t *testing.T) {
 	r := Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirInbound, TTL: 60 * time.Second}.normalize()
-	argv := nftApplyArgv(r)
+	argv := nftApplyArgvs(r)[0]
 	want := []string{"add", "element", "inet", tableName, setIPIn, "{ 203.0.113.5 timeout 60s }"}
 	if len(argv) != len(want) {
 		t.Fatalf("argv length %d want %d: %v", len(argv), len(want), argv)
@@ -119,7 +175,7 @@ func TestApplyArgvIncludesTimeout(t *testing.T) {
 
 func TestApplyArgvWrapsElementInBraces(t *testing.T) {
 	r := Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirInbound, TTL: 60 * time.Second}.normalize()
-	argv := nftApplyArgv(r)
+	argv := nftApplyArgvs(r)[0]
 	last := argv[len(argv)-1]
 	if last != "{ 203.0.113.5 timeout 60s }" {
 		t.Fatalf("nft requires the element in braces, got %q", last)
@@ -128,7 +184,7 @@ func TestApplyArgvWrapsElementInBraces(t *testing.T) {
 
 func TestRemoveArgvHasNoTimeout(t *testing.T) {
 	r := Rule{Action: ActionBlock, CIDR: "203.0.113.5", Direction: DirInbound, TTL: 60 * time.Second}.normalize()
-	argv := nftRemoveArgv(r)
+	argv := nftRemoveArgvs(r)[0]
 	last := argv[len(argv)-1]
 	if last != "{ 203.0.113.5 }" {
 		t.Fatalf("delete element must use the bare key in braces, got %q", last)
@@ -137,7 +193,7 @@ func TestRemoveArgvHasNoTimeout(t *testing.T) {
 
 func TestApplyArgvSvcKey(t *testing.T) {
 	r := Rule{Action: ActionBlock, CIDR: "203.0.113.5", Proto: "tcp", Port: 22, Direction: DirInbound}.normalize()
-	argv := nftApplyArgv(r)
+	argv := nftApplyArgvs(r)[0]
 	last := argv[len(argv)-1]
 	if last != "{ 203.0.113.5 . tcp . 22 }" {
 		t.Fatalf("unexpected svc element %q", last)

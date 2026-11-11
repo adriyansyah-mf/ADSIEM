@@ -89,22 +89,30 @@ func (b *NftBackend) ensureOne(stmt string) error {
 }
 
 func (b *NftBackend) Apply(rule Rule) error {
-	if err := b.nftExec(nftApplyArgv(rule)...); err != nil {
-		return fmt.Errorf("apply %s: %w", rule.ID, err)
+	for _, argv := range nftApplyArgvs(rule) {
+		if err := b.nftExec(argv...); err != nil {
+			return fmt.Errorf("apply %s: %w", rule.ID, err)
+		}
 	}
 	return nil
 }
 
+// Remove deletes the rule's element from every set it belongs in. A missing
+// element is not an error: the rule expired, or it was applied before both
+// directions were enforced and only sits in the input set.
 func (b *NftBackend) Remove(rule Rule) error {
-	err := b.nftExec(nftRemoveArgv(rule)...)
-	if err == nil {
-		return nil
+	for _, argv := range nftRemoveArgvs(rule) {
+		err := b.nftExec(argv...)
+		if err == nil {
+			continue
+		}
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "no such") || strings.Contains(msg, "does not exist") {
+			continue
+		}
+		return fmt.Errorf("remove %s: %w", rule.ID, err)
 	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "no such") || strings.Contains(msg, "does not exist") {
-		return nil
-	}
-	return fmt.Errorf("remove %s: %w", rule.ID, err)
+	return nil
 }
 
 func (b *NftBackend) List() ([]Rule, error) {
@@ -153,38 +161,56 @@ func execNft(ctx context.Context, args ...string) (string, error) {
 	return text, nil
 }
 
-func setElement(rule Rule) (key string, set string) {
-	inbound := rule.Direction == DirInbound || rule.Direction == DirBoth
-	outboundOnly := rule.Direction == DirOutbound
-
+// setElements returns the element key of a block rule and the sets it goes in:
+// inbound drops traffic from the address, outbound drops connections to it,
+// and both goes in the input and the output set.
+//
+// The nft table only has drop sets, so an allow rule goes in none: whatever is
+// not in a set is accepted by the chains' policy, and the guard already
+// refuses to block protected addresses. Putting an allow rule in a drop set
+// would block exactly the address it is meant to keep reachable (isolate
+// allows the SIEM server with DirBoth).
+func setElements(rule Rule) (key string, sets []string) {
+	if rule.Action != ActionBlock {
+		return "", nil
+	}
+	in, out := setIPIn, setIPOut
+	key = rule.CIDR
 	if rule.IsPortScoped() {
 		proto := rule.Proto
 		if proto == "any" {
 			proto = "tcp"
 		}
 		key = fmt.Sprintf("%s . %s . %d", rule.CIDR, proto, rule.Port)
-		if outboundOnly {
-			return key, setSvcOut
-		}
-		return key, setSvcIn
+		in, out = setSvcIn, setSvcOut
 	}
-
-	if outboundOnly {
-		return rule.CIDR, setIPOut
+	switch rule.Direction {
+	case DirInbound:
+		return key, []string{in}
+	case DirOutbound:
+		return key, []string{out}
+	default: // DirBoth
+		return key, []string{in, out}
 	}
-	_ = inbound
-	return rule.CIDR, setIPIn
 }
 
-func nftApplyArgv(rule Rule) []string {
-	key, set := setElement(rule)
-	elem := "{ " + key + nftTimeoutSuffix(rule) + " }"
-	return []string{"add", "element", "inet", tableName, set, elem}
+func nftApplyArgvs(rule Rule) [][]string {
+	key, sets := setElements(rule)
+	argvs := make([][]string, 0, len(sets))
+	for _, set := range sets {
+		elem := "{ " + key + nftTimeoutSuffix(rule) + " }"
+		argvs = append(argvs, []string{"add", "element", "inet", tableName, set, elem})
+	}
+	return argvs
 }
 
-func nftRemoveArgv(rule Rule) []string {
-	key, set := setElement(rule)
-	return []string{"delete", "element", "inet", tableName, set, "{ " + key + " }"}
+func nftRemoveArgvs(rule Rule) [][]string {
+	key, sets := setElements(rule)
+	argvs := make([][]string, 0, len(sets))
+	for _, set := range sets {
+		argvs = append(argvs, []string{"delete", "element", "inet", tableName, set, "{ " + key + " }"})
+	}
+	return argvs
 }
 
 func nftTimeoutSuffix(rule Rule) string {
