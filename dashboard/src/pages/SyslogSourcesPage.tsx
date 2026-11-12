@@ -95,6 +95,7 @@ export default function SyslogSourcesPage() {
           {error && <p className="text-xs text-destructive mt-2">{error}</p>}
           <p className="text-xs text-muted-foreground mt-2">
             FortiGate: <span className="font-mono">fortigate_traffic</span> · any CEF sender: <span className="font-mono">cef</span> ·
+            Suricata eve.json: <span className="font-mono">suricata</span> · Zeek JSON: <span className="font-mono">zeek</span> ·
             Linux rsyslog forwarding: <span className="font-mono">linux_auth</span>
           </p>
         </div>

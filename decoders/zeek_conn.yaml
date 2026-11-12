@@ -1,0 +1,27 @@
+# Zeek conn.log (JSON). Zeek logs carry no record type, so each decoder keys
+# on the fields its log alone has. raw_fields keeps Zeek's own names (id.orig_h,
+# conn_state, ...) for SigmaHQ's zeek rules. Log type "zeek".
+name: zeek_conn
+log_type: zeek
+type: json
+priority: 30
+enabled: true
+raw_fields: true
+when:
+  conn_state: "*"
+fields:
+  source.ip: id.orig_h
+  source.port: id.orig_p
+  destination.ip: id.resp_h
+  destination.port: id.resp_p
+  event.id: uid
+  network.transport: proto
+  network.protocol: service
+  event.duration: duration
+  source.bytes: orig_bytes
+  destination.bytes: resp_bytes
+static_fields:
+  event.kind: event
+  event.category: network
+  event.module: zeek
+  event.dataset: zeek.conn

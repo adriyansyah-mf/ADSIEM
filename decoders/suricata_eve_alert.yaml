@@ -1,0 +1,32 @@
+# Suricata EVE JSON: IDS/IPS alerts (event_type alert). Ship eve.json with the
+# agent (log type "suricata") or forward it over syslog to the receiver.
+# rules/suricata_alert_*.yaml turn these into SIEM alerts by severity.
+name: suricata_eve_alert
+log_type: suricata
+type: json
+priority: 10
+enabled: true
+when:
+  event_type: alert
+fields:
+  source.ip: src_ip
+  source.port: src_port
+  destination.ip: dest_ip
+  destination.port: dest_port
+  network.transport: proto
+  network.protocol: app_proto
+  observer.hostname: host
+  observer.ingress.interface.name: in_iface
+  event.id: flow_id
+  rule.name: alert.signature
+  rule.id: alert.signature_id
+  rule.category: alert.category
+  event.severity: alert.severity
+  event.action: alert.action
+  rule.ruleset: alert.rev
+  message: alert.signature
+static_fields:
+  event.kind: alert
+  event.category: intrusion_detection
+  event.module: suricata
+  event.dataset: suricata.alert

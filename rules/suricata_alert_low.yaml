@@ -1,0 +1,22 @@
+title: Suricata IDS Alert (low-severity)
+id: rule-suricata-alert-low
+description: >
+  Suricata raised an alert with severity 3. The signature, category and
+  endpoints are in the event (rule.name, rule.category, source.ip,
+  destination.ip). One alert per signature and source per hour; repeats are
+  counted on it.
+logsource:
+  product: suricata
+  service: alert
+detection:
+  selection:
+    event.kind: alert
+    event.severity: '3'
+  condition: selection
+suppression:
+  timewindow: 3600
+  group_by: [rule.name, source.ip]
+level: low
+tags:
+  - attack.initial_access
+  - attack.command_and_control

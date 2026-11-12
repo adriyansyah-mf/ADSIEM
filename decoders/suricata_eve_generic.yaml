@@ -1,0 +1,28 @@
+# Suricata EVE JSON: any other record (flow, netflow, fileinfo, ssh, smb, ...)
+name: suricata_eve_generic
+log_type: suricata
+type: json
+priority: 90
+enabled: true
+when:
+  event_type: "*"
+fields:
+  source.ip: src_ip
+  source.port: src_port
+  destination.ip: dest_ip
+  destination.port: dest_port
+  network.transport: proto
+  network.protocol: app_proto
+  observer.hostname: host
+  observer.ingress.interface.name: in_iface
+  event.id: flow_id
+  event.action: event_type
+  file.name: fileinfo.filename
+  file.hash.sha256: fileinfo.sha256
+  source.bytes: flow.bytes_toserver
+  destination.bytes: flow.bytes_toclient
+static_fields:
+  event.kind: event
+  event.category: network
+  event.module: suricata
+  event.dataset: suricata.eve
