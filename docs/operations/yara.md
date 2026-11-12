@@ -125,3 +125,7 @@ cd agent && go test ./internal/yara/
 ```
 
 Fuzz targets: `go test ./internal/yara -run '^$' -fuzz FuzzCompile` and `-fuzz FuzzScan`.
+
+## Offline start
+
+The last rule set the server sent is kept in `<state_dir>/yara_rules.json` (0600, SHA-256 checksum over the rules) and compiled when the agent starts, so on-access scanning works before the server answers. When the server reports no rules, the cache is removed with them. A file that fails its checksum is ignored and logged. Tests: `internal/yarascan/cache_test.go`.

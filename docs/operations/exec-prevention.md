@@ -51,3 +51,7 @@ CGO_ENABLED=0 go test -c -o /tmp/prevent.test ./internal/prevent/
 docker run --rm --privileged --pid=host -e PREVENT_E2E=1 -v /tmp/prevent.test:/t:ro debian:bookworm-slim \
   sh -c 'mount -t tracefs nodev /sys/kernel/tracing; mount -t securityfs none /sys/kernel/security; /t -test.v'
 ```
+
+## Offline start
+
+After each successful rule sync the agent writes the rule set to `<state_dir>/prevention_rules.json` (0600, with a SHA-256 checksum over the rules). At start it enforces that set before the server answers, so a host that boots offline, or while the server is down, is not left without prevention. The cached hash is sent as `loaded_hash`, so the server answers `unchanged` when nothing moved. A file that fails its checksum is ignored and logged (`prevent: cached rules not used`). The checksum makes the cache tamper-evident, not signed: anyone who can write the state directory can already stop the agent. Tests: `internal/prevent/cache_test.go`, `internal/rulecache`.
