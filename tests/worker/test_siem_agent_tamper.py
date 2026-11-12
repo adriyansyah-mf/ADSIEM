@@ -97,6 +97,18 @@ def _sysmon(image, cmd):
     ("linux_process_exec", "Image=/usr/bin/apt-get CommandLine=\"apt-get purge -y siem-agent\" PID=1 PPID=1 User=0"),
     ("linux_process_exec", "Image=/usr/bin/rpm CommandLine=\"rpm -e siem-agent\" PID=1 PPID=1 User=0"),
     ("linux_process_exec", "Image=/usr/bin/rm CommandLine=\"rm -f /usr/bin/siem-agent\" PID=1 PPID=1 User=0"),
+    ("linux_process_exec", "Image=/usr/bin/chmod CommandLine=\"chmod 000 /usr/bin/siem-agent\" PID=1 PPID=1 User=0"),
+    # blinding the agent: its ETW sessions stopped or their providers removed
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\logman.exe", "logman stop SIEMAgent-Process -ets")),
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\logman.exe",
+                               "logman update trace SIEMAgent-Network --p Microsoft-Windows-Kernel-Network -ets")),
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                               "powershell Remove-EtwTraceProvider -SessionName SIEMAgent-DNS -Guid x")),
+    # taking the install folder over to replace or lock the binary
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\takeown.exe",
+                               "takeown /f C:\\\\Program Files\\\\SIEMAgent\\\\siem-agent.exe")),
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\icacls.exe",
+                               "icacls C:\\\\Program Files\\\\SIEMAgent /deny SYSTEM:F")),
 ])
 def test_tamper_commands_alert(engines, log_type, line):
     assert "SIEM Agent Tampering Command" in _titles(engines, log_type, line)[1]
@@ -110,6 +122,13 @@ def test_tamper_commands_alert(engines, log_type, line):
     ("linux_process_exec", "Image=/usr/bin/dpkg CommandLine=\"/usr/bin/dpkg --status-fd 46 --no-triggers --unpack "
                            "--auto-deconfigure /var/cache/apt/archives/siem-agent_1.7.0_amd64.deb\" PID=1 PPID=1 User=0"),
     ("linux_process_exec", "Image=/usr/bin/cat CommandLine=\"cat /etc/siem-agent/config.yaml\" PID=1 PPID=1 User=0"),
+    # the package's own postinst
+    ("linux_process_exec", "Image=/usr/bin/chmod CommandLine=\"chmod 600 /etc/siem-agent/config.yaml\" PID=1 PPID=1 User=0"),
+    ("linux_process_exec", "Image=/usr/bin/chown CommandLine=\"chown -R siem-agent:siem-agent /var/lib/siem-agent\" "
+                           "PID=1 PPID=1 User=0"),
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\logman.exe", "logman query -ets")),
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\logman.exe", "logman stop MyTrace -ets")),
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\icacls.exe", "icacls C:\\\\Tools /grant bob:F")),
 ])
 def test_queries_and_upgrades_are_not_tampering(engines, log_type, line):
     assert "SIEM Agent Tampering Command" not in _titles(engines, log_type, line)[1]

@@ -1,10 +1,13 @@
 title: SIEM Agent Tampering Command
 id: rule-siem-agent-tamper-commands
 description: >-
-  A command that stops, reconfigures, removes or deletes the SIEM agent:
-  sc/net/taskkill/PowerShell/reg against the SIEMAgent service on Windows,
-  package removal or deleting the agent's files on Linux. (systemctl stop and
-  kill of siem-agent are covered by "Security Tool Disabled".) T1562.001.
+  A command that stops, reconfigures, removes, blinds or deletes the SIEM
+  agent: sc/net/taskkill/PowerShell/reg against the SIEMAgent service,
+  stopping or editing its ETW trace sessions (SIEMAgent-*: the agent keeps
+  running but sees nothing), or taking ownership of / re-ACLing its install
+  folder on Windows; package removal, deleting the agent's files or changing
+  their owner or mode on Linux. (systemctl stop and kill of siem-agent are
+  covered by "Security Tool Disabled".) T1562.001, T1562.006, T1222.
 logsource:
   category: process_creation
 detection:
@@ -36,6 +39,21 @@ detection:
     Image|endswith: '\reg.exe'
     CommandLine|contains: '\Services\SIEMAgent'
     CommandLine|re: '(?i)\s(add|delete|import)\s'
+  win_etw_logman:
+    Image|endswith: '\logman.exe'
+    CommandLine|contains: 'SIEMAgent-'
+    CommandLine|re: '(?i)\s(stop|delete|update)\s'
+  win_etw_powershell:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains: 'SIEMAgent-'
+    CommandLine|re: '(?i)(Stop|Remove)-EtwTraceSession|(Set|Remove)-EtwTraceProvider'
+  win_acl:
+    Image|endswith:
+      - '\takeown.exe'
+      - '\icacls.exe'
+    CommandLine|contains: '\SIEMAgent'
   linux_package_removal:
     Image|endswith:
       - '/apt'
@@ -59,8 +77,18 @@ detection:
       - '/usr/bin/siem-agent'
       - '/etc/siem-agent/'
       - '/lib/systemd/system/siem-agent.service'
+  # the installer chmods/chowns the config and state dir, never the binary
+  linux_perms:
+    Image|endswith:
+      - '/chmod'
+      - '/chown'
+    CommandLine|contains:
+      - '/usr/bin/siem-agent'
+      - '/lib/systemd/system/siem-agent.service'
   condition: 1 of them
 level: high
 tags:
   - attack.defense_evasion
   - attack.t1562.001
+  - attack.t1562.006
+  - attack.t1222
