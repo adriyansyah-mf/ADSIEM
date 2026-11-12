@@ -20,16 +20,26 @@ services:
     networks:
       - siem-net
 
+  # Redis holds every log line between ingest and the worker. AOF (fsync every
+  # second) keeps that queue across a restart or crash; without it a restart
+  # lost everything since the last RDB snapshot. noeviction under maxmemory makes
+  # a full Redis refuse new writes (ingest answers 5xx, agents retry) instead of
+  # being OOM-killed. Keep REDIS_MAXMEMORY below the container's memory limit.
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    command: ["sh", "/usr/local/bin/redis-start.sh"]
+    environment:
+      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-1536mb}
     volumes:
       - redis_data:/data
+      - ./redis/start.sh:/usr/local/bin/redis-start.sh:ro
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 120s  # first start after upgrade converts a large RDB to AOF
     networks:
       - siem-net
 

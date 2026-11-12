@@ -31,12 +31,31 @@ class UserMe(BaseModel):
 
 # ─── Users ───────────────────────────────────────────────────────
 
+def _user_group(value: str | None) -> str | None:
+    """A user's group is their tenant boundary. An empty one would read as "no
+    group filter" in list routes (`if group_filter:`), so it is refused here and
+    in deps.get_scoped_group."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        raise ValueError("group_id must not be empty")
+    if len(value) > 100:
+        raise ValueError("group_id is at most 100 characters")
+    return value
+
+
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
     role_id: int
     group_id: str = "default"
+
+    @field_validator("group_id")
+    @classmethod
+    def _group(cls, v: str) -> str:
+        return _user_group(v)
 
 class UserUpdate(BaseModel):
     username: str | None = None
@@ -45,6 +64,11 @@ class UserUpdate(BaseModel):
     role_id: int | None = None
     group_id: str | None = None
     is_active: bool | None = None
+
+    @field_validator("group_id")
+    @classmethod
+    def _group(cls, v: str | None) -> str | None:
+        return _user_group(v)
 
 class UserOut(BaseModel):
     id: UUID

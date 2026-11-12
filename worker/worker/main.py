@@ -9,6 +9,7 @@ from threading import Thread
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
 from worker.config import LOG_LEVEL
+from worker import es_client, pipeline_health
 from worker.database import AsyncSessionLocal, engine
 from worker.decoder_engine import DecoderEngine
 from worker.redis_client import get_redis
@@ -47,11 +48,10 @@ structlog.configure(
 log = structlog.get_logger()
 
 _start_time = time.time()
-queue_lag_gauge = Gauge("siem_worker_queue_lag", "Redis stream pending messages")
 active_agents_gauge = Gauge("siem_active_agents", "Active agents count")
 
 # Shared health state updated by the async health probe loop.
-_health_state: dict = {"postgres": "ok", "redis": "ok"}
+_health_state: dict = {"postgres": "ok", "redis": "ok", "elasticsearch": "ok"}
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -59,13 +59,10 @@ class HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            pg = _health_state.get("postgres", "ok")
-            rd = _health_state.get("redis", "ok")
-            status = "ok" if pg == "ok" and rd == "ok" else "degraded"
+            state = dict(_health_state)
             payload = {
-                "status": status,
-                "postgres": pg,
-                "redis": rd,
+                "status": pipeline_health.overall_status(state),
+                **state,
                 "uptime_seconds": int(time.time() - _start_time),
             }
             body = json.dumps(payload).encode()
@@ -100,7 +97,8 @@ async def _supervise(name: str, factory):
 
 
 async def health_probe_loop():
-    """Periodically check postgres/redis health and update Prometheus gauges."""
+    """Periodically check postgres, redis and the log pipeline (Elasticsearch,
+    stream backlog, DLQ) and update the gauges /health and /metrics report."""
     import sqlalchemy
     while True:
         try:
@@ -114,17 +112,10 @@ async def health_probe_loop():
                 pg_status = "error"
             try:
                 await redis.ping()
-                # Update queue lag gauge from the Redis stream pending count
-                try:
-                    info = await redis.xinfo_groups(REDIS_STREAM_KEY)
-                    lag = sum(g.get("pending", 0) for g in info)
-                    queue_lag_gauge.set(lag)
-                except Exception:
-                    pass
             except Exception:
                 rd_status = "error"
-            _health_state["postgres"] = pg_status
-            _health_state["redis"] = rd_status
+            pipeline = await pipeline_health.collect(redis, es_client.ping)
+            _health_state.update(postgres=pg_status, redis=rd_status, **pipeline)
 
             # Update active agents gauge from DB
             try:

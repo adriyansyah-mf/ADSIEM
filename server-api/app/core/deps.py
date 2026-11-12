@@ -49,8 +49,14 @@ def require_permission(permission_name: str):
     return checker
 
 def get_scoped_group(current_user: Annotated[User, Depends(get_current_user)]) -> str | None:
+    """The group a request is limited to; None (no filter) only for superadmin.
+
+    Many list routes test the result for truthiness (`if group_filter:`), so a
+    non-superadmin with an empty group would see every tenant. Refuse instead."""
     if current_user.role.name == "superadmin":
         return None  # no filter
+    if not (current_user.group_id or "").strip():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has no group")
     return current_user.group_id
 
 def assert_group_access(obj, group_filter: str | None, *, detail: str = "Not found") -> None:
