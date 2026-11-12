@@ -75,8 +75,11 @@ async def ai_backfill_loop() -> None:
                     select(Alert).where(Alert.status == "new").order_by(Alert.created_at.desc()).limit(50)
                 )).scalars().all()
             from worker.ai_retry import is_pending
+            from worker.alert_manager import _should_ai_investigate
             redis = await get_redis()
             for alert in rows:
+                if not await _should_ai_investigate(alert.severity):
+                    continue  # under ai_min_severity (raised since the alert was made)
                 if await is_pending(redis, str(alert.id)):
                     continue  # waiting for its retry (the LLM was rate-limited)
                 try:

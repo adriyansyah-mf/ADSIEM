@@ -26,7 +26,7 @@ interface Props {
 type Tab = 'overview' | 'process' | 'table' | 'json'
 type DocValue = string | number | boolean | null | undefined | string[]
 
-const STATUS_OPTIONS = ['new', 'in_progress', 'resolved', 'false_positive']
+const STATUS_OPTIONS = ['new', 'in_progress', 'acknowledged', 'below_threshold', 'resolved', 'false_positive']
 
 // Wazuh-style numeric level next to our severity, so analysts used to Wazuh read it at a glance.
 const LEVEL: Record<string, number> = { info: 3, low: 5, medium: 8, high: 12, critical: 15 }
@@ -527,7 +527,7 @@ function AlertDetailBody({ alert, detail, variant, onClose }: {
               <label className="mb-1 block text-xs font-medium text-muted-foreground">Status</label>
               <select value={alert.status} onChange={(e) => handleStatusChange(e.target.value)}
                 className="w-full rounded border border-border bg-background px-2 py-1.5 text-sm">
-                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
               </select>
             </div>
             <div>

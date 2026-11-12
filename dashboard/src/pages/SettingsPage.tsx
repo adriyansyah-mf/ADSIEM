@@ -61,7 +61,7 @@ const SETTING_HINTS: Record<string, string> = {
   agent_log_silence_minutes: 'Alert when an agent still heartbeats but has sent no logs for this long (log sources removed, shipping blocked). 0 = off',
   searxng_url: 'Internal URL of your SearXNG instance',
   ai_analyst_enabled: 'Enable or disable automated AI triage (true / false)',
-  ai_min_severity: 'Only run AI triage for alerts at this severity or above (low / medium / high / critical)',
+  ai_min_severity: 'Only run AI triage for alerts at this severity or above. Lower alerts are created as "Below threshold": not in the New queue, never auto-acknowledged by the AI; an analyst can still pick one up',
   virustotal_api_key: 'Free tier: 500 req/day — virustotal.com/gui/my-apikey',
   malwarebazaar_enabled: 'true / false (default off). Let AI investigations send observed file hashes to MalwareBazaar when relevant. No file upload or sample download. Check your external-intelligence policy and abuse.ch fair-use/commercial terms.',
   malwarebazaar_api_key: 'Auth-Key from auth.abuse.ch (free). Stored server-side and masked. Used to download new malware hashes for the known-malware set (only downloads) and, with MalwareBazaar Hash Enrichment on, for AI investigation lookups.',
@@ -93,6 +93,10 @@ const MASKED = '••••••••'
 
 // settings whose value is a 9router model or combo: offer what 9router lists
 const MODEL_KEYS = new Set(['ninerouter_model', 'investigation_model'])
+// settings with a fixed set of values: a select instead of free text
+const CHOICE_KEYS: Readonly<Record<string, readonly string[]>> = {
+  ai_min_severity: ['info', 'low', 'medium', 'high', 'critical'],
+}
 // settings where an empty value means something (none auto-approved)
 const EMPTY_OK_KEYS = new Set(['ai_command_autoapprove', 'case_ioc_exclusions', 'malware_hash_block_groups'])
 
@@ -162,7 +166,14 @@ function SettingRow({ setting }: { setting: Setting }) {
             {(models.data?.models ?? []).map(m => <option key={m} value={m} />)}
           </datalist>
         )}
-        <input
+        {CHOICE_KEYS[setting.key] ? (
+          <select value={value} aria-label={label}
+            onChange={e => { setValue(e.target.value); setSaved(false) }}
+            style={{ flex: 1, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '4px',
+              padding: '8px 12px', color: 'var(--text-primary)', fontFamily: 'Share Tech Mono, monospace', fontSize: '13px' }}>
+            {CHOICE_KEYS[setting.key].map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        ) : <input
           type={setting.is_secret ? 'password' : 'text'}
           value={value}
           list={isModel ? `models-${setting.key}` : undefined}
@@ -179,7 +190,7 @@ function SettingRow({ setting }: { setting: Setting }) {
             fontSize: '13px',
             outline: 'none',
           }}
-        />
+        />}
         {setting.is_secret && setting.value && !value && (
           <span style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '13px', color: 'var(--text-muted)', letterSpacing: '2px' }}>
             {MASKED}

@@ -76,9 +76,21 @@ async def _get_entity_risk_max(source_ip: str | None, hostname: str | None) -> f
     return max(scores) if scores else 0.0
 
 
+# Alerts under ai_min_severity get this status at creation instead of "new":
+# the AI (and its hourly backfill) leaves them alone, so the AI only
+# acknowledges/escalates what reaches the threshold and the low-severity
+# noise stays out of the "new" queue (an analyst can still pick one up).
+BELOW_THRESHOLD = "below_threshold"
+OPEN_STATUSES = ("new", "in_progress", BELOW_THRESHOLD)
+
+
+async def _ai_min_severity() -> str:
+    value = (await get_setting("ai_min_severity", "high") or "").strip().lower()
+    return value if value in _SEVERITY_ORDER else "high"  # a typo must not hide every alert
+
+
 async def _should_ai_investigate(severity: str) -> bool:
-    min_sev = await get_setting("ai_min_severity", "high")
-    return _severity_gte(severity, min_sev)
+    return _severity_gte(severity, await _ai_min_severity())
 
 
 async def _is_suppressed(
@@ -137,7 +149,7 @@ async def create_alert(
             select(Alert)
             .where(Alert.title == rule_match["title"])
             .where(Alert.group_id == group_id)
-            .where(Alert.status.in_(["new", "in_progress"]))
+            .where(Alert.status.in_(OPEN_STATUSES))
             .where(Alert.created_at >= dedup_window)
         )
         if source_ip:
@@ -153,11 +165,12 @@ async def create_alert(
             return existing.id
 
     techniques = mitre_from_tags(rule_match.get("mitre_tags") or [])
+    initial_status = "new" if await _should_ai_investigate(rule_match["level"]) else BELOW_THRESHOLD
     async with AsyncSessionLocal() as db:
         alert = Alert(
             title=rule_match["title"],
             severity=rule_match["level"],
-            status="new",
+            status=initial_status,
             rule_id=_as_uuid(rule_match.get("rule_db_id")),
             event_id=event_id,
             agent_id=agent_id,

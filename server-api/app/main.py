@@ -79,7 +79,7 @@ _DEFAULT_SETTINGS = [
     ("ninerouter_search_provider", "searxng",            False, "9router /v1/search provider/combo for AI research queries (searxng, tavily, or a dashboard search-combo for multi-provider auto-fallback)"),
     ("ai_analyst_enabled", "true",                      False, "Enable automatic AI triage on every alert (true/false)"),
     ("ai_confidence_threshold","0.0",                    False, "Minimum AI confidence (0.0-1.0) to create/escalate a case — notes always written regardless"),
-    ("ai_min_severity",    "high",                      False, "Minimum alert severity investigated by the AI analyst (info/low/medium/high/critical)"),
+    ("ai_min_severity",    "high",                      False, "Minimum alert severity investigated by the AI analyst (info/low/medium/high/critical); lower alerts get status below_threshold"),
     ("bruteforce_digest_enabled", "true",               False, "Collect failed-only brute force from public IPs into one AI case per day instead of a case per attacker IP (true/false)"),
     ("searxng_url",        "http://searxng:8080",        False, "Internal URL of SearXNG instance used for threat intel search"),
     ("virustotal_api_key", "",                          True,  "VirusTotal API key — free tier: 500 req/day (virustotal.com)"),

@@ -20,7 +20,8 @@ EVENTS = ("alert.created", "alert.triaged", "case.created", "case.alert_linked",
 OPERATORS = ("eq", "neq", "gte", "lte", "gt", "lt", "in", "contains", "not_null", "is_null", "regex")
 RESPONSE_OPS = ("isolate_host", "unisolate_host", "block_ip", "unblock_ip", "kill_process", "quarantine_file")
 CASE_OPS = ("create_case", "add_note", "set_alert_status", "suppress")
-ALERT_STATUSES = ("new", "acknowledged", "investigating", "resolved", "false_positive", "closed")
+ALERT_STATUSES = ("new", "acknowledged", "investigating", "resolved", "false_positive", "closed",
+                  "below_threshold")
 HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")
 BODY_TYPES = ("none", "json", "form", "text")
 NOTIFY_CHANNELS = ("webhook", "discord", "slack")

@@ -33,6 +33,10 @@ async def list_settings(
         *[~PlatformSetting.key.startswith(p) for p in INTERNAL_PREFIXES]).order_by(PlatformSetting.key))
     return [_mask(s) for s in result.scalars().all()]
 
+# alerts under ai_min_severity are created as below_threshold (worker alert_manager)
+_SEVERITIES = ("info", "low", "medium", "high", "critical")
+
+
 @router.put("/api/settings/{key}", response_model=SettingOut)
 async def update_setting(
     key: str, body: SettingUpdate,
@@ -44,6 +48,10 @@ async def update_setting(
     setting = result.scalar_one_or_none()
     if not setting or key.startswith(INTERNAL_PREFIXES):
         raise HTTPException(status_code=404, detail="Setting not found")
+    if key == "ai_min_severity":
+        body.value = (body.value or "").strip().lower()
+        if body.value not in _SEVERITIES:
+            raise HTTPException(status_code=422, detail=f"ai_min_severity must be one of {', '.join(_SEVERITIES)}")
     setting.value = body.value
     setting.updated_by = current_user.id
     await db.commit()
