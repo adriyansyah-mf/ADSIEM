@@ -55,11 +55,64 @@ def _parse_kv(raw: str) -> dict[str, str]:
     return result
 
 
+_CEF_HEADER_KEYS = ("cef_version", "device_vendor", "device_product", "device_version",
+                    "signature_id", "name", "severity")
+# an extension key starts after whitespace; a backslash is not a key character, so an
+# escaped "a\=b" stays inside its value
+_CEF_KEY_RE = re.compile(r"(?:^|(?<=\s))([A-Za-z0-9_.\[\]-]+)=")
+_CEF_EXT_UNESCAPE = {"=": "=", "\\": "\\", "n": "\n", "r": "\r"}
+
+
+def _cef_unescape(value: str, table: dict[str, str]) -> str:
+    out, i = [], 0
+    while i < len(value):
+        ch = value[i]
+        if ch == "\\" and i + 1 < len(value) and value[i + 1] in table:
+            out.append(table[value[i + 1]])
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _parse_cef(raw: str) -> dict[str, str]:
+    """ArcSight CEF ("CEF:0|vendor|product|version|sig|name|sev|ext") anywhere in
+    the line (it often follows a syslog header). Header fields get the names in
+    _CEF_HEADER_KEYS; extension keys keep their CEF names (src, dst, suser, ...)."""
+    start = raw.find("CEF:")
+    if start < 0:
+        return {}
+    text = raw[start + 4:]
+    header, buf, i = [], [], 0
+    while i < len(text) and len(header) < 7:
+        ch = text[i]
+        if ch == "\\" and i + 1 < len(text) and text[i + 1] in "|\\":
+            buf.append(text[i + 1])
+            i += 2
+            continue
+        if ch == "|":
+            header.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    if len(header) < 7:
+        return {}
+    result = dict(zip(_CEF_HEADER_KEYS, (h.strip() for h in header)))
+    ext = text[i:]
+    keys = list(_CEF_KEY_RE.finditer(ext))
+    for n, m in enumerate(keys):
+        end = keys[n + 1].start() if n + 1 < len(keys) else len(ext)
+        result[m.group(1)] = _cef_unescape(ext[m.end():end].strip(), _CEF_EXT_UNESCAPE)
+    return result
+
+
 @dataclass
 class DecoderDef:
     name: str
     log_type: str
-    decoder_type: str          # "regex" or "kv"
+    decoder_type: str          # "regex", "kv" or "cef"
     pattern: re.Pattern | None # only used for regex
     fields_map: dict[str, str]
     static_fields: dict[str, str]
@@ -101,15 +154,15 @@ class DecoderEngine:
                         match_filter=d.get("match"),
                     ))
 
-                elif decoder_type == "kv":
-                    # fields: { output_field: kv_key } — all are KV key references
+                elif decoder_type in ("kv", "cef"):
+                    # fields: { output_field: key } — all are KV / CEF key references
                     fields_map = dict(d.get("fields", {}))
                     # static_fields: { output_field: literal_value }
                     static_fields = dict(d.get("static_fields", {}))
                     decoders.append(DecoderDef(
                         name=d["name"],
                         log_type=d["log_type"],
-                        decoder_type="kv",
+                        decoder_type=decoder_type,
                         pattern=None,
                         fields_map=fields_map,
                         static_fields=static_fields,
@@ -143,8 +196,8 @@ class DecoderEngine:
                 result.update(decoder.static_fields)
                 return normalize_web_fields(result), decoder.name
 
-            elif decoder.decoder_type == "kv":
-                kv = _parse_kv(raw_message)
+            elif decoder.decoder_type in ("kv", "cef"):
+                kv = _parse_kv(raw_message) if decoder.decoder_type == "kv" else _parse_cef(raw_message)
                 if not kv:
                     continue
                 result = {}

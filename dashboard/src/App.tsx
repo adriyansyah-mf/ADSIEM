@@ -23,6 +23,7 @@ const RulesPage = lazy(() => import('@/pages/RulesPage'))
 const DecodersPage = lazy(() => import('@/pages/DecodersPage'))
 const UsersPage = lazy(() => import('@/pages/UsersPage'))
 const WebhooksPage = lazy(() => import('@/pages/WebhooksPage'))
+const SyslogSourcesPage = lazy(() => import('@/pages/SyslogSourcesPage'))
 const CasesPage = lazy(() => import('@/pages/CasesPage'))
 const CaseDetailPage = lazy(() => import('@/pages/CaseDetailPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="/cases/:id" element={<CaseDetailPage />} />
             <Route path="/rules" element={<RulesPage />} />
             <Route path="/decoders" element={<DecodersPage />} />
+            <Route path="/syslog" element={<SyslogSourcesPage />} />
             <Route path="/users" element={<ProtectedRoute minRole="superadmin"><UsersPage /></ProtectedRoute>} />
             <Route path="/webhooks" element={<ProtectedRoute minRole="admin"><WebhooksPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute minRole="admin"><SettingsPage /></ProtectedRoute>} />

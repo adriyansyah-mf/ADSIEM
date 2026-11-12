@@ -716,6 +716,22 @@ class AlertSuppression(Base):
     created_by   = Column(UUID(as_uuid=True))
     created_at   = Column(DateTime(timezone=True), default=now_utc)
 
+class SyslogSource(Base):
+    """A network device that sends syslog to the agentless receiver: messages
+    from an address inside `cidr` are queued for `group_id` as `log_type`.
+    One CIDR belongs to one group; the most specific CIDR wins."""
+    __tablename__ = "syslog_sources"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name          = Column(String(255), nullable=False)
+    group_id      = Column(String(100), nullable=False, default="default", index=True)
+    cidr          = Column(String(64), nullable=False, unique=True)
+    log_type      = Column(String(100), nullable=False)
+    enabled       = Column(Boolean, nullable=False, default=True)
+    message_count = Column(BigInteger, nullable=False, default=0, server_default="0")
+    last_seen_at  = Column(DateTime(timezone=True))
+    created_by    = Column(UUID(as_uuid=True))
+    created_at    = Column(DateTime(timezone=True), default=now_utc)
+
 class ShiftHandover(Base):
     __tablename__ = "shift_handovers"
     id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

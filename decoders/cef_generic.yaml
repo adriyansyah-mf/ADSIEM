@@ -1,0 +1,38 @@
+# ArcSight Common Event Format from any vendor, sent to the syslog receiver
+# with a source whose log type is "cef". Vendor-specific decoders can use
+# type: cef with a lower priority and a match: on the vendor name.
+name: cef_generic
+log_type: cef
+type: cef
+priority: 50
+enabled: true
+fields:
+  observer.vendor: device_vendor
+  observer.product: device_product
+  observer.version: device_version
+  event.code: signature_id
+  rule.name: name
+  event.severity: severity
+  event.action: act
+  event.outcome: outcome
+  message: msg
+  source.ip: src
+  source.port: spt
+  source.domain: shost
+  source.mac: smac
+  destination.ip: dst
+  destination.port: dpt
+  destination.domain: dhost
+  user.name: suser
+  destination.user.name: duser
+  network.transport: proto
+  network.application: app
+  url.original: request
+  http.request.method: requestMethod
+  user_agent.original: requestClientApplication
+  process.name: sproc
+  file.name: fname
+  file.path: filePath
+  file.hash.sha256: fileHash
+static_fields:
+  event.dataset: cef
