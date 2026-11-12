@@ -51,6 +51,16 @@ async def ensure_index() -> None:
         log.info("es_index_ready", index=LOGS_INDEX)
 
 
+async def ping() -> bool:
+    """True when the cluster answers and isn't red (red: some primary shard is
+    unassigned, so writes to it fail)."""
+    try:
+        resp = await _get_client().get("/_cluster/health", timeout=2)  # inside the 5s healthcheck
+        return resp.status_code == 200 and resp.json().get("status") != "red"
+    except Exception:  # noqa: BLE001 — unreachable is the answer, not an error
+        return False
+
+
 async def index_log(doc_id: str, doc: dict) -> None:
     client = _get_client()
     resp = await client.put(f"/{LOGS_INDEX}/_doc/{doc_id}", json=doc)

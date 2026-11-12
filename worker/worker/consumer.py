@@ -5,18 +5,22 @@ import socket
 import time
 import uuid
 from datetime import datetime, timezone
+import httpx
+import redis.exceptions
+import sqlalchemy.exc
 import structlog
 from prometheus_client import Counter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from worker.config import CONSUME_BATCH, CONSUME_CONCURRENCY, REDIS_CONSUMER_GROUP, REDIS_STREAM_KEY
+from worker.config import (CONSUME_BATCH, CONSUME_CONCURRENCY, DLQ_MAX_ATTEMPTS, DLQ_MAXLEN, DLQ_RETRY_BATCH,
+                           DLQ_RETRY_INTERVAL, REDIS_CONSUMER_GROUP, REDIS_STREAM_KEY)
 from worker.database import AsyncSessionLocal
 from worker.decoder_engine import DecoderEngine
 from worker.redis_client import get_redis
 from worker.sigma_engine import SigmaEngine
 from worker.alert_manager import create_alert
 from worker.ueba.scorer import score_event as ueba_score_event
-from worker.es_client import index_log
+from worker.es_client import index_log, ping as es_ping
 from worker import evidence_inbox
 from worker.policy_exclusions import excluded as excluded_by_policy
 from worker.malware_feed import learn_from_event
@@ -29,6 +33,10 @@ events_decoded  = Counter("siem_events_decoded_total", "Total events decoded")
 decode_failures = Counter("siem_decode_failures_total", "Total decode failures")
 alerts_total    = Counter("siem_alerts_generated_total", "Alerts generated", ["severity", "rule_id"])
 sigma_matches   = Counter("siem_sigma_matches_total", "Sigma rule matches", ["rule_id"])
+dlq_dropped     = Counter("siem_dlq_dropped_total", "Log lines dropped after DLQ_MAX_ATTEMPTS failures")
+
+DLQ_KEY = f"{REDIS_STREAM_KEY}:failed"
+DLQ_ATTEMPTS_FIELD = "_dlq_attempts"
 
 async def ensure_stream_group(redis) -> None:
     try:
@@ -191,8 +199,48 @@ async def _process_group(redis, group: list, dec_engine, sig_engine, limit: asyn
                 await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
             except Exception as exc:
                 log.error("message_processing_failed", msg_id=msg_id, error=str(exc))
+                try:
+                    await dead_letter(redis, data, exc)
+                except Exception as dlq_exc:  # noqa: BLE001 — e.g. Redis full (noeviction)
+                    # leave it unacked: stream_maintenance hands stale pending entries back
+                    log.error("dlq_write_failed", msg_id=msg_id, error=str(dlq_exc))
+                    continue
                 await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
-                await redis.xadd(f"{REDIS_STREAM_KEY}:failed", data)
+
+
+# HTTP statuses from Elasticsearch that say "not now" rather than "this document
+# is bad": overloaded, read-only (flood-stage disk), timeouts, server errors.
+_RETRYABLE_STATUS = {403, 408, 409, 429}
+
+
+def is_infrastructure_error(exc: BaseException) -> bool:
+    """True when the failure is about a dependency (Elasticsearch, Postgres,
+    Redis, the network) rather than the line itself. Such failures must not use
+    up the line's attempts: an outage would otherwise get its lines dropped."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code >= 500 or code in _RETRYABLE_STATUS
+    return isinstance(exc, (httpx.TransportError, OSError, asyncio.TimeoutError, redis.exceptions.RedisError,
+                            sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError,
+                            sqlalchemy.exc.TimeoutError))
+
+
+async def dead_letter(redis, data: dict, exc: BaseException | None = None) -> bool:
+    """Park a failed line in the DLQ. Attempts count only failures caused by the
+    line itself; a line that fails that way DLQ_MAX_ATTEMPTS times is a poison
+    message and is dropped rather than retried forever. Returns False when
+    dropped; raises when the DLQ write itself fails."""
+    attempts = int(data.get(DLQ_ATTEMPTS_FIELD) or 0)
+    if exc is None or not is_infrastructure_error(exc):
+        attempts += 1
+    if attempts > DLQ_MAX_ATTEMPTS:
+        dlq_dropped.inc()
+        log.error("dlq_message_dropped", attempts=DLQ_MAX_ATTEMPTS, log_type=data.get("log_type"),
+                  hostname=data.get("hostname"))
+        return False
+    await redis.xadd(DLQ_KEY, {**data, DLQ_ATTEMPTS_FIELD: str(attempts)},
+                     maxlen=DLQ_MAXLEN, approximate=True)
+    return True
 
 
 async def _process_references(redis, group: list, state: dict, limit: asyncio.Semaphore) -> None:
@@ -259,30 +307,35 @@ async def consume_loop(state: dict) -> None:
             log.error("consume_loop_error", error=str(exc))
             await asyncio.sleep(5)
 
+async def dlq_retry_once(redis, es_up) -> int:
+    """Move up to DLQ_RETRY_BATCH lines from the DLQ back into the stream, but
+    only while Elasticsearch is up: retrying into an outage would only fail them
+    again and use up their attempts. Returns how many were moved."""
+    if not await es_up():
+        return 0
+    entries = await redis.xrange(DLQ_KEY, count=DLQ_RETRY_BATCH)
+    if not entries:
+        return 0
+    pipe = redis.pipeline()
+    for entry_id, data in entries:
+        pipe.xadd(REDIS_STREAM_KEY, data)
+        pipe.xdel(DLQ_KEY, entry_id)
+    await pipe.execute()
+    return len(entries)
+
+
 async def dlq_retry_loop(state: dict) -> None:
-    """Periodically re-inject messages from the failed DLQ back into the main stream."""
-    DLQ_KEY = f"{REDIS_STREAM_KEY}:failed"
-    RETRY_INTERVAL = 300  # retry every 5 minutes
-    MAX_RETRY_BATCH = 50
+    """Re-inject DLQ lines into the stream once Elasticsearch is reachable again."""
     while True:
-        await asyncio.sleep(RETRY_INTERVAL)
+        await asyncio.sleep(DLQ_RETRY_INTERVAL)
         try:
-            redis = await get_redis()
-            # Read up to MAX_RETRY_BATCH entries from the DLQ stream
-            entries = await redis.xrange(DLQ_KEY, count=MAX_RETRY_BATCH)
-            if not entries:
-                continue
-            pipe = redis.pipeline()
-            for entry_id, data in entries:
-                pipe.xadd(REDIS_STREAM_KEY, data)
-                pipe.xdel(DLQ_KEY, entry_id)
-            await pipe.execute()
-            log.info("dlq_retry", count=len(entries))
+            moved = await dlq_retry_once(await get_redis(), es_ping)
+            if moved:
+                log.info("dlq_retry", count=moved)
         except asyncio.CancelledError:
             break
         except Exception as exc:
             log.error("dlq_retry_error", error=str(exc))
-
 
 async def reload_loop(state: dict) -> None:
     from worker.config import RELOAD_INTERVAL

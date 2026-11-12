@@ -10,6 +10,7 @@ from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from app.core.database import engine, get_db
 from app.core.redis_client import get_redis
+from app.core import es_client
 
 router = APIRouter(tags=["system"])
 _start_time = time.time()
@@ -17,7 +18,7 @@ _start_time = time.time()
 @router.get("/health")
 async def health():
     redis = await get_redis()
-    checks = {"postgres": "ok", "redis": "ok"}
+    checks = {"postgres": "ok", "redis": "ok", "elasticsearch": "ok"}
     try:
         async with engine.connect() as conn:
             await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
@@ -27,6 +28,8 @@ async def health():
         await redis.ping()
     except Exception:
         checks["redis"] = "error"
+    if not await es_client.ping():  # logs, search and detection all go through it
+        checks["elasticsearch"] = "error"
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
     return {"status": status, **checks, "uptime_seconds": int(time.time() - _start_time)}
 

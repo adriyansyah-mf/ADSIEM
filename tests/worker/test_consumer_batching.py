@@ -40,7 +40,7 @@ class FakeRedis:
     async def xack(self, _key, _group, msg_id):
         self.acked.append(msg_id)
 
-    async def xadd(self, key, data):
+    async def xadd(self, key, data, **kwargs):  # maxlen/approximate, as redis-py takes them
         self.failed.append((key, data))
 
 

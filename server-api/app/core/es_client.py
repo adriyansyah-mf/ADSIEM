@@ -36,6 +36,15 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
+async def ping() -> bool:
+    """True when the cluster answers and isn't red."""
+    try:
+        resp = await _get_client().get("/_cluster/health", timeout=2)  # inside the 5s healthcheck
+        return resp.status_code == 200 and resp.json().get("status") != "red"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def ensure_index() -> None:
     client = _get_client()
     resp = await client.head(f"/{LOGS_INDEX}")

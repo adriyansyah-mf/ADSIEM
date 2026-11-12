@@ -37,3 +37,14 @@ NINEROUTER_SEARCH_PROVIDER: str = os.environ.get("NINEROUTER_SEARCH_PROVIDER", "
 SEARXNG_URL: str = os.environ.get("SEARXNG_URL", "http://searxng:8080")
 AI_ANALYSIS_QUEUE: str = os.environ.get("AI_ANALYSIS_QUEUE", "siem:ai-analysis")
 ELASTICSEARCH_URL: str = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch:9200")
+
+# Dead-letter queue for log lines that failed processing (consumer.py).
+# Retries wait for Elasticsearch to be reachable, so an outage doesn't burn
+# attempts; a line that still fails after DLQ_MAX_ATTEMPTS is a poison message.
+DLQ_MAXLEN: int = int(os.environ.get("DLQ_MAXLEN", "200000"))
+DLQ_MAX_ATTEMPTS: int = int(os.environ.get("DLQ_MAX_ATTEMPTS", "10"))
+DLQ_RETRY_INTERVAL: int = int(os.environ.get("DLQ_RETRY_INTERVAL", "60"))
+DLQ_RETRY_BATCH: int = int(os.environ.get("DLQ_RETRY_BATCH", "500"))
+# /health reports "degraded" above these
+HEALTH_DLQ_WARN: int = int(os.environ.get("HEALTH_DLQ_WARN", "1000"))
+HEALTH_PENDING_WARN: int = int(os.environ.get("HEALTH_PENDING_WARN", "50000"))
