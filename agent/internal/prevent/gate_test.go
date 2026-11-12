@@ -1,6 +1,7 @@
 package prevent
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,23 @@ import (
 	"github.com/siem-platform/agent/internal/malhash"
 	"github.com/siem-platform/agent/internal/policy"
 )
+
+// A SHA-256 exclusion applies to a path rule too, which matches without
+// reading the file: the hash is computed for the exclusion.
+func TestHashExclusionCoversPathRules(t *testing.T) {
+	sum := strings.Repeat("aa", 32)
+	dir := t.TempDir()
+	p, _ := Compile([]Rule{{ID: "d", Name: "dir", RuleType: TypeDir, Value: dir, Action: ActionBlock}})
+	hashed := 0
+	e := Exec{Path: filepath.Join(dir, "tool"), Hash: func() (string, bool) { hashed++; return sum, true }}
+	if p.Match(e, false) == nil || hashed != 0 {
+		t.Fatal("no hash exclusion: the path rule matches without hashing")
+	}
+	gated := p.withGate(false, []policy.Exclusion{{Kind: "sha256", Value: sum, Scopes: []string{policy.ScopePrevention}}})
+	if gated.Match(e, false) != nil {
+		t.Fatal("the excluded hash must not be stopped by a path rule")
+	}
+}
 
 func TestGroupPolicyGate(t *testing.T) {
 	g := &guard{hashes: map[string]string{}}

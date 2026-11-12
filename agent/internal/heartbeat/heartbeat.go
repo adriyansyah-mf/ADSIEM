@@ -476,6 +476,11 @@ func VerifyUninstallToken(configPath, token string) error {
 			return nil
 		}
 		hash, ferr := fetchUninstallHash(configPath, cfg)
+		if errors.Is(ferr, errAgentUnknown) {
+			// deleted on the server (or its token revoked): nothing protects it any more
+			slog.Info("uninstall check: the server no longer knows this agent")
+			return nil
+		}
 		if ferr != nil || len(hash) != 64 {
 			slog.Warn("uninstall token hash unavailable", "err", ferr)
 			return ErrUninstallUnverifiable
@@ -512,6 +517,10 @@ func enrollment(configPath string) (*config.Config, bool, error) {
 	return &cfg, cfg.Agent.Token != "" && cfg.Server.URL != "", nil
 }
 
+// errAgentUnknown: the server rejects this agent's token (the agent was
+// deleted there).
+var errAgentUnknown = errors.New("agent unknown to the server")
+
 // fetchUninstallHash asks the server for this agent's uninstall token hash
 // with a "stopping" heartbeat (reason uninstall_check): it carries the hash
 // and, unlike a normal heartbeat, dispatches no pending task (tests replace
@@ -531,7 +540,11 @@ var fetchUninstallHash = func(configPath string, cfg *config.Config) (string, er
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	switch resp.StatusCode {
+	case 200:
+	case 401, 403, 404:
+		return "", errAgentUnknown
+	default:
 		return "", errors.New("heartbeat: status " + resp.Status)
 	}
 	var hb HeartbeatResponse

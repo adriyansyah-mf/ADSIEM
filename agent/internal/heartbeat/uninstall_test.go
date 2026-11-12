@@ -79,6 +79,14 @@ func TestUninstallCorruptedConfigRefuses(t *testing.T) {
 	}
 }
 
+func TestUninstallAgentDeletedOnServerIsAllowed(t *testing.T) {
+	cfg := enrolledConfig(t, "agent-token")
+	stubFetch(t, "", errAgentUnknown)
+	if err := VerifyUninstallToken(cfg, ""); err != nil {
+		t.Fatalf("an agent the server no longer knows must be removable: %v", err)
+	}
+}
+
 func TestUninstallNeverEnrolledIsAllowed(t *testing.T) {
 	calls := stubFetch(t, "", errors.New("must not be called"))
 	cfg := enrolledConfig(t, "") // installed, never enrolled

@@ -122,6 +122,9 @@ def test_tamper_commands_alert(engines, log_type, line):
     ("linux_process_exec", "Image=/usr/bin/dpkg CommandLine=\"/usr/bin/dpkg --status-fd 46 --no-triggers --unpack "
                            "--auto-deconfigure /var/cache/apt/archives/siem-agent_1.7.0_amd64.deb\" PID=1 PPID=1 User=0"),
     ("linux_process_exec", "Image=/usr/bin/cat CommandLine=\"cat /etc/siem-agent/config.yaml\" PID=1 PPID=1 User=0"),
+    # the Windows installer locking its data folder down
+    ("windows_sysmon", _sysmon("C:\\Windows\\System32\\icacls.exe",
+                               "icacls C:\\\\ProgramData\\\\SIEMAgent /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F")),
     # the package's own postinst
     ("linux_process_exec", "Image=/usr/bin/chmod CommandLine=\"chmod 600 /etc/siem-agent/config.yaml\" PID=1 PPID=1 User=0"),
     ("linux_process_exec", "Image=/usr/bin/chown CommandLine=\"chown -R siem-agent:siem-agent /var/lib/siem-agent\" "

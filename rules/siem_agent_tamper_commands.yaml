@@ -49,11 +49,15 @@ detection:
       - '\pwsh.exe'
     CommandLine|contains: 'SIEMAgent-'
     CommandLine|re: '(?i)(Stop|Remove)-EtwTraceSession|(Set|Remove)-EtwTraceProvider'
-  win_acl:
-    Image|endswith:
-      - '\takeown.exe'
-      - '\icacls.exe'
+  # the installer runs icacls /inheritance:r /grant:r on its data folder;
+  # denying, re-owning or resetting is someone else
+  win_takeown:
+    Image|endswith: '\takeown.exe'
     CommandLine|contains: '\SIEMAgent'
+  win_icacls:
+    Image|endswith: '\icacls.exe'
+    CommandLine|contains: '\SIEMAgent'
+    CommandLine|re: '(?i)\s/(deny|setowner|reset|remove)\b'
   linux_package_removal:
     Image|endswith:
       - '/apt'

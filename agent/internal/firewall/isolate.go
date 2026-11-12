@@ -45,6 +45,10 @@ const (
 type isolationState struct {
 	Since time.Time `json:"since"`
 	Allow []string  `json:"allow"`
+	// pending: wanted (restored at start) but not applied yet, because the
+	// backend failed or the server's address is unknown; the monitor
+	// retries every minute.
+	pending bool
 }
 
 // Isolate isolates the host. The result lists what stays reachable.
@@ -89,15 +93,17 @@ func (e *Engine) Unisolate() error {
 }
 
 func (e *Engine) unisolateLocked(why string) error {
-	if e.isolation == nil {
-		return fmt.Errorf("host is not isolated")
-	}
 	iso, ok := e.backend.(isolator)
 	if !ok {
 		return ErrNotEnforcing
 	}
 	if err := iso.Unisolate(); err != nil {
 		return err
+	}
+	if e.isolation == nil {
+		// nothing recorded (state file lost, agent crashed or reinstalled):
+		// the backend's isolation is removed all the same
+		return nil
 	}
 	e.isolation = nil
 	e.stopIsolationMonitor()
@@ -174,6 +180,21 @@ func (e *Engine) isolationTick(now time.Time) {
 			return
 		}
 	}
+	if e.isolation.pending {
+		if !e.guard.HasServer() {
+			return // isolating now would cut the host off for good
+		}
+		if iso, ok := e.backend.(isolator); ok {
+			if err := iso.Isolate(allow); err != nil {
+				slog.Warn("host isolation still not restored", "err", err)
+				return
+			}
+			e.isolation.Allow, e.isolation.pending = allow, false
+			e.persistIsolation()
+			e.emit("firewall_isolation_restored", isolationRule(), "")
+		}
+		return
+	}
 	if !slices.Equal(allow, e.isolation.Allow) {
 		if iso, ok := e.backend.(isolator); ok {
 			if err := iso.Isolate(allow); err != nil {
@@ -242,22 +263,33 @@ func (e *Engine) restoreIsolation(legacy bool) {
 		slog.Warn("host was isolated, but the firewall cannot enforce isolation now")
 		return
 	}
-	allow := e.guard.IsolationAllow()
-	if !e.guard.HasServer() {
-		allow = mergeAllow(allow, st.Allow) // offline at start: the last good list keeps the server
-	}
-	if err := iso.Isolate(allow); err != nil {
-		slog.Warn("could not restore host isolation", "err", err)
-		return
-	}
 	if st.Since.IsZero() {
 		st.Since = time.Now().UTC()
 	}
-	e.isolation = &isolationState{Since: st.Since, Allow: allow}
+	e.isolation = &isolationState{Since: st.Since}
 	e.isolatedAt = time.Now()
+	e.startIsolationMonitor()
+
+	allow := e.guard.IsolationAllow()
+	if !e.guard.HasServer() {
+		if len(st.Allow) == 0 {
+			// no server address now or saved (an old isolation): wait for one
+			slog.Warn("host isolation pending: the SIEM server's address is unknown")
+			e.isolation.pending = true
+			e.persistIsolation()
+			return
+		}
+		allow = mergeAllow(allow, st.Allow) // offline at start: the last good list keeps the server
+	}
+	if err := iso.Isolate(allow); err != nil {
+		slog.Warn("could not restore host isolation, retrying every minute", "err", err)
+		e.isolation.Allow, e.isolation.pending = st.Allow, true
+		e.persistIsolation()
+		return
+	}
+	e.isolation.Allow = allow
 	e.persistIsolation()
 	e.emit("firewall_isolation_restored", isolationRule(), "")
-	e.startIsolationMonitor()
 }
 
 func mergeAllow(a, b []string) []string {

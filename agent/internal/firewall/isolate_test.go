@@ -145,8 +145,9 @@ func TestUnisolateReleasesAndForgets(t *testing.T) {
 	if _, err := os.Stat(state + ".isolation.json"); !os.IsNotExist(err) {
 		t.Fatalf("state must be removed, got %v", err)
 	}
-	if err := e.Unisolate(); err == nil {
-		t.Fatal("unisolating a host that isn't isolated must say so")
+	// unisolate with nothing recorded (state lost, reinstall) still clears the backend
+	if err := e.Unisolate(); err != nil || f.unisolate != 2 {
+		t.Fatalf("unisolate must always remove the backend's isolation: err=%v calls=%d", err, f.unisolate)
 	}
 }
 
@@ -273,5 +274,40 @@ func TestSyncLeavesIsolationAlone(t *testing.T) {
 	e.Sync(nil) // the server has no rules for this agent
 	if !e.Isolated() || f.current() == nil || f.unisolate != 0 {
 		t.Fatal("a server rule sync must not touch the isolation")
+	}
+}
+
+func TestFailedRestoreIsRetried(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "fw.json")
+	e, _ := enforcingEngine(t, state, Options{ReleaseAfterOffline: -1})
+	if _, err := e.Isolate(); err != nil {
+		t.Fatal(err)
+	}
+	e2, f2 := enforcingEngine(t, state, Options{ReleaseAfterOffline: -1})
+	f2.failNext = true // nft/netsh not ready at boot
+	e2.restoreIsolation(false)
+	if f2.current() != nil || !e2.Isolated() || !e2.isolation.pending {
+		t.Fatal("a failed restore must stay wanted (pending), not be dropped")
+	}
+	e2.isolationTick(time.Now())
+	if !slices.Contains(f2.current(), "192.0.2.10/32") || e2.isolation.pending {
+		t.Fatalf("the monitor must re-apply it: %v", f2.current())
+	}
+}
+
+func TestLegacyIsolationWithoutServerWaits(t *testing.T) {
+	orig := lookupHost
+	lookupHost = func(string) ([]string, error) { return nil, errors.New("offline") }
+	t.Cleanup(func() { lookupHost = orig })
+	e, f := enforcingEngine(t, filepath.Join(t.TempDir(), "fw.json"),
+		Options{ServerURL: "https://siem.example", ReleaseAfterOffline: -1})
+	e.restoreIsolation(true) // an old block-rule isolation, no address known
+	if f.current() != nil || !e.isolation.pending {
+		t.Fatal("no server address: isolating would strand the host, it must wait")
+	}
+	lookupHost = func(string) ([]string, error) { return []string{"192.0.2.44"}, nil }
+	e.isolationTick(time.Now())
+	if !slices.Contains(f.current(), "192.0.2.44/32") {
+		t.Fatalf("applied once the server resolves: %v", f.current())
 	}
 }

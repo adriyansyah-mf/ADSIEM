@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/siem-platform/agent/internal/malhash"
@@ -325,10 +326,27 @@ func (p *Policy) Match(e Exec, kernelDecides bool) *compiled {
 	if c.RuleType == TypeKnownMalware {
 		scope = policy.ScopeMalware
 	}
-	if (policy.Settings{Exclusions: p.exclusions}).Excluded(scope, policy.Match{Image: e.Path, Path: e.Path, SHA256: sum}) {
+	set := policy.Settings{Exclusions: p.exclusions}
+	if set.Excluded(scope, policy.Match{Image: e.Path, Path: e.Path, SHA256: sum}) {
 		return nil
 	}
+	// a path, directory or parent rule matched without reading the file: a
+	// SHA-256 exclusion still needs the hash
+	if sum == "" && e.Hash != nil && hasHashExclusion(p.exclusions, scope) {
+		if v, ok := e.Hash(); ok && set.Excluded(scope, policy.Match{SHA256: v}) {
+			return nil
+		}
+	}
 	return c
+}
+
+func hasHashExclusion(ex []policy.Exclusion, scope string) bool {
+	for _, x := range ex {
+		if x.Kind == "sha256" && slices.Contains(x.Scopes, scope) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Policy) match(e Exec, kernelDecides bool) *compiled {
