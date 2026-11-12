@@ -1,0 +1,28 @@
+title: Malicious-Looking Project Downloaded (medium)
+id: rule-project-scan-medium
+description: >-
+  A project the user just cloned or installed carries something that runs inline code, starts a hidden file, auto-runs on open, or is obfuscated:
+  a package.json install script, a VS Code task that runs when the folder is
+  opened, an obfuscated JS loader, or a setup.py running code at install. This
+  is how the fake job interview / "coding test" attacks (TraderTraitor, the
+  Bybit and Binance thefts) get developers to run their stealer. The user was
+  warned on their desktop. Check the file (file.path in file.directory), the
+  repository (url.original), and whether the project was run: an ioa_dev_*
+  chain or credential_access from the same host follows if it was.
+logsource:
+  product: project
+  service: scan
+detection:
+  selection:
+    event.action: project_scan_finding
+    event.severity: medium
+  condition: selection
+suppression:
+  timewindow: 3600
+  group_by: [hostname, file.directory, file.path]
+level: medium
+tags:
+  - attack.initial_access
+  - attack.t1195.001
+  - attack.execution
+  - attack.t1204.002

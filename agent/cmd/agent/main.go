@@ -41,6 +41,7 @@ import (
 	"github.com/siem-platform/agent/internal/policy"
 	"github.com/siem-platform/agent/internal/prevent"
 	"github.com/siem-platform/agent/internal/procexec"
+	"github.com/siem-platform/agent/internal/projscan"
 	"github.com/siem-platform/agent/internal/ransomguard"
 	"github.com/siem-platform/agent/internal/scriptscan"
 	"github.com/siem-platform/agent/internal/tailer"
@@ -401,11 +402,31 @@ func run(configPath string, stop <-chan struct{}) {
 		hardenSafeMode()
 	}
 
+	// Projects a developer clones or installs (git clone, npm install): scanned
+	// before they run, for the fake-job-interview lures (package.json lifecycle
+	// scripts, VS Code auto-run tasks, JS loaders). Started below, once the
+	// file scanner exists; the exec and file feeds offer it projects.
+	var projects *projscan.Scanner
+	var projectFiles *yarascan.Scanner
+	if !cfg.ProjectScan.Disabled {
+		projects = projscan.New(projscan.Options{
+			Emit: func(line string) { buf.Push(tailer.Encode(projscan.LogType, line)) },
+			ScanFile: func(ctx context.Context, path string) {
+				if projectFiles != nil {
+					_, _ = projectFiles.Scan(ctx, path, "project_scan", false)
+				}
+			},
+			Excluded: func(dir string) bool {
+				return polStore.Current().Settings.Excluded(policy.ScopeYara, policy.Match{Path: dir, Image: dir})
+			},
+		})
+	}
+
 	// Process-exec telemetry via eBPF (best-effort: needs CAP_BPF/CAP_SYS_ADMIN
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
 	// Producers are stopped explicitly at shutdown, before the durable journal closes.
 	var stopProducers []func()
-	if procMon, err := procexec.StartWith(buf, linuxExecFeed(scripts, guard)); err != nil {
+	if procMon, err := procexec.StartWith(buf, linuxExecFeed(scripts, guard, projects)); err != nil {
 		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
 	} else {
 		stopProducers = append(stopProducers, procMon.Stop)
@@ -458,7 +479,7 @@ func run(configPath string, stop <-chan struct{}) {
 		if cfg.ETW.Mode == "auto" && winsensor.SysmonInstalled() {
 			slog.Info("ETW sensor off: Sysmon is installed (set etw.mode: on to run both)")
 		} else if sensor, err := winsensor.StartWith(buf, winsensor.Options{
-			Disabled: cfg.ETW.DisabledEvents, OnFile: windowsFileFeed(onFile),
+			Disabled: cfg.ETW.DisabledEvents, OnFile: windowsFileFeed(onFile, projects),
 			OnProcess: windowsProcessFeed(preventer), OnCommandLine: windowsCommandFeed(guard),
 			OnScript: func(a winsensor.AMSIScript) {
 				scripts.Offer(scriptscan.Script{PID: a.PID, Image: a.Image, App: a.App, Name: a.Name, Content: a.Content})
@@ -609,6 +630,10 @@ func run(configPath string, stop <-chan struct{}) {
 		})
 	scripts.Yara = yaraScanner
 	go scripts.Run(flowCtx)
+	if projects != nil {
+		projectFiles = yaraScanner // before Run: the worker reads it
+		go projects.Run(flowCtx)
+	}
 	if !cfg.Yara.Disabled {
 		go func() {
 			if err := yaraScanner.Run(flowCtx); err != nil {
@@ -810,7 +835,7 @@ func wait(ctx context.Context, d time.Duration) bool {
 var urgentLogTypes = map[string]bool{
 	malhash.LogType: true, webblock.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
 	ransomguard.LogType: true, mlscan.LogType: true, "local_detection": true, "linux_sensor_health": true,
-	scriptscan.LogType: true, ioa.LogType: true,
+	scriptscan.LogType: true, ioa.LogType: true, projscan.LogType: true,
 }
 
 func isUrgentEntry(entry string) bool {
@@ -1019,11 +1044,19 @@ func windowsCommandFeed(g *ransomguard.Guard) func(winsensor.ProcessStart) {
 	}
 }
 
-// linuxExecFeed hands the eBPF exec events to the script scanner and to the
-// anti-ransomware precursor checks (nil guard: off).
-func linuxExecFeed(scripts *scriptscan.Scanner, g *ransomguard.Guard) func(procexec.Exec) {
+// linuxExecFeed hands the eBPF exec events to the script scanner, the
+// anti-ransomware precursor checks (nil guard: off) and the project scanner
+// (nil: off).
+func linuxExecFeed(scripts *scriptscan.Scanner, g *ransomguard.Guard, projects *projscan.Scanner) func(procexec.Exec) {
 	return func(ex procexec.Exec) {
 		scripts.OfferExec(ex.PID, ex.Image, ex.Args)
+		if projects != nil && projscan.Interesting(ex.Image) {
+			// git clone without a target and npm install act on the working directory
+			cwd, _ := os.Readlink(fmt.Sprintf("/proc/%d/cwd", ex.PID))
+			if t, ok := projscan.FromExec(ex.Image, ex.Args, cwd); ok {
+				projects.Offer(t)
+			}
+		}
 		if g != nil {
 			g.ObserveProcess(ransomguard.ProcessStart{PID: ex.PID, PPID: ex.PPID, Image: ex.Image,
 				CommandLine: strings.Join(ex.Args, " "), Time: time.Now()})
@@ -1032,14 +1065,23 @@ func linuxExecFeed(scripts *scriptscan.Scanner, g *ransomguard.Guard) func(proce
 }
 
 // windowsFileFeed adapts the ETW sensor's file events to the anti-ransomware
-// guard's (linsensor.FileEvent); nil when the guard is off.
-func windowsFileFeed(onFile func(linsensor.FileEvent)) func(winsensor.FileEvent) {
-	if onFile == nil {
+// guard's (linsensor.FileEvent) and hands them to the project scanner (a
+// Windows process start has no working directory, so a clone is seen as git
+// creating .git\HEAD); nil when both are off.
+func windowsFileFeed(onFile func(linsensor.FileEvent), projects *projscan.Scanner) func(winsensor.FileEvent) {
+	if onFile == nil && projects == nil {
 		return nil
 	}
 	return func(e winsensor.FileEvent) {
-		onFile(linsensor.FileEvent{Time: e.Time, PID: e.PID, PPID: e.PPID, Image: e.Image,
-			Comm: filepath.Base(e.Image), Action: e.Action, Path: e.Path, From: e.From})
+		if onFile != nil {
+			onFile(linsensor.FileEvent{Time: e.Time, PID: e.PID, PPID: e.PPID, Image: e.Image,
+				Comm: filepath.Base(e.Image), Action: e.Action, Path: e.Path, From: e.From})
+		}
+		if projects != nil {
+			if t, ok := projscan.FromFileEvent(e.Image, e.Action, e.Path); ok {
+				projects.Offer(t)
+			}
+		}
 	}
 }
 

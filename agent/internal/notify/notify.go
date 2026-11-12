@@ -117,6 +117,13 @@ func Message(logType, line string) string {
 		case "detected":
 			return "A known malicious file was found:\n" + what + "\n\nDo not open it. Your security team has been alerted."
 		}
+	case "project_scan":
+		// one pop-up per project (the summary line), not one per finding, and
+		// only for high: medium findings are leads for the analysts
+		if f["event"] == "project_scan" && f["verdict"] == "suspicious" && f["severity"] == "high" {
+			return "A project you just downloaded looks malicious:\n" + shorten(f["dir"]) + "\n" + f["top"] +
+				"\n\nDo not install or run it (npm install, opening it in VS Code). Your security team has been alerted."
+		}
 	case "yara_match":
 		if s := f["severity"]; s == "critical" || s == "high" {
 			return fmt.Sprintf("A suspicious file was found:\n%s\n(rule %s)\n\nDo not open it. Your security team has been alerted.",

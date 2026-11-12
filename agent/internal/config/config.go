@@ -132,6 +132,13 @@ type PreventionConfig struct {
 	Disabled bool `yaml:"disabled"`
 }
 
+// ProjectScanConfig: scanning a project when it is cloned or installed
+// (internal/projscan).
+type ProjectScanConfig struct {
+	// Disabled turns it off.
+	Disabled bool `yaml:"disabled"`
+}
+
 type NotifyConfig struct {
 	// Disabled stops the pop-ups the agent shows signed-in users (Windows)
 	// when it finds or stops malware.
@@ -176,6 +183,7 @@ type Config struct {
 	AntiTamper   AntiTamperConfig   `yaml:"anti_tamper"`
 	Prevention   PreventionConfig   `yaml:"prevention"`
 	Notify       NotifyConfig       `yaml:"notify"`
+	ProjectScan  ProjectScanConfig  `yaml:"project_scan"`
 	Update       UpdateConfig       `yaml:"update"`
 }
 
