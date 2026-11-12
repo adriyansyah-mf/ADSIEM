@@ -24,8 +24,10 @@ async def _analyze_one(data: dict) -> None:
             severity=data.get("severity", "medium"),
             source_ip=data.get("source_ip"),
             hostname=data.get("hostname"),
-            decoded_fields=data.get("decoded_fields", {}),
+            decoded_fields=data.get("decoded_fields") or {},
             group_id=data.get("group_id", "default"),
+            attempt=int(data.get("attempt") or 0),
+            annotate_only=bool(data.get("annotate_only")),
         )
     except Exception as e:
         log.error("ai_consumer_item_failed", alert_id=data.get("alert_id"), error=str(e))
@@ -72,10 +74,14 @@ async def ai_backfill_loop() -> None:
                 rows = (await db.execute(
                     select(Alert).where(Alert.status == "new").order_by(Alert.created_at.desc()).limit(50)
                 )).scalars().all()
+            from worker.ai_retry import is_pending
             from worker.alert_manager import _should_ai_investigate
+            redis = await get_redis()
             for alert in rows:
                 if not await _should_ai_investigate(alert.severity):
                     continue  # under ai_min_severity (raised since the alert was made)
+                if await is_pending(redis, str(alert.id)):
+                    continue  # waiting for its retry (the LLM was rate-limited)
                 try:
                     await analyze_and_maybe_create_case(
                         alert_id=str(alert.id),

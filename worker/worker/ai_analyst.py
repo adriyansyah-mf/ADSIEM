@@ -846,6 +846,16 @@ async def _graph_enrich(text_blob: str, alert_title: str):
     return await aggregator.enrich(text_blob, alert_title=alert_title)
 
 
+async def _schedule_ai_retry(state: dict, attempt: int, annotate_only: bool) -> float | None:
+    """Queue the alert's triage again after the LLM failed (worker.ai_retry)."""
+    from worker import ai_retry
+    from worker.redis_client import get_redis
+    payload = {k: state.get(k) for k in ("alert_id", "title", "severity", "source_ip", "hostname",
+                                          "decoded_fields", "group_id")}
+    payload["annotate_only"] = annotate_only
+    return await ai_retry.schedule(await get_redis(), payload, attempt)
+
+
 async def analyze_and_maybe_create_case(
     alert_id: str,
     title: str,
@@ -854,6 +864,8 @@ async def analyze_and_maybe_create_case(
     hostname: Optional[str],
     decoded_fields: dict,
     group_id: str,
+    attempt: int = 0,
+    annotate_only: bool = False,
 ) -> None:
     enabled = await get_setting("ai_analyst_enabled", "true")
     if enabled.lower() == "false":
@@ -908,6 +920,7 @@ async def analyze_and_maybe_create_case(
             "dispatch_case_webhooks": dispatch_case_webhooks,
             "ueba_context": _ueba_context,
             "record_outcome": _record_ueba_outcome,
+            "schedule_ai_retry": _schedule_ai_retry,
         },
     )
 
@@ -922,6 +935,8 @@ async def analyze_and_maybe_create_case(
         "similar_cases": [],
         "sop_context": [],
         "feedback_context": [],
+        "attempt": attempt,
+        "annotate_only": annotate_only,
     }
 
     # One replica owns each alert's triage; the other skips rather than
