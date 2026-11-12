@@ -1,6 +1,7 @@
 """Detection doesn't wait for Elasticsearch: an ES outage delays search, not
 alerts; the retry indexes the same event_id and never alerts twice; the batch
 is written with one _bulk request."""
+import asyncio
 import uuid
 
 import httpx
@@ -126,7 +127,7 @@ async def test_batch_is_written_with_one_bulk_and_refused_items_are_dead_lettere
 
     async def bulk(docs):
         calls.append([d for d, _ in docs])
-        return {str(bad): {"status": 400, "error": {"type": "mapper_parsing_exception"}}}
+        return {1: {"status": 400, "error": {"type": "mapper_parsing_exception"}}}   # by position
 
     monkeypatch.setattr(consumer, "bulk_index_items", bulk)
     await consumer._index_batch(redis, [("1-0", dict(LINE), good, {}), ("2-0", dict(LINE), bad, {})])
@@ -155,3 +156,54 @@ async def test_bulk_request_failure_retries_every_line_without_using_attempts(en
 def test_bulk_item_errors_classify_like_http_errors():
     assert consumer.is_infrastructure_error(consumer._bulk_item_error({"status": 429, "error": "es_rejected"}))
     assert not consumer.is_infrastructure_error(consumer._bulk_item_error({"status": 400, "error": "mapping"}))
+
+
+
+async def test_one_failing_group_does_not_drop_the_others(env, monkeypatch):
+    # a Redis error while one source's line is failed out used to abort the
+    # whole gather: every other source's already-detected lines were never
+    # indexed or acked, and their redelivery alerted again
+    redis, _, _ = env
+    bulk_calls = []
+
+    async def bulk(docs):
+        bulk_calls.append([d for d, _ in docs])
+        return {}
+
+    class StreamRedis(FakeRedis):
+        def __init__(self):
+            super().__init__()
+            self.batches = [[("siem:logs", [("1-0", {**LINE, "raw_message": "bad"}),
+                                            ("2-0", {**LINE, "hostname": "other", "raw_message": "good"})])]]
+
+        async def xgroup_create(self, *a, **k):
+            pass
+
+        async def xreadgroup(self, *a, **k):
+            if self.batches:
+                return self.batches.pop()
+            raise asyncio.CancelledError
+
+        async def xack(self, _stream, _group, *ids):
+            if "1-0" in ids:
+                raise ConnectionError("redis hiccup")
+            self.acked.extend(ids)
+
+    stream = StreamRedis()
+
+    async def get_redis():
+        return stream
+
+    async def process(data, dec, sig, predecoded=None, **kw):
+        if data["raw_message"] == "bad":
+            raise ValueError("bad line")
+        return uuid.uuid4(), {"raw_message": data["raw_message"]}
+
+    monkeypatch.setattr(consumer, "get_redis", get_redis)
+    monkeypatch.setattr(consumer, "process_message", process)
+    monkeypatch.setattr(consumer, "bulk_index_items", bulk)
+    monkeypatch.setattr(consumer, "group_by_source",
+                        lambda entries, dec: [[(m, d, None)] for m, d in entries])
+    await consumer.consume_loop({"dec_engine": None, "sig_engine": None})
+    assert len(bulk_calls) == 1 and len(bulk_calls[0]) == 1      # the good line was still indexed
+    assert stream.acked == ["2-0"]

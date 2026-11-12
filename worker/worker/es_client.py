@@ -67,9 +67,10 @@ async def index_log(doc_id: str, doc: dict) -> None:
     resp.raise_for_status()
 
 
-async def bulk_index_items(docs: list[tuple[str, dict]]) -> dict[str, dict]:
-    """Bulk-index (doc_id, doc) pairs; returns {doc_id: {"status", "error"}} for
-    the items Elasticsearch refused. Raises when the request itself fails."""
+async def bulk_index_items(docs: list[tuple[str, dict]]) -> dict[int, dict]:
+    """Bulk-index (doc_id, doc) pairs; returns {position in docs: {"status",
+    "error"}} for the items Elasticsearch refused (_bulk answers items in request
+    order). Raises when the request itself fails."""
     if not docs:
         return {}
     lines = []
@@ -83,10 +84,10 @@ async def bulk_index_items(docs: list[tuple[str, dict]]) -> dict[str, dict]:
     if not result.get("errors"):
         return {}
     failed = {}
-    for item in result.get("items", []):
+    for position, item in enumerate(result.get("items", [])):
         entry = item.get("index", {})
         if entry.get("error"):
-            failed[str(entry.get("_id"))] = {"status": entry.get("status"), "error": entry.get("error")}
+            failed[position] = {"status": entry.get("status"), "error": entry.get("error")}
     return failed
 
 

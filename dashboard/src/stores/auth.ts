@@ -20,7 +20,13 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       setAccessToken: (token) => set({ accessToken: token }),
       setUser: (user) => set({ user }),
-      logout: () => set({ accessToken: null, user: null }),
+      logout: () => {
+        // Revoke the refresh token server-side and clear its httponly cookie;
+        // best-effort, local state is cleared either way. Plain fetch: the
+        // axios instance in api/client imports this store.
+        fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => undefined)
+        set({ accessToken: null, user: null })
+      },
       hasRole: (minRole) => {
         const user = get().user
         if (!user) return false

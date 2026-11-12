@@ -207,6 +207,11 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Error("enrollment failed", "err", err)
 			os.Exit(1)
 		}
+		heartbeat.RemoveStoredToken(configPath) // a rotated token from before belongs to the old identity
+	}
+	heartbeat.TokenBasis = heartbeat.TokenBasisOf(cfg.Agent.Token)
+	if rotated := heartbeat.LoadStoredToken(configPath, heartbeat.TokenBasis); rotated != "" {
+		cfg.Agent.Token = rotated // the server rotated it; config.yaml keeps the enrollment token
 	}
 
 	// Windows: only SYSTEM may stop / reconfigure / delete the service (no-op elsewhere)
@@ -710,7 +715,6 @@ func sendEntry(ctx context.Context, entry string, c *client.Client, cfg *config.
 	logType, location, rawMessage := tailer.Decode(entry)
 	payload := map[string]interface{}{
 		"agent_id":    cfg.Agent.ID,
-		"agent_token": cfg.Agent.Token,
 		"log_type":    logType,
 		"raw_message": rawMessage,
 		"location":    location,
@@ -825,13 +829,22 @@ func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *
 	wasOffline := false
 	replaySpill(buf, spill)
 
+	// held is a batch the server answered 429 for: it is resent as is, without
+	// popping it again, so local detection doesn't observe it a second time.
+	var held []string
 	for ctx.Err() == nil {
 		batchMax := logBatchMax()
 		n := batchMax
 		if n <= 0 {
 			n = 1 // older server: one line per POST /api/ingest/log
 		}
-		entries := buf.PopN(n, maxBatchBytes)
+		retrying := held != nil
+		var entries []string
+		if retrying {
+			entries, held = held, nil
+		} else {
+			entries = buf.PopN(n, maxBatchBytes)
+		}
 		if len(entries) == 0 {
 			backoff = time.Second
 			wait(ctx, 100*time.Millisecond)
@@ -840,7 +853,7 @@ func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *
 
 		// Local detection observes every event exactly once, before delivery:
 		// it must keep working while the server is unreachable.
-		if detector != nil {
+		if detector != nil && !retrying {
 			for _, entry := range entries {
 				logType, _, rawMessage := tailer.Decode(entry)
 				detector.Emit(detector.Observe(logType, rawMessage))
@@ -855,21 +868,25 @@ func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *
 			sent, err = sendBatch(ctx, entries, c, cfg)
 		}
 		if !sent {
+			var busy *retryAfterError
+			if errors.As(err, &busy) && ctx.Err() == nil {
+				// the server is up but backed up: hold this batch, wait as
+				// asked, and don't grow the outage backoff
+				slog.Warn("server busy, holding logs", "retry_in", busy.delay, "entries", len(entries))
+				if !wait(ctx, busy.delay) {
+					for _, entry := range entries {
+						buf.Requeue(entry) // shutdown: the final flush (and its spill) takes them
+					}
+					return
+				}
+				held = entries
+				continue
+			}
 			for _, entry := range entries {
 				buf.Requeue(entry) // also when shutdown cancelled the request
 			}
 			if ctx.Err() != nil {
 				return
-			}
-			var busy *retryAfterError
-			if errors.As(err, &busy) {
-				// the server is up but backed up: wait as asked, keep the
-				// lines in memory (no spill), and don't grow the outage backoff
-				slog.Warn("server busy, holding logs", "retry_in", busy.delay, "entries", len(entries))
-				if !wait(ctx, busy.delay) {
-					return
-				}
-				continue
 			}
 			for _, entry := range entries {
 				spill.Append(entry)

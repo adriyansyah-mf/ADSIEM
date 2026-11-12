@@ -300,6 +300,8 @@ class HeartbeatRequest(BaseModel):
     evidence_health: EvidenceHealth | None = None  # durable agents only
     update: AgentUpdateStatus | None = None
     web_block_health: WebBlockHealth | None = None
+    # 1 = this agent stores a token handed back in HeartbeatResponse.agent_token
+    token_rotation: int | None = None
 
     @field_validator("evidence_health", "update", "web_block_health", mode="wrap")
     @classmethod
@@ -331,6 +333,7 @@ class HeartbeatResponse(BaseModel):
     malware_hashes_version: str = ""  # "<seq>:<action>"; agents sync from /api/ingest/malware-hashes ("" = off)
     web_blocklist_version: str = ""  # "<seq>"; agents sync from /api/ingest/web-blocklist ("" = Web Protection off)
     update: dict | None = None  # services.agent_update.offer_for: version, revision, url, signed
+    agent_token: str | None = None  # a rotated token; only to agents that sent token_rotation
 
 # ─── Ingest ──────────────────────────────────────────────────────
 

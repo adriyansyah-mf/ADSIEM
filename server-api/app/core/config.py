@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # (X-Ingest-Backpressure) get 429 on the legacy log paths instead of the line
     # being queued: well before MAXLEN, which would trim unread lines silently.
     INGEST_BACKLOG_LIMIT: int = 1_000_000
+    # Agent token rotation: agents that support it get a new token over the
+    # heartbeat this often; the old one keeps working for the grace period.
+    AGENT_TOKEN_ROTATE_DAYS: int = 30
+    AGENT_TOKEN_GRACE_HOURS: int = 72
+    # Refresh-token cookie: Secure flag (set true behind HTTPS)
+    REFRESH_COOKIE_SECURE: bool = False
     INGEST_RETRY_AFTER_SECONDS: int = 30
     REDIS_CONSUMER_GROUP: str = "siem-workers"
     ELASTICSEARCH_URL: str = "http://elasticsearch:9200"

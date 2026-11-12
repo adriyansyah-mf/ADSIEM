@@ -57,6 +57,12 @@ class Agent(Base):
     hostname     = Column(String(255), nullable=False)
     group_id     = Column(String(100), nullable=False, default="default")
     token_hash   = Column(Text, nullable=False)
+    # Token rotation (ingest.heartbeat): the previous token stays valid until
+    # prev_token_expires_at, so an agent that missed the new one isn't locked out.
+    token_issued_at        = Column(DateTime(timezone=True), default=now_utc)
+    prev_token_hash        = Column(Text)
+    prev_token_expires_at  = Column(DateTime(timezone=True))
+    token_rotate_requested = Column(Boolean, nullable=False, default=False, server_default="false")
     version      = Column(String(50))
     status       = Column(String(20), nullable=False, default="offline")
     # False while waiting for approval (enrolled with a key that requires it):

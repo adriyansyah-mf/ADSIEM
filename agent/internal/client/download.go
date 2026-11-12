@@ -58,9 +58,7 @@ func (c *Client) downloadFrom(ctx context.Context, path string, w io.Writer, off
 	if err != nil {
 		return 0, false, fmt.Errorf("new request: %w", err)
 	}
-	if c.AgentToken != "" {
-		req.Header.Set("X-Agent-Token", c.AgentToken)
-	}
+	c.setToken(req)
 	if offset > 0 {
 		req.Header.Set("Range", "bytes="+strconv.FormatInt(offset, 10)+"-")
 	}

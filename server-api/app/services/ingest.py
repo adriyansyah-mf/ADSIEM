@@ -23,11 +23,11 @@ async def stream_backlog(redis: aioredis.Redis) -> int:
     return _backlog["length"]
 
 
-async def refuse_if_backlogged(request: Request, redis: aioredis.Redis) -> None:
+async def refuse_if_backlogged(request: Request | None, redis: aioredis.Redis) -> None:
     """429 + Retry-After when the workers are far behind, but only to agents that
     said they retry it (agents before this header treat any 4xx as "sent" and
     would drop the lines)."""
-    if request.headers.get(BACKPRESSURE_HEADER) != "1":
+    if request is None or request.headers.get(BACKPRESSURE_HEADER) != "1":
         return
     if await stream_backlog(redis) >= settings.INGEST_BACKLOG_LIMIT:
         raise HTTPException(status_code=429, detail="ingest_backlog",

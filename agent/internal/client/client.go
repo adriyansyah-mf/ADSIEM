@@ -7,20 +7,46 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 )
 
+// Client is shared by every loop of the agent (heartbeat, senders, updater,
+// flows, stores). Its token can change at runtime (rotation over the
+// heartbeat), so it is read and set under a lock.
 type Client struct {
 	BaseURL    string
-	AgentToken string
 	httpClient *http.Client
+
+	mu    sync.RWMutex
+	token string
 }
 
 func New(baseURL, agentToken string) *Client {
 	return &Client{
 		BaseURL:    baseURL,
-		AgentToken: agentToken,
+		token:      agentToken,
 		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+// Token is the agent token sent as X-Agent-Token.
+func (c *Client) Token() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.token
+}
+
+// SetToken replaces the token for every request from now on.
+func (c *Client) SetToken(token string) {
+	c.mu.Lock()
+	c.token = token
+	c.mu.Unlock()
+}
+
+func (c *Client) setToken(req *http.Request) {
+	if t := c.Token(); t != "" {
+		req.Header.Set("X-Agent-Token", t)
 	}
 }
 
@@ -38,9 +64,7 @@ func (c *Client) PostRaw(path string, body *bytes.Reader) (*http.Response, error
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.AgentToken != "" {
-		req.Header.Set("X-Agent-Token", c.AgentToken)
-	}
+	c.setToken(req)
 	return c.httpClient.Do(req)
 }
 
@@ -61,9 +85,7 @@ func (c *Client) PostContextWith(ctx context.Context, path string, payload any, 
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.AgentToken != "" {
-		req.Header.Set("X-Agent-Token", c.AgentToken)
-	}
+	c.setToken(req)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -76,9 +98,7 @@ func (c *Client) GetContext(ctx context.Context, path string) (*http.Response, e
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}
-	if c.AgentToken != "" {
-		req.Header.Set("X-Agent-Token", c.AgentToken)
-	}
+	c.setToken(req)
 	return http.DefaultClient.Do(req)
 }
 

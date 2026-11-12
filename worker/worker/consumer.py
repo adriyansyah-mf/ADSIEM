@@ -178,6 +178,11 @@ async def process_message(
         return event_id, doc
     try:
         await index_log(str(event_id), doc)
+    except asyncio.CancelledError:
+        # durable evidence runs under wait_for: a timeout here must not make
+        # its retry detect again
+        await _mark_detected(event_id)
+        raise
     except Exception as exc:
         await _mark_detected(event_id)
         raise IndexFailed(event_id) from exc
@@ -288,8 +293,8 @@ async def _index_batch(redis, pending: list) -> None:
     except Exception as exc:  # noqa: BLE001 — Elasticsearch down: every line is retried
         failed, request_error = {}, exc
     acked = []
-    for msg_id, data, event_id, _doc in pending:
-        error = request_error or failed.get(str(event_id))
+    for position, (msg_id, data, event_id, _doc) in enumerate(pending):
+        error = request_error or failed.get(position)
         if error is None:
             acked.append(msg_id)
             continue
@@ -298,7 +303,10 @@ async def _index_batch(redis, pending: list) -> None:
         await _fail(redis, msg_id, {**data, EVENT_ID_FIELD: str(event_id)}, cause)
     if acked:
         logs_ingested.inc(len(acked))
-        await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, *acked)
+        try:
+            await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, *acked)
+        except Exception as exc:  # noqa: BLE001 — indexed already; stream_maintenance redelivers
+            log.error("xack_failed", lines=len(acked), error=str(exc))
     if request_error is not None:
         log.error("es_bulk_failed", lines=len(pending), error=str(request_error))
 
@@ -314,7 +322,7 @@ def _bulk_item_error(item: dict) -> Exception:
 
 # HTTP statuses from Elasticsearch that say "not now" rather than "this document
 # is bad": overloaded, read-only (flood-stage disk), timeouts, server errors.
-_RETRYABLE_STATUS = {403, 408, 409, 429}
+_RETRYABLE_STATUS = {403, 408, 409, 413, 429}  # 413: the batch was too large, not this line
 
 
 def is_infrastructure_error(exc: BaseException) -> bool:
@@ -391,12 +399,20 @@ async def consume_loop(state: dict) -> None:
             # durable inbox references carry no log line: route them before legacy decoding
             references = [e for e in entries if e[1].get("kind") == evidence_inbox.EVIDENCE_KIND]
             legacy = [e for e in entries if e[1].get("kind") != evidence_inbox.EVIDENCE_KIND]
+            # return_exceptions: one group failing (e.g. a Redis error in its ack)
+            # must not throw away the lines the other groups already detected
             results = await asyncio.gather(
                 *(_process_group(redis, group, dec_engine, sig_engine, limit)
                   for group in group_by_source(legacy, dec_engine)),
                 *(_process_references(redis, group, state, limit) for group in group_references(references)),
+                return_exceptions=True,
             )
-            await _index_batch(redis, [line for pending in results if pending for line in pending])
+            for result in results:
+                if isinstance(result, BaseException) and not isinstance(result, Exception):
+                    raise result  # cancellation
+                if isinstance(result, Exception):
+                    log.error("consume_group_failed", error=str(result))
+            await _index_batch(redis, [line for pending in results if isinstance(pending, list) for line in pending])
         except asyncio.CancelledError:
             break
         except Exception as exc:

@@ -55,6 +55,9 @@ type HeartbeatRequest struct {
 	// Self-update status (agents >= 1.9.0); the server offers updates only to
 	// agents reporting it.
 	Update *update.Status `json:"update,omitempty"`
+	// TokenRotation = 1: this agent stores a token handed back in
+	// HeartbeatResponse.AgentToken (servers rotate only agents that say so).
+	TokenRotation int `json:"token_rotation,omitempty"`
 }
 
 // Updater, when set, reports its status on every heartbeat and receives the
@@ -86,6 +89,76 @@ func newSession() string {
 // (next to the config); `siem-agent -verify-uninstall-token` checks against it.
 func UninstallHashPath(configPath string) string {
 	return filepath.Join(filepath.Dir(configPath), "uninstall.sha256")
+}
+
+// TokenPath is where a rotated agent token is kept: next to the config, not in
+// it. Rewriting config.yaml would change config_sha256, which the server reads
+// as tampering.
+func TokenPath(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), "agent.token")
+}
+
+// TokenBasis fingerprints the token in config.yaml at startup. A rotated
+// token is stored with it and used only while config.yaml still holds that
+// token: when the config gets a new one (edited, reinstalled), a stored token
+// from before would otherwise override it and lock the agent out.
+var TokenBasis string
+
+// TokenBasisOf is the fingerprint of a config token.
+func TokenBasisOf(configToken string) string {
+	sum := sha256.Sum256([]byte(configToken))
+	return hex.EncodeToString(sum[:])
+}
+
+// LoadStoredToken is the last token the server rotated to, or "" when there
+// is none or it belongs to another config token (it is then removed).
+func LoadStoredToken(configPath, basis string) string {
+	if configPath == "" {
+		return ""
+	}
+	data, err := os.ReadFile(TokenPath(configPath))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Fields(string(data))
+	if len(lines) != 2 || lines[1] != basis {
+		slog.Warn("ignoring a stored agent token issued for a different config token")
+		RemoveStoredToken(configPath)
+		return ""
+	}
+	return lines[0]
+}
+
+// RemoveStoredToken drops a rotated token, after a fresh enrollment replaced it.
+func RemoveStoredToken(configPath string) {
+	if configPath == "" {
+		return
+	}
+	if err := os.Remove(TokenPath(configPath)); err != nil && !os.IsNotExist(err) {
+		slog.Warn("could not remove the stored agent token", "err", err)
+	}
+}
+
+// storeAgentToken keeps a rotated token across restarts (temp file + rename,
+// 0600). It is applied to the client either way: the server still accepts the
+// previous token during its grace, so a failed write is not fatal.
+func storeAgentToken(c *client.Client, token string) {
+	c.SetToken(token)
+	if ConfigPath == "" {
+		return
+	}
+	path := TokenPath(ConfigPath)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(token+"\n"+TokenBasis+"\n"), 0o600); err != nil {
+		slog.Warn("could not store the rotated agent token", "err", err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		slog.Warn("could not store the rotated agent token", "err", err)
+		_ = os.Remove(tmp)
+		return
+	}
+	slog.Info("agent token rotated")
 }
 
 // storeUninstallHash writes the hash the server sent, when it changed.
@@ -243,6 +316,8 @@ type HeartbeatResponse struct {
 	PolicyVersion string `json:"policy_version"`
 	// Set while this agent's group rollout wants it on another version.
 	Update *update.Offer `json:"update"`
+	// AgentToken is a rotated token (only to agents that sent TokenRotation).
+	AgentToken string `json:"agent_token,omitempty"`
 }
 
 var (
@@ -315,7 +390,7 @@ func Loop(
 			Integrity:     integrity,
 			Session:       Session,
 			Seq:           seq.Add(1),
-		}
+			TokenRotation: 1}
 		if EvidenceHealth != nil {
 			payload.EvidenceHealth = EvidenceHealth()
 		}
@@ -336,6 +411,9 @@ func Loop(
 			var hbResp HeartbeatResponse
 			if err := json.Unmarshal(body, &hbResp); err == nil {
 				storeUninstallHash(hbResp.UninstallTokenSHA256)
+				if hbResp.AgentToken != "" {
+					storeAgentToken(c, hbResp.AgentToken)
+				}
 				storeEvidenceProtocols(hbResp.EvidenceProtocols, hbResp.EvidenceBatchMax)
 				logBatchMax.Store(int64(max(hbResp.LogBatchMax, 0)))
 				if Updater != nil {
