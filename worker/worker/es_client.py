@@ -67,6 +67,29 @@ async def index_log(doc_id: str, doc: dict) -> None:
     resp.raise_for_status()
 
 
+async def bulk_index_items(docs: list[tuple[str, dict]]) -> dict[str, dict]:
+    """Bulk-index (doc_id, doc) pairs; returns {doc_id: {"status", "error"}} for
+    the items Elasticsearch refused. Raises when the request itself fails."""
+    if not docs:
+        return {}
+    lines = []
+    for doc_id, doc in docs:
+        lines.append(json.dumps({"index": {"_index": LOGS_INDEX, "_id": doc_id}}))
+        lines.append(json.dumps(doc, default=str))
+    resp = await _get_client().post("/_bulk", content="\n".join(lines) + "\n",
+                                    headers={"Content-Type": "application/x-ndjson"}, timeout=30)
+    resp.raise_for_status()
+    result = resp.json()
+    if not result.get("errors"):
+        return {}
+    failed = {}
+    for item in result.get("items", []):
+        entry = item.get("index", {})
+        if entry.get("error"):
+            failed[str(entry.get("_id"))] = {"status": entry.get("status"), "error": entry.get("error")}
+    return failed
+
+
 async def bulk_index(docs: list[tuple[str, dict]]) -> int:
     """Bulk-index (doc_id, doc) pairs in one request. Returns count of items
     that errored (logged, not raised — a handful of bad rows shouldn't sink

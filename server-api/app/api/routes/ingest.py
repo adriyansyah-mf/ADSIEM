@@ -26,7 +26,7 @@ from app.services import yara_ruleset
 from app.api.routes import malware_hashes
 from app.services import agent_policy
 from app.services import web_blocks
-from app.services.ingest import enqueue_log
+from app.services.ingest import enqueue_log, refuse_if_backlogged
 from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
                                         accept_evidence, accept_evidence_batch, check_evidence_durability)
 
@@ -74,6 +74,7 @@ async def _session_anomaly(redis: aioredis.Redis, agent_id, body: HeartbeatReque
 
 @router.post("/log", status_code=202)
 async def ingest_log(
+    request: Request,
     body: LogIngestRequest,
     agent: Annotated[Agent, Depends(get_agent)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -81,6 +82,7 @@ async def ingest_log(
     if not agent.approved:
         # accepted, not processed: the agent keeps running quietly until approved
         return {"status": "pending_approval"}
+    await refuse_if_backlogged(request, redis)
     await enqueue_log(redis, {
         "agent_id": str(agent.id),
         "group_id": agent.group_id,
@@ -105,6 +107,7 @@ class LogBatchRequest(BaseModel):
 
 @router.post("/logs", status_code=202)
 async def ingest_logs(
+    request: Request,
     body: LogBatchRequest,
     agent: Annotated[Agent, Depends(get_agent)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
@@ -114,6 +117,7 @@ async def ingest_logs(
     detection waited behind hours of telemetry."""
     if not agent.approved:
         return {"status": "pending_approval", "accepted": 0}
+    await refuse_if_backlogged(request, redis)
     for e in body.entries:
         await enqueue_log(redis, {
             "agent_id": str(agent.id),

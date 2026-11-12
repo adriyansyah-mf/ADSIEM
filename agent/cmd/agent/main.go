@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -715,7 +717,7 @@ func sendEntry(ctx context.Context, entry string, c *client.Client, cfg *config.
 		"received_at": time.Now().UTC().Format(time.RFC3339Nano),
 		"hostname":    mustHostname(),
 	}
-	resp, err := c.PostContext(ctx, "/api/ingest/log", payload)
+	resp, err := c.PostContextWith(ctx, "/api/ingest/log", payload, ingestHeaders)
 	if err != nil {
 		return false, err
 	}
@@ -723,11 +725,39 @@ func sendEntry(ctx context.Context, entry string, c *client.Client, cfg *config.
 	return deliveryResult(resp, logType)
 }
 
-// deliveryResult: 5xx, and 401/403 (this agent's token is refused: dropping
-// would throw away everything, and retrying at once floods the server) are
-// retried with a backoff; other refusals drop the entry.
+// ingestHeaders tells the server this agent retries a 429 (honouring
+// Retry-After) instead of dropping it, so the server may push back when its
+// queue is backed up. Agents without the header never get a 429 on these paths.
+var ingestHeaders = map[string]string{"X-Ingest-Backpressure": "1"}
+
+// retryAfterError is a 429: the server's queue is backed up. The entries are
+// kept and resent after the delay the server asked for.
+type retryAfterError struct{ delay time.Duration }
+
+func (e *retryAfterError) Error() string {
+	return fmt.Sprintf("server busy (429), retrying in %s", e.delay)
+}
+
+// ingestRetryAfter turns a Retry-After header into a delay within [1s, 5m].
+func ingestRetryAfter(v string) time.Duration {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	switch {
+	case err != nil || n < 1:
+		return 5 * time.Second
+	case n > 300:
+		return 5 * time.Minute
+	}
+	return time.Duration(n) * time.Second
+}
+
+// deliveryResult: 5xx, 429 (the server's queue is backed up) and 401/403 (this
+// agent's token is refused: dropping would throw away everything, and retrying
+// at once floods the server) are retried with a backoff; other refusals drop
+// the entry.
 func deliveryResult(resp *http.Response, what string) (bool, error) {
 	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return false, &retryAfterError{delay: ingestRetryAfter(resp.Header.Get("Retry-After"))}
 	case resp.StatusCode >= 500:
 		return false, fmt.Errorf("server status %d", resp.StatusCode)
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
@@ -751,7 +781,7 @@ func sendBatch(ctx context.Context, entries []string, c *client.Client, cfg *con
 			"received_at": now, "hostname": host,
 		})
 	}
-	resp, err := c.PostContext(ctx, "/api/ingest/logs", map[string]any{"entries": batch})
+	resp, err := c.PostContextWith(ctx, "/api/ingest/logs", map[string]any{"entries": batch}, ingestHeaders)
 	if err != nil {
 		return false, err
 	}
@@ -830,6 +860,16 @@ func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *
 			}
 			if ctx.Err() != nil {
 				return
+			}
+			var busy *retryAfterError
+			if errors.As(err, &busy) {
+				// the server is up but backed up: wait as asked, keep the
+				// lines in memory (no spill), and don't grow the outage backoff
+				slog.Warn("server busy, holding logs", "retry_in", busy.delay, "entries", len(entries))
+				if !wait(ctx, busy.delay) {
+					return
+				}
+				continue
 			}
 			for _, entry := range entries {
 				spill.Append(entry)

@@ -47,6 +47,11 @@ func (c *Client) PostRaw(path string, body *bytes.Reader) (*http.Response, error
 // PostContext is Post bound to ctx instead of the client's 10s timeout — for
 // long polls and live-response updates, which set their own deadline.
 func (c *Client) PostContext(ctx context.Context, path string, payload any) (*http.Response, error) {
+	return c.PostContextWith(ctx, path, payload, nil)
+}
+
+// PostContextWith is PostContext with extra request headers.
+func (c *Client) PostContextWith(ctx context.Context, path string, payload any, headers map[string]string) (*http.Response, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal: %w", err)
@@ -58,6 +63,9 @@ func (c *Client) PostContext(ctx context.Context, path string, payload any) (*ht
 	req.Header.Set("Content-Type", "application/json")
 	if c.AgentToken != "" {
 		req.Header.Set("X-Agent-Token", c.AgentToken)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 	return http.DefaultClient.Do(req)
 }

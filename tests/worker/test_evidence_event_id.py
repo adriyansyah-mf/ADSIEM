@@ -38,7 +38,7 @@ class FakeRedis:
     async def xack(self, _key, _group, msg_id):
         self.acked.append(msg_id)
 
-    async def xadd(self, key, data):
+    async def xadd(self, key, data, **kwargs):
         self.failed.append((key, data))
 
 
@@ -59,7 +59,7 @@ def test_consumer_routes_references_and_never_dead_letters_them(monkeypatch):
             raise RuntimeError("database down")
         return "completed"
 
-    async def fake_process(data, dec, sig, predecoded=None, event_id=None):
+    async def fake_process(data, dec, sig, predecoded=None, event_id=None, **kwargs):
         legacy.append(data["raw_message"])
 
     async def fake_get_redis():
