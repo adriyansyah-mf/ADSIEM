@@ -34,3 +34,5 @@ dashboard/dist/
 go.work.sum
 
 .playwright-mcp/
+# docker-compose backup service output (BACKUP_DIR)
+/backups/

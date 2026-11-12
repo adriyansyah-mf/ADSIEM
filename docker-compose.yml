@@ -43,6 +43,30 @@ services:
     networks:
       - siem-net
 
+  # Postgres dumps on a schedule, and ownership of the Elasticsearch snapshot
+  # directory. Both land in BACKUP_DIR: copy that off this host (rsync, restic,
+  # object storage), or a lost disk still takes the backups with it.
+  # Runbook: docs/operations/backup-restore.md
+  backup:
+    image: pgvector/pgvector:pg16  # same major version as the server, so pg_dump matches
+    restart: unless-stopped
+    entrypoint: ["sh", "/usr/local/bin/backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB:-soc_platform}
+      PGUSER: ${POSTGRES_USER:-soc}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-soc}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+    volumes:
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - siem-net
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
     restart: unless-stopped
@@ -51,8 +75,11 @@ services:
       xpack.security.enabled: "false"
       xpack.security.enrollment.enabled: "false"
       ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+      # snapshot repository (worker/worker/es_snapshots.py registers it + an SLM policy)
+      path.repo: /usr/share/elasticsearch/snapshots
     volumes:
       - es_data:/usr/share/elasticsearch/data
+      - ${BACKUP_DIR:-./backups}/elasticsearch:/usr/share/elasticsearch/snapshots
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
       interval: 10s
