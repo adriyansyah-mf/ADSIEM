@@ -54,13 +54,13 @@ docker compose exec elasticsearch curl -s -XPOST localhost:9200/_slm/policy/adsi
 ## Restore Postgres
 
 ```bash
-docker compose stop server-api worker   # nothing writes while restoring
+docker compose stop server-api worker syslog-receiver   # nothing writes while restoring
 DUMP=backups/postgres/adsiem-20261112T013000Z.dump      # pick one
 docker compose exec -T postgres sh -c 'dropdb -U "$POSTGRES_USER" --if-exists soc_restore && createdb -U "$POSTGRES_USER" soc_restore'
 docker compose exec -T postgres pg_restore -U soc -d soc_restore --no-owner < "$DUMP"
 # check it, then swap: rename the live DB away and the restored one in
 docker compose exec -T postgres psql -U soc -d postgres -c 'ALTER DATABASE soc_platform RENAME TO soc_platform_old' -c 'ALTER DATABASE soc_restore RENAME TO soc_platform'
-docker compose start server-api worker
+docker compose start server-api worker syslog-receiver
 ```
 
 Restoring into a fresh database and renaming keeps the old one until you're
@@ -69,14 +69,14 @@ sure. Drop `soc_platform_old` afterwards.
 ## Restore Elasticsearch
 
 ```bash
-docker compose stop worker               # stop new writes
+docker compose stop worker syslog-receiver   # stop new writes
 docker compose exec elasticsearch curl -s 'localhost:9200/_snapshot/adsiem-backups/_all?pretty' | grep '"snapshot"'
 SNAP=adsiem-2026.11.12-xxxxxxxx                          # pick one
 # an open index can't be restored over: close (or delete) it first
 docker compose exec elasticsearch curl -s -XPOST 'localhost:9200/logs,alert_iocs/_close'
 docker compose exec elasticsearch curl -s -XPOST "localhost:9200/_snapshot/adsiem-backups/$SNAP/_restore" \
   -H 'Content-Type: application/json' -d '{"indices": "logs,alert_iocs"}'
-docker compose start worker
+docker compose start worker syslog-receiver
 ```
 
 If the restore answers `"failed": 1` for a shard, check
