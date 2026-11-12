@@ -37,6 +37,7 @@ from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
 from app.api.routes.export import router as export_router
 from app.api.routes.suppressions import router as suppressions_router
+from app.api.routes.syslog_sources import router as syslog_sources_router
 from app.api.routes.metrics import router as metrics_router
 from app.api.routes.handover import router as handover_router
 from app.api.routes.hunt_schedules import router as hunt_schedules_router
@@ -568,7 +569,7 @@ for router in [
     tasks_router, fleet_router, artifacts_router, yara_router, yara_capability_router,
     flows_router, flow_artifacts_router, agent_flows_router,
     enrollment_tokens_router, audit_logs_router,
-    export_router, suppressions_router, metrics_router, handover_router,
+    export_router, suppressions_router, syslog_sources_router, metrics_router, handover_router,
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, investigation_chat_router, yara_drafts_router, knowledge_router, evidence_router,

@@ -37,3 +37,11 @@ NINEROUTER_SEARCH_PROVIDER: str = os.environ.get("NINEROUTER_SEARCH_PROVIDER", "
 SEARXNG_URL: str = os.environ.get("SEARXNG_URL", "http://searxng:8080")
 AI_ANALYSIS_QUEUE: str = os.environ.get("AI_ANALYSIS_QUEUE", "siem:ai-analysis")
 ELASTICSEARCH_URL: str = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch:9200")
+
+# Agentless syslog receiver (python -m worker.syslog_receiver)
+SYSLOG_UDP_PORT: int = int(os.environ.get("SYSLOG_UDP_PORT", "5514"))
+SYSLOG_TCP_PORT: int = int(os.environ.get("SYSLOG_TCP_PORT", "5514"))
+SYSLOG_BIND: str = os.environ.get("SYSLOG_BIND", "0.0.0.0")
+SYSLOG_QUEUE_SIZE: int = int(os.environ.get("SYSLOG_QUEUE_SIZE", "50000"))
+SYSLOG_METRICS_PORT: int = int(os.environ.get("SYSLOG_METRICS_PORT", "8002"))
+REDIS_STREAM_MAXLEN: int = int(os.environ.get("REDIS_STREAM_MAXLEN", "2000000"))

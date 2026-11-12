@@ -57,6 +57,15 @@ services:
     environment:
       LOG_LEVEL: info
 
+  syslog-receiver:
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+    environment:
+      LOG_LEVEL: info
+
   dashboard:
     deploy:
       resources:
