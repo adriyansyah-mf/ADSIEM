@@ -411,3 +411,16 @@ class EvidenceGroupUsage(Base):
     __table_args__ = (CheckConstraint("payload_bytes >= 0", name="ck_evidence_usage_bytes"),)
     group_id      = Column(String(100), primary_key=True)
     payload_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")
+
+
+class SyslogSource(Base):
+    """Read side of server-api's syslog_sources (syslog_receiver.py)."""
+    __tablename__ = "syslog_sources"
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name          = Column(String(255), nullable=False)
+    group_id      = Column(String(100), nullable=False, default="default")
+    cidr          = Column(String(64), nullable=False)
+    log_type      = Column(String(100), nullable=False)
+    enabled       = Column(Boolean, nullable=False, default=True)
+    message_count = Column(BigInteger, nullable=False, default=0)
+    last_seen_at  = Column(DateTime(timezone=True))

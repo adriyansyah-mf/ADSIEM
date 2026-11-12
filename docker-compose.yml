@@ -228,6 +228,44 @@ services:
     networks:
       - siem-net
 
+
+  # Agentless log intake: firewalls, switches and appliances send syslog
+  # (UDP/TCP, RFC 3164/5424, CEF) to SYSLOG_PORT. Only senders registered under
+  # Log Sources -> Syslog are accepted (docs/operations/syslog-ingest.md).
+  syslog-receiver:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+      args:
+        HF_ENDPOINT: ${HF_ENDPOINT:-}
+    command: ["python", "-m", "worker.syslog_receiver"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://soc:soc@postgres:5432/soc_platform}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_STREAM_KEY: ${REDIS_STREAM_KEY:-siem:logs}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SYSLOG_UDP_PORT: "5514"
+      SYSLOG_TCP_PORT: "5514"
+    ports:
+      - "${SYSLOG_PORT:-514}:5514/udp"
+      - "${SYSLOG_PORT:-514}:5514/tcp"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      server-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/')\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    networks:
+      - siem-net
+
   dashboard:
     build:
       context: ./dashboard

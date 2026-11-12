@@ -48,3 +48,11 @@ DLQ_RETRY_BATCH: int = int(os.environ.get("DLQ_RETRY_BATCH", "500"))
 # /health reports "degraded" above these
 HEALTH_DLQ_WARN: int = int(os.environ.get("HEALTH_DLQ_WARN", "1000"))
 HEALTH_PENDING_WARN: int = int(os.environ.get("HEALTH_PENDING_WARN", "50000"))
+
+# Agentless syslog receiver (python -m worker.syslog_receiver)
+SYSLOG_UDP_PORT: int = int(os.environ.get("SYSLOG_UDP_PORT", "5514"))
+SYSLOG_TCP_PORT: int = int(os.environ.get("SYSLOG_TCP_PORT", "5514"))
+SYSLOG_BIND: str = os.environ.get("SYSLOG_BIND", "0.0.0.0")
+SYSLOG_QUEUE_SIZE: int = int(os.environ.get("SYSLOG_QUEUE_SIZE", "50000"))
+SYSLOG_METRICS_PORT: int = int(os.environ.get("SYSLOG_METRICS_PORT", "8002"))
+REDIS_STREAM_MAXLEN: int = int(os.environ.get("REDIS_STREAM_MAXLEN", "2000000"))
