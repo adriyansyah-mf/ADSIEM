@@ -63,6 +63,77 @@ writes `~/.adsiem-sim/stage.py`, runs it with python, the stage opens one
 byte of an SSH key or browser file and connects to portquiz.net:1224). Expect
 `IOA:` alerts for the three `ioa_dev_*` rules within a minute.
 
+### Project scan: before the lure runs
+
+The chains above fire once the payload runs. The project scan
+(`agent/internal/projscan`, log type `project_scan`, agent 1.25.0+) looks at
+the project when it arrives, so the developer can be warned before they run
+anything.
+
+**Trigger:**
+- Linux: the exec sensor sees `git clone` (the target directory comes from
+  the argument or the process's working directory), `gh repo clone`,
+  `npm|yarn|pnpm|bun install|ci`, and `pip install -r|-e|.`.
+- Windows: the ETW file sensor sees git creating a repository's `.git\HEAD`,
+  or npm writing `node_modules\.package-lock.json`. A Windows process start
+  carries no working directory. Hosts that run Sysmon instead of the ETW
+  sensor aren't covered.
+
+A clone is scanned once its checked-out files stop changing (three polls,
+two seconds apart). A clone whose directory never appears is dropped after
+30 seconds, and one that never checks out a file (`git init`, a failed
+clone) after a minute. An install is scanned only when its directory is a
+project (`package.json`, `requirements.txt`, `setup.py` or
+`pyproject.toml`). Global installs (`-g`) and installs inside
+`node_modules` are ignored. The same directory is scanned at most once
+every 10 minutes, and each scan is capped at 10 minutes.
+
+On Windows the npm trigger is npm's own `node_modules\.package-lock.json`,
+which may be written after the lifecycle scripts ran. There the scan still
+alerts and warns, but may come after the install script instead of before
+it. The clone trigger has no such delay.
+
+**Scan:** every file goes through the agent's file scanner (YARA, known
+malware, archives; hits alert as `yara_match`), and these checks look for
+the lures' shapes:
+
+| Check | Flags | Severity |
+|---|---|---|
+| `npm_lifecycle` | `preinstall`/`install`/`postinstall`/`prepare` scripts that download (`curl`, `wget`, `iwr`, URLs) or decode and run (`base64`, `eval`, `\| sh`, PowerShell) | high |
+| | ... that run inline code (`node -e`), or start a hidden or out-of-project file (`node .vscode/x.js`) | medium |
+| `vscode_autorun` | a `.vscode/tasks.json` task with `runOptions.runOn: folderOpen` that downloads or runs code, or hides its output | high |
+| | ... any other auto-run task | medium |
+| `js_loader` | JS that is obfuscated (`_0x` names, `eval(atob(...))`) and runs programs or uses the network, or that runs programs, uses the network and reads credentials or wallets (BeaverTail / InvisibleFerret) | high |
+| | ... obfuscated only | medium |
+| `python_setup` | `setup.py` running decoded code, or a custom install command doing network or process work | high |
+
+`.git`, `node_modules`, virtualenvs and caches aren't walked.
+- The checks read every file they know, wherever it sits, so filler files
+  can't hide the lure.
+- Only the first 5000 files go to the YARA scan.
+- A `package.json`, `tasks.json` or `setup.py` padded past 2 MiB is reported
+  (`oversized_manifest`, medium) rather than skipped.
+- Files with a byte order mark, and `tasks.json` with comments or trailing
+  commas, are read the way npm and VS Code read them.
+
+**Result:**
+- One summary line per scan (`verdict=clean|suspicious`).
+- A high one shows the user a desktop pop-up: "A project you just
+  downloaded looks malicious ... Do not install or run it" (group policy
+  *notify user*). Medium findings stay with the analysts.
+- Control characters in file names are blanked, so a crafted name can't
+  write its own lines into the pop-up.
+- One line per finding, which alerts as *Malicious-Looking Project
+  Downloaded* (high/medium) through `rules/project_scan_*.yaml`.
+- Nothing is blocked: on a developer's machine a false alarm that stops
+  their work costs more than an alert.
+- `project_scan: {disabled: true}` in the agent config turns it off. YARA
+  exclusions in the group policy also exclude project directories.
+
+To check an endpoint, run `tests/simulations/project_scan_sim.sh` there. It
+clones a harmless lure (commands point at `example.invalid`) and expects the
+pop-up and both alerts within a minute.
+
 ## Turning it off, excluding programs
 
 Policies → group → **Behaviour chains (IOA)**: Detect (default) or Off.

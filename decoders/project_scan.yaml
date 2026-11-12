@@ -1,0 +1,29 @@
+# A project a developer cloned or installed (git clone, npm install, pip
+# install -r), scanned before it runs (agent/internal/projscan): the fake job
+# interview lures ship their payload as a package.json lifecycle script, a VS
+# Code task that runs when the folder is opened, or an obfuscated JS loader.
+# One summary line per scan (verdict clean/suspicious, what the user is told)
+# and one finding line per suspicious file (what alerts). YARA hits in the
+# project arrive separately as yara_match.
+name: project_scan
+log_type: project_scan
+type: kv
+priority: 3
+enabled: true
+match: 'event=project_scan'
+fields:
+  event.action: event
+  event.severity: severity
+  event.outcome: verdict
+  project.trigger: trigger
+  project.check: check
+  file.directory: dir
+  file.path: file
+  url.original: origin
+  process.executable: image
+  message: detail
+  project.top_finding: top
+  project.files: files
+  project.findings: findings
+static_fields:
+  event.category: malware
