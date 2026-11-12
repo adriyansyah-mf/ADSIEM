@@ -72,7 +72,10 @@ async def ai_backfill_loop() -> None:
                 rows = (await db.execute(
                     select(Alert).where(Alert.status == "new").order_by(Alert.created_at.desc()).limit(50)
                 )).scalars().all()
+            from worker.alert_manager import _should_ai_investigate
             for alert in rows:
+                if not await _should_ai_investigate(alert.severity):
+                    continue  # under ai_min_severity (raised since the alert was made)
                 try:
                     await analyze_and_maybe_create_case(
                         alert_id=str(alert.id),

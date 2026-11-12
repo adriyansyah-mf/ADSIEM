@@ -147,7 +147,7 @@ export interface Alert {
   id: string
   title: string
   severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
-  status: 'new' | 'in_progress' | 'resolved' | 'false_positive'
+  status: 'new' | 'in_progress' | 'acknowledged' | 'below_threshold' | 'resolved' | 'false_positive' | 'closed'
   rule_id: string | null
   event_id: string | null
   agent_id: string | null

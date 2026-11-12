@@ -257,7 +257,7 @@ export default function CommandCenterPage() {
         {metrics.isPending ? <QueryState kind="loading" title="Loading response breakdown…" />
           : metrics.isError ? <QueryState kind="error" title="Response breakdown unavailable" onRetry={() => { void metrics.refetch() }} />
           : metrics.data && <>
-            <ul className="cc-bars">{['new', 'in_progress', 'resolved', 'false_positive'].map(status => <li key={status}>
+            <ul className="cc-bars">{['new', 'in_progress', 'acknowledged', 'below_threshold', 'resolved', 'false_positive'].map(status => <li key={status}>
               <Link className="cc-bars__row" to={`/alerts?status=${status}&start_time=${encodeURIComponent(since)}`}>
                 <StatusBadge status={status} /><span className="cc-bars__value tabular-nums">{(metrics.data.by_status[status] ?? 0).toLocaleString()}</span>
               </Link>

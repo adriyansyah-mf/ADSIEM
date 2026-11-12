@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 
 const COLORS: Readonly<Record<string, string>> = {
   new: 'var(--accent-cyan)', open: 'var(--accent-cyan)',
+  acknowledged: 'var(--accent-yellow)', below_threshold: 'var(--text-muted)',
   in_progress: 'var(--accent-yellow)', in_review: 'var(--accent-yellow)',
   escalated: 'var(--accent-orange)',
   pending_approval: 'var(--accent-yellow)', isolated: 'var(--accent-red)',

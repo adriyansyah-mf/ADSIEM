@@ -131,6 +131,7 @@ export default function AlertsPage() {
           <label className="field"><span>Status</span><select className="ui-input" value={status}
             onChange={event => updateFilters({ status: event.target.value })}>
             <option value="">All statuses</option><option value="new">New</option><option value="in_progress">In progress</option>
+            <option value="acknowledged">Acknowledged</option><option value="below_threshold">Below threshold</option>
             <option value="resolved">Resolved</option><option value="false_positive">False positive</option>
           </select></label>
           <div className="field"><span id="alert-time-label">Time window</span>
