@@ -321,10 +321,21 @@ type HeartbeatResponse struct {
 }
 
 var (
+	lastOK           atomic.Int64 // unix nanos of the last 200 heartbeat
 	evidenceV2       atomic.Bool
 	evidenceBatchMax atomic.Int64
 	logBatchMax      atomic.Int64
 )
+
+// LastContact is when a heartbeat last got a 200 from the server (zero
+// before the first one).
+func LastContact() time.Time {
+	n := lastOK.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
+}
 
 // LogBatchMax is how many legacy log lines the last successful heartbeat said
 // one POST /api/ingest/logs takes; 0 (older server) means one per POST /log.
@@ -408,6 +419,7 @@ func Loop(
 		resp.Body.Close()
 
 		if resp.StatusCode == 200 {
+			lastOK.Store(time.Now().UnixNano())
 			var hbResp HeartbeatResponse
 			if err := json.Unmarshal(body, &hbResp); err == nil {
 				storeUninstallHash(hbResp.UninstallTokenSHA256)

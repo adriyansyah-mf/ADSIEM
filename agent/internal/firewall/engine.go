@@ -25,6 +25,11 @@ type Options struct {
 	StatePath    string
 	ServerURL    string
 	Buffer       *buffer.Buffer
+	// LastContact is when the agent last reached the server (heartbeat); an
+	// isolation is released when it is older than ReleaseAfterOffline
+	// (0: 60 minutes, negative: never).
+	LastContact         func() time.Time
+	ReleaseAfterOffline time.Duration
 }
 
 type Engine struct {
@@ -37,6 +42,13 @@ type Engine struct {
 	enabled  bool
 	applied  map[string]Rule
 	degraded string
+
+	isolation    *isolationState
+	isolatedAt   time.Time // isolation applied or restored in this process
+	monitorStop  chan struct{}
+	refreshEvery time.Duration
+	lastContact  func() time.Time
+	releaseAfter time.Duration
 }
 
 func New(opts Options) *Engine {
@@ -56,6 +68,12 @@ func New(opts Options) *Engine {
 		dryRun:  opts.DryRun,
 		enabled: opts.Enabled,
 		applied: make(map[string]Rule),
+
+		lastContact:  opts.LastContact,
+		releaseAfter: opts.ReleaseAfterOffline,
+	}
+	if e.releaseAfter == 0 {
+		e.releaseAfter = defaultReleaseOffline
 	}
 	e.guard = NewGuard(opts.ServerURL, opts.ProtectedIPs)
 
@@ -80,7 +98,8 @@ func New(opts Options) *Engine {
 		}
 	}
 
-	e.replayState()
+	legacyIsolated := e.replayState()
+	e.restoreIsolation(legacyIsolated)
 	if _, noop := e.backend.(*NoopBackend); !noop {
 		go e.sweepLoop()
 	}
@@ -237,83 +256,6 @@ func (e *Engine) Flush() error {
 	return nil
 }
 
-func (e *Engine) Isolate() (map[string]any, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	protected := e.guard.ProtectedCIDRs()
-	rule := Rule{
-		Action:    ActionBlock,
-		CIDR:      "0.0.0.0/0",
-		Direction: DirBoth,
-		Reason:    "isolate_host",
-	}.normalize()
-
-	if err := e.guard.Protect(rule); err == nil {
-		return nil, fmt.Errorf("guard allowed 0.0.0.0/0 — refusing to isolate")
-	}
-
-	applied := make([]string, 0, len(protected))
-	for _, c := range protected {
-		allow := Rule{
-			Action:    ActionAllow,
-			CIDR:      c,
-			Direction: DirBoth,
-			Reason:    "isolate_allow",
-		}.normalize()
-		if err := e.backend.Apply(allow); err != nil {
-			return nil, fmt.Errorf("apply allow %s: %w", c, err)
-		}
-		e.applied[allow.ID] = allow
-		applied = append(applied, c)
-	}
-
-	block := Rule{
-		Action:    ActionBlock,
-		CIDR:      "0.0.0.0/0",
-		Direction: DirInbound,
-		Reason:    "isolate_host",
-	}.normalize()
-	if err := e.backend.Apply(block); err != nil {
-		return nil, fmt.Errorf("apply isolation block: %w", err)
-	}
-	e.applied[block.ID] = block
-	e.persist()
-	e.emit("firewall_isolated", block, "")
-
-	return map[string]any{
-		"isolated":  true,
-		"protected": applied,
-		"backend":   e.backend.Name(),
-	}, nil
-}
-
-func (e *Engine) Unisolate() error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	blockID := Rule{Action: ActionBlock, CIDR: "0.0.0.0/0", Direction: DirInbound}.normalize().ID
-	rule, ok := e.applied[blockID]
-	if !ok {
-		return fmt.Errorf("host is not isolated")
-	}
-	if err := e.backend.Remove(rule); err != nil {
-		return err
-	}
-	delete(e.applied, blockID)
-
-	for id, r := range e.applied {
-		if r.Reason == "isolate_allow" {
-			if err := e.backend.Remove(r); err == nil {
-				delete(e.applied, id)
-			}
-		}
-	}
-	e.persist()
-	e.emit("firewall_unisolated", rule, "")
-	return nil
-}
-
 // ServerRule is the wire shape the server sends on every heartbeat: the full,
 // declarative set of rules the agent should have. Sync reconciles towards it.
 type ServerRule struct {
@@ -461,21 +403,25 @@ func (e *Engine) persist() {
 	}
 }
 
-func (e *Engine) replayState() {
+// replayState re-applies the saved rules. The block-rule isolation of
+// earlier versions (reasons isolate_host / isolate_allow) is not replayed:
+// it is removed, and true is returned so the host is isolated again the
+// current way.
+func (e *Engine) replayState() (legacyIsolated bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	if e.state == "" {
-		return
+		return false
 	}
 	data, err := os.ReadFile(e.state)
 	if err != nil {
-		return
+		return false
 	}
 	var saved []persistedRule
 	if err := json.Unmarshal(data, &saved); err != nil {
 		slog.Warn("firewall state unreadable, ignoring", "err", err)
-		return
+		return false
 	}
 
 	now := time.Now().UTC()
@@ -485,6 +431,11 @@ func (e *Engine) replayState() {
 			continue
 		}
 		r := p.Rule.normalize()
+		if r.Reason == "isolate_host" || r.Reason == "isolate_allow" {
+			legacyIsolated = legacyIsolated || r.Reason == "isolate_host"
+			_ = e.backend.Remove(r)
+			continue
+		}
 		if err := e.guard.Protect(r); err != nil {
 			slog.Warn("dropping persisted rule rejected by guard", "rule", r.ID, "err", err)
 			continue
@@ -501,4 +452,5 @@ func (e *Engine) replayState() {
 		e.emit("firewall_state_restored", Rule{}, fmt.Sprintf("%d rules", restored))
 	}
 	e.persist()
+	return legacyIsolated
 }

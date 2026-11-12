@@ -319,13 +319,15 @@ func run(configPath string, stop <-chan struct{}) {
 
 	// Task runner for live response / Velociraptor-style artifacts
 	fwEngine := firewall.New(firewall.Options{
-		Enabled:      cfg.Firewall.Enabled,
-		Backend:      cfg.Firewall.Backend,
-		DryRun:       cfg.Firewall.DryRun,
-		ProtectedIPs: cfg.Firewall.ProtectedIPs,
-		StatePath:    cfg.Firewall.StatePath,
-		ServerURL:    cfg.Server.URL,
-		Buffer:       buf,
+		Enabled:             cfg.Firewall.Enabled,
+		Backend:             cfg.Firewall.Backend,
+		DryRun:              cfg.Firewall.DryRun,
+		ProtectedIPs:        cfg.Firewall.ProtectedIPs,
+		StatePath:           cfg.Firewall.StatePath,
+		ServerURL:           cfg.Server.URL,
+		Buffer:              buf,
+		LastContact:         heartbeat.LastContact,
+		ReleaseAfterOffline: time.Duration(cfg.Firewall.IsolationReleaseAfterOfflineMinutes) * time.Minute,
 	})
 	taskRunner := task.NewRunner(cfg, c, fwEngine)
 
@@ -391,7 +393,7 @@ func run(configPath string, stop <-chan struct{}) {
 			AllowImages:   cfg.Ransomware.AllowImages,
 			Kill:          !cfg.Ransomware.ReportOnly,
 		}
-		isolate := func() error { _, err := fwEngine.Isolate(); return err }
+		isolate := func() error { return task.IsolateHost(fwEngine, cfg.Server.URL) }
 		if cfg.Ransomware.Isolate {
 			opts.Isolate = isolate
 		}
