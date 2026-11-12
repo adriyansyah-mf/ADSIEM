@@ -104,8 +104,8 @@ def _validate_decoder_yaml(content: str):
         decoder_type = parsed.get("type", "regex")
         if decoder_type == "regex" and "pattern" not in parsed:
             raise ValueError("Decoder must have a 'pattern' field")
-        if decoder_type not in ("regex", "kv"):
-            raise ValueError(f"Unsupported decoder type '{decoder_type}'; use 'regex' or 'kv'")
+        if decoder_type not in ("regex", "kv", "cef"):
+            raise ValueError(f"Unsupported decoder type '{decoder_type}'; use 'regex', 'kv' or 'cef'")
     except yaml.YAMLError as e:
         raise HTTPException(status_code=422, detail=f"Invalid YAML: {e}")
     except ValueError as e:
