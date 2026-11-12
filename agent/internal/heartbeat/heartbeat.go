@@ -20,6 +20,7 @@ import (
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
 	"github.com/siem-platform/agent/internal/update"
+	"gopkg.in/yaml.v3"
 )
 
 type LogSource struct {
@@ -321,10 +322,21 @@ type HeartbeatResponse struct {
 }
 
 var (
+	lastOK           atomic.Int64 // unix nanos of the last 200 heartbeat
 	evidenceV2       atomic.Bool
 	evidenceBatchMax atomic.Int64
 	logBatchMax      atomic.Int64
 )
+
+// LastContact is when a heartbeat last got a 200 from the server (zero
+// before the first one).
+func LastContact() time.Time {
+	n := lastOK.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
+}
 
 // LogBatchMax is how many legacy log lines the last successful heartbeat said
 // one POST /api/ingest/logs takes; 0 (older server) means one per POST /log.
@@ -408,6 +420,7 @@ func Loop(
 		resp.Body.Close()
 
 		if resp.StatusCode == 200 {
+			lastOK.Store(time.Now().UnixNano())
 			var hbResp HeartbeatResponse
 			if err := json.Unmarshal(body, &hbResp); err == nil {
 				storeUninstallHash(hbResp.UninstallTokenSHA256)
@@ -441,14 +454,42 @@ func Loop(
 var ErrUninstallRefused = errors.New("uninstall refused: wrong or missing uninstall token " +
 	"(Agents page → agent → Uninstall token)")
 
-// VerifyUninstallToken is what the package removal hooks call. With no hash
-// provisioned yet (never reached the server) removal is allowed.
+// ErrUninstallUnverifiable: the agent is enrolled but its uninstall token
+// hash is gone and the server can't be asked for it.
+var ErrUninstallUnverifiable = errors.New("uninstall refused: this agent is enrolled but its uninstall token " +
+	"hash is missing and the SIEM server can't be reached to check the token; restore connectivity and retry")
+
+// VerifyUninstallToken is what the package removal hooks call. An agent that
+// never enrolled has no token to check, so removal is allowed. An enrolled
+// one whose hash file is missing (deleted to get around the check) asks the
+// server for it, and refuses when the server can't be reached.
 func VerifyUninstallToken(configPath, token string) error {
 	want, err := os.ReadFile(UninstallHashPath(configPath))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
+		cfg, enrolled, cerr := enrollment(configPath)
+		if cerr != nil {
+			// a config made unreadable must not turn the check off
+			slog.Warn("uninstall check: agent config unreadable", "err", cerr)
+			return ErrUninstallUnverifiable
+		}
+		if !enrolled {
+			return nil
+		}
+		hash, ferr := fetchUninstallHash(configPath, cfg)
+		if errors.Is(ferr, errAgentUnknown) {
+			// deleted on the server (or its token revoked): nothing protects it any more
+			slog.Info("uninstall check: the server no longer knows this agent")
+			return nil
+		}
+		if ferr != nil || len(hash) != 64 {
+			slog.Warn("uninstall token hash unavailable", "err", ferr)
+			return ErrUninstallUnverifiable
+		}
+		if werr := os.WriteFile(UninstallHashPath(configPath), []byte(hash+"\n"), 0o600); werr != nil {
+			slog.Warn("could not store the uninstall token hash", "err", werr)
+		}
+		want = []byte(hash)
+	} else if err != nil {
 		return err
 	}
 	got := sha256.Sum256([]byte(strings.TrimSpace(token)))
@@ -456,4 +497,59 @@ func VerifyUninstallToken(configPath, token string) error {
 		return ErrUninstallRefused
 	}
 	return nil
+}
+
+// enrollment reads only what the uninstall check needs from the config (a
+// full config.Load also validates settings that don't matter here). No
+// config at all: the agent was never set up.
+func enrollment(configPath string) (*config.Config, bool, error) {
+	data, err := os.ReadFile(configPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var cfg config.Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, false, err
+	}
+	return &cfg, cfg.Agent.Token != "" && cfg.Server.URL != "", nil
+}
+
+// errAgentUnknown: the server rejects this agent's token (the agent was
+// deleted there).
+var errAgentUnknown = errors.New("agent unknown to the server")
+
+// fetchUninstallHash asks the server for this agent's uninstall token hash
+// with a "stopping" heartbeat (reason uninstall_check): it carries the hash
+// and, unlike a normal heartbeat, dispatches no pending task (tests replace
+// it).
+var fetchUninstallHash = func(configPath string, cfg *config.Config) (string, error) {
+	token := cfg.Agent.Token
+	if rotated := LoadStoredToken(configPath, TokenBasisOf(cfg.Agent.Token)); rotated != "" {
+		token = rotated
+	}
+	c := client.New(cfg.Server.URL, token)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	resp, err := c.PostContext(ctx, "/api/ingest/heartbeat", HeartbeatRequest{
+		AgentID: cfg.Agent.ID, Status: "stopping", Version: AgentVersion, Reason: "uninstall_check",
+	})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case 200:
+	case 401, 403, 404:
+		return "", errAgentUnknown
+	default:
+		return "", errors.New("heartbeat: status " + resp.Status)
+	}
+	var hb HeartbeatResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&hb); err != nil {
+		return "", err
+	}
+	return hb.UninstallTokenSHA256, nil
 }

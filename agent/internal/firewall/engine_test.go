@@ -3,6 +3,7 @@ package firewall
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -72,24 +73,28 @@ func TestEngineDisabledIsNoop(t *testing.T) {
 	}
 }
 
-func TestEngineIsolateRefusesWithoutGuard(t *testing.T) {
+func TestEngineIsolateRefusesWithoutServer(t *testing.T) {
 	eng := New(Options{Enabled: true, DryRun: true, StatePath: filepath.Join(t.TempDir(), "fw.json")})
+	if _, err := eng.Isolate(); err == nil {
+		t.Fatal("isolating with no known server address must be refused: nothing could release the host")
+	}
+}
+
+func TestEngineIsolateDryRunReportsTheAllowList(t *testing.T) {
+	eng := New(Options{Enabled: true, DryRun: true, ServerURL: "http://172.20.0.4:8000",
+		StatePath: filepath.Join(t.TempDir(), "fw.json")})
 	res, err := eng.Isolate()
 	if err != nil {
-		t.Fatalf("isolate should succeed once protected ranges are allow-listed first: %v", err)
+		t.Fatalf("dry-run isolate: %v", err)
 	}
-	protected, ok := res["protected"].([]string)
-	if !ok || len(protected) == 0 {
-		t.Fatalf("isolation must always allow-list protected ranges first, got %v", res)
+	if res["isolated"] != false || res["dry_run"] != true {
+		t.Fatalf("dry-run must not claim the host is isolated: %v", res)
 	}
-	foundLoopback := false
-	for _, c := range protected {
-		if c == "127.0.0.0/8" {
-			foundLoopback = true
+	allow, _ := res["would_allow"].([]string)
+	for _, want := range []string{"127.0.0.0/8", "::1/128", "172.20.0.4/32"} {
+		if !slices.Contains(allow, want) {
+			t.Fatalf("%s missing from the allow list %v", want, allow)
 		}
-	}
-	if !foundLoopback {
-		t.Fatalf("loopback must be in the allow list, got %v", protected)
 	}
 }
 

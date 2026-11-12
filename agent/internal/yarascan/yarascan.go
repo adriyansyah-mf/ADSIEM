@@ -71,6 +71,10 @@ type Options struct {
 	// archive, disk image, shortcut or smuggling page (internal/unpack) is
 	// hashed, handed to OnData and scanned too, as "outer|inner" paths.
 	NoUnpack bool
+	// CacheFile keeps the last rule set from the server, loaded by New so
+	// files are scanned with it until the server answers
+	// (internal/rulecache). Empty: no cache.
+	CacheFile string
 }
 
 // Scanner owns the rule set and the on-access watcher.
@@ -100,10 +104,12 @@ func New(opts Options) *Scanner {
 	if len(opts.Roots) == 0 {
 		opts.Roots = DefaultRoots()
 	}
-	return &Scanner{
+	s := &Scanner{
 		opts: opts, cache: map[string]string{}, queue: make(chan string, queueSize),
 		wantState: wantState{wake: make(chan struct{}, 1)},
 	}
+	s.LoadCache()
+	return s
 }
 
 // DefaultRoots are the directories where dropped payloads and web shells

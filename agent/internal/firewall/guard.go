@@ -14,6 +14,9 @@ var alwaysProtected = []string{
 	"127.0.0.0/8",
 	"169.254.0.0/16",
 	"0.0.0.0/32",
+	"::1/128",
+	"fe80::/10", // IPv6 link-local: neighbour discovery, router advertisements
+	"ff02::/16", // IPv6 link-local multicast (neighbour discovery)
 }
 
 type Guard struct {
@@ -24,16 +27,26 @@ type Guard struct {
 	resolveErr  error
 	gateway     *net.IPNet
 	gatewayRead bool
+	// serverNets are the server's addresses (and their local subnets) from the
+	// last lookup that worked: a failed lookup keeps them, or an isolated host
+	// whose DNS hiccups would drop the server from its allow list.
+	serverNets []*net.IPNet
+	// resolvConf is read for the DNS servers an isolated host may still ask
+	// (tests point it elsewhere).
+	resolvConf string
 }
 
 func NewGuard(serverURL string, extraIPs []string) *Guard {
-	g := &Guard{serverURL: serverURL, extraIPs: extraIPs}
+	g := &Guard{serverURL: serverURL, extraIPs: extraIPs, resolvConf: "/etc/resolv.conf"}
 	g.Refresh()
 	return g
 }
 
 func (g *Guard) SetServerURL(raw string) {
 	g.mu.Lock()
+	if raw != g.serverURL {
+		g.serverNets = nil // another server: the old addresses are not it
+	}
 	g.serverURL = raw
 	g.mu.Unlock()
 	g.Refresh()
@@ -53,28 +66,35 @@ func (g *Guard) Refresh() {
 	}
 
 	var resolveErr error
+	var server []*net.IPNet
+	addServer := func(ip net.IP) {
+		server = append(server, hostNet(ip))
+		if n := localNetFor(ip); n != nil {
+			server = append(server, n)
+		}
+	}
 	if host != "" {
 		if ip := net.ParseIP(host); ip != nil {
-			nets = append(nets, hostNet(ip))
-			if n := localNetFor(ip); n != nil {
-				nets = append(nets, n)
-			}
+			addServer(ip)
 		} else {
-			addrs, err := net.LookupHost(host)
+			addrs, err := lookupHost(host)
 			if err != nil || len(addrs) == 0 {
 				resolveErr = fmt.Errorf("cannot resolve %s: %w", host, err)
 			} else {
 				for _, a := range addrs {
 					if ip := net.ParseIP(a); ip != nil {
-						nets = append(nets, hostNet(ip))
-						if n := localNetFor(ip); n != nil {
-							nets = append(nets, n)
-						}
+						addServer(ip)
 					}
 				}
 			}
 		}
 	}
+	if len(server) == 0 { // lookup failed: keep the last addresses that worked
+		g.mu.RLock()
+		server = g.serverNets
+		g.mu.RUnlock()
+	}
+	nets = append(nets, server...)
 
 	for _, c := range extra {
 		c = strings.TrimSpace(c)
@@ -93,7 +113,61 @@ func (g *Guard) Refresh() {
 	g.mu.Lock()
 	g.resolved = nets
 	g.resolveErr = resolveErr
+	g.serverNets = server
 	g.mu.Unlock()
+}
+
+// HasServer: the server's address is known (now, or from the last lookup that
+// worked). Isolating without it would cut the host off from the server, and
+// with it the unisolate command.
+func (g *Guard) HasServer() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return len(g.serverNets) > 0
+}
+
+// IsolationAllow is what an isolated host may still talk to: the protected
+// networks (server, loopback, link-local, the gateway, configured IPs) and
+// the DNS servers, so the server's name can still be looked up.
+func (g *Guard) IsolationAllow() []string {
+	out := g.ProtectedCIDRs()
+	g.mu.RLock()
+	conf := g.resolvConf
+	g.mu.RUnlock()
+	seen := map[string]bool{}
+	for _, c := range out {
+		seen[c] = true
+	}
+	for _, ip := range readResolvers(conf) {
+		if c := hostNet(ip).String(); !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// readResolvers: the nameserver lines of resolv.conf (Linux; none elsewhere).
+func readResolvers(path string) []net.IP {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var out []net.IP
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) >= 2 && fields[0] == "nameserver" {
+			if ip := net.ParseIP(strings.SplitN(fields[1], "%", 2)[0]); ip != nil {
+				out = append(out, ip)
+			}
+		}
+	}
+	return out
 }
 
 func (g *Guard) Gateway() *net.IPNet {
@@ -240,3 +314,6 @@ func parseHexIPv4LE(hex string) net.IP {
 	}
 	return net.IPv4(b[0], b[1], b[2], b[3])
 }
+
+// lookupHost resolves the server's name (tests replace it).
+var lookupHost = net.LookupHost

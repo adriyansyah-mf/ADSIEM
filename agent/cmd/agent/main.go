@@ -319,13 +319,15 @@ func run(configPath string, stop <-chan struct{}) {
 
 	// Task runner for live response / Velociraptor-style artifacts
 	fwEngine := firewall.New(firewall.Options{
-		Enabled:      cfg.Firewall.Enabled,
-		Backend:      cfg.Firewall.Backend,
-		DryRun:       cfg.Firewall.DryRun,
-		ProtectedIPs: cfg.Firewall.ProtectedIPs,
-		StatePath:    cfg.Firewall.StatePath,
-		ServerURL:    cfg.Server.URL,
-		Buffer:       buf,
+		Enabled:             cfg.Firewall.Enabled,
+		Backend:             cfg.Firewall.Backend,
+		DryRun:              cfg.Firewall.DryRun,
+		ProtectedIPs:        cfg.Firewall.ProtectedIPs,
+		StatePath:           cfg.Firewall.StatePath,
+		ServerURL:           cfg.Server.URL,
+		Buffer:              buf,
+		LastContact:         heartbeat.LastContact,
+		ReleaseAfterOffline: time.Duration(cfg.Firewall.IsolationReleaseAfterOfflineMinutes) * time.Minute,
 	})
 	taskRunner := task.NewRunner(cfg, c, fwEngine)
 
@@ -366,7 +368,8 @@ func run(configPath string, stop <-chan struct{}) {
 	var preventer *prevent.Manager
 	if (runtime.GOOS == "linux" || runtime.GOOS == "windows") && !cfg.Prevention.Disabled {
 		if pm, err := prevent.Start(prevent.Options{
-			Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			Push:      func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			CacheFile: filepath.Join(task.StateDir(cfg), "prevention_rules.json"),
 		}); err != nil {
 			slog.Warn("execution prevention unavailable", "err", err)
 		} else {
@@ -391,7 +394,7 @@ func run(configPath string, stop <-chan struct{}) {
 			AllowImages:   cfg.Ransomware.AllowImages,
 			Kill:          !cfg.Ransomware.ReportOnly,
 		}
-		isolate := func() error { _, err := fwEngine.Isolate(); return err }
+		isolate := func() error { return task.IsolateHost(fwEngine, cfg.Server.URL) }
 		if cfg.Ransomware.Isolate {
 			opts.Isolate = isolate
 		}
@@ -586,6 +589,7 @@ func run(configPath string, stop <-chan struct{}) {
 		Roots:       cfg.Yara.WatchPaths,
 		MaxFileSize: cfg.Yara.MaxFileSizeMB << 20,
 		Push:        push,
+		CacheFile:   filepath.Join(task.StateDir(cfg), "yara_rules.json"),
 		OnHash:      malFiles.Check,
 		// variants of known malware (TLSH), then the static ML check
 		OnData: func(path, sha string, data []byte, trigger string) bool {

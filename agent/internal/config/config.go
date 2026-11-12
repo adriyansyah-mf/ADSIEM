@@ -40,6 +40,10 @@ type FirewallConfig struct {
 	DryRun       bool     `yaml:"dry_run"`
 	ProtectedIPs []string `yaml:"protected_ips"`
 	StatePath    string   `yaml:"state_path"`
+	// An isolated host is released when the server has been unreachable this
+	// long (0: 60 minutes; negative: never), so a broken isolation can't
+	// strand it.
+	IsolationReleaseAfterOfflineMinutes int `yaml:"isolation_release_after_offline_minutes"`
 }
 
 type NetwatchConfig struct {

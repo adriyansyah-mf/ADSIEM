@@ -111,16 +111,25 @@ func (r *Runner) handleUnblockIP(params map[string]any) (any, error) {
 	return map[string]any{"removed": id}, nil
 }
 
-func (r *Runner) handleIsolateHost() (any, error) {
-	if nativeFirewall {
-		if err := nativeIsolate(r.cfg.Server.URL); err != nil {
+// IsolateHost isolates the host for a task or for anti-ransomware. The
+// firewall engine does it when it enforces rules (both directions, IPv4 and
+// IPv6, the server re-resolved, released when the server stays unreachable);
+// on Windows without an enforcing engine, netsh directly as before.
+// Elsewhere, a firewall that blocks nothing is an error, never a fake success.
+func IsolateHost(eng *firewall.Engine, serverURL string) error {
+	_, err := isolateWith(eng, serverURL)
+	return err
+}
+
+func isolateWith(eng *firewall.Engine, serverURL string) (map[string]any, error) {
+	if nativeFirewall && (eng == nil || !eng.Enforcing()) {
+		if err := nativeIsolate(serverURL); err != nil {
 			return nil, err
 		}
-		return map[string]any{"isolated": true, "backend": "netsh"}, nil
+		return map[string]any{"isolated": true, "backend": "netsh", "direction": firewall.DirBoth}, nil
 	}
-	eng, err := r.firewallEngine()
-	if err != nil {
-		return nil, err
+	if eng == nil {
+		return nil, fmt.Errorf("firewall gate not initialised")
 	}
 	if err := requireEnforcing(eng); err != nil {
 		return nil, err
@@ -128,8 +137,13 @@ func (r *Runner) handleIsolateHost() (any, error) {
 	return eng.Isolate()
 }
 
+func (r *Runner) handleIsolateHost() (any, error) {
+	return isolateWith(r.fw, r.cfg.Server.URL)
+}
+
 func (r *Runner) handleUnisolateHost() (any, error) {
-	if nativeFirewall {
+	if nativeFirewall && (r.fw == nil || !r.fw.Isolated()) {
+		// isolated by netsh directly (or by an older agent): same rule names
 		if err := nativeUnisolate(); err != nil {
 			return nil, err
 		}

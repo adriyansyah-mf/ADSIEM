@@ -3,6 +3,7 @@ package prevent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/siem-platform/agent/internal/malhash"
 	"github.com/siem-platform/agent/internal/policy"
+	"github.com/siem-platform/agent/internal/rulecache"
 )
 
 // LogType of decision lines on Linux (decoders/linux_exec_prevention.yaml);
@@ -99,6 +101,9 @@ type engines interface {
 type Options struct {
 	// Push receives one line per decision.
 	Push func(logType, line string)
+	// CacheFile keeps the last rule set from the server, enforced at start
+	// until the server answers (internal/rulecache). Empty: no cache.
+	CacheFile string
 }
 
 // Manager keeps the server's rules applied to the engines.
@@ -126,7 +131,26 @@ func Start(opts Options) (*Manager, error) {
 		return nil, err
 	}
 	m.eng = eng
+	m.loadCache()
 	return m, nil
+}
+
+// loadCache enforces the rules cached by the last sync: an agent that
+// starts while the server is unreachable must not run without them.
+func (m *Manager) loadCache() {
+	if m.opts.CacheFile == "" {
+		return
+	}
+	var rules []Rule
+	hash, err := rulecache.Load(m.opts.CacheFile, &rules)
+	if err != nil {
+		if !errors.Is(err, rulecache.ErrNone) {
+			slog.Warn("prevent: cached rules not used", "err", err)
+		}
+		return
+	}
+	slog.Info("prevent: enforcing cached rules until the server answers", "rules", len(rules))
+	m.Apply(hash, rules)
 }
 
 func (m *Manager) Close() { m.eng.close() }
@@ -277,6 +301,11 @@ func (m *Manager) Sync(ctx context.Context, c Poster) error {
 		return nil
 	}
 	m.Apply(body.Hash, body.Rules)
+	if m.opts.CacheFile != "" {
+		if err := rulecache.Save(m.opts.CacheFile, body.Hash, body.Rules); err != nil {
+			slog.Warn("prevent: could not cache rules", "err", err)
+		}
+	}
 	return nil
 }
 

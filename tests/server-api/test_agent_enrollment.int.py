@@ -256,9 +256,12 @@ def test_heartbeat_integrity_and_stop_notice(env):
     hb(version="1.8.0", integrity={"binary_sha256": a, "config_sha256": b})  # upgrade: new baseline
     assert len(redis.items) == 1
 
-    hb(version="1.8.0", status="stopping", reason="service_stop")
+    stopping = hb(version="1.8.0", status="stopping", reason="service_stop")
     agent = _agent(env, res.agent_id)
     assert (agent.status, agent.stop_reason) == ("offline", "service_stop")
+    # the uninstall hook asks with a stopping heartbeat when its hash file is gone
+    from app.services.agent_tamper import uninstall_token_sha256 as _hash
+    assert stopping.uninstall_token_sha256 == _hash(res.agent_id)
     assert len(redis.items) == 1  # the worker reports it if the agent stays down
     hb(version="1.8.0")  # restarted
     agent = _agent(env, res.agent_id)

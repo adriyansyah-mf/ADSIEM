@@ -36,7 +36,7 @@ type windowsEngine struct {
 	policy *Policy
 
 	hashes *hashCache
-	work   chan struct{} // bounds concurrent hashing
+	work   chan struct{} // bounds concurrent hashing (only hashing: see matchBounded)
 }
 
 func startEngines(report func(Decision)) (engines, error) {
@@ -60,20 +60,11 @@ func (e *windowsEngine) observe(ps ProcessStart) {
 	if p == nil || !p.active() || ps.Image == "" || ps.PID == e.self || ps.PID <= 4 {
 		return
 	}
-	go func() {
-		e.work <- struct{}{}
-		defer func() { <-e.work }()
-		e.decide(p, ps)
-	}()
+	go e.decide(p, ps)
 }
 
 func (e *windowsEngine) decide(p *Policy, ps ProcessStart) {
-	var sum string
-	c := p.Match(Exec{Path: ps.Image, Parent: ps.ParentImage, Hash: func() (string, bool) {
-		h, err := e.hashes.get(ps.Image)
-		sum = h
-		return h, err == nil
-	}}, false)
+	c, sum := matchBounded(p, ps.Image, ps.ParentImage, e.work, e.hashes.get)
 	if c == nil {
 		return
 	}

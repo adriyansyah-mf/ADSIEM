@@ -26,14 +26,20 @@ type runner func(ctx context.Context, argv ...string) (string, error)
 
 type NftBackend struct {
 	run runner
+	// script runs a whole nft script atomically (isolation)
+	script func(ctx context.Context, script string) error
 }
 
 func NewNft() *NftBackend {
-	return &NftBackend{run: execNft}
+	return &NftBackend{run: execNft, script: execNftScript}
 }
 
+// NewNftWithRunner: tests; a script reaches the runner as -f - <script>.
 func NewNftWithRunner(r runner) *NftBackend {
-	return &NftBackend{run: r}
+	return &NftBackend{run: r, script: func(ctx context.Context, s string) error {
+		_, err := r(ctx, "-f", "-", s)
+		return err
+	}}
 }
 
 func (b *NftBackend) Name() string { return "nft" }

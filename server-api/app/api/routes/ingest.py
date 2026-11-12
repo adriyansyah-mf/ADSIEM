@@ -259,8 +259,11 @@ async def heartbeat(
             status="offline", last_seen_at=now, stop_reason=(body.reason or "service_stop")[:30], **evidence))
         await db.commit()
         protocols = [2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []
+        # the uninstall hook asks with a stopping heartbeat when the agent's
+        # copy of the hash is gone (agent >= 1.25.0)
         return HeartbeatResponse(config_hash="", log_sources=[], evidence_protocols=protocols,
-                                 evidence_batch_max=MAX_BATCH_EVENTS if protocols else 0)
+                                 evidence_batch_max=MAX_BATCH_EVENTS if protocols else 0,
+                                 uninstall_token_sha256=uninstall_token_sha256(agent.id))
 
     integrity_updates, changes = check_integrity(agent, body.version, body.integrity)
     update_status = body.update.model_dump() if body.update is not None else None
