@@ -19,6 +19,7 @@ from worker.consumer import consume_loop, load_engines, reload_loop, dlq_retry_l
 from worker.adaptive import adaptive_loop
 from worker.webhook_sender import webhook_retry_loop
 from worker.ai_consumer import ai_analysis_loop, ai_backfill_loop
+from worker.ai_retry import ai_retry_loop
 from worker.ueba.loops import ueba_snapshot_loop, ueba_train_loop
 from worker.hunter import hunt_loop
 from worker.agent_monitor import agent_monitor_loop
@@ -173,6 +174,7 @@ async def main():
         _supervise("soar", soar_loop),
         _supervise("ai_analysis", ai_analysis_loop),
         _supervise("ai_backfill", ai_backfill_loop),
+        _supervise("ai_retry", ai_retry_loop),
         _supervise("ueba_snapshot", ueba_snapshot_loop),
         _supervise("ueba_train", ueba_train_loop),
         _supervise("hunt", hunt_loop),

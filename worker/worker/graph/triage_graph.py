@@ -85,6 +85,12 @@ class TriageState(TypedDict):
     case_id: NotRequired[str | None]
     used_fallback: NotRequired[bool]
 
+    # Retries after the LLM failed (rate limit, quota, timeout: worker.ai_retry)
+    attempt: NotRequired[int]          # 0 on the first triage
+    annotate_only: NotRequired[bool]   # the alert was already escalated: only add the AI's view
+    deferred: NotRequired[bool]        # no verdict this time: nothing downstream runs
+    retry_in: NotRequired[float | None]
+
 
 def _extract_json(text: str) -> dict | None:
     if not text:
@@ -193,6 +199,29 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
 
         return out
 
+    async def _defer(state: TriageState) -> dict | None:
+        """The LLM failed: schedule another try. Returns the node's result when
+        this run stops here (nothing escalated now), None to go on with the
+        fallback verdict (critical/high escalate at once; attempts used up)."""
+        retry = deps.get("schedule_ai_retry")
+        attempt = int(state.get("attempt") or 0)
+        severity = state.get("effective_severity", state["severity"])
+        escalate_now = severity in ("critical", "high") and not state.get("annotate_only")
+        delay = None
+        if retry:
+            try:
+                delay = await retry(state, attempt, bool(escalate_now or state.get("annotate_only")))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("ai_retry_schedule_failed", alert_id=state.get("alert_id"), error=str(exc))
+        if delay is not None and escalate_now:
+            state["retry_in"] = delay
+            return None
+        if delay is not None or state.get("annotate_only"):
+            log.info("ai_l1_triage_deferred", alert_id=state.get("alert_id"), attempt=attempt, retry_in=delay)
+            return {"deferred": True, "retry_in": delay, "used_fallback": True, "verdict": "pending",
+                    "analysis": {}, "confidence": 0.0, "triage_notes": "", "search_queries": []}
+        return None
+
     async def triage_node(state: TriageState):
         prompt_parts = [
             f"ALERT TO TRIAGE:",
@@ -228,8 +257,18 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                 state.get("effective_severity", state["severity"])
             )
         except Exception as exc:
-            log.error("ai_l1_triage_failed", error=str(exc))
+            log.error("ai_l1_triage_failed", alert_id=state.get("alert_id"), attempt=state.get("attempt", 0),
+                      error=str(exc))
+            deferred = await _defer(state)
+            if deferred is not None:
+                return deferred
             analysis = _fallback_verdict(state.get("effective_severity", state["severity"]))
+            if state.get("retry_in"):  # escalated now, the AI's view comes with a later retry
+                analysis["triage_notes"] += (f" The LLM is unavailable (rate limit or outage): AI triage is retried "
+                                             f"in about {round(state['retry_in'] / 60)} min and its analysis "
+                                             f"will be added to this alert.")
+            elif state.get("attempt"):
+                analysis["triage_notes"] += f" (gave up after {state['attempt'] + 1} attempts)"
 
         verdict = analysis.get("verdict", "monitor")
         confidence = float(analysis.get("confidence", 0.0) or 0.0)
@@ -250,9 +289,23 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             "triage_notes": analysis.get("triage_notes", ""),
             "search_queries": analysis.get("search_queries", []) or [],
             "used_fallback": bool(analysis.get("used_fallback")),
+            "retry_in": state.get("retry_in"),
         }
 
     async def persist_node(state: TriageState):
+        if state.get("deferred"):
+            alert_id = state.get("alert_id")
+            attempt = int(state.get("attempt") or 0)
+            if alert_id and state.get("retry_in") and attempt == 0:
+                await deps["write_alert_note"](alert_id, (
+                    "## 🤖 AI L1 Triage — PENDING\n\nThe LLM is unavailable (rate limit or outage). The alert "
+                    f"stays open and AI triage is retried in about {round(state['retry_in'] / 60)} min "
+                    "(up to ~2 hours, backing off)."))
+            elif alert_id and not state.get("retry_in") and state.get("annotate_only"):
+                await deps["write_alert_note"](alert_id, (
+                    f"## 🤖 AI L1 Triage — GAVE UP\n\nThe LLM stayed unavailable for {attempt + 1} attempts: "
+                    "no AI analysis for this alert; it stays with L2."))
+            return {}
         analysis = state.get("analysis") or {}
         verdict = state.get("verdict", "monitor")
         confidence = state.get("confidence", 0.0)
@@ -276,8 +329,11 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             ))
 
         actions_str = ("\n\n**Immediate Actions:**\n" + "\n".join(f"- {a}" for a in actions)) if actions else ""
+        delayed = " (delayed, after the LLM was unavailable)" if state.get("annotate_only") else ""
+        if delayed and verdict == "false_positive":
+            delayed += "\n\n_The alert was already escalated: L2 decides whether to close it._"
         note = (
-            f"## 🤖 AI L1 Triage — {verdict.upper()}\n\n"
+            f"## 🤖 AI L1 Triage — {verdict.upper()}{delayed}\n\n"
             f"**Confidence:** {confidence:.0%}\n\n"
             f"**Investigation Notes:**\n{state.get('triage_notes','')}"
             f"{actions_str}"
@@ -288,7 +344,8 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
 
     async def soar_node(state: TriageState):
         alert_id = state["alert_id"]
-        if not alert_id:
+        # deferred: no verdict yet; annotate_only: the playbooks ran when it was escalated
+        if not alert_id or state.get("deferred") or state.get("annotate_only"):
             return {}
         try:
             enrichment = state.get("enrichment")
@@ -314,6 +371,8 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         return {}
 
     async def finalize_node(state: TriageState):
+        if state.get("deferred") or state.get("annotate_only"):
+            return {}  # no status change, no case: pending, or already with L2
         if "grouping_lock" in deps:
             async with deps["grouping_lock"](state.get("group_id", "default")):
                 return await finalize_locked(state)
@@ -464,7 +523,7 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         """Hand the outcome back to the subsystem that raised the alert (UEBA
         writes it onto its anomaly so the UEBA page shows the AI's view)."""
         hook = deps.get("record_outcome")
-        if hook and state.get("alert_id"):
+        if hook and state.get("alert_id") and not state.get("deferred"):
             try:
                 await hook(
                     alert_id=state["alert_id"],

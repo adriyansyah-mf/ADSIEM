@@ -136,6 +136,7 @@ class NineRouterChatModel(BaseChatModel):
                         url, headers=self._headers(), json=self._payload(messages, stream=False)
                     )
                     if resp.status_code == 429:
+                        last_exc = RuntimeError("rate limited (429)")
                         wait = min(max(float(resp.headers.get("retry-after", delay)), 2.0), 20.0)
                         await asyncio.sleep(wait)
                         delay = min(delay * 2, 60)
