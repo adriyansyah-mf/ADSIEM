@@ -1,0 +1,29 @@
+# Suricata EVE JSON: HTTP transactions
+name: suricata_eve_http
+log_type: suricata
+type: json
+priority: 20
+enabled: true
+when:
+  event_type: http
+fields:
+  source.ip: src_ip
+  source.port: src_port
+  destination.ip: dest_ip
+  destination.port: dest_port
+  network.transport: proto
+  network.protocol: app_proto
+  observer.hostname: host
+  observer.ingress.interface.name: in_iface
+  event.id: flow_id
+  url.domain: http.hostname
+  url.path: http.url
+  http.request.method: http.http_method
+  http.response.status_code: http.status
+  user_agent.original: http.http_user_agent
+  http.request.referrer: http.http_refer
+static_fields:
+  event.kind: event
+  event.category: network
+  event.module: suricata
+  event.dataset: suricata.http

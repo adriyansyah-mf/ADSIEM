@@ -226,6 +226,13 @@ SOURCES: list[Source] = [
     Source("fortigate", log_types=("fortigate_*",), raw_kv=True),
     Source("fortigate", "event", log_types=("fortigate_*",), when=(("type", "eq", ("event",)),), raw_kv=True),
     Source("fortigate", "utm", log_types=("fortigate_*",), when=(("type", "eq", ("utm",)),), raw_kv=True),
+    # Suricata EVE JSON (decoders/suricata_eve.yaml): one stream, event_type per record
+    Source("suricata", log_types=("suricata",)),
+    Source("suricata", "alert", log_types=("suricata",), when=(("event.dataset", "eq", ("suricata.alert",)),)),
+    # Zeek JSON logs (decoders/zeek_json.yaml): one Sigma service per Zeek log
+    Source("zeek", log_types=("zeek",)),
+    *(Source("zeek", svc, log_types=("zeek",), when=(("event.dataset", "eq", (f"zeek.{svc}",)),))
+      for svc in ("conn", "dns", "http", "ssl", "notice")),
     # The platform's own rules predate this table and use these as products.
     Source("webserver", log_types=_WEB, aliases=_WEB_ALIASES),
     Source("firewall", log_types=_FW),

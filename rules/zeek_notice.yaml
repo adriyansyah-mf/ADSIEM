@@ -1,0 +1,19 @@
+title: Zeek Notice
+id: rule-zeek-notice
+description: >
+  Zeek raised a notice: its own detections, such as scans
+  (Scan::Port_Scan), invalid certificates or SSH brute force. The notice type
+  is rule.name, the detail is message.
+logsource:
+  product: zeek
+  service: notice
+detection:
+  selection:
+    event.kind: alert
+  condition: selection
+suppression:
+  timewindow: 3600
+  group_by: [rule.name, source.ip]
+level: medium
+tags:
+  - attack.discovery

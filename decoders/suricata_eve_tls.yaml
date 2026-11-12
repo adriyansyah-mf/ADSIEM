@@ -1,0 +1,29 @@
+# Suricata EVE JSON: TLS handshakes (SNI, certificate, JA3)
+name: suricata_eve_tls
+log_type: suricata
+type: json
+priority: 20
+enabled: true
+when:
+  event_type: tls
+fields:
+  source.ip: src_ip
+  source.port: src_port
+  destination.ip: dest_ip
+  destination.port: dest_port
+  network.transport: proto
+  network.protocol: app_proto
+  observer.hostname: host
+  observer.ingress.interface.name: in_iface
+  event.id: flow_id
+  tls.client.server_name: tls.sni
+  tls.server.subject: tls.subject
+  tls.server.issuer: tls.issuerdn
+  tls.version: tls.version
+  tls.client.ja3: tls.ja3.hash
+  tls.server.ja3s: tls.ja3s.hash
+static_fields:
+  event.kind: event
+  event.category: network
+  event.module: suricata
+  event.dataset: suricata.tls

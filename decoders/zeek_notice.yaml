@@ -1,0 +1,23 @@
+# Zeek notice.log (JSON): Zeek's own detections (scans, invalid certs, ...)
+name: zeek_notice
+log_type: zeek
+type: json
+priority: 10
+enabled: true
+raw_fields: true
+when:
+  note: "*"
+fields:
+  source.ip: id.orig_h
+  source.port: id.orig_p
+  destination.ip: id.resp_h
+  destination.port: id.resp_p
+  event.id: uid
+  rule.name: note
+  message: msg
+  event.reason: sub
+static_fields:
+  event.kind: alert
+  event.category: intrusion_detection
+  event.module: zeek
+  event.dataset: zeek.notice

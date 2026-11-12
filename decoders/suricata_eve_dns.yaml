@@ -1,0 +1,27 @@
+# Suricata EVE JSON: DNS queries and answers (EVE v2 and v3 layouts)
+name: suricata_eve_dns
+log_type: suricata
+type: json
+priority: 20
+enabled: true
+when:
+  event_type: dns
+fields:
+  source.ip: src_ip
+  source.port: src_port
+  destination.ip: dest_ip
+  destination.port: dest_port
+  network.transport: proto
+  network.protocol: app_proto
+  observer.hostname: host
+  observer.ingress.interface.name: in_iface
+  event.id: flow_id
+  dns.question.name: [dns.rrname, dns.queries.0.rrname]
+  dns.question.type: [dns.rrtype, dns.queries.0.rrtype]
+  dns.response_code: dns.rcode
+  dns.type: dns.type
+static_fields:
+  event.kind: event
+  event.category: network
+  event.module: suricata
+  event.dataset: suricata.dns

@@ -1,0 +1,27 @@
+# Zeek ssl.log (JSON)
+name: zeek_ssl
+log_type: zeek
+type: json
+priority: 20
+enabled: true
+raw_fields: true
+when:
+  established: "*"
+  version: "*"
+fields:
+  source.ip: id.orig_h
+  source.port: id.orig_p
+  destination.ip: id.resp_h
+  destination.port: id.resp_p
+  event.id: uid
+  tls.client.server_name: server_name
+  tls.version: version
+  tls.established: established
+  tls.server.subject: subject
+  tls.server.issuer: issuer
+  tls.client.ja3: ja3
+static_fields:
+  event.kind: event
+  event.category: network
+  event.module: zeek
+  event.dataset: zeek.ssl

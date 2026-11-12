@@ -108,16 +108,92 @@ def _parse_cef(raw: str) -> dict[str, str]:
     return result
 
 
+_JSON = __import__("json").JSONDecoder()
+_MISSING = object()
+
+
+def _parse_json(raw: str) -> dict | None:
+    """The JSON object in a line: from the first '{', so one forwarded with a
+    syslog header ("Mmm dd host suricata[12]: {...}") parses too."""
+    start = raw.find("{")
+    if start < 0:
+        return None
+    try:
+        obj, _ = _JSON.raw_decode(raw, start)
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _json_get(obj: Any, path: str) -> Any:
+    """A dotted path into nested objects; a literal dotted key wins (Zeek writes
+    flat keys like "id.orig_h"); numeric parts index lists ("queries.0.rrname")."""
+    if isinstance(obj, dict) and path in obj:
+        return obj[path]
+    head, _, rest = path.partition(".")
+    if isinstance(obj, dict):
+        nxt = obj.get(head, _MISSING)
+    elif isinstance(obj, list) and head.isdigit() and int(head) < len(obj):
+        nxt = obj[int(head)]
+    else:
+        return _MISSING
+    if nxt is _MISSING or not rest:
+        return nxt
+    return _json_get(nxt, rest)
+
+
+def _json_str(value: Any) -> str:
+    """Field values are strings, like every other decoder type's."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        return __import__("json").dumps(value, separators=(",", ":"), sort_keys=True)
+    return str(value)
+
+
+def _json_flatten(obj: dict, prefix: str = "") -> dict[str, str]:
+    """Every scalar under its dotted path ({"id": {"orig_h": x}} -> "id.orig_h"),
+    lists as JSON text: the source's own field names, for Sigma rules written
+    against them (SigmaHQ's zeek rules use query, id.orig_h, ...)."""
+    out: dict[str, str] = {}
+    for key, value in obj.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(_json_flatten(value, name + "."))
+        elif value is not None:
+            out[name] = _json_str(value)
+    return out
+
+
+def _json_when(obj: dict, when: dict[str, Any]) -> bool:
+    """Every condition holds: path == value, value "*" = the path exists, a list
+    = any of its values."""
+    for path, expected in when.items():
+        value = _json_get(obj, path)
+        if value is _MISSING or value is None:
+            return False
+        if expected == "*":
+            continue
+        options = expected if isinstance(expected, list) else [expected]
+        if _json_str(value) not in {_json_str(o) for o in options}:
+            return False
+    return True
+
+
 @dataclass
 class DecoderDef:
     name: str
     log_type: str
-    decoder_type: str          # "regex", "kv" or "cef"
+    decoder_type: str          # "regex", "kv", "cef" or "json"
     pattern: re.Pattern | None # only used for regex
     fields_map: dict[str, str]
     static_fields: dict[str, str]
     priority: int
     match_filter: str | None = None  # optional substring required in message
+    when: dict[str, Any] = field(default_factory=dict)  # json: conditions on the parsed object
+    raw_fields: bool = False  # json: also keep the source's own field names
 
 
 class DecoderEngine:
@@ -154,6 +230,21 @@ class DecoderEngine:
                         match_filter=d.get("match"),
                     ))
 
+                elif decoder_type == "json":
+                    # fields: { output_field: path | [path, fallback path, ...] }
+                    decoders.append(DecoderDef(
+                        name=d["name"],
+                        log_type=d["log_type"],
+                        decoder_type="json",
+                        pattern=None,
+                        fields_map=dict(d.get("fields", {})),
+                        static_fields=dict(d.get("static_fields", {})),
+                        priority=d.get("priority", 100),
+                        match_filter=d.get("match"),
+                        when=dict(d.get("when", {})),
+                        raw_fields=bool(d.get("raw_fields", False)),
+                    ))
+
                 elif decoder_type in ("kv", "cef"):
                     # fields: { output_field: key } — all are KV / CEF key references
                     fields_map = dict(d.get("fields", {}))
@@ -179,6 +270,7 @@ class DecoderEngine:
 
     def decode_named(self, log_type: str, raw_message: str) -> tuple[dict[str, Any], str | None]:
         """decode() plus the name of the decoder that matched (None if none did)."""
+        parsed_json = None  # parsed once per line, shared by every json decoder tried
         for decoder in self._decoders:
             if decoder.log_type != log_type:
                 continue
@@ -193,6 +285,21 @@ class DecoderEngine:
                 result: dict[str, Any] = {}
                 for output_field, group_name in decoder.fields_map.items():
                     result[output_field] = groups.get(group_name)
+                result.update(decoder.static_fields)
+                return normalize_web_fields(result), decoder.name
+
+            elif decoder.decoder_type == "json":
+                obj = parsed_json if parsed_json is not None else _parse_json(raw_message)
+                parsed_json = obj if obj is not None else {}
+                if not obj or not _json_when(obj, decoder.when):
+                    continue
+                result = _json_flatten(obj) if decoder.raw_fields else {}
+                for output_field, paths in decoder.fields_map.items():
+                    for path in (paths if isinstance(paths, list) else [paths]):
+                        value = _json_get(obj, path)
+                        if value is not _MISSING and value is not None:
+                            result[output_field] = _json_str(value)
+                            break
                 result.update(decoder.static_fields)
                 return normalize_web_fields(result), decoder.name
 

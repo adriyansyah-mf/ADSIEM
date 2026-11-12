@@ -74,6 +74,46 @@ Any CEF sender: point it at `<siem-host>:514` and register it with log type `cef
 For vendor-specific field mappings, add a decoder with `type: cef`, the same
 `log_type` and a lower `priority` than 50, plus `match: <vendor name>`.
 
+### Suricata and Zeek (JSON)
+
+Both write one JSON object per line. Either have the agent on the sensor tail
+the file, or forward it over syslog. The decoders find the JSON after a syslog
+header.
+
+| Sensor | Agent log source | Log type | Decoders |
+|---|---|---|---|
+| Suricata | `/var/log/suricata/eve.json` | `suricata` | `suricata_eve_{alert,dns,http,tls,generic}` |
+| Zeek (`LogAscii::use_json=T`) | `/opt/zeek/logs/current/{conn,dns,http,ssl,notice}.log` | `zeek` | `zeek_{conn,dns,http,ssl,notice}` |
+
+rsyslog forwarding of `eve.json` (`/etc/rsyslog.d/91-suricata.conf`), with the
+sender registered as a syslog device with log type `suricata`:
+
+```
+module(load="imfile")
+input(type="imfile" File="/var/log/suricata/eve.json" Tag="suricata" Severity="info")
+if $programname == 'suricata' then @@<siem-host>:514
+```
+
+The rules turn detections into alerts:
+
+- `rules/suricata_alert_{high,medium,low}.yaml` alert on Suricata severity 1, 2
+  and 3. They keep one alert per signature and source per hour and count the
+  repeats on it.
+- `rules/zeek_notice.yaml` alerts on Zeek notices (port scans, invalid
+  certificates, and so on).
+
+DNS, HTTP, TLS and flow records stay searchable telemetry. Zeek decoders keep
+Zeek's own field names too (`raw_fields: true`), so Sigma rules written for
+`product: zeek` (`query`, `id.orig_h`, ...) apply to them.
+
+Decoder type `json` (for other JSON sources) works as follows:
+
+- `fields` maps output fields to dotted paths into the object. A list gives
+  fallbacks.
+- `when` selects records: `path: value`, `path: [a, b]` for any of several
+  values, or `path: "*"` for "the path exists".
+- `raw_fields: true` also keeps every source field under its own name.
+
 ## Deployment
 
 `docker-compose.yml` runs `syslog-receiver` from the worker image

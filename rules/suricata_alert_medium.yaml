@@ -1,0 +1,22 @@
+title: Suricata IDS Alert (medium-severity)
+id: rule-suricata-alert-medium
+description: >
+  Suricata raised an alert with severity 2. The signature, category and
+  endpoints are in the event (rule.name, rule.category, source.ip,
+  destination.ip). One alert per signature and source per hour; repeats are
+  counted on it.
+logsource:
+  product: suricata
+  service: alert
+detection:
+  selection:
+    event.kind: alert
+    event.severity: '2'
+  condition: selection
+suppression:
+  timewindow: 3600
+  group_by: [rule.name, source.ip]
+level: medium
+tags:
+  - attack.initial_access
+  - attack.command_and_control
