@@ -57,7 +57,7 @@ def test_consume_loop_runs_sources_concurrently_in_order(monkeypatch):
     redis = FakeRedis(entries)
     seen, running, peak = {}, [0], [0]
 
-    async def fake_process(data, dec, sig, predecoded=None):
+    async def fake_process(data, dec, sig, predecoded=None, **kwargs):
         running[0] += 1
         peak[0] = max(peak[0], running[0])
         await asyncio.sleep(0.01)

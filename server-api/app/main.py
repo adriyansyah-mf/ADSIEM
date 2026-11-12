@@ -414,6 +414,28 @@ async def _migrate_web_block_indexes() -> None:
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_web_block_entries_group_seq ON web_block_entries (group_id, seq)"))
 
+async def _migrate_agent_token_rotation() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            ALTER TABLE agents
+            ADD COLUMN IF NOT EXISTS token_issued_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS prev_token_hash TEXT,
+            ADD COLUMN IF NOT EXISTS prev_token_expires_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS token_rotate_requested BOOLEAN NOT NULL DEFAULT false
+        """))
+        # tokens issued before rotation existed date from enrollment
+        await conn.execute(text(
+            "UPDATE agents SET token_issued_at = COALESCE(enrolled_at, created_at, now()) WHERE token_issued_at IS NULL"
+        ))
+        # every agent request looks its token up: don't scan the table for it
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agents_token_hash ON agents (token_hash)"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_agents_prev_token_hash ON agents (prev_token_hash) "
+            "WHERE prev_token_hash IS NOT NULL"
+        ))
+
+
 async def _migrate_agent_enrollment_columns() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -518,6 +540,7 @@ async def lifespan(app: FastAPI):
         await _seed_web_allowlist()
         await _migrate_audit_log_group()
         await _migrate_agent_enrollment_columns()
+        await _migrate_agent_token_rotation()
         await _migrate_rule_source_columns()
         await _migrate_drop_alerts_event_fk()
         await _migrate_investigation_ledger_columns()

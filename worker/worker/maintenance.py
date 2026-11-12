@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import structlog
 from sqlalchemy import delete
 
-from worker import alert_iocs
+from worker import alert_iocs, es_client, es_snapshots
 from worker.database import AsyncSessionLocal
 from worker.models import Alert
 from worker.settings_cache import get_setting
@@ -59,9 +59,20 @@ async def maintenance_loop() -> None:
             # only delete closed/resolved alerts older than threshold
             n_alrt = await _purge_alerts(alrt_days)
 
+            # re-assert the snapshot repository/policy (a recreated cluster heals) and
+            # report how fresh the last snapshot is
+            snap: dict = {}
+            try:
+                if await es_snapshots.ensure(es_client._get_client()):
+                    snap = await es_snapshots.last_status(es_client._get_client())
+            except Exception as snap_exc:  # noqa: BLE001
+                log.warning("es_snapshot_check_failed", error=str(snap_exc))
+
             log.info("maintenance_done",
                      logs_deleted=n_evt,
-                     alerts_deleted=n_alrt)
+                     alerts_deleted=n_alrt,
+                     snapshot_last_success=snap.get("last_success"),
+                     snapshot_last_failure=snap.get("last_failure"))
         except Exception as exc:
             log.error("maintenance_error", error=str(exc))
 

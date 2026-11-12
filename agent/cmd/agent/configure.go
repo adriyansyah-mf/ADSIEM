@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/siem-platform/agent/internal/config"
+	"github.com/siem-platform/agent/internal/heartbeat"
 )
 
 // configureOptions are the -configure flags; the Windows MSI passes its
@@ -53,6 +54,7 @@ func configure(configPath string, o configureOptions) error {
 		cfg.Agent.EnrollmentToken = o.key
 		cfg.Agent.Token = ""
 		cfg.Agent.ID = ""
+		heartbeat.RemoveStoredToken(configPath)
 	}
 	if o.name != "" {
 		cfg.Agent.Name = o.name

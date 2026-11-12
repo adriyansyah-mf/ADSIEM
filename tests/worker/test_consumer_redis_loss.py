@@ -25,7 +25,7 @@ def test_consumer_recreates_the_group_after_redis_lost_everything(monkeypatch):
         await r.flushdb()
         seen = asyncio.Event()
 
-        async def fake_process(data, dec, sig, predecoded=None):
+        async def fake_process(data, dec, sig, predecoded=None, **kwargs):
             if data.get("raw_message") == "after the restart":
                 seen.set()
 

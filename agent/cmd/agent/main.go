@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -205,6 +207,11 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Error("enrollment failed", "err", err)
 			os.Exit(1)
 		}
+		heartbeat.RemoveStoredToken(configPath) // a rotated token from before belongs to the old identity
+	}
+	heartbeat.TokenBasis = heartbeat.TokenBasisOf(cfg.Agent.Token)
+	if rotated := heartbeat.LoadStoredToken(configPath, heartbeat.TokenBasis); rotated != "" {
+		cfg.Agent.Token = rotated // the server rotated it; config.yaml keeps the enrollment token
 	}
 
 	// Windows: only SYSTEM may stop / reconfigure / delete the service (no-op elsewhere)
@@ -708,14 +715,13 @@ func sendEntry(ctx context.Context, entry string, c *client.Client, cfg *config.
 	logType, location, rawMessage := tailer.Decode(entry)
 	payload := map[string]interface{}{
 		"agent_id":    cfg.Agent.ID,
-		"agent_token": cfg.Agent.Token,
 		"log_type":    logType,
 		"raw_message": rawMessage,
 		"location":    location,
 		"received_at": time.Now().UTC().Format(time.RFC3339Nano),
 		"hostname":    mustHostname(),
 	}
-	resp, err := c.PostContext(ctx, "/api/ingest/log", payload)
+	resp, err := c.PostContextWith(ctx, "/api/ingest/log", payload, ingestHeaders)
 	if err != nil {
 		return false, err
 	}
@@ -723,11 +729,39 @@ func sendEntry(ctx context.Context, entry string, c *client.Client, cfg *config.
 	return deliveryResult(resp, logType)
 }
 
-// deliveryResult: 5xx, and 401/403 (this agent's token is refused: dropping
-// would throw away everything, and retrying at once floods the server) are
-// retried with a backoff; other refusals drop the entry.
+// ingestHeaders tells the server this agent retries a 429 (honouring
+// Retry-After) instead of dropping it, so the server may push back when its
+// queue is backed up. Agents without the header never get a 429 on these paths.
+var ingestHeaders = map[string]string{"X-Ingest-Backpressure": "1"}
+
+// retryAfterError is a 429: the server's queue is backed up. The entries are
+// kept and resent after the delay the server asked for.
+type retryAfterError struct{ delay time.Duration }
+
+func (e *retryAfterError) Error() string {
+	return fmt.Sprintf("server busy (429), retrying in %s", e.delay)
+}
+
+// ingestRetryAfter turns a Retry-After header into a delay within [1s, 5m].
+func ingestRetryAfter(v string) time.Duration {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	switch {
+	case err != nil || n < 1:
+		return 5 * time.Second
+	case n > 300:
+		return 5 * time.Minute
+	}
+	return time.Duration(n) * time.Second
+}
+
+// deliveryResult: 5xx, 429 (the server's queue is backed up) and 401/403 (this
+// agent's token is refused: dropping would throw away everything, and retrying
+// at once floods the server) are retried with a backoff; other refusals drop
+// the entry.
 func deliveryResult(resp *http.Response, what string) (bool, error) {
 	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return false, &retryAfterError{delay: ingestRetryAfter(resp.Header.Get("Retry-After"))}
 	case resp.StatusCode >= 500:
 		return false, fmt.Errorf("server status %d", resp.StatusCode)
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
@@ -751,7 +785,7 @@ func sendBatch(ctx context.Context, entries []string, c *client.Client, cfg *con
 			"received_at": now, "hostname": host,
 		})
 	}
-	resp, err := c.PostContext(ctx, "/api/ingest/logs", map[string]any{"entries": batch})
+	resp, err := c.PostContextWith(ctx, "/api/ingest/logs", map[string]any{"entries": batch}, ingestHeaders)
 	if err != nil {
 		return false, err
 	}
@@ -795,13 +829,22 @@ func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *
 	wasOffline := false
 	replaySpill(buf, spill)
 
+	// held is a batch the server answered 429 for: it is resent as is, without
+	// popping it again, so local detection doesn't observe it a second time.
+	var held []string
 	for ctx.Err() == nil {
 		batchMax := logBatchMax()
 		n := batchMax
 		if n <= 0 {
 			n = 1 // older server: one line per POST /api/ingest/log
 		}
-		entries := buf.PopN(n, maxBatchBytes)
+		retrying := held != nil
+		var entries []string
+		if retrying {
+			entries, held = held, nil
+		} else {
+			entries = buf.PopN(n, maxBatchBytes)
+		}
 		if len(entries) == 0 {
 			backoff = time.Second
 			wait(ctx, 100*time.Millisecond)
@@ -810,7 +853,7 @@ func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *
 
 		// Local detection observes every event exactly once, before delivery:
 		// it must keep working while the server is unreachable.
-		if detector != nil {
+		if detector != nil && !retrying {
 			for _, entry := range entries {
 				logType, _, rawMessage := tailer.Decode(entry)
 				detector.Emit(detector.Observe(logType, rawMessage))
@@ -825,6 +868,20 @@ func senderLoop(ctx context.Context, buf *buffer.Buffer, c *client.Client, cfg *
 			sent, err = sendBatch(ctx, entries, c, cfg)
 		}
 		if !sent {
+			var busy *retryAfterError
+			if errors.As(err, &busy) && ctx.Err() == nil {
+				// the server is up but backed up: hold this batch, wait as
+				// asked, and don't grow the outage backoff
+				slog.Warn("server busy, holding logs", "retry_in", busy.delay, "entries", len(entries))
+				if !wait(ctx, busy.delay) {
+					for _, entry := range entries {
+						buf.Requeue(entry) // shutdown: the final flush (and its spill) takes them
+					}
+					return
+				}
+				held = entries
+				continue
+			}
 			for _, entry := range entries {
 				buf.Requeue(entry) // also when shutdown cancelled the request
 			}

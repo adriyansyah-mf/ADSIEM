@@ -9,7 +9,7 @@ from threading import Thread
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
 from worker.config import LOG_LEVEL
-from worker import es_client, pipeline_health
+from worker import es_client, es_snapshots, pipeline_health
 from worker.database import AsyncSessionLocal, engine
 from worker.decoder_engine import DecoderEngine
 from worker.redis_client import get_redis
@@ -144,6 +144,10 @@ async def main():
     await seed_if_empty()
     await ensure_es_index()
     await ensure_alert_iocs_index()
+    try:  # best-effort: snapshots are off until path.repo/BACKUP_DIR are set up
+        await es_snapshots.ensure(es_client._get_client())
+    except Exception as exc:  # noqa: BLE001
+        log.warning("es_snapshot_setup_failed", error=str(exc))
 
     async with AsyncSessionLocal() as db:
         dec_engine, sig_engine = await load_engines(db)

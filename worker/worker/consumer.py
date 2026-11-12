@@ -20,7 +20,7 @@ from worker.redis_client import get_redis
 from worker.sigma_engine import SigmaEngine
 from worker.alert_manager import create_alert
 from worker.ueba.scorer import score_event as ueba_score_event
-from worker.es_client import index_log, ping as es_ping
+from worker.es_client import bulk_index_items, index_log, ping as es_ping
 from worker import evidence_inbox
 from worker.policy_exclusions import excluded as excluded_by_policy
 from worker.malware_feed import learn_from_event
@@ -37,6 +37,35 @@ dlq_dropped     = Counter("siem_dlq_dropped_total", "Log lines dropped after DLQ
 
 DLQ_KEY = f"{REDIS_STREAM_KEY}:failed"
 DLQ_ATTEMPTS_FIELD = "_dlq_attempts"
+# A line whose detection ran but whose Elasticsearch write failed carries its
+# event_id into the DLQ, so the retry indexes the same document the alerts
+# point at; DETECTED_KEY marks that detection already ran for that event_id.
+EVENT_ID_FIELD = "_event_id"
+DETECTED_KEY = "siem:detected:{}"
+DETECTED_TTL = 7 * 86400
+
+
+class IndexFailed(Exception):
+    """Detection ran for this line, but writing it to Elasticsearch failed.
+    __cause__ is the underlying error (used to tell an outage from a bad line)."""
+
+    def __init__(self, event_id: uuid.UUID):
+        super().__init__(f"elasticsearch write failed for event {event_id}")
+        self.event_id = event_id
+
+
+async def _mark_detected(event_id: uuid.UUID) -> None:
+    try:
+        await (await get_redis()).set(DETECTED_KEY.format(event_id), "1", ex=DETECTED_TTL)
+    except Exception as exc:  # noqa: BLE001 — worst case the retry detects again
+        log.warning("detected_mark_failed", event_id=str(event_id), error=str(exc))
+
+
+async def _already_detected(event_id: uuid.UUID) -> bool:
+    try:
+        return bool(await (await get_redis()).exists(DETECTED_KEY.format(event_id)))
+    except Exception:  # noqa: BLE001
+        return False
 
 async def ensure_stream_group(redis) -> None:
     try:
@@ -86,9 +115,19 @@ async def process_message(
     sig_engine: SigmaEngine,
     predecoded: tuple[dict, str | None] | None = None,
     event_id: uuid.UUID | None = None,
-) -> None:
-    """Index, evaluate and score one log line. Durable evidence passes its
-    stable event_id (evidence_inbox.evidence_event_id); legacy lines get a new one."""
+    *,
+    defer_index: bool = False,
+) -> tuple[uuid.UUID, dict] | None:
+    """Evaluate, score and index one log line.
+
+    Detection runs before the Elasticsearch write, so an Elasticsearch outage
+    delays search, not alerts. A retry (durable evidence passes its stable
+    event_id; a DLQ'd legacy line carries _event_id) skips detection when it
+    already ran for that event, so it never alerts twice.
+
+    defer_index=True returns (event_id, document) instead of writing it: the
+    legacy consumer writes a whole batch with one _bulk request. Otherwise an
+    Elasticsearch failure raises IndexFailed."""
     agent_id_str = data.get("agent_id")
     log_type = data.get("log_type", "").strip()
     raw_message = data.get("raw_message", "").strip()
@@ -98,7 +137,7 @@ async def process_message(
 
     if not raw_message:
         log.warning("skipping_empty_message", agent_id=agent_id_str, log_type=log_type)
-        return
+        return None
 
     try:
         received_at = datetime.fromisoformat(received_at_str)
@@ -116,8 +155,12 @@ async def process_message(
     else:
         events_decoded.inc()
 
-    event_id = event_id or uuid.uuid4()
-    await index_log(str(event_id), {
+    retry = event_id is not None or bool(data.get(EVENT_ID_FIELD))
+    event_id = event_id or (uuid.UUID(data[EVENT_ID_FIELD]) if data.get(EVENT_ID_FIELD) else uuid.uuid4())
+    if not (retry and await _already_detected(event_id)):
+        await _detect(decoded, event_id, agent_id, group_id, hostname, raw_message, log_type, sig_engine)
+
+    doc = {
         "agent_id": str(agent_id) if agent_id else None,
         "group_id": group_id,
         "log_type": log_type,
@@ -130,10 +173,25 @@ async def process_message(
         "source_ip": decoded.get("source.ip"),
         "user_name": decoded.get("user.name"),
         "created_at": received_at.isoformat(),
-    })
-
+    }
+    if defer_index:
+        return event_id, doc
+    try:
+        await index_log(str(event_id), doc)
+    except asyncio.CancelledError:
+        # durable evidence runs under wait_for: a timeout here must not make
+        # its retry detect again
+        await _mark_detected(event_id)
+        raise
+    except Exception as exc:
+        await _mark_detected(event_id)
+        raise IndexFailed(event_id) from exc
     logs_ingested.inc()
+    return None
 
+
+async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, hostname: str,
+                  raw_message: str, log_type: str, sig_engine: SigmaEngine) -> None:
     # raw_message gives Sigma `keywords` selections the original log line to search;
     # log_type selects which rules apply (their logsource)
     flat_event = {**decoded, "group_id": group_id, "hostname": hostname, "raw_message": raw_message,
@@ -174,6 +232,7 @@ async def process_message(
     except Exception as _ueba_exc:
         log.warning("ueba_score_error", error=str(_ueba_exc))
 
+
 def group_by_source(entries: list, dec_engine: DecoderEngine) -> list[list]:
     """Split a batch into per-source groups of (msg_id, data, predecoded), in
     stream order. Groups run concurrently; a group runs in order, so threshold
@@ -191,26 +250,79 @@ def group_by_source(entries: list, dec_engine: DecoderEngine) -> list[list]:
     return list(groups.values())
 
 
-async def _process_group(redis, group: list, dec_engine, sig_engine, limit: asyncio.Semaphore) -> None:
+async def _process_group(redis, group: list, dec_engine, sig_engine, limit: asyncio.Semaphore) -> list:
+    """Detect each line of one source, in order. Returns the lines still to be
+    written to Elasticsearch, as (msg_id, data, event_id, doc): the caller
+    writes the whole batch with one _bulk request and acks them after."""
+    pending = []
     async with limit:
         for msg_id, data, predecoded in group:
             try:
-                await process_message(data, dec_engine, sig_engine, predecoded)
-                await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
+                result = await process_message(data, dec_engine, sig_engine, predecoded, defer_index=True)
             except Exception as exc:
                 log.error("message_processing_failed", msg_id=msg_id, error=str(exc))
-                try:
-                    await dead_letter(redis, data, exc)
-                except Exception as dlq_exc:  # noqa: BLE001 — e.g. Redis full (noeviction)
-                    # leave it unacked: stream_maintenance hands stale pending entries back
-                    log.error("dlq_write_failed", msg_id=msg_id, error=str(dlq_exc))
-                    continue
+                await _fail(redis, msg_id, data, exc)
+                continue
+            if result is None:  # nothing to index (empty line)
                 await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
+            else:
+                pending.append((msg_id, data, *result))
+    return pending
+
+
+async def _fail(redis, msg_id: str, data: dict, exc: BaseException) -> None:
+    """DLQ the line, then ack it. If the DLQ write itself fails (e.g. Redis full,
+    noeviction), leave it unacked: stream_maintenance hands stale pending entries back."""
+    try:
+        await dead_letter(redis, data, exc)
+    except Exception as dlq_exc:  # noqa: BLE001
+        log.error("dlq_write_failed", msg_id=msg_id, error=str(dlq_exc))
+        return
+    await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, msg_id)
+
+
+async def _index_batch(redis, pending: list) -> None:
+    """One _bulk write for the batch's detected lines. A line Elasticsearch
+    refuses (or the whole request failing) goes to the DLQ with its event_id,
+    marked as detected, so the retry only indexes it."""
+    if not pending:
+        return
+    try:
+        failed = await bulk_index_items([(str(event_id), doc) for _m, _d, event_id, doc in pending])
+        request_error = None
+    except Exception as exc:  # noqa: BLE001 — Elasticsearch down: every line is retried
+        failed, request_error = {}, exc
+    acked = []
+    for position, (msg_id, data, event_id, _doc) in enumerate(pending):
+        error = request_error or failed.get(position)
+        if error is None:
+            acked.append(msg_id)
+            continue
+        await _mark_detected(event_id)
+        cause = error if isinstance(error, BaseException) else _bulk_item_error(error)
+        await _fail(redis, msg_id, {**data, EVENT_ID_FIELD: str(event_id)}, cause)
+    if acked:
+        logs_ingested.inc(len(acked))
+        try:
+            await redis.xack(REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP, *acked)
+        except Exception as exc:  # noqa: BLE001 — indexed already; stream_maintenance redelivers
+            log.error("xack_failed", lines=len(acked), error=str(exc))
+    if request_error is not None:
+        log.error("es_bulk_failed", lines=len(pending), error=str(request_error))
+
+
+def _bulk_item_error(item: dict) -> Exception:
+    """A _bulk item failure as an exception dead_letter can classify: an
+    HTTPStatusError with the item's status, so 429/5xx count as an outage."""
+    status = int(item.get("status") or 500)
+    request = httpx.Request("POST", "/_bulk")
+    return httpx.HTTPStatusError(str(item.get("error"))[:300], request=request,
+                                 response=httpx.Response(status, request=request))
 
 
 # HTTP statuses from Elasticsearch that say "not now" rather than "this document
 # is bad": overloaded, read-only (flood-stage disk), timeouts, server errors.
-_RETRYABLE_STATUS = {403, 408, 409, 429}
+_RETRYABLE_STATUS = {403, 408, 409, 413, 429}  # 413: the batch was too large, not this line
 
 
 def is_infrastructure_error(exc: BaseException) -> bool:
@@ -287,11 +399,20 @@ async def consume_loop(state: dict) -> None:
             # durable inbox references carry no log line: route them before legacy decoding
             references = [e for e in entries if e[1].get("kind") == evidence_inbox.EVIDENCE_KIND]
             legacy = [e for e in entries if e[1].get("kind") != evidence_inbox.EVIDENCE_KIND]
-            await asyncio.gather(
+            # return_exceptions: one group failing (e.g. a Redis error in its ack)
+            # must not throw away the lines the other groups already detected
+            results = await asyncio.gather(
                 *(_process_group(redis, group, dec_engine, sig_engine, limit)
                   for group in group_by_source(legacy, dec_engine)),
                 *(_process_references(redis, group, state, limit) for group in group_references(references)),
+                return_exceptions=True,
             )
+            for result in results:
+                if isinstance(result, BaseException) and not isinstance(result, Exception):
+                    raise result  # cancellation
+                if isinstance(result, Exception):
+                    log.error("consume_group_failed", error=str(result))
+            await _index_batch(redis, [line for pending in results if isinstance(pending, list) for line in pending])
         except asyncio.CancelledError:
             break
         except Exception as exc:

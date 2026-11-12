@@ -2,11 +2,11 @@
 import hashlib
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_agent
 from app.core.redis_client import get_redis
-from app.core.security import hash_token
+from app.core.security import generate_agent_token, hash_token
 from app.models.models import (Agent, AgentFirewallRule, AgentLogSource, AgentTask,
                             AgentUpdatePolicy, FimWatchPath)
 from app.services import agent_update
@@ -26,7 +26,7 @@ from app.services import yara_ruleset
 from app.api.routes import malware_hashes
 from app.services import agent_policy
 from app.services import web_blocks
-from app.services.ingest import enqueue_log
+from app.services.ingest import enqueue_log, refuse_if_backlogged
 from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
                                         accept_evidence, accept_evidence_batch, check_evidence_durability)
 
@@ -77,10 +77,12 @@ async def ingest_log(
     body: LogIngestRequest,
     agent: Annotated[Agent, Depends(get_agent)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    request: Request = None,
 ):
     if not agent.approved:
         # accepted, not processed: the agent keeps running quietly until approved
         return {"status": "pending_approval"}
+    await refuse_if_backlogged(request, redis)
     await enqueue_log(redis, {
         "agent_id": str(agent.id),
         "group_id": agent.group_id,
@@ -108,12 +110,14 @@ async def ingest_logs(
     body: LogBatchRequest,
     agent: Annotated[Agent, Depends(get_agent)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    request: Request = None,
 ):
     """Many log lines in one request (agents >= 1.13 on the legacy queue):
     one line per POST /log could not keep up over a slow link, and a
     detection waited behind hours of telemetry."""
     if not agent.approved:
         return {"status": "pending_approval", "accepted": 0}
+    await refuse_if_backlogged(request, redis)
     for e in body.entries:
         await enqueue_log(redis, {
             "agent_id": str(agent.id),
@@ -191,14 +195,47 @@ async def ingest_evidence_batch(
     return {"protocol_version": 2, "results": await accept_evidence_batch(db, agent, events)}
 
 
+async def _rotate_token(db: AsyncSession, request: Request | None, agent: Agent, body: HeartbeatRequest,
+                        now: datetime) -> str | None:
+    """A new token for an agent that can store one, when its token is due
+    (AGENT_TOKEN_ROTATE_DAYS), an admin asked, or it still authenticates with
+    the previous token (it missed the heartbeat that carried the new one). The
+    token it used stays valid for AGENT_TOKEN_GRACE_HOURS."""
+    if body.token_rotation != 1:
+        return None  # older agents ignore agent_token; rotating them would lock them out
+    slot = getattr(getattr(request, "state", None), "agent_token_slot", "current")
+    issued = agent.token_issued_at or agent.enrolled_at
+    due = (agent.token_rotate_requested or slot == "previous" or issued is None
+           or now - issued >= timedelta(days=settings.AGENT_TOKEN_ROTATE_DAYS))
+    if not due:
+        return None
+    raw = generate_agent_token()
+    values = {"token_hash": hash_token(raw), "token_issued_at": now, "token_rotate_requested": False,
+              "prev_token_expires_at": now + timedelta(hours=settings.AGENT_TOKEN_GRACE_HOURS)}
+    if slot == "current":
+        values["prev_token_hash"] = agent.token_hash
+    # slot "previous": the agent still holds prev_token_hash; keep it, extend its grace.
+    # Compare-and-set on the token this request saw: of two concurrent heartbeats
+    # (one timed out on the agent's side) only one may rotate, or the agent could
+    # end up holding a token that is neither current nor previous.
+    result = await db.execute(update(Agent).where(Agent.id == agent.id, Agent.token_hash == agent.token_hash)
+                              .values(**values))
+    await db.commit()
+    if result.rowcount != 1:
+        return None
+    log.info("agent_token_rotated", agent_id=str(agent.id), reason="requested" if agent.token_rotate_requested
+             else "redelivery" if slot == "previous" else "age")
+    return raw
+
+
 @router.post("/heartbeat", response_model=HeartbeatResponse)
 async def heartbeat(
     body: HeartbeatRequest,
     agent: Annotated[Agent, Depends(get_agent)],
     db: Annotated[AsyncSession, Depends(get_db)],
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
+    request: Request = None,
 ):
-    from sqlalchemy import update
     from worker.agent_health import health_event
 
     def health(event: str, **fields) -> dict:
@@ -306,7 +343,9 @@ async def heartbeat(
 
     protocols = [2] if settings.EVIDENCE_INGEST_ENABLED and await check_evidence_durability(db) else []
     offer = await _update_offer(db, redis, agent, update_status, newly_failed)
+    new_token = await _rotate_token(db, request, agent, body, now)
     return HeartbeatResponse(
+        agent_token=new_token,
         update=offer,
         evidence_protocols=protocols,
         evidence_batch_max=MAX_BATCH_EVENTS if protocols else 0,

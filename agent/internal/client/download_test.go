@@ -79,7 +79,7 @@ func TestDownloadResumesAfterDrops(t *testing.T) {
 	body := payload(t, 3<<20)
 	srv, n, ranges := cutServer(t, body, 3, 700_000) // three drops, each after 700 kB
 	var got bytes.Buffer
-	c := &Client{BaseURL: srv.URL, AgentToken: "tok"}
+	c := &Client{BaseURL: srv.URL, token: "tok"}
 	if err := c.Download(context.Background(), "/p", WriterErrors(&got)); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestDownloadGivesUpAfterAttempts(t *testing.T) {
 	body := payload(t, 1<<20)
 	srv, n, _ := cutServer(t, body, 100, 10) // every connection drops
 	var got bytes.Buffer
-	c := &Client{BaseURL: srv.URL, AgentToken: "tok"}
+	c := &Client{BaseURL: srv.URL, token: "tok"}
 	err := c.Download(context.Background(), "/p", &got)
 	if err == nil || int(n.Load()) != DownloadAttempts || !strings.Contains(err.Error(), "after 60 bytes") {
 		t.Fatalf("err %v after %d requests", err, n.Load())
@@ -130,7 +130,7 @@ func TestDownloadServerWithoutRanges(t *testing.T) {
 func TestDownloadWriterErrorIsNotRetried(t *testing.T) {
 	body := payload(t, 200_000)
 	srv, n, _ := cutServer(t, body, 0, 0)
-	c := &Client{BaseURL: srv.URL, AgentToken: "tok"}
+	c := &Client{BaseURL: srv.URL, token: "tok"}
 	full := errors.New("package is larger than its signed size")
 	err := c.Download(context.Background(), "/p", WriterErrors(failAfter{1000, full}))
 	if !errors.Is(err, full) || n.Load() != 1 {

@@ -28,6 +28,17 @@ class Settings(BaseSettings):
     # processed (worker/stream_maintenance.py); this only bites if the workers
     # are down for long, so Redis can't grow until it is killed.
     REDIS_STREAM_MAXLEN: int = 2_000_000
+    # Above this many entries waiting in the stream, agents that can be pushed back
+    # (X-Ingest-Backpressure) get 429 on the legacy log paths instead of the line
+    # being queued: well before MAXLEN, which would trim unread lines silently.
+    INGEST_BACKLOG_LIMIT: int = 1_000_000
+    # Agent token rotation: agents that support it get a new token over the
+    # heartbeat this often; the old one keeps working for the grace period.
+    AGENT_TOKEN_ROTATE_DAYS: int = 30
+    AGENT_TOKEN_GRACE_HOURS: int = 72
+    # Refresh-token cookie: Secure flag (set true behind HTTPS)
+    REFRESH_COOKIE_SECURE: bool = False
+    INGEST_RETRY_AFTER_SECONDS: int = 30
     REDIS_CONSUMER_GROUP: str = "siem-workers"
     ELASTICSEARCH_URL: str = "http://elasticsearch:9200"
     NINEROUTER_BASE_URL: str = "http://9router:20128/v1"

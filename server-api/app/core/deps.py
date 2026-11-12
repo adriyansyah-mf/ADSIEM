@@ -3,7 +3,9 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
-from sqlalchemy import select
+from datetime import datetime, timezone
+
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -101,8 +103,15 @@ async def get_agent(
     if not token:
         raise HTTPException(status_code=401, detail="Missing agent token")
     token_hash = hash_token(token)
-    result = await db.execute(select(Agent).where(Agent.token_hash == token_hash))
-    agent = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    # the previous token (after a rotation) works until its grace ends, so an
+    # agent that missed the heartbeat carrying the new one isn't locked out
+    result = await db.execute(select(Agent).where(or_(
+        Agent.token_hash == token_hash,
+        and_(Agent.prev_token_hash == token_hash, Agent.prev_token_expires_at > now),
+    )))
+    agent = result.scalars().first()
     if not agent:
         raise HTTPException(status_code=401, detail="Invalid agent token")
+    request.state.agent_token_slot = "current" if agent.token_hash == token_hash else "previous"
     return agent

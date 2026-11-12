@@ -153,6 +153,8 @@ async def enroll_agent(
         agent.status = "online"
         agent.last_seen_at = now
         agent.token_hash = hash_token(raw_token)
+        agent.token_issued_at, agent.token_rotate_requested = now, False
+        agent.prev_token_hash = agent.prev_token_expires_at = None
         if needs_approval:
             agent.approved = False
         # Log sources are server-driven after enrollment, so without this a
@@ -170,7 +172,7 @@ async def enroll_agent(
         agent = Agent(
             name=body.name or body.hostname, hostname=body.hostname,
             group_id=group_id, version=body.version,
-            token_hash=hash_token(raw_token), status="online",
+            token_hash=hash_token(raw_token), token_issued_at=now, status="online",
             last_seen_at=now, approved=not needs_approval,
         )
         db.add(agent)
@@ -238,6 +240,28 @@ async def _claim_enrollment_token(db: AsyncSession, row: EnrollmentToken) -> Non
     )).scalar_one_or_none()
     if claimed is None:
         raise HTTPException(status_code=401, detail=_spent(row))
+
+
+@router.post("/api/agents/{agent_id}/rotate-token")
+async def rotate_agent_token(
+    agent_id: UUID,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(Perm)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    revoke_previous: bool = False,
+):
+    """Rotate this agent's token on its next heartbeat (agents that support
+    rotation). revoke_previous=true also ends the grace of the token replaced by
+    the last rotation at once, e.g. after it leaked."""
+    agent = await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    agent.token_rotate_requested = True
+    if revoke_previous:
+        agent.prev_token_hash = agent.prev_token_expires_at = None
+    await db.commit()
+    background.add_task(audit_log, db, current_user.id, "agent_token_rotation_requested", "agent", str(agent_id),
+                        {"hostname": agent.hostname, "revoke_previous": revoke_previous})
+    return {"status": "rotation_requested", "revoke_previous": revoke_previous}
 
 
 @router.post("/api/agents/{agent_id}/approve", response_model=AgentOut)

@@ -26,9 +26,14 @@ def create_access_token(subject: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode({"sub": subject, "exp": expire, "type": "access"}, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
-def create_refresh_token(subject: str) -> str:
+def create_refresh_token(subject: str, jti: str | None = None) -> str:
+    """jti identifies this refresh token in Redis (routes/auth.py), so it can be
+    rotated on every refresh and revoked on logout."""
     expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    return jwt.encode({"sub": subject, "exp": expire, "type": "refresh"}, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    claims = {"sub": subject, "exp": expire, "type": "refresh"}
+    if jti:
+        claims["jti"] = jti
+    return jwt.encode(claims, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
