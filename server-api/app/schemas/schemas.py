@@ -940,6 +940,7 @@ class UebaStatusOut(BaseModel):
     user_snapshot_count: int
     ip_snapshot_count: int
     host_snapshot_count: int
+    process_snapshot_count: int = 0
 
 # ─── Threat Hunts ────────────────────────────────────────────────
 

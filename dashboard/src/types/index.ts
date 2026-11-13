@@ -455,6 +455,8 @@ export interface UebaStatus {
   trained_at: string | null
   user_snapshot_count: number
   ip_snapshot_count: number
+  host_snapshot_count?: number
+  process_snapshot_count?: number
 }
 
 export interface ThreatHunt {

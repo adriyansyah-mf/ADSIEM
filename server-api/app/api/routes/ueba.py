@@ -89,6 +89,7 @@ async def get_status(
     user_count = (await db.execute(_count_q("user"))).scalar_one()
     ip_count = (await db.execute(_count_q("ip"))).scalar_one()
     host_count = (await db.execute(_count_q("host"))).scalar_one()
+    process_count = (await db.execute(_count_q("process"))).scalar_one()
 
     return UebaStatusOut(
         status=status,
@@ -96,6 +97,7 @@ async def get_status(
         user_snapshot_count=user_count,
         ip_snapshot_count=ip_count,
         host_snapshot_count=host_count,
+        process_snapshot_count=process_count,
     )
 
 

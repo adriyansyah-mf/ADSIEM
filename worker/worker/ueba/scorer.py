@@ -1,5 +1,6 @@
 # worker/worker/ueba/scorer.py
 import hashlib
+import json
 import time
 from datetime import datetime, timezone
 
@@ -7,15 +8,16 @@ import numpy as np
 import structlog
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from worker import behavior
 from worker.alert_manager import create_alert
 from worker.database import AsyncSessionLocal
 from worker.models import UebaAnomaly, UebaEntityScore
 from worker.ueba.explain import assess, explain, mitre_for, next_risk, security_reasons
 from worker.ueba.features import (
-    USER_FEATURE_KEYS, IP_FEATURE_KEYS,
-    update_user_counters, update_ip_counters,
-    build_user_vector_dict, build_ip_vector_dict,
-    vector_from_dict,
+    USER_FEATURE_KEYS, IP_FEATURE_KEYS, HOST_FEATURE_KEYS, PROCESS_FEATURE_KEYS,
+    update_user_counters, update_ip_counters, update_host_counters, update_process_counters,
+    build_user_vector_dict, build_ip_vector_dict, build_host_vector_dict, build_process_vector_dict,
+    process_entity, remember_group, vector_from_dict,
 )
 from worker.ueba.model_codec import ModelBundle, loads_model
 
@@ -31,8 +33,12 @@ STRONG_ANOMALY = 0.9         # …unless a single anomaly is this strong
 ANOMALY_RECORD_WINDOW = 300  # record an entity's anomaly at most once per 5 min…
 WORSE_BY = 0.1               # …unless its anomaly strength grew by this much
 
-_FEATURE_KEYS = {"user": USER_FEATURE_KEYS, "ip": IP_FEATURE_KEYS}
-_bundles: dict[str, ModelBundle | None] = {"user": None, "ip": None}
+SCORE_EVERY = 60            # host and process entities: telemetry is high volume, score each at most once a minute
+
+_FEATURE_KEYS = {"user": USER_FEATURE_KEYS, "ip": IP_FEATURE_KEYS,
+                 "host": HOST_FEATURE_KEYS, "process": PROCESS_FEATURE_KEYS}
+_bundles: dict[str, ModelBundle | None] = {"user": None, "ip": None, "host": None, "process": None}
+GROUP_BASELINE_KEY = "ueba:baseline:{}:{}"  # written by trainer._store_group_baselines
 _model_loaded_at: float = 0
 _reported: set[str] = set()  # blob digests already logged as unusable (log once, not per event)
 
@@ -83,7 +89,8 @@ async def _handle_score(
     now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as db:
         row = await db.get(UebaEntityScore, (entity_type, entity_value))
-        reasons = explain(entity_type, feat, row.feature_profile if row else None, bundle.baseline)
+        population, scope = await _population(redis, entity_type, group_id, bundle)
+        reasons = explain(entity_type, feat, row.feature_profile if row else None, population, scope)
         strength = assess(score, ANOMALY_THRESHOLD, reasons)
 
         # The features are hourly windows, so every event of a burst looks the
@@ -143,6 +150,19 @@ async def _handle_score(
         await db.commit()
 
 
+async def _population(redis, entity_type: str, group_id: str, bundle: ModelBundle) -> tuple[dict, str]:
+    """The group's population baseline when the trainer built one, else everyone's."""
+    raw = await redis.get(GROUP_BASELINE_KEY.format(entity_type, group_id or "default"))
+    if raw:
+        try:
+            baseline = json.loads(raw)
+            if isinstance(baseline, dict) and baseline:
+                return baseline, f"group {group_id or 'default'}"
+        except ValueError:
+            pass
+    return bundle.baseline, "all entities"
+
+
 async def _raise_alert(entity_type, entity_value, risk, score, reasons, mitre, feat, group_id, decoded):
     severity = (
         "critical" if risk >= 80 else
@@ -165,23 +185,29 @@ async def _raise_alert(entity_type, entity_value, risk, score, reasons, mitre, f
         },
         event_id=None, agent_id=None, group_id=group_id,
         source_ip=entity_value if entity_type == "ip" else decoded.get("source.ip"),
-        hostname=decoded.get("hostname") or decoded.get("host.hostname"),
+        hostname=(entity_value if entity_type == "host"
+                  else decoded.get("hostname") or decoded.get("host.hostname")),
     )
     log.info("ueba_alert_created", entity_type=entity_type, entity_value=entity_value,
              risk=risk, score=score, reasons=[r["feature"] for r in reasons])
     return alert_id
 
 
-async def score_event(redis, decoded: dict, group_id: str) -> None:
-    """Entry point called from consumer.py after each event is saved."""
+async def score_event(redis, decoded: dict, group_id: str, log_type: str = "") -> None:
+    """Entry point called from consumer.py after each event is saved. Logins
+    feed the user and IP entities; agent process and network telemetry feed
+    the host and process entities."""
     user = decoded.get("user.name")
     ip   = decoded.get("source.ip")
 
     # Always update counters (even when model is cold — builds training data)
     if user:
         await update_user_counters(redis, user, decoded)
+        await remember_group(redis, "user", user, group_id)
     if ip:
         await update_ip_counters(redis, ip, decoded, user)
+        await remember_group(redis, "ip", ip, group_id)
+    entities = await _telemetry_counters(redis, decoded, group_id, log_type)
 
     if not await _load_models(redis):
         return  # model cold, not yet trained, or unusable (logged once)
@@ -197,3 +223,39 @@ async def score_event(redis, decoded: dict, group_id: str) -> None:
         failed = int(await redis.get(f"ueba:ip:{ip}:failed") or 0)
         feat = await build_ip_vector_dict(redis, ip, total, failed)
         await _handle_score(redis, "ip", ip, _bundles["ip"], feat, group_id, decoded)
+
+    for entity_type, value in entities:
+        bundle = _bundles[entity_type]
+        if bundle is None or not await redis.set(f"ueba:sc:{entity_type}:{value}", "1", nx=True, ex=SCORE_EVERY):
+            continue
+        feat = await (build_host_vector_dict(redis, value) if entity_type == "host"
+                      else build_process_vector_dict(redis, value))
+        await _handle_score(redis, entity_type, value, bundle, feat, group_id, decoded)
+
+
+async def _telemetry_counters(redis, decoded: dict, group_id: str, log_type: str) -> list[tuple[str, str]]:
+    """Count a process start or an outbound connection for its host and program;
+    the (entity type, value) pairs it touched."""
+    host = decoded.get("hostname") or decoded.get("host.hostname")
+    if not host or log_type not in behavior.PROCESS_TYPES | behavior.NETWORK_TYPES:
+        return []
+    if log_type in behavior.PROCESS_TYPES:
+        image = str(decoded.get("Image") or decoded.get("process.executable") or "").strip()
+        if not image:
+            return []
+        parent = str(decoded.get("ParentImage") or decoded.get("process.parent.name") or "").strip()
+        entity = process_entity(image, group_id)
+        await update_host_counters(redis, host, group_id, image=image, parent=parent,
+                                   user_writable=behavior.user_writable(image))
+        await update_process_counters(redis, entity, group_id, host, parent=parent, started=True)
+        return [("host", host), ("process", entity)]
+    conn = behavior.outbound_connection(log_type, decoded)
+    if conn is None:
+        return []
+    dest, port, proc = conn
+    if dest.startswith("127.") or dest == "::1":
+        return []
+    entity = process_entity(proc, group_id)
+    await update_host_counters(redis, host, group_id, dest=dest, port=port)
+    await update_process_counters(redis, entity, group_id, host, dest=dest, port=port)
+    return [("host", host), ("process", entity)]

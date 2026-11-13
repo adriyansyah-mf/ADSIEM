@@ -11,7 +11,7 @@ export function UebaEntityDetails({ entityType, entityValue, onClose }: {
 }) {
   const query = useUebaEntityDetail(entityType, entityValue)
   const history = useUebaRiskHistory(entityType, entityValue)
-  return <WorkspaceDialog title={`Entity · ${entityValue}`} description={`${entityType === 'ip' ? 'IP address' : 'User'} · Read-only behavior evidence`} onClose={onClose} wide>
+  return <WorkspaceDialog title={`Entity · ${entityValue}`} description={`${({ ip: 'IP address', host: 'Host', process: 'Program (name@group)' } as Record<string, string>)[entityType] ?? 'User'} · Read-only behavior evidence`} onClose={onClose} wide>
     {query.isPending ? <QueryState kind="loading" title="Loading entity details…" />
       : query.isError ? <QueryState kind="error" title="Could not load entity details" description="The entity may be unavailable or outside your access scope." onRetry={() => { void query.refetch() }} />
         : <div className="space-y-6 min-w-0">

@@ -229,7 +229,7 @@ async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, h
     # UEBA scoring — best-effort, never block main pipeline
     try:
         _redis = await get_redis()
-        await ueba_score_event(_redis, {**decoded, "hostname": hostname}, group_id)
+        await ueba_score_event(_redis, {**decoded, "hostname": hostname}, group_id, log_type)
     except Exception as _ueba_exc:
         log.warning("ueba_score_error", error=str(_ueba_exc))
 
