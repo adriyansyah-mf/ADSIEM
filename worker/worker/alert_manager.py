@@ -223,6 +223,15 @@ async def create_alert(
         source_ip, rule_match.get("matched_fields"),
     )
 
+    # Unified host/user risk (worker/worker/entity_risk.py) — best-effort
+    try:
+        from worker import entity_risk
+        await entity_risk.record(alert_id=alert_id, rule_match=rule_match, techniques=techniques,
+                                 group_id=group_id, hostname=hostname, user=user, agent_id=agent_id,
+                                 sessions=AsyncSessionLocal)
+    except Exception as _risk_exc:
+        log.warning("entity_risk_failed", alert_id=str(alert_id), error=str(_risk_exc))
+
     # Publish to Redis for WebSocket broadcast (best-effort)
     try:
         redis = await get_redis()
