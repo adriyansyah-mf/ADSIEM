@@ -168,19 +168,11 @@ class Behavior:
 
     async def network(self, agent: str, group: str, log_type: str, decoded: dict,
                       received: float, raw: str = "") -> list[tuple[str, dict]]:
-        if log_type == "windows_etw_network" and str(decoded.get("Initiated", "true")).lower() != "true":
-            return []  # inbound: the remote side picks the rhythm
-        if log_type == "linux_network_snapshot":
-            dst, port, proc = _ss_peer(raw)
-        else:
-            dst = str(decoded.get("destination.ip") or decoded.get("destination.address") or "")
-            port = str(decoded.get("destination.port") or "")
-            proc = str(decoded.get("process.name") or decoded.get("Image") or "")
-        try:
-            port_n = int(port)
-        except ValueError:
+        conn = outbound_connection(log_type, decoded, raw)
+        if conn is None:
             return []
-        if not dst or not proc or port_n in NOISY_PORTS or not _external(dst):
+        dst, port_n, proc = conn
+        if port_n in NOISY_PORTS or not _external(dst):
             return []
         key = _k("bc", agent, f"{proc.lower()}|{dst}|{port_n}")
         await self.r.lpush(key, str(_event_time(decoded, received)))
@@ -203,6 +195,32 @@ class Behavior:
         return [("behavior_beaconing", {
             "image": proc, "destination": dst, "port": port_n, "interval_s": round(med, 1),
             "jitter": round(jitter, 3), "connections": len(times), "fleet_hosts": fleet})]
+
+
+def outbound_connection(log_type: str, decoded: dict, raw: str = "") -> tuple[str, int, str] | None:
+    """(destination, port, program) of an outbound connection line, or None
+    (inbound, not a connection, or incomplete). Shared with UEBA host features."""
+    if log_type not in NETWORK_TYPES:
+        return None
+    if log_type == "windows_etw_network" and str(decoded.get("Initiated", "true")).lower() != "true":
+        return None  # inbound: the remote side picks the rhythm
+    if log_type == "linux_network_snapshot":
+        dst, port, proc = _ss_peer(raw)
+    else:
+        dst = str(decoded.get("destination.ip") or decoded.get("destination.address") or "")
+        port = str(decoded.get("destination.port") or "")
+        proc = str(decoded.get("process.name") or decoded.get("Image") or "")
+    try:
+        port_n = int(port)
+    except ValueError:
+        return None
+    if not dst or not proc:
+        return None
+    return dst, port_n, proc
+
+
+def external(ip: str) -> bool:
+    return _external(ip)
 
 
 def _ss_peer(raw: str) -> tuple[str, str, str]:

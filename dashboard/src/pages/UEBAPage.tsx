@@ -6,10 +6,12 @@ import StatusBadge from '@/components/StatusBadge'
 import { PageHeader, Panel, QueryState } from '@/components/Workspace'
 import { UebaRisk } from '@/components/UebaRisk'
 import { UebaEntityDetails } from '@/components/UebaEntityDetails'
-import { useUebaEntities, useUebaStatus } from '@/hooks/useUeba'
+import { type UebaEntityType, useUebaEntities, useUebaStatus } from '@/hooks/useUeba'
 import type { UebaEntityScore } from '@/types'
 
 type EntityRow = UebaEntityScore & { readonly id: string }
+
+const ENTITY_LABEL: Record<UebaEntityType, string> = { user: 'user', ip: 'IP', host: 'host', process: 'program' }
 
 function ModelStatus() {
   const query = useUebaStatus()
@@ -21,14 +23,16 @@ function ModelStatus() {
             {query.data.trained_at && <span className="text-xs text-muted-foreground">Trained <time dateTime={query.data.trained_at}>{format(new Date(query.data.trained_at), 'dd MMM yyyy, HH:mm')}</time></span>}</div>
           {query.data.status === 'cold' && <p className="text-sm text-muted-foreground">Collecting baseline data</p>}
           <dl className="ueba-model-stats"><div><dt>User snapshots</dt><dd>{query.data.user_snapshot_count.toLocaleString()}</dd></div>
-            <div><dt>IP snapshots</dt><dd>{query.data.ip_snapshot_count.toLocaleString()}</dd></div></dl>
+            <div><dt>IP snapshots</dt><dd>{query.data.ip_snapshot_count.toLocaleString()}</dd></div>
+            <div><dt>Host snapshots</dt><dd>{(query.data.host_snapshot_count ?? 0).toLocaleString()}</dd></div>
+            <div><dt>Program snapshots</dt><dd>{(query.data.process_snapshot_count ?? 0).toLocaleString()}</dd></div></dl>
           <p className="text-xs text-muted-foreground mb-0">Snapshots are collected observations, not elapsed hours or an estimated training completion time.</p>
         </div>}
   </Panel></section>
 }
 
 export default function UEBAPage() {
-  const [entityType, setEntityType] = useState<'user' | 'ip'>('user')
+  const [entityType, setEntityType] = useState<UebaEntityType>('user')
   const [minRisk, setMinRisk] = useState(0)
   const [selected, setSelected] = useState<EntityRow | null>(null)
   const query = useUebaEntities(entityType, minRisk)
@@ -41,16 +45,16 @@ export default function UEBAPage() {
     { key: 'group_id', header: 'Group', hiddenByDefault: true, render: row => row.group_id },
   ]
   return <div className="workspace">
-    <PageHeader eyebrow="Behavior intelligence" title="Behavior analytics" description="Prioritize anomalous users and IP addresses, then examine the evidence behind each risk score."
+    <PageHeader eyebrow="Behavior intelligence" title="Behavior analytics" description="Prioritize anomalous users, IP addresses, hosts and programs, then examine the evidence behind each risk score."
       actions={<button className="ui-button" disabled={query.isFetching} onClick={() => { void query.refetch() }}><RefreshCw size={14} /> Refresh entities</button>} />
     <ModelStatus />
     <section className="panel" aria-label="Entity filters"><div className="ueba-filters">
       <label className="field"><span>Entity type</span><select className="ui-input" value={entityType} onChange={event => {
-        setEntityType(event.target.value === 'ip' ? 'ip' : 'user'); setSelected(null)
-      }}><option value="user">Users</option><option value="ip">IP addresses</option></select></label>
+        setEntityType(ENTITY_LABEL[event.target.value as UebaEntityType] ? event.target.value as UebaEntityType : 'user'); setSelected(null)
+      }}><option value="user">Users</option><option value="ip">IP addresses</option><option value="host">Hosts</option><option value="process">Programs</option></select></label>
       <label className="field"><span>Minimum risk</span><select className="ui-input" value={minRisk} onChange={event => { setMinRisk(Number(event.target.value)); setSelected(null) }}>
         <option value={0}>All risk scores</option><option value={40}>40 and above</option><option value={60}>60 and above</option><option value={80}>80 and above</option></select></label>
-    </div><div className="filter-footer"><span>{query.isFetching ? 'Updating entities…' : query.isError ? 'Entity results unavailable' : `Showing ${rows.length} ${entityType === 'user' ? 'user' : 'IP'} ${rows.length === 1 ? 'entity' : 'entities'}`} · Up to 50 highest-risk matches · refreshes every 30 seconds · Open a row for evidence</span></div></section>
+    </div><div className="filter-footer"><span>{query.isFetching ? 'Updating entities…' : query.isError ? 'Entity results unavailable' : `Showing ${rows.length} ${ENTITY_LABEL[entityType]} ${rows.length === 1 ? 'entity' : 'entities'}`} · Up to 50 highest-risk matches · refreshes every 30 seconds · Open a row for evidence</span></div></section>
     {query.isPending ? <section className="panel"><QueryState kind="loading" title="Loading entities…" /></section>
       : query.isError ? <section className="panel"><QueryState kind="error" title="Could not load entities" description="Your entity and risk filters are preserved." onRetry={() => { void query.refetch() }} /></section>
         : <DataTable columns={columns} data={rows} total={rows.length} page={1} pageSize={50} onPageChange={() => {}} showPagination={false}

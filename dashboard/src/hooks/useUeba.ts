@@ -9,6 +9,8 @@ export interface UebaRiskHistory {
   history: Array<{ day: string; max_risk: number; anomaly_count: number }>
 }
 
+export type UebaEntityType = 'user' | 'ip' | 'host' | 'process'
+
 export function useUebaRiskHistory(entityType: string, entityValue: string) {
   return useQuery<UebaRiskHistory>({
     queryKey: ['ueba', 'history', entityType, entityValue, 30],
@@ -20,7 +22,7 @@ export function useUebaRiskHistory(entityType: string, entityValue: string) {
   })
 }
 
-export function useUebaEntities(entityType: 'user' | 'ip' | 'all' = 'all', minRisk = 0) {
+export function useUebaEntities(entityType: UebaEntityType | 'all' = 'all', minRisk = 0) {
   return useQuery<UebaEntityScore[]>({
     queryKey: ['ueba', 'entities', entityType, minRisk],
     queryFn: () =>

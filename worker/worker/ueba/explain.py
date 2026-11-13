@@ -23,18 +23,24 @@ MIN_HOURS_FOR_TIME = 20     # distinct active hours a baseline needs before "rar
 # How busy an entity is, and when — shown as context, never an anomaly on its
 # own: a popular web client or a night-shift admin is not an attack. Anomalies
 # need a security-relevant deviation (failures, many users/hosts, sudo, new IP).
-CONTEXT_FEATURES = {"total_events", "login_count", "hour_of_day", "is_weekend"}
+CONTEXT_FEATURES = {"total_events", "login_count", "hour_of_day", "is_weekend",
+                    "process_count", "outbound_conns", "exec_count"}
 
 # Smallest count that can be suspicious at all, whatever the baseline says.
 _MIN_VALUE = {
     "unique_users": 3, "failed_count": 5, "unique_target_hosts": 3,
     "sudo_count": 3, "unique_ips": 3, "unique_hosts": 3,
+    # host and process entities (agent telemetry)
+    "unique_processes": 30, "new_processes": 3, "shell_spawns": 3, "user_writable_execs": 2,
+    "unique_dest_ips": 10, "unique_dest_ports": 10, "unique_parents": 3,
 }
 
 # Features where only a *higher* value is suspicious (a quiet hour is not an attack).
 _UPWARD = {
     "login_count", "failed_ratio", "unique_ips", "unique_hosts", "sudo_count",
     "unique_users", "total_events", "unique_target_hosts", "failed_count",
+    "process_count", "unique_processes", "new_processes", "shell_spawns", "user_writable_execs",
+    "outbound_conns", "unique_dest_ips", "unique_dest_ports", "exec_count", "unique_parents",
 }
 
 # feature -> (technique id, name) per entity type
@@ -54,6 +60,19 @@ _MITRE = {
         "unique_target_hosts": ("T1021", "Remote Services"),
         "total_events": ("T1595", "Active Scanning"),
     },
+    "host": {
+        "new_processes": ("T1204", "User Execution"),
+        "user_writable_execs": ("T1204.002", "User Execution: Malicious File"),
+        "shell_spawns": ("T1059", "Command and Scripting Interpreter"),
+        "unique_dest_ips": ("T1071", "Application Layer Protocol"),
+        "unique_dest_ports": ("T1046", "Network Service Discovery"),
+    },
+    "process": {
+        "unique_hosts": ("T1570", "Lateral Tool Transfer"),
+        "unique_parents": ("T1059", "Command and Scripting Interpreter"),
+        "unique_dest_ips": ("T1071", "Application Layer Protocol"),
+        "unique_dest_ports": ("T1046", "Network Service Discovery"),
+    },
 }
 
 _LABELS = {
@@ -66,6 +85,16 @@ _LABELS = {
     "total_events": "events in the last hour",
     "unique_target_hosts": "distinct target hosts",
     "failed_count": "failed attempts",
+    "process_count": "process starts in the last hour",
+    "unique_processes": "distinct programs run",
+    "new_processes": "programs never run here in 7 days",
+    "shell_spawns": "shells started by non-shell programs",
+    "user_writable_execs": "programs run from user-writable folders",
+    "outbound_conns": "outbound connections in the last hour",
+    "unique_dest_ips": "distinct destination addresses",
+    "unique_dest_ports": "distinct destination ports",
+    "exec_count": "starts in the last hour",
+    "unique_parents": "distinct parent programs",
 }
 
 
@@ -102,11 +131,13 @@ def _fmt(v: float) -> str:
     return f"{v:.2f}" if abs(v) < 10 and v != int(v) else f"{v:.0f}"
 
 
-def explain(entity_type: str, features: dict, entity_profile: dict | None, population: dict) -> list[dict]:
-    """Ranked reasons this feature vector is unusual (most severe first)."""
+def explain(entity_type: str, features: dict, entity_profile: dict | None, population: dict,
+            population_scope: str = "all entities") -> list[dict]:
+    """Ranked reasons this feature vector is unusual (most severe first).
+    population_scope names what `population` covers ("its group" for a group baseline)."""
     use_entity = bool(entity_profile) and entity_profile.get("_n", 0) >= MIN_ENTITY_SNAPSHOTS
     base = entity_profile if use_entity else population
-    scope = "its own baseline" if use_entity else "all entities"
+    scope = "its own baseline" if use_entity else population_scope
     reasons = []
 
     for key, value in features.items():

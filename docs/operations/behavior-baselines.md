@@ -17,3 +17,20 @@
 Findings are pushed back into the log stream as `siem_behavior` lines (`decoders/siem_behavior.yaml`), so dedup, policy exclusions, AI triage and SOAR apply as for any alert. A confirmed beacon destination can be blocked fleet-wide from the IP Blocklist page or a SOAR `ip_block` node.
 
 Tests: `tests/worker/test_behavior.py`.
+
+## UEBA entities from agent telemetry
+
+UEBA (`worker/worker/ueba/`) models four entity types. Users and IP addresses come from logins; **hosts** and **programs** come from the same process and network telemetry as the findings above. Each is an hourly feature vector scored by an Isolation Forest and explained against a robust baseline.
+
+| Entity | Value | Features (per hour) |
+|---|---|---|
+| `host` | hostname | process starts*, distinct programs, programs never run there in 7 days, shells started by non-shell programs, runs from user-writable folders, outbound connections*, distinct destination addresses, distinct destination ports, hour, weekend |
+| `process` | `<file name>@<group>` (e.g. `powershell.exe@blue`) | starts*, distinct hosts running it, distinct parents, outbound connections*, distinct destination addresses and ports, hour, weekend |
+
+\* context only: volume never raises an anomaly on its own. Typical findings: a host suddenly reaching 180 ports (internal scan, T1046), a web server spawning shells (T1059), a burst of never-seen programs (T1204), a tool running on 12 hosts within the hour (T1570).
+
+- **Group baselines**: snapshots are stored under the entity's real group (all four types; before, every snapshot was `default`). After each hourly training, a group with at least 50 active snapshot-hours gets its own population baseline (`ueba:baseline:<type>:<group>`); reasons then read "vs typical … (group blue)". Smaller groups use the global one. An entity with 12+ hours of its own history is still compared with itself first.
+- **Throttling**: telemetry is high volume, so host and process entities are scored at most once a minute each; counters update on every event.
+- **Dashboard**: Behavior analytics → Entity type → Hosts / Programs; the model panel shows host and program snapshot counts.
+
+Tests: `tests/worker/test_ueba_entities.py`.

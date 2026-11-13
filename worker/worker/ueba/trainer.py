@@ -1,5 +1,6 @@
 # worker/worker/ueba/trainer.py
 import asyncio
+import json
 import structlog
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
@@ -10,8 +11,8 @@ from worker.database import AsyncSessionLocal
 from worker.models import UebaEntityScore, UebaFeatureSnapshot
 from worker.ueba.explain import MIN_ENTITY_SNAPSHOTS, build_baseline
 from worker.ueba.features import (
-    USER_FEATURE_KEYS, IP_FEATURE_KEYS,
-    build_user_vector_dict, build_ip_vector_dict,
+    USER_FEATURE_KEYS, IP_FEATURE_KEYS, HOST_FEATURE_KEYS, PROCESS_FEATURE_KEYS,
+    build_user_vector_dict, build_ip_vector_dict, build_host_vector_dict, build_process_vector_dict,
     vector_from_dict,
 )
 from worker.ueba.model_codec import dumps_model
@@ -22,40 +23,42 @@ MIN_SNAPSHOTS = 50
 MODEL_TTL = 7200  # 2 hours — trainer rewrites every hour
 
 
+async def _vector(redis, entity_type: str, value: str) -> dict:
+    if entity_type == "user":
+        login = int(await redis.get(f"ueba:u:{value}:login") or 0)
+        failed = int(await redis.get(f"ueba:u:{value}:failed") or 0)
+        return await build_user_vector_dict(redis, value, login, failed)
+    if entity_type == "ip":
+        total = int(await redis.get(f"ueba:ip:{value}:total") or 0)
+        failed = int(await redis.get(f"ueba:ip:{value}:failed") or 0)
+        return await build_ip_vector_dict(redis, value, total, failed)
+    if entity_type == "host":
+        return await build_host_vector_dict(redis, value)
+    return await build_process_vector_dict(redis, value)
+
+
 async def take_snapshots(redis) -> None:
-    """Read active entities from Redis, build feature dicts, upsert hourly snapshot to DB."""
+    """Read active entities from Redis, build feature dicts, upsert hourly snapshot to DB,
+    each under the group the entity was last seen in (ueba:group:<type>)."""
     now = datetime.now(timezone.utc)
     snapshot_hour = now.replace(minute=0, second=0, microsecond=0)
-
-    users = await redis.smembers("ueba:active:users")
-    ips   = await redis.smembers("ueba:active:ips")
+    counts = {}
 
     async with AsyncSessionLocal() as db:
-        for user in users:
-            login  = int(await redis.get(f"ueba:u:{user}:login")  or 0)
-            failed = int(await redis.get(f"ueba:u:{user}:failed") or 0)
-            feat = await build_user_vector_dict(redis, user, login, failed)
-            stmt = pg_insert(UebaFeatureSnapshot).values(
-                entity_type="user", entity_value=user, group_id="default",
-                features=feat, snapshot_hour=snapshot_hour,
-            ).on_conflict_do_update(
-                index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
-                set_={"features": feat},
-            )
-            await db.execute(stmt)
-
-        for ip in ips:
-            total  = int(await redis.get(f"ueba:ip:{ip}:total")  or 0)
-            failed = int(await redis.get(f"ueba:ip:{ip}:failed") or 0)
-            feat = await build_ip_vector_dict(redis, ip, total, failed)
-            stmt = pg_insert(UebaFeatureSnapshot).values(
-                entity_type="ip", entity_value=ip, group_id="default",
-                features=feat, snapshot_hour=snapshot_hour,
-            ).on_conflict_do_update(
-                index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
-                set_={"features": feat},
-            )
-            await db.execute(stmt)
+        for entity_type, active in ACTIVE_SETS.items():
+            values = await redis.smembers(active)
+            groups = await redis.hgetall(f"ueba:group:{entity_type}") or {}
+            counts[entity_type] = len(values)
+            for value in values:
+                feat = await _vector(redis, entity_type, value)
+                stmt = pg_insert(UebaFeatureSnapshot).values(
+                    entity_type=entity_type, entity_value=value, group_id=groups.get(value) or "default",
+                    features=feat, snapshot_hour=snapshot_hour,
+                ).on_conflict_do_update(
+                    index_elements=["entity_type", "entity_value", "group_id", "snapshot_hour"],
+                    set_={"features": feat},
+                )
+                await db.execute(stmt)
 
         # Prune snapshots older than 8 days
         cutoff = now - timedelta(days=8)
@@ -64,18 +67,40 @@ async def take_snapshots(redis) -> None:
         )
         await db.commit()
 
-    log.info("ueba_snapshots_saved", users=len(users), ips=len(ips))
+    log.info("ueba_snapshots_saved", **counts)
 
 
-_ACTIVITY_KEY = {"user": "login_count", "ip": "total_events"}
+ACTIVE_SETS = {"user": "ueba:active:users", "ip": "ueba:active:ips",
+               "host": "ueba:active:hosts", "process": "ueba:active:processes"}
+FEATURE_KEYS = {"user": USER_FEATURE_KEYS, "ip": IP_FEATURE_KEYS,
+                "host": HOST_FEATURE_KEYS, "process": PROCESS_FEATURE_KEYS}
+_ACTIVITY_KEYS = {"user": ("login_count",), "ip": ("total_events",),
+                  "host": ("process_count", "outbound_conns"), "process": ("exec_count", "outbound_conns")}
+GROUP_BASELINE_KEY = "ueba:baseline:{}:{}"
 
 
 def active_snapshots(entity_type: str, rows):
     """Drop hourly snapshots of entities that did nothing that hour. Their
     counters had already expired, and keeping them drags every baseline to
     zero — after which any active IP looks wildly abnormal."""
-    key = _ACTIVITY_KEY[entity_type]
-    return [r for r in rows if float((r.features or {}).get(key, 0) or 0) > 0]
+    keys = _ACTIVITY_KEYS[entity_type]
+    return [r for r in rows if any(float((r.features or {}).get(k, 0) or 0) > 0 for k in keys)]
+
+
+async def _store_group_baselines(redis, entity_type: str, rows, keys: list[str]) -> int:
+    """Population baselines per group (a finance laptop is not compared with a
+    build server); groups with fewer than MIN_SNAPSHOTS hours use the global one."""
+    by_group: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_group[r.group_id or "default"].append(r.features)
+    stored = 0
+    for group, feats in by_group.items():
+        if len(feats) < MIN_SNAPSHOTS:
+            continue
+        await redis.set(GROUP_BASELINE_KEY.format(entity_type, group),
+                        json.dumps(build_baseline(feats, keys)), ex=MODEL_TTL)
+        stored += 1
+    return stored
 
 
 async def _store_entity_profiles(entity_type: str, rows, keys: list[str]) -> None:
@@ -110,26 +135,21 @@ async def train_models(redis) -> None:
     cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     async with AsyncSessionLocal() as db:
-        user_rows = (await db.execute(
-            select(UebaFeatureSnapshot)
-            .where(UebaFeatureSnapshot.entity_type == "user")
-            .where(UebaFeatureSnapshot.snapshot_hour >= cutoff)
-        )).scalars().all()
-
-        ip_rows = (await db.execute(
-            select(UebaFeatureSnapshot)
-            .where(UebaFeatureSnapshot.entity_type == "ip")
-            .where(UebaFeatureSnapshot.snapshot_hour >= cutoff)
-        )).scalars().all()
+        rows_by_type = {
+            entity_type: (await db.execute(
+                select(UebaFeatureSnapshot)
+                .where(UebaFeatureSnapshot.entity_type == entity_type)
+                .where(UebaFeatureSnapshot.snapshot_hour >= cutoff)
+            )).scalars().all()
+            for entity_type in FEATURE_KEYS
+        }
 
     trained_any = False
     trained_at = datetime.now(timezone.utc).isoformat()
 
-    for entity_type, rows, keys, model_key in [
-        ("user", user_rows, USER_FEATURE_KEYS, "ueba:model:user"),
-        ("ip",   ip_rows,   IP_FEATURE_KEYS,   "ueba:model:ip"),
-    ]:
-        rows = active_snapshots(entity_type, rows)
+    for entity_type, keys in FEATURE_KEYS.items():
+        model_key = f"ueba:model:{entity_type}"
+        rows = active_snapshots(entity_type, rows_by_type[entity_type])
         if len(rows) < MIN_SNAPSHOTS:
             log.info("ueba_cold_start", entity_type=entity_type, n=len(rows), needed=MIN_SNAPSHOTS)
             continue
@@ -143,9 +163,10 @@ async def train_models(redis) -> None:
         population = build_baseline((r.features for r in rows), keys)
         model_b64 = dumps_model(model, keys, population, len(rows), trained_at)
         await redis.set(model_key, model_b64, ex=MODEL_TTL)
+        groups = await _store_group_baselines(redis, entity_type, rows, keys)
         await _store_entity_profiles(entity_type, rows, keys)
         trained_any = True
-        log.info("ueba_model_trained", entity_type=entity_type, n_samples=len(rows))
+        log.info("ueba_model_trained", entity_type=entity_type, n_samples=len(rows), group_baselines=groups)
 
     status = "ready" if trained_any else "cold"
     await redis.set("ueba:model:status", status)
