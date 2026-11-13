@@ -63,6 +63,12 @@ jobs:
         shell: pwsh
         run: go test ./agent/internal/firewall ./agent/internal/ipblock -count=1 -v -run 'WFP|IOC|Watcher|Sync|Routine'
 
+      # Quarantine stops the processes running the file (a copy of ping.exe),
+      # leaving the real one alone.
+      - name: Quarantine stops running processes
+        shell: pwsh
+        run: go test ./agent/internal/task -run TestStopRunning -count=1 -v
+
       # App Control (WDAC) on the disposable runner: the agent's policy, built
       # from AllowAll plus a path deny rule and activated in enforce mode,
       # stops a copied whoami.exe before it runs; the policy is removed after.
