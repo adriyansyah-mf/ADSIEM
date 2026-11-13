@@ -1,0 +1,22 @@
+# Host behaviour findings the worker derives from agent telemetry
+# (worker/worker/behavior.py): rare parent → child, new rare executable,
+# beaconing. rules/behavior_*.yaml turn them into alerts.
+name: siem_behavior
+log_type: siem_behavior
+type: kv
+priority: 10
+enabled: true
+fields:
+  event.action: event
+  process.executable: image
+  process.parent.executable: parent
+  process.command_line: command_line
+  behavior.pair: pair
+  behavior.fleet_hosts: fleet_hosts
+  destination.ip: destination
+  destination.port: port
+  behavior.interval_s: interval_s
+  behavior.jitter: jitter
+  behavior.connections: connections
+static_fields:
+  event.category: behavior
