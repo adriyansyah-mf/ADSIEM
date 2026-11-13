@@ -22,6 +22,9 @@ func SysmonInstalled() bool { return false }
 // Dropped is always 0 off Windows.
 func (*Sensor) Dropped() uint64 { return 0 }
 
+// Lost is always 0 off Windows.
+func (*Sensor) Lost() uint64 { return 0 }
+
 // Stop is a no-op off Windows.
 func (*Sensor) Stop() {}
 

@@ -144,3 +144,19 @@ func TestStartReplacesAStaleSession(t *testing.T) {
 	}
 	second.Close()
 }
+
+// KernelLost queries a live session's own loss counters (heartbeat sensor_health).
+func TestKernelLostQueriesALiveSession(t *testing.T) {
+	ses, err := Start(Config{Name: "SIEMAgent-Test-Lost", Providers: []Provider{{GUID: kernelProcessProvider, Keywords: 0x10}}}, func(*Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ses.Close()
+	lost, err := ses.KernelLost()
+	if err != nil {
+		t.Fatalf("EVENT_TRACE_CONTROL_QUERY: %v", err)
+	}
+	if lost > 1_000_000 {
+		t.Fatalf("an idle test session reports %d lost: the properties are misread", lost)
+	}
+}

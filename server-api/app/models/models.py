@@ -84,6 +84,8 @@ class Agent(Base):
     evidence_health_at = Column(DateTime(timezone=True))
     web_block_health    = Column(JSONB)
     web_block_health_at = Column(DateTime(timezone=True))
+    sensor_health       = Column(JSONB)   # per telemetry sensor, from heartbeats (services/sensor_health.py)
+    sensor_health_at    = Column(DateTime(timezone=True))
     # Self-update: rollout ring (0 canary … 2 everyone else) and the agent's
     # last reported update status (schemas.AgentUpdateStatus)
     update_ring        = Column(Integer, nullable=False, default=2, server_default="2")

@@ -53,6 +53,10 @@ type HeartbeatRequest struct {
 	// Web protection state (hosts block, CA, page server); omitted until the
 	// agent wires WebBlockHealth.
 	WebBlockHealth any `json:"web_block_health,omitempty"`
+	// Per telemetry sensor: running, events delivered, events lost
+	// (internal/sensorstat); the server alerts on a sensor that stops, goes
+	// silent or loses events while the agent still heartbeats.
+	SensorHealth any `json:"sensor_health,omitempty"`
 	// Self-update status (agents >= 1.9.0); the server offers updates only to
 	// agents reporting it.
 	Update *update.Status `json:"update,omitempty"`
@@ -354,6 +358,9 @@ var EvidenceHealth func() any
 // WebBlockHealth, when set, returns the web protection state for the heartbeat.
 var WebBlockHealth func() any
 
+// SensorHealth, when set, returns the telemetry sensors' state for the heartbeat.
+var SensorHealth func() any
+
 // SupportsEvidenceV2 reports whether the last successful heartbeat advertised
 // durable ingest protocol 2. The evidence sender sends nothing until it does.
 func SupportsEvidenceV2() bool { return evidenceV2.Load() }
@@ -412,6 +419,9 @@ func Loop(
 		}
 		if WebBlockHealth != nil {
 			payload.WebBlockHealth = WebBlockHealth()
+		}
+		if SensorHealth != nil {
+			payload.SensorHealth = SensorHealth()
 		}
 		payload.Update = updateStatus()
 		resp, err := c.Post("/api/ingest/heartbeat", payload)

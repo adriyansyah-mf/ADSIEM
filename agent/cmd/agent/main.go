@@ -46,6 +46,7 @@ import (
 	"github.com/siem-platform/agent/internal/projscan"
 	"github.com/siem-platform/agent/internal/ransomguard"
 	"github.com/siem-platform/agent/internal/scriptscan"
+	"github.com/siem-platform/agent/internal/sensorstat"
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/unpack"
@@ -292,6 +293,7 @@ func run(configPath string, stop <-chan struct{}) {
 	buf.SetObserver(func(entry string) {
 		ioaEngine.Observe(entry)
 		ipWatcher.Observe(entry)
+		sensorstat.Default.Observe(entry)
 		if notifier != nil {
 			logType, _, line := tailer.Decode(entry)
 			notifier.Observe(logType, line)
@@ -439,8 +441,12 @@ func run(configPath string, stop <-chan struct{}) {
 	var stopProducers []func()
 	if procMon, err := procexec.StartWith(buf, linuxExecFeed(scripts, guard, projects)); err != nil {
 		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
+		if runtime.GOOS == "linux" {
+			sensorstat.Default.SetRunning(sensorstat.ProcExec, false, err.Error())
+		}
 	} else {
 		stopProducers = append(stopProducers, procMon.Stop)
+		sensorstat.Default.SetRunning(sensorstat.ProcExec, true, "")
 	}
 
 	// File, kernel module, ptrace, privilege, memfd/fileless and exit
@@ -452,8 +458,10 @@ func run(configPath string, stop <-chan struct{}) {
 			Disabled: cfg.LinuxSensor.DisabledEvents,
 		}); err != nil {
 			slog.Warn("linux sensor unavailable, continuing without it", "err", err)
+			sensorstat.Default.SetRunning(sensorstat.LinSensor, false, err.Error())
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
+			sensorstat.Default.SetRunning(sensorstat.LinSensor, true, "")
 		}
 	}
 
@@ -478,9 +486,13 @@ func run(configPath string, stop <-chan struct{}) {
 				snap := netwatch.StartSnapshotter(buf, cfg.Server.URL)
 				stopProducers = append(stopProducers, snap.Stop)
 				slog.Info("netwatch running in snapshot mode (new connections only)", "interval", "10s")
+				sensorstat.Default.SetRunning(sensorstat.Netwatch, true, "snapshot fallback: "+err.Error())
+			} else {
+				sensorstat.Default.SetRunning(sensorstat.Netwatch, false, err.Error())
 			}
 		} else {
 			stopProducers = append(stopProducers, netMon.Stop)
+			sensorstat.Default.SetRunning(sensorstat.Netwatch, true, "")
 		}
 	}
 
@@ -499,8 +511,11 @@ func run(configPath string, stop <-chan struct{}) {
 				}
 			}}); err != nil {
 			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
+			sensorstat.Default.SetRunning(sensorstat.ETW, false, err.Error())
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
+			sensorstat.Default.SetRunning(sensorstat.ETW, true, "")
+			sensorstat.Default.SetLost(sensorstat.ETW, sensor.Lost)
 			slog.Info("ETW sensor running", "telemetry", "process, network, dns, file, image, access, thread",
 				"disabled", cfg.ETW.DisabledEvents)
 			if !slices.Contains(cfg.ETW.DisabledEvents, winsensor.GroupRegistry) {
@@ -551,6 +566,7 @@ func run(configPath string, stop <-chan struct{}) {
 		StateDir:  webStateDir,
 	}
 	heartbeat.WebBlockHealth = func() any { return webCtl.Health() }
+	heartbeat.SensorHealth = func() any { return sensorstat.Default.Snapshot() }
 	// OnChange applies the store's newest list, never an older one that lost
 	// a race with it.
 	webStore.OnChange = func(*webblock.List) { webCtl.ApplyCurrent(webStore.Current) }

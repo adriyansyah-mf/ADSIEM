@@ -1,0 +1,21 @@
+title: SIEM Agent Telemetry Sensor Stopped
+id: rule-siem-agent-sensor-stopped
+description: >-
+  A telemetry sensor that was running on the agent (agent.sensor: etw,
+  procexec, netwatch or linsensor) stopped while the agent kept sending
+  heartbeats: its ETW session was stopped (logman stop, a tool that kills
+  trace sessions), its eBPF programs detached, or the process lost the
+  privilege it needs. The host is partly blind until the agent restarts the
+  sensor (T1562.001, T1562.006). event.reason_detail holds the sensor's error.
+logsource:
+  product: siem
+  service: agent
+detection:
+  selection:
+    event.action: agent_sensor_stopped
+  condition: selection
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+  - attack.t1562.006

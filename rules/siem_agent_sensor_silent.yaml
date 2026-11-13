@@ -1,0 +1,21 @@
+title: SIEM Agent Telemetry Sensor Silent
+id: rule-siem-agent-sensor-silent
+description: >-
+  A telemetry sensor (agent.sensor) that had been delivering events delivered
+  none for agent.silent_minutes while it still reports running and the agent
+  keeps heartbeating: it was blinded without being stopped (an ETW provider
+  disabled or patched out, EtwEventWrite hooked, an eBPF link detached, events
+  filtered). The count is taken on the agent, so a slow server does not cause
+  this. A host that is truly idle for that long can too: raise the platform
+  setting agent_sensor_silence_minutes for such hosts (T1562.006).
+logsource:
+  product: siem
+  service: agent
+detection:
+  selection:
+    event.action: agent_sensor_silent
+  condition: selection
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.006

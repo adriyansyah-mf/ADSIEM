@@ -27,6 +27,8 @@ from app.api.routes import malware_hashes
 from app.services import agent_policy
 from app.services import web_blocks
 from app.services import ip_blocks
+from app.services import sensor_health
+from app.core.llm_gateway import get_setting
 from app.services.ingest import enqueue_log, refuse_if_backlogged
 from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
                                         accept_evidence, accept_evidence_batch, check_evidence_durability)
@@ -249,6 +251,10 @@ async def heartbeat(
                 if body.evidence_health is not None else {})
     if body.web_block_health is not None:
         evidence |= {"web_block_health": body.web_block_health.model_dump(mode="json"), "web_block_health_at": now}
+    sensors = ({name: s.model_dump(mode="json") for name, s in body.sensor_health.items()}
+               if body.sensor_health is not None else None)
+    if sensors is not None:
+        evidence |= {"sensor_health": sensors, "sensor_health_at": now}
     anomaly = await _session_anomaly(redis, agent.id, body)
     if anomaly and agent.approved:
         await enqueue_log(redis, health("agent_heartbeat_anomaly", kind=anomaly, session=body.session,
@@ -282,6 +288,14 @@ async def heartbeat(
     if agent.approved:
         for change in changes:
             await enqueue_log(redis, health("agent_integrity_changed", **change))
+        if sensors is not None:
+            try:
+                silence = int(await get_setting(db, "agent_sensor_silence_minutes",
+                                                str(sensor_health.DEFAULT_SILENCE_MINUTES)))
+            except ValueError:
+                silence = sensor_health.DEFAULT_SILENCE_MINUTES
+            for event, fields in await sensor_health.check(redis, agent.id, sensors, now.timestamp(), silence):
+                await enqueue_log(redis, health(event, version=body.version, **fields))
 
     result = await db.execute(
         select(AgentLogSource).where(AgentLogSource.agent_id == agent.id)

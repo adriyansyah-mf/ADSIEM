@@ -288,6 +288,21 @@ class WebBlockHealth(BaseModel):
             return value[:300]
         return value
 
+class SensorStat(BaseModel):
+    """One telemetry sensor in the heartbeat (agent/internal/sensorstat)."""
+    model_config = ConfigDict(extra="ignore")
+    running: bool = False
+    events: int = Field(default=0, ge=0, le=2**63 - 1)
+    last_event_at: str = Field(default="", max_length=40)
+    lost: int = Field(default=0, ge=0, le=2**63 - 1)
+    error: str = Field(default="", max_length=300)
+
+    @field_validator("error", mode="before")
+    @classmethod
+    def truncate_error(cls, value):
+        return value[:300] if isinstance(value, str) else value
+
+
 class HeartbeatRequest(BaseModel):
     agent_id: UUID
     status: str = "online"
@@ -300,10 +315,13 @@ class HeartbeatRequest(BaseModel):
     evidence_health: EvidenceHealth | None = None  # durable agents only
     update: AgentUpdateStatus | None = None
     web_block_health: WebBlockHealth | None = None
+    # per telemetry sensor (etw, procexec, netwatch, linsensor): app/services/sensor_health.py
+    sensor_health: Annotated[dict[Annotated[str, Field(max_length=32)], SensorStat],
+                             Field(max_length=16)] | None = None
     # 1 = this agent stores a token handed back in HeartbeatResponse.agent_token
     token_rotation: int | None = None
 
-    @field_validator("evidence_health", "update", "web_block_health", mode="wrap")
+    @field_validator("evidence_health", "update", "web_block_health", "sensor_health", mode="wrap")
     @classmethod
     def drop_invalid_evidence_health(cls, value, handler):
         # An invalid or unbounded health object is rejected on its own: the

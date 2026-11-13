@@ -169,7 +169,8 @@ const (
 	processTraceModeRealTime    = 0x00000100
 	processTraceModeEventRecord = 0x10000000
 
-	eventTraceControlStop = 1
+	eventTraceControlQuery = 0
+	eventTraceControlStop  = 1
 
 	eventControlCodeEnableProvider = 1
 
