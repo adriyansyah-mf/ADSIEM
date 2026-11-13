@@ -45,6 +45,7 @@ export const NAVIGATION: readonly { readonly label: string; readonly items: read
     { to: '/prevention', label: 'Prevention', icon: Ban },
     { to: '/malware-hashes', label: 'Malware hashes', icon: ShieldX },
     { to: '/web-protection', label: 'Web Protection', icon: Globe, minRole: 'analyst' },
+    { to: '/ip-blocklist', label: 'IP Blocklist', icon: ShieldX, minRole: 'analyst' },
     { to: '/policies', label: 'Policies', icon: ShieldCheck },
     { to: '/reports', label: 'Reports', icon: FileBarChart },
   ] },

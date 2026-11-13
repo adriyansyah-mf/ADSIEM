@@ -6,6 +6,7 @@ import asyncio
 import os
 import sys
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../worker"))
@@ -279,3 +280,64 @@ def test_block_ioc_prevention_rule(monkeypatch, notes):
         asyncio.run(nodes.run_block_ioc({}, {"operation": "prevention_rule", "rule_type": "dir", "value": "tmp"}, CTX))
     with pytest.raises(nodes.NodeError, match="SHA-256"):
         asyncio.run(nodes.run_block_ioc({}, {"operation": "prevention_rule", "rule_type": "hash", "value": "x"}, CTX))
+
+
+# ─── Block IOC: IP and domain ───────────────────────────────────────────────
+
+class Rows(Result):
+    """A result that is iterated (allowlist rows) or read with first()/scalar_one_or_none()."""
+
+    def __init__(self, value=None, rows=()):
+        super().__init__(value)
+        self.rows = list(rows)
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def first(self):
+        return (self.value,) if self.value is not None else None
+
+
+def test_block_ioc_ip_and_web_validation():
+    validate(graph(("block_ioc", {"operation": "ip_block", "value": "{{ trigger.source_ip }}", "days": 7})))
+    validate(graph(("block_ioc", {"operation": "web_block", "value": "{{ trigger.hostname }}"})))
+    for days in (0, 366, "7", True):
+        with pytest.raises(GraphError) as exc:
+            validate(graph(("block_ioc", {"operation": "ip_block", "value": "x", "days": days})))
+        assert any("days must be between" in e for e in exc.value.errors)
+
+
+def test_block_ioc_ip_block(monkeypatch, notes):
+    entry = uuid.uuid4()
+    session = Session([Result(), Rows(entry)])
+    use_session(monkeypatch, session)
+    out = asyncio.run(nodes.run_block_ioc({}, {"operation": "ip_block", "value": "45.33.32.156", "days": 7}, CTX))
+    lock, upsert = session.executed
+    assert "pg_advisory_xact_lock" in str(lock[0])
+    params = upsert[1]
+    assert (params["cidr"], params["group"], params["source"]) == ("45.33.32.156/32", "blue", "soar")
+    assert params["alert"] == uuid.UUID(CTX["trigger"]["alert_id"]) and "run-1" in params["reason"]
+    assert 6 <= (params["expires"] - datetime.now(timezone.utc)).days <= 7
+    assert out.data["value"] == "45.33.32.156/32" and out.data["entry_id"] == str(entry) and session.commits == 1
+    assert "45.33.32.156/32" in notes[-1]
+    # automation never blocks private, loopback or broad ranges
+    for bad, why in (("10.0.0.5", "private"), ("127.0.0.1", "loopback"), ("8.0.0.0/8", "too broad"),
+                     ("nope", "not an IP")):
+        use_session(monkeypatch, Session())
+        with pytest.raises(nodes.NodeError, match=why):
+            asyncio.run(nodes.run_block_ioc({}, {"operation": "ip_block", "value": bad}, CTX))
+
+
+def test_block_ioc_web_block_respects_allowlist(monkeypatch, notes):
+    entry = uuid.uuid4()
+    session = Session([Rows(rows=[]), Result(), Result(entry)])
+    use_session(monkeypatch, session)
+    out = asyncio.run(nodes.run_block_ioc({}, {"operation": "web_block", "value": "https://Evil.Example/x"}, CTX))
+    params = session.executed[2][1]
+    assert (params["domain"], params["group"]) == ("evil.example", "blue")
+    assert "'soar'" in str(session.executed[2][0]) and out.data["entry_id"] == str(entry)
+
+    allow = SimpleNamespace(domain="github.com", include_subdomains=True)
+    use_session(monkeypatch, Session([Rows(rows=[allow])]))
+    with pytest.raises(nodes.NodeError, match="allowlisted"):
+        asyncio.run(nodes.run_block_ioc({}, {"operation": "web_block", "value": "raw.github.com"}, CTX))

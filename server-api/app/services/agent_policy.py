@@ -70,6 +70,13 @@ class PolicySettings(BaseModel):
     # indicators of attack: behaviour chains in a process tree (agent/internal/ioa),
     # reported as alerts; detect only for now (nothing is stopped)
     ioa: Literal["off", "detect"] = "detect"
+    # IP IoC blocklist (app/services/ip_blocks.py): detect reports connections to listed
+    # addresses as ioc_match; block also drops them (nftables on Linux, WFP on Windows)
+    ip_ioc: Literal["off", "detect", "block"] = "block"
+    # Windows App Control (WDAC) built from the execution prevention rules: block rules
+    # stop programs before they run (audit only logs what enforce would block); Linux
+    # already blocks before execution with BPF LSM, so this is Windows only
+    app_control: Literal["off", "audit", "enforce"] = "off"
     # scheduled file scans (agent local time): quick every day at HH:MM;
     # full on "<mon..sun> HH:MM" or "daily HH:MM". "" is off.
     quick_scan_time: str = Field(default="", max_length=32)

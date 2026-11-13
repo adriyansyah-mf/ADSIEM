@@ -15,10 +15,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/siem-platform/agent/internal/appcontrol"
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
@@ -31,6 +33,7 @@ import (
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
 	"github.com/siem-platform/agent/internal/ioa"
+	"github.com/siem-platform/agent/internal/ipblock"
 	"github.com/siem-platform/agent/internal/linsensor"
 	"github.com/siem-platform/agent/internal/malhash"
 	"github.com/siem-platform/agent/internal/memscan"
@@ -44,6 +47,7 @@ import (
 	"github.com/siem-platform/agent/internal/projscan"
 	"github.com/siem-platform/agent/internal/ransomguard"
 	"github.com/siem-platform/agent/internal/scriptscan"
+	"github.com/siem-platform/agent/internal/sensorstat"
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/unpack"
@@ -282,8 +286,15 @@ func run(configPath string, stop <-chan struct{}) {
 	})
 	ioaEngine.Start()
 	slog.Info("ioa engine started", "rules", ioaEngine.RuleCount())
+	// IP IoCs: connections to or from a listed address become ioc_match lines
+	// (the list and its enforcement are wired after the firewall below).
+	var ipEnforced atomic.Bool
+	ipWatcher := ipblock.NewWatcher(func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		ipEnforced.Load)
 	buf.SetObserver(func(entry string) {
 		ioaEngine.Observe(entry)
+		ipWatcher.Observe(entry)
+		sensorstat.Default.Observe(entry)
 		if notifier != nil {
 			logType, _, line := tailer.Decode(entry)
 			notifier.Observe(logType, line)
@@ -366,10 +377,20 @@ func run(configPath string, stop <-chan struct{}) {
 	// terminating a matching process as soon as the ETW sensor reports its
 	// start; rules default to detect-only.
 	var preventer *prevent.Manager
+	// Windows App Control (WDAC): the group policy's app_control turns the
+	// block rules into a policy Windows enforces before a program runs; files
+	// a hash rule stopped after they started are learned and denied too.
+	appCtl := &appcontrol.Controller{
+		Dir:  filepath.Join(task.StateDir(cfg), "appcontrol"),
+		Run:  appcontrol.PowerShell(),
+		Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		In:   appcontrol.Inputs{Mode: func() string { return polStore.Current().Settings.AppControl }},
+	}
 	if (runtime.GOOS == "linux" || runtime.GOOS == "windows") && !cfg.Prevention.Disabled {
 		if pm, err := prevent.Start(prevent.Options{
-			Push:      func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
-			CacheFile: filepath.Join(task.StateDir(cfg), "prevention_rules.json"),
+			Push:         func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			CacheFile:    filepath.Join(task.StateDir(cfg), "prevention_rules.json"),
+			OnTerminated: appCtl.Learn,
 		}); err != nil {
 			slog.Warn("execution prevention unavailable", "err", err)
 		} else {
@@ -377,6 +398,21 @@ func run(configPath string, stop <-chan struct{}) {
 			go pm.Run(flowCtx, c)
 			preventer = pm
 		}
+	}
+	if runtime.GOOS == "windows" {
+		// runs without a preventer too, so turning app_control off still
+		// removes a policy an earlier run applied
+		appCtl.In.Rules = func() [][2]string {
+			var out [][2]string
+			if preventer == nil {
+				return nil
+			}
+			for _, r := range preventer.BlockRules() {
+				out = append(out, [2]string{r.RuleType, r.Value})
+			}
+			return out
+		}
+		go appCtl.Loop(flowCtx)
 	}
 
 	// Ransomware protection: canary files everywhere, the bulk-encryption
@@ -431,8 +467,12 @@ func run(configPath string, stop <-chan struct{}) {
 	var stopProducers []func()
 	if procMon, err := procexec.StartWith(buf, linuxExecFeed(scripts, guard, projects)); err != nil {
 		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
+		if runtime.GOOS == "linux" {
+			sensorstat.Default.SetRunning(sensorstat.ProcExec, false, err.Error())
+		}
 	} else {
 		stopProducers = append(stopProducers, procMon.Stop)
+		sensorstat.Default.SetRunning(sensorstat.ProcExec, true, "")
 	}
 
 	// File, kernel module, ptrace, privilege, memfd/fileless and exit
@@ -444,8 +484,10 @@ func run(configPath string, stop <-chan struct{}) {
 			Disabled: cfg.LinuxSensor.DisabledEvents,
 		}); err != nil {
 			slog.Warn("linux sensor unavailable, continuing without it", "err", err)
+			sensorstat.Default.SetRunning(sensorstat.LinSensor, false, err.Error())
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
+			sensorstat.Default.SetRunning(sensorstat.LinSensor, true, "")
 		}
 	}
 
@@ -470,9 +512,13 @@ func run(configPath string, stop <-chan struct{}) {
 				snap := netwatch.StartSnapshotter(buf, cfg.Server.URL)
 				stopProducers = append(stopProducers, snap.Stop)
 				slog.Info("netwatch running in snapshot mode (new connections only)", "interval", "10s")
+				sensorstat.Default.SetRunning(sensorstat.Netwatch, true, "snapshot fallback: "+err.Error())
+			} else {
+				sensorstat.Default.SetRunning(sensorstat.Netwatch, false, err.Error())
 			}
 		} else {
 			stopProducers = append(stopProducers, netMon.Stop)
+			sensorstat.Default.SetRunning(sensorstat.Netwatch, true, "")
 		}
 	}
 
@@ -491,8 +537,11 @@ func run(configPath string, stop <-chan struct{}) {
 				}
 			}}); err != nil {
 			slog.Warn("ETW sensor unavailable, continuing without it", "err", err)
+			sensorstat.Default.SetRunning(sensorstat.ETW, false, err.Error())
 		} else {
 			stopProducers = append(stopProducers, sensor.Stop)
+			sensorstat.Default.SetRunning(sensorstat.ETW, true, "")
+			sensorstat.Default.SetLost(sensorstat.ETW, sensor.Lost)
 			slog.Info("ETW sensor running", "telemetry", "process, network, dns, file, image, access, thread",
 				"disabled", cfg.ETW.DisabledEvents)
 			if !slices.Contains(cfg.ETW.DisabledEvents, winsensor.GroupRegistry) {
@@ -543,6 +592,7 @@ func run(configPath string, stop <-chan struct{}) {
 		StateDir:  webStateDir,
 	}
 	heartbeat.WebBlockHealth = func() any { return webCtl.Health() }
+	heartbeat.SensorHealth = func() any { return sensorstat.Default.Snapshot() }
 	// OnChange applies the store's newest list, never an older one that lost
 	// a race with it.
 	webStore.OnChange = func(*webblock.List) { webCtl.ApplyCurrent(webStore.Current) }
@@ -551,6 +601,32 @@ func run(configPath string, stop <-chan struct{}) {
 	go webCtl.ApplyCurrent(webStore.Current)
 	go webStore.SyncLoop(flowCtx, c)
 	go webCtl.Run(flowCtx, webStore)
+
+	// IP IoC blocklist: mode block hands it to the firewall (nft siem_ioc
+	// table, WFP or netsh on Windows); detect and block both report matches.
+	ipStore := ipblock.Open(filepath.Join(task.StateDir(cfg), "ip_blocklist.json"))
+	var ipApply sync.Mutex
+	applyIP := func(l *ipblock.List) {
+		ipApply.Lock()
+		defer ipApply.Unlock()
+		ipWatcher.Update(l)
+		var cidrs []string
+		if l.Mode == "block" {
+			cidrs = l.CIDRs()
+		}
+		res, err := fwEngine.SetIOCs(cidrs)
+		ipEnforced.Store(err == nil && len(cidrs) > 0)
+		switch {
+		case err != nil && len(cidrs) > 0:
+			slog.Warn("ipblock: firewall did not take the IP blocklist; matches are only reported", "err", err)
+		case len(res.Rejected) > 0:
+			slog.Warn("ipblock: entries refused by the firewall guard", "rejected", len(res.Rejected),
+				"first", res.Rejected[0])
+		}
+	}
+	ipStore.OnChange = func(*ipblock.List) { applyIP(ipStore.Current()) }
+	go applyIP(ipStore.Current())
+	go ipStore.SyncLoop(flowCtx, c)
 	malFiles.Excluded = func(path, sha string) bool {
 		return polStore.Current().Settings.Excluded(policy.ScopeMalware, policy.Match{Path: path, Image: path, SHA256: sha})
 	}
@@ -654,6 +730,7 @@ func run(configPath string, stop <-chan struct{}) {
 			yaraScanner.Want(resp.YaraRulesHash)
 			malStore.Want(resp.MalwareHashesVersion)
 			webStore.Want(resp.WebBlocklistVersion)
+			ipStore.Want(resp.IPBlocklistVersion)
 			polStore.Want(resp.PolicyVersion)
 			fwEngine.RefreshGuard(cfg.Server.URL)
 
@@ -839,7 +916,7 @@ func wait(ctx context.Context, d time.Duration) bool {
 var urgentLogTypes = map[string]bool{
 	malhash.LogType: true, webblock.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
 	ransomguard.LogType: true, mlscan.LogType: true, "local_detection": true, "linux_sensor_health": true,
-	scriptscan.LogType: true, ioa.LogType: true, projscan.LogType: true,
+	scriptscan.LogType: true, ioa.LogType: true, projscan.LogType: true, ipblock.LogType: true,
 }
 
 func isUrgentEntry(entry string) bool {

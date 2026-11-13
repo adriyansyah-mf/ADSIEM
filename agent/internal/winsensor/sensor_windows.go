@@ -250,6 +250,18 @@ func longPathName(p string) string {
 // (the guard's file writes are counted apart, WritesDropped).
 func (s *Sensor) Dropped() uint64 { return s.q.dropped.Load() }
 
+// Lost is every SIEM event the sensor lost: dropped by the agent's queue plus
+// what the ETW sessions themselves lost in the kernel (heartbeat sensor_health).
+func (s *Sensor) Lost() uint64 {
+	n := s.q.dropped.Load()
+	for _, ses := range s.sessions {
+		if k, err := ses.KernelLost(); err == nil {
+			n += k
+		}
+	}
+	return n
+}
+
 // WritesDropped is the number of the guard's file writes lost because the
 // agent fell behind.
 func (s *Sensor) WritesDropped() uint64 { return s.q.writesDropped.Load() }

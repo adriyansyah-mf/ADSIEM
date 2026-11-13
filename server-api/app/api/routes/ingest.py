@@ -26,6 +26,9 @@ from app.services import yara_ruleset
 from app.api.routes import malware_hashes
 from app.services import agent_policy
 from app.services import web_blocks
+from app.services import ip_blocks
+from app.services import sensor_health
+from app.core.llm_gateway import get_setting
 from app.services.ingest import enqueue_log, refuse_if_backlogged
 from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
                                         accept_evidence, accept_evidence_batch, check_evidence_durability)
@@ -248,6 +251,10 @@ async def heartbeat(
                 if body.evidence_health is not None else {})
     if body.web_block_health is not None:
         evidence |= {"web_block_health": body.web_block_health.model_dump(mode="json"), "web_block_health_at": now}
+    sensors = ({name: s.model_dump(mode="json") for name, s in body.sensor_health.items()}
+               if body.sensor_health is not None else None)
+    if sensors is not None:
+        evidence |= {"sensor_health": sensors, "sensor_health_at": now}
     anomaly = await _session_anomaly(redis, agent.id, body)
     if anomaly and agent.approved:
         await enqueue_log(redis, health("agent_heartbeat_anomaly", kind=anomaly, session=body.session,
@@ -281,6 +288,14 @@ async def heartbeat(
     if agent.approved:
         for change in changes:
             await enqueue_log(redis, health("agent_integrity_changed", **change))
+        if sensors is not None:
+            try:
+                silence = int(await get_setting(db, "agent_sensor_silence_minutes",
+                                                str(sensor_health.DEFAULT_SILENCE_MINUTES)))
+            except ValueError:
+                silence = sensor_health.DEFAULT_SILENCE_MINUTES
+            for event, fields in await sensor_health.check(redis, agent.id, sensors, now.timestamp(), silence):
+                await enqueue_log(redis, health(event, version=body.version, **fields))
 
     result = await db.execute(
         select(AgentLogSource).where(AgentLogSource.agent_id == agent.id)
@@ -332,6 +347,7 @@ async def heartbeat(
     yara_hash, _ = await yara_ruleset.enabled_ruleset(db)
     malware_version = await malware_hashes.agent_version(db, agent)
     web_version = await web_blocks.agent_version(db, agent)
+    ip_version = await ip_blocks.agent_version(db, agent)
     policy_version = (await agent_policy.effective(db, agent.group_id))["version"] if agent.approved else ""
     # Agents hand these versions to their stores only when config_hash changes
     # (heartbeat.Loop → onConfig): every version must be part of the hash, or a
@@ -339,7 +355,8 @@ async def heartbeat(
     config_hash = hashlib.sha256(
         json.dumps(
             {"sources": sources_data, "fim_paths": fim_paths, "firewall": firewall_data, "yara": yara_hash,
-             "malware": malware_version, "web": web_version, "policy": policy_version},
+             "malware": malware_version, "web": web_version, "policy": policy_version,
+             "ip": ip_version},
             sort_keys=True,
         ).encode()
     ).hexdigest()
@@ -362,6 +379,7 @@ async def heartbeat(
         log_batch_max=LOG_BATCH_MAX,
         malware_hashes_version=malware_version,
         web_blocklist_version=web_version,
+        ip_blocklist_version=ip_version,
         policy_version=policy_version,
     )
 

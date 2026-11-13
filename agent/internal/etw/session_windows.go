@@ -274,6 +274,26 @@ func (s *Session) Close() error {
 // DecodeErrors counts events TDH could not describe (delivered partially or not).
 func (s *Session) DecodeErrors() uint64 { return s.decodeErrors.Load() }
 
+// KernelLost is what the session itself lost (EVENT_TRACE_CONTROL_QUERY):
+// events the kernel could not log and real-time buffers dropped because the
+// consumer fell behind. A tool that floods or starves the session to blind
+// the agent shows here, not in the agent's own queue counters.
+func (s *Session) KernelLost() (uint64, error) {
+	const names = 1024 // bytes reserved for the logger name and the log file name
+	base := unsafe.Sizeof(eventTraceProperties{})
+	size := base + 2*names
+	buf := make([]uint64, (size+7)/8)
+	p := (*eventTraceProperties)(unsafe.Pointer(&buf[0]))
+	p.Wnode.BufferSize = uint32(size)
+	p.LoggerNameOffset = uint32(base)
+	p.LogFileNameOffset = uint32(base + names)
+	r, _, _ := procControlTraceW.Call(uintptr(s.handle), 0, uintptr(unsafe.Pointer(p)), eventTraceControlQuery)
+	if r != 0 {
+		return 0, windows.Errno(r)
+	}
+	return uint64(p.EventsLost) + uint64(p.RealTimeBuffersLost), nil
+}
+
 func (s *Session) stop() {
 	p := (*eventTraceProperties)(unsafe.Pointer(&s.props[0]))
 	procControlTraceW.Call(uintptr(s.handle), 0, uintptr(unsafe.Pointer(p)), eventTraceControlStop)

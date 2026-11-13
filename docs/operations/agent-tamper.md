@@ -31,3 +31,19 @@ Rule `SIEM Agent Tampering Command` (`rules/siem_agent_tamper_commands.yaml`) ma
 Other existing coverage: `SIEM Agent Service Tampering` (start type changed, service key written outside SCM/MSI), `SIEM Agent Network Blocked by WFP` (EDRSilencer-style filters), `SIEM Agent Binary/Config Modified` (integrity hashes in the heartbeat, so a local `config.yaml` edit that turns a protection off is reported), `SIEM Agent Stopped`, `SIEM Agent Stopped Reporting`, and `SIEM Agent Heartbeat Spoofing`.
 
 Tests: `agent/internal/heartbeat/uninstall_test.go`, `tests/worker/test_siem_agent_tamper.py`, and `tests/server-api/test_agent_enrollment.int.py` (the stopping heartbeat carries the hash).
+
+## Sensor health (blinding without stopping the agent)
+
+Each heartbeat carries `sensor_health`: per telemetry sensor (`etw` on Windows; `procexec`, `netwatch`, `linsensor` on Linux) whether it started, how many events it put into the agent's buffer, and how many it lost. Windows adds the ETW sessions' own kernel losses (`EVENT_TRACE_CONTROL_QUERY`: `EventsLost` + `RealTimeBuffersLost`) to the agent's queue drops. The counts are taken on the agent (`agent/internal/sensorstat`), so a slow or backlogged server never makes a sensor look silent.
+
+server-api compares each heartbeat with the previous one (`app/services/sensor_health.py`, state in Redis `siem:agent:sensors:<id>`) and stores the snapshot on the agent (Agents page, Sensors column):
+
+| Event | When | Rule |
+|---|---|---|
+| `agent_sensor_stopped` | a sensor that ran stops or disappears while heartbeats continue | `SIEM Agent Telemetry Sensor Stopped` (high) |
+| `agent_sensor_silent` | a sensor with at least 20 events delivered none for `agent_sensor_silence_minutes` (platform setting, default 60; 0 turns it off); once per silence | `SIEM Agent Telemetry Sensor Silent` (high) |
+| `agent_sensor_events_lost` | 100+ events lost between two heartbeats; at most hourly per sensor | `SIEM Agent Telemetry Sensor Losing Events` (medium) |
+
+A counter that goes down is an agent restart: the baseline starts over, nothing is reported. Hosts that are idle for an hour at a time (a quiet appliance) can trip the silence rule: raise the setting rather than disabling the rule. The Linux canary (`sensor_blind`) stays: it proves the eBPF hooks still fire, while silence covers ETW and every sensor without a canary.
+
+Tests: `tests/server-api/test_sensor_health.py`, `tests/server-api/test_sensor_health_heartbeat.int.py`, `agent/internal/sensorstat`, `agent/internal/etw` (`TestKernelLostQueriesALiveSession`, Windows runner).

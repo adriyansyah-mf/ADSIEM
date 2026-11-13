@@ -132,7 +132,10 @@ export function summary(node: Pick<WfNode, 'type' | 'params'>): string {
       : p.operation === 'memory_scan' ? `memory_scan pid ${str(p.pid) || 'all'}` : str(p.operation)
     case 'hunt': return `${str(p.ioc_type)} ${str(p.ioc_value)}`
     case 'block_ioc': return p.operation === 'prevention_rule'
-      ? `${str(p.action || 'block')} ${str(p.rule_type || 'hash')} ${str(p.value)}` : `malware hash ${str(p.value)}`
+      ? `${str(p.action || 'block')} ${str(p.rule_type || 'hash')} ${str(p.value)}`
+      : p.operation === 'ip_block' ? `block IP ${str(p.value)} · ${str(p.days ?? 30)} d`
+      : p.operation === 'web_block' ? `web-block ${str(p.value)} · ${str(p.days ?? 30)} d`
+      : `malware hash ${str(p.value)}`
   }
 }
 

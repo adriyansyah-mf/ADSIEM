@@ -12,7 +12,27 @@ import { EvidenceBadge, EvidenceHealthPanel } from '@/components/EvidenceHealth'
 import { useAgents } from '@/hooks/useAgents'
 import { useWorkspaceFilters } from '@/hooks/useWorkspaceFilters'
 import { useAuthStore } from '@/stores/auth'
-import type { Agent } from '@/types'
+import type { Agent, AgentSensorStat } from '@/types'
+
+const SENSOR_LABEL: Record<string, string> = { etw: 'ETW', procexec: 'exec', netwatch: 'net', linsensor: 'eBPF' }
+
+/** One chip per telemetry sensor: green running, amber losing events, red stopped. */
+function SensorBadges({ sensors }: { readonly sensors?: Record<string, AgentSensorStat> | null }) {
+  const entries = Object.entries(sensors ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  if (entries.length === 0) return <span className="text-xs text-muted-foreground">not reported</span>
+  return <div className="flex flex-wrap gap-1">
+    {entries.map(([name, s]) => {
+      const tone = !s.running ? 'border-red-500/40 text-red-600 dark:text-red-400'
+        : s.lost > 0 ? 'border-amber-500/40 text-amber-600 dark:text-amber-400'
+          : 'border-green-500/40 text-green-600 dark:text-green-400'
+      const detail = [`${s.events.toLocaleString()} events`, s.lost > 0 ? `${s.lost.toLocaleString()} lost` : '',
+        s.last_event_at ? `last ${new Date(s.last_event_at).toLocaleString()}` : '', s.error].filter(Boolean).join(' · ')
+      return <span key={name} title={detail} className={`rounded border px-1.5 py-0.5 text-[11px] font-medium ${tone}`}>
+        {SENSOR_LABEL[name] ?? name}{!s.running && ' off'}
+      </span>
+    })}
+  </div>
+}
 
 export default function AgentsPage() {
   const [page, setPage] = useState(1)
@@ -34,6 +54,8 @@ export default function AgentsPage() {
     </div> },
     { key: 'evidence', header: 'Evidence delivery', render: row => <EvidenceBadge summary={row.evidence} />,
       exportValue: row => row.evidence?.status ?? 'not_reported' },
+    { key: 'sensors', header: 'Sensors', render: row => <SensorBadges sensors={row.sensor_health} />,
+      exportValue: row => Object.entries(row.sensor_health ?? {}).map(([n, s]) => `${n}:${s.running ? 'on' : 'off'}`).join(' ') },
     { key: 'version', header: 'Version', render: row => <span className="font-mono">{row.version ?? '—'}</span> },
     { key: 'last_seen_at', header: 'Last seen', render: row => row.last_seen_at ? <time className="whitespace-nowrap" dateTime={row.last_seen_at} title={new Date(row.last_seen_at).toLocaleString()}>{formatDistanceToNow(new Date(row.last_seen_at), { addSuffix: true })}</time> : 'Never' },
     { key: 'sources', header: 'Log sources', render: row => row.log_sources.length, exportValue: row => row.log_sources.length },

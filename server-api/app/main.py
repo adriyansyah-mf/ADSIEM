@@ -32,6 +32,7 @@ from app.api.routes.yara_rules import capability_router as yara_capability_route
 from app.api.routes.prevention_rules import router as prevention_router, agent_router as prevention_agent_router
 from app.api.routes.malware_hashes import router as malware_hashes_router, agent_router as malware_hashes_agent_router
 from app.api.routes.web_protection import router as web_protection_router, agent_router as web_protection_agent_router
+from app.api.routes.ip_blocks import router as ip_blocks_router, agent_router as ip_blocks_agent_router
 from app.api.routes.policies import router as policies_router, agent_router as policies_agent_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
@@ -361,6 +362,12 @@ async def _migrate_agent_web_block_health() -> None:
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS web_block_health JSONB"))
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS web_block_health_at TIMESTAMPTZ"))
 
+async def _migrate_agent_sensor_health() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS sensor_health JSONB"))
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS sensor_health_at TIMESTAMPTZ"))
+
 async def _migrate_investigation_ledger_columns() -> None:
     """Columns the investigation ledger (services/investigation_ledger.py) adds to existing tables."""
     from sqlalchemy import text
@@ -534,6 +541,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_integrity()
         await _migrate_agent_evidence_health()
         await _migrate_agent_web_block_health()
+        await _migrate_agent_sensor_health()
         await _migrate_agent_update_columns()
         await _migrate_malware_hashes_tlsh()
         await _migrate_web_block_indexes()
@@ -597,6 +605,6 @@ for router in [
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, investigation_chat_router, yara_drafts_router, knowledge_router, evidence_router,
     iocs_router,
-    prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, policies_router, policies_agent_router, agent_updates_router,
+    prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, ip_blocks_agent_router, ip_blocks_router, policies_router, policies_agent_router, agent_updates_router,
 ]:
     app.include_router(router)

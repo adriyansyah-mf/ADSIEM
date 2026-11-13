@@ -395,7 +395,7 @@ export function NodeForm({ node, graph, catalog, disabled, onChange }: Props) {
       {node.type === 'block_ioc' && (
         <>
           <Field label="Block with">
-            <Select value={op} options={catalog.block_ioc_operations ?? ['malware_hash', 'prevention_rule']} onChange={v => set({ operation: v })} disabled={disabled} />
+            <Select value={op} options={catalog.block_ioc_operations ?? ['malware_hash', 'prevention_rule', 'ip_block', 'web_block']} onChange={v => set({ operation: v })} disabled={disabled} />
           </Field>
           {op === 'prevention_rule' && (
             <>
@@ -407,8 +407,17 @@ export function NodeForm({ node, graph, catalog, disabled, onChange }: Props) {
               </Field>
             </>
           )}
-          <Field label={op === 'prevention_rule' && p.rule_type && p.rule_type !== 'hash' ? 'Path' : 'SHA-256'}>
-            <Text mono value={p.value} placeholder="{{ steps.alert_event_1.sha256 }}" onChange={v => set({ value: v })} disabled={disabled} />
+          {(op === 'ip_block' || op === 'web_block') && (
+            <Field label="Block for (days)" hint="The alert’s group drops it until then; analysts can remove it earlier.">
+              <Num value={p.days ?? 30} min={1} max={365} onChange={v => set({ days: v })} disabled={disabled} />
+            </Field>
+          )}
+          <Field label={op === 'ip_block' ? 'IP address or CIDR' : op === 'web_block' ? 'Domain or URL'
+            : op === 'prevention_rule' && p.rule_type && p.rule_type !== 'hash' ? 'Path' : 'SHA-256'}
+            hint={op === 'ip_block' ? 'Private, loopback and ranges broader than /16 are refused for automation.' : undefined}>
+            <Text mono value={p.value}
+              placeholder={op === 'ip_block' ? '{{ trigger.source_ip }}' : op === 'web_block' ? '{{ steps.alert_event_1.fields.url.domain }}' : '{{ steps.alert_event_1.sha256 }}'}
+              onChange={v => set({ value: v })} disabled={disabled} />
           </Field>
           <Field label="Label" hint="Empty = the alert’s rule title."><Text value={p.label} onChange={v => set({ label: v })} disabled={disabled} /></Field>
         </>

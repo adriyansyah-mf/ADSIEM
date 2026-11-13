@@ -191,6 +191,9 @@ class AgentOut(BaseModel):
     # served by GET /api/agents/{id}/evidence
     evidence_health: dict | None = Field(default=None, exclude=True)
     evidence_health_at: datetime | None = Field(default=None, exclude=True)
+    # per telemetry sensor from the last heartbeat (app/services/sensor_health.py)
+    sensor_health: dict | None = None
+    sensor_health_at: datetime | None = None
     model_config = {"from_attributes": True}
 
     @computed_field
@@ -288,6 +291,21 @@ class WebBlockHealth(BaseModel):
             return value[:300]
         return value
 
+class SensorStat(BaseModel):
+    """One telemetry sensor in the heartbeat (agent/internal/sensorstat)."""
+    model_config = ConfigDict(extra="ignore")
+    running: bool = False
+    events: int = Field(default=0, ge=0, le=2**63 - 1)
+    last_event_at: str = Field(default="", max_length=40)
+    lost: int = Field(default=0, ge=0, le=2**63 - 1)
+    error: str = Field(default="", max_length=300)
+
+    @field_validator("error", mode="before")
+    @classmethod
+    def truncate_error(cls, value):
+        return value[:300] if isinstance(value, str) else value
+
+
 class HeartbeatRequest(BaseModel):
     agent_id: UUID
     status: str = "online"
@@ -300,10 +318,13 @@ class HeartbeatRequest(BaseModel):
     evidence_health: EvidenceHealth | None = None  # durable agents only
     update: AgentUpdateStatus | None = None
     web_block_health: WebBlockHealth | None = None
+    # per telemetry sensor (etw, procexec, netwatch, linsensor): app/services/sensor_health.py
+    sensor_health: Annotated[dict[Annotated[str, Field(max_length=32)], SensorStat],
+                             Field(max_length=16)] | None = None
     # 1 = this agent stores a token handed back in HeartbeatResponse.agent_token
     token_rotation: int | None = None
 
-    @field_validator("evidence_health", "update", "web_block_health", mode="wrap")
+    @field_validator("evidence_health", "update", "web_block_health", "sensor_health", mode="wrap")
     @classmethod
     def drop_invalid_evidence_health(cls, value, handler):
         # An invalid or unbounded health object is rejected on its own: the
@@ -332,6 +353,7 @@ class HeartbeatResponse(BaseModel):
     policy_version: str = ""  # the group policy; agents fetch it from /api/ingest/policy
     malware_hashes_version: str = ""  # "<seq>:<action>"; agents sync from /api/ingest/malware-hashes ("" = off)
     web_blocklist_version: str = ""  # "<seq>"; agents sync from /api/ingest/web-blocklist ("" = Web Protection off)
+    ip_blocklist_version: str = ""  # "<group>:<seq>:<mode>"; agents sync from /api/ingest/ip-blocklist ("" = ip_ioc off)
     update: dict | None = None  # services.agent_update.offer_for: version, revision, url, signed
     agent_token: str | None = None  # a rotated token; only to agents that sent token_rotation
 

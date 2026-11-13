@@ -1,0 +1,20 @@
+title: SIEM Agent Telemetry Sensor Losing Events
+id: rule-siem-agent-sensor-events-lost
+description: >-
+  A telemetry sensor (agent.sensor) lost at least 100 events between two
+  heartbeats (agent.events_lost; the total since the agent started is
+  agent.events_lost_total): the kernel's trace buffers overflowed or the
+  agent's queue was full. A burst of activity can do this; so can an attacker
+  flooding the sensor so that their own actions are dropped (T1562.006).
+  Reported at most once an hour per sensor.
+logsource:
+  product: siem
+  service: agent
+detection:
+  selection:
+    event.action: agent_sensor_events_lost
+  condition: selection
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1562.006

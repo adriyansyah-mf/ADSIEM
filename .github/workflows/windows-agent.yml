@@ -55,6 +55,25 @@ jobs:
           $env:WEBBLOCK_E2E = '1'
           go test ./agent/internal/webblock -run E2E -count=1 -v
 
+      # IP IoC blocklist in WFP filters (fwpuclnt.dll, dynamic session) on a
+      # real elevated runner: a listed address is unreachable, dropping it
+      # from the list (or closing the session) restores it; the struct layouts,
+      # the netsh fallback and the ipblock sync/watcher run natively too.
+      - name: WFP IoC blocking
+        shell: pwsh
+        run: go test ./agent/internal/firewall ./agent/internal/ipblock -count=1 -v -run 'WFP|IOC|Watcher|Sync|Routine'
+
+      # App Control (WDAC) on the disposable runner: the agent's policy, built
+      # from AllowAll plus a path deny rule and activated in enforce mode,
+      # stops a copied whoami.exe before it runs; the policy is removed after.
+      - name: App Control (WDAC) end-to-end
+        shell: pwsh
+        run: |
+          go test ./agent/internal/appcontrol -count=1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:APPCONTROL_E2E = '1'
+          go test ./agent/internal/appcontrol -run TestAppControlEnforcesAPathRule -count=1 -v
+
   msi-smoke:
     runs-on: windows-latest
     steps:

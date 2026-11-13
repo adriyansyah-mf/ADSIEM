@@ -36,6 +36,10 @@ logs:
     type: windows_sysmon
   - path: eventlog:Microsoft-Windows-PowerShell/Operational
     type: windows_powershell
+  # App Control (WDAC) blocks: a program refused before it runs leaves no
+  # process start, only CodeIntegrity 3077 (3076 in audit mode)
+  - path: eventlog:Microsoft-Windows-CodeIntegrity/Operational
+    type: windows_codeintegrity
 
 # AI investigations can ask to run commands on this host once an analyst
 # approves them on the server (Settings → ai_command_execution). To refuse

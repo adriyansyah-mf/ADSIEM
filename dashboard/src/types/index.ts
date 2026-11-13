@@ -45,6 +45,17 @@ export interface Agent {
   log_sources: LogSource[]
   /** Durable evidence delivery summary; absent from older API servers. */
   evidence?: AgentEvidenceSummary
+  /** Telemetry sensors from the last heartbeat (etw, procexec, netwatch, linsensor); absent from older agents. */
+  sensor_health?: Record<string, AgentSensorStat> | null
+  sensor_health_at?: string | null
+}
+
+export interface AgentSensorStat {
+  running: boolean
+  events: number
+  last_event_at: string
+  lost: number
+  error: string
 }
 
 export type EvidenceDeliveryStatus = 'healthy' | 'backlogged' | 'blocked' | 'degraded' | 'not_reported'

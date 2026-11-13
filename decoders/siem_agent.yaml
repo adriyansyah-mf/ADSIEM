@@ -22,5 +22,10 @@ fields:
   agent.last_log: last_log
   agent.last_poll: last_poll
   agent.silent_minutes: silent_minutes
+  agent.sensor: sensor
+  agent.events: events
+  agent.events_lost: lost
+  agent.events_lost_total: lost_total
+  event.reason_detail: error
 static_fields:
   event.category: agent_health

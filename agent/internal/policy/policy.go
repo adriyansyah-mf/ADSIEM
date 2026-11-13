@@ -60,6 +60,10 @@ type Settings struct {
 	// IOA: behaviour chains (internal/ioa): off or detect; empty (a server
 	// from before it) is detect.
 	IOA string `json:"ioa"`
+	// AppControl: Windows App Control (internal/appcontrol) built from the
+	// prevention block rules: off, audit or enforce; empty (a server from
+	// before it) is off.
+	AppControl string `json:"app_control"`
 	// QuickScanTime "HH:MM" (every day) and FullScanSchedule "<day> HH:MM"
 	// or "daily HH:MM": scheduled file scans (internal/fullscan); "" is off.
 	QuickScanTime    string      `json:"quick_scan_time"`

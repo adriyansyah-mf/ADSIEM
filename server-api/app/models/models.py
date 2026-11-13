@@ -84,6 +84,8 @@ class Agent(Base):
     evidence_health_at = Column(DateTime(timezone=True))
     web_block_health    = Column(JSONB)
     web_block_health_at = Column(DateTime(timezone=True))
+    sensor_health       = Column(JSONB)   # per telemetry sensor, from heartbeats (services/sensor_health.py)
+    sensor_health_at    = Column(DateTime(timezone=True))
     # Self-update: rollout ring (0 canary … 2 everyone else) and the agent's
     # last reported update status (schemas.AgentUpdateStatus)
     update_ring        = Column(Integer, nullable=False, default=2, server_default="2")
@@ -1121,6 +1123,35 @@ class WebBlockPolicy(Base):
     contact          = Column(String(255), nullable=False, default="")
     updated_at       = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
     seq              = Column(BigInteger, _web_block_seq, server_default=_web_block_seq.next_value(), nullable=False)
+
+
+_ip_block_seq = Sequence("ip_block_seq")
+
+
+class IPBlockEntry(Base):
+    """An IP or CIDR (an IoC) the agents of a group drop (group_id "*" = every
+    group). Every change takes the next ip_block_seq so agents sync deltas
+    (app/services/ip_blocks.py, agent/internal/ipblock)."""
+    __tablename__ = "ip_block_entries"
+    __table_args__ = (
+        UniqueConstraint("group_id", "cidr", "source", name="uq_ip_block_entry"),
+        Index("ix_ip_block_entries_expiry", "expires_at",
+              postgresql_where=text("status = 'active' AND expires_at IS NOT NULL")),
+        Index("ix_ip_block_entries_group_seq", "group_id", "seq"),
+    )
+    id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    cidr       = Column(String(43), nullable=False, index=True)      # canonical, e.g. 198.51.100.7/32
+    group_id   = Column(String(100), nullable=False)
+    source     = Column(String(20), nullable=False)                  # manual, soar, alert, feed
+    status     = Column(String(20), nullable=False, default="active")  # active, removed
+    reason     = Column(Text, nullable=False, default="")
+    alert_id   = Column(UUID(as_uuid=True), ForeignKey("alerts.id", ondelete="SET NULL"))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc)
+    expires_at = Column(DateTime(timezone=True))
+    seq        = Column(BigInteger, _ip_block_seq, server_default=_ip_block_seq.next_value(),
+                        nullable=False, index=True)
 
 
 class ExecPreventionRule(Base):

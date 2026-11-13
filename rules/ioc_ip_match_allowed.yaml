@@ -1,0 +1,16 @@
+title: Connection To IP IoC Not Blocked
+id: rule-ioc-ip-match-allowed
+description: A process connected to or accepted a connection from an address on the IP IoC blocklist and the agent did not drop it (the group policy's ip_ioc is detect, or the firewall could not take the list). threat.indicator.ip and process.executable name the address and the program; switch the group to block or isolate the host.
+logsource:
+  product: ioc
+  service: match
+detection:
+  selection:
+    event.action: ip_ioc_match
+  blocked:
+    ioc.blocked: 'true'
+  condition: selection and not blocked
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1071

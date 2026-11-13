@@ -1,0 +1,13 @@
+title: Agent Could Not Apply App Control Policy
+id: rule-app-control-failed
+description: The Windows agent could not build or activate its App Control (WDAC) policy (error.message says why, e.g. the ConfigCI module is missing on this edition, or CiTool refused the policy). Execution prevention on this host still stops matching programs right after they start, but not before; it retries every 30 minutes.
+logsource:
+  product: app
+  service: control
+detection:
+  selection:
+    event.action: app_control_failed
+  condition: selection
+level: medium
+tags:
+  - attack.defense_evasion

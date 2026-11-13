@@ -41,6 +41,7 @@ const PreventionPage = lazy(() => import('@/pages/PreventionPage'))
 const MalwareHashesPage = lazy(() => import('@/pages/MalwareHashesPage'))
 const ThreatIocsPage = lazy(() => import('@/pages/ThreatIocsPage'))
 const WebProtectionPage = lazy(() => import('@/pages/WebProtectionPage'))
+const IpBlocklistPage = lazy(() => import('@/pages/IpBlocklistPage'))
 const PoliciesPage = lazy(() => import('@/pages/PoliciesPage'))
 const AuditLogsPage = lazy(() => import('@/pages/AuditLogsPage'))
 const SoarPage = lazy(() => import('@/pages/SoarPage'))
@@ -97,6 +98,7 @@ export default function App() {
             <Route path="/malware-hashes" element={<MalwareHashesPage />} />
             <Route path="/threat-iocs" element={<ThreatIocsPage />} />
             <Route path="/web-protection" element={<ProtectedRoute minRole="analyst"><WebProtectionPage /></ProtectedRoute>} />
+            <Route path="/ip-blocklist" element={<ProtectedRoute minRole="analyst"><IpBlocklistPage /></ProtectedRoute>} />
             <Route path="/policies" element={<PoliciesPage />} />
             <Route path="/agent-updates" element={<AgentUpdatesPage />} />
             <Route path="/soar" element={<ProtectedRoute minRole="analyst"><SoarPage /></ProtectedRoute>} />

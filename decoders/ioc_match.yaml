@@ -1,0 +1,29 @@
+# A connection to or from an address on the group's IP IoC blocklist, seen in
+# the agent's network telemetry (agent/internal/ipblock). blocked: the policy's
+# ip_ioc is "block" and the firewall holds the list (nftables siem_ioc table,
+# WFP or netsh SIEM-IOC rules), so the connection was dropped; false in
+# "detect" mode or when the firewall could not take the list.
+# rules/ioc_ip_match_*.yaml turn these into alerts.
+name: ioc_match
+log_type: ioc_match
+type: json
+priority: 3
+enabled: true
+when:
+  event: ip_ioc_match
+fields:
+  destination.ip: ip
+  threat.indicator.ip: ip
+  threat.indicator.cidr: cidr
+  threat.indicator.provider: source
+  threat.indicator.description: reason
+  ioc.mode: mode
+  ioc.blocked: blocked
+  network.direction: direction
+  process.pid: pid
+  process.executable: image
+  ioc.telemetry: telemetry
+static_fields:
+  event.category: network
+  event.kind: alert
+  event.action: ip_ioc_match

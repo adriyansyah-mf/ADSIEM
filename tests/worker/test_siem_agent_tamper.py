@@ -161,3 +161,18 @@ def test_windows_service_start_type_and_registry(engines):
         engines, "windows_sysmon", reg.format("C:\\Windows\\regedit.exe"))[1]
     assert "SIEM Agent Service Tampering" not in _titles(
         engines, "windows_sysmon", reg.format("C:\\Windows\\System32\\services.exe"))[1]
+
+
+@pytest.mark.parametrize("event,fields,title", [
+    ("agent_sensor_stopped", {"sensor": "etw", "error": "ETW session stopped"},
+     "SIEM Agent Telemetry Sensor Stopped"),
+    ("agent_sensor_silent", {"sensor": "procexec", "silent_minutes": 60, "events": 900},
+     "SIEM Agent Telemetry Sensor Silent"),
+    ("agent_sensor_events_lost", {"sensor": "etw", "lost": 5000, "lost_total": 5100},
+     "SIEM Agent Telemetry Sensor Losing Events"),
+])
+def test_sensor_health_events_raise_their_alert(engines, event, fields, title):
+    line = health_line(event, version="1.26.0", **fields)
+    decoded, titles = _titles(engines, LOG_TYPE, line)
+    assert decoded["event.action"] == event and decoded["agent.sensor"] == fields["sensor"]
+    assert [t for t in titles if t.startswith("SIEM Agent Telemetry")] == [title]

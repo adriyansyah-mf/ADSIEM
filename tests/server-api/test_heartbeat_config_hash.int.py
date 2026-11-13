@@ -27,10 +27,13 @@ async def heartbeat(env):
 
 @pytest.fixture
 def versions(monkeypatch):
-    current = {"web": "", "malware": "", "policy": "p1"}
+    current = {"web": "", "malware": "", "policy": "p1", "ip": ""}
 
     async def web(db, agent):
         return current["web"]
+
+    async def ip(db, agent):
+        return current["ip"]
 
     async def malware(db, agent):
         return current["malware"]
@@ -39,6 +42,7 @@ def versions(monkeypatch):
         return {"version": current["policy"]}
 
     monkeypatch.setattr(ingest.web_blocks, "agent_version", web)
+    monkeypatch.setattr(ingest.ip_blocks, "agent_version", ip)
     monkeypatch.setattr(ingest.malware_hashes, "agent_version", malware)
     monkeypatch.setattr(ingest.agent_policy, "effective", policy)
     return current
@@ -52,6 +56,7 @@ async def test_unchanged_versions_keep_the_hash(evidence_api, versions):
     ("web", "web_blocklist_version", "blue:5"),
     ("malware", "malware_hashes_version", "9:alert"),
     ("policy", "policy_version", "p2"),
+    ("ip", "ip_blocklist_version", "blue:7:block"),
 ])
 async def test_a_version_change_changes_the_config_hash(evidence_api, versions, key, field, value):
     before = await heartbeat(evidence_api)
