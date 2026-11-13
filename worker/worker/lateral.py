@@ -20,6 +20,7 @@ feed triage, SOAR and entity risk. Never raises into the pipeline."""
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 from datetime import datetime, timezone
 
@@ -34,7 +35,10 @@ from worker.database import AsyncSessionLocal
 log = structlog.get_logger()
 
 PORTS = {22: "ssh", 445: "smb", 3389: "rdp", 5985: "winrm", 5986: "winrm", 135: "rpc"}
-AUTH_TYPES = {"linux_auth", "windows_security"}
+AUTH_TYPES = {"linux_auth", "windows_security", "syslog"}
+# sshd (and OpenSSH 9.8+ sshd-session) success line, wherever rsyslog files it:
+# some hosts send it to /var/log/syslog rather than auth.log
+_SSH_ACCEPTED = re.compile(r"\bsshd(?:-session)?\[\d+\]: Accepted \S+ for (\S+) from (\S+) port \d+")
 IP_TTL = 7 * 86400
 EDGE_TOUCH = 300
 FANOUT_WINDOW, FANOUT_MIN, FANOUT_REPORT_EVERY = 3600, 5, 6 * 3600
@@ -55,14 +59,21 @@ def _internal(ip: str) -> bool:
     return (a.is_private or a.is_link_local) and not a.is_loopback and not a.is_unspecified
 
 
-def auth_edge(log_type: str, decoded: dict, hostname: str) -> tuple[str, str, str] | None:
+def auth_edge(log_type: str, decoded: dict, hostname: str, raw: str = "") -> tuple[str, str, str] | None:
     """(source ip, protocol, user) of a remote login to `hostname`, or None."""
-    if log_type not in AUTH_TYPES or str(decoded.get("event.action", "")) != "login_success":
+    if log_type not in AUTH_TYPES:
+        return None
+    if log_type in ("linux_auth", "syslog") and str(decoded.get("event.action", "")) != "login_success":
+        m = _SSH_ACCEPTED.search(raw) if "Accepted " in raw else None
+        if m is None:
+            return None
+        decoded = {"event.action": "login_success", "user.name": m.group(1), "source.ip": m.group(2)}
+    if str(decoded.get("event.action", "")) != "login_success":
         return None
     src = str(decoded.get("source.ip") or "").strip()
     if not src or src in ("-", "::1") or src.startswith("127."):
         return None
-    if log_type == "linux_auth":
+    if log_type in ("linux_auth", "syslog"):
         protocol = "ssh"
     else:
         logon = str(decoded.get("winlog.logon.type") or decoded.get("LogonType") or "")
@@ -158,13 +169,13 @@ class Lateral:
 
 
 async def observe(redis, *, log_type: str, decoded: dict, group_id: str, hostname: str, agent_id=None,
-                  sessions=None) -> list[str]:
+                  sessions=None, raw: str = "") -> list[str]:
     """Learn addresses and edges from one event; push findings. Returns the events pushed."""
     group = group_id or "default"
     lat = Lateral(redis, sessions)
     found: list[tuple[str, dict]] = []
     if log_type in AUTH_TYPES:
-        edge = auth_edge(log_type, decoded, hostname)
+        edge = auth_edge(log_type, decoded, hostname, raw)
         if edge is None or not hostname:
             return []
         src_ip, protocol, user = edge

@@ -10,7 +10,7 @@ server:
   url: http://your-siem-server:8000
   heartbeat_interval: 30
 
-config_version: 1
+config_version: 2
 
 # Containment (block_ip / isolate from the console or SOAR). Off means those
 # tasks fail instead of being applied; the server's address is never blocked.
@@ -19,6 +19,13 @@ firewall:
   backend: auto          # Linux: nft, Windows: netsh
   dry_run: false         # true: log what would be blocked, enforce nothing
   protected_ips: []      # extra addresses/CIDRs never blocked (admin, VPN)
+
+# Network telemetry (connect/accept/bind/DNS via eBPF; needs root). It feeds IP
+# IoC matching, beaconing, UEBA host features and the lateral movement graph.
+# snapshot_fallback polls `ss` every 10 s where eBPF cannot attach.
+netwatch:
+  enabled: true
+  snapshot_fallback: true
 
 # Common log paths by distro:
 #   Debian/Ubuntu (with rsyslog): /var/log/auth.log, /var/log/syslog

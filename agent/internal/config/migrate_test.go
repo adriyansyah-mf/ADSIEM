@@ -23,6 +23,36 @@ func TestMigrateEnablesFirewallFromOldInstaller(t *testing.T) {
 	}
 }
 
+// Packaged Linux configs before 1.27.0 had no netwatch section: network
+// telemetry was off on every install. Version 2 turns it on, once, on Linux.
+func TestMigrateEnablesNetwatchOnLinuxOnce(t *testing.T) {
+	cfg := &Config{Version: 1}
+	changed := migrate(cfg, "linux")
+	if !cfg.Netwatch.Enabled || !cfg.Netwatch.SnapshotFallback || cfg.Version != 2 {
+		t.Fatalf("netwatch not turned on: %+v version %d", cfg.Netwatch, cfg.Version)
+	}
+	if !strings.Contains(strings.Join(changed, ","), "netwatch.enabled") {
+		t.Fatalf("change not reported: %v", changed)
+	}
+	// an operator turning it off afterwards is respected
+	cfg.Netwatch.Enabled = false
+	if again := migrate(cfg, "linux"); len(again) != 0 || cfg.Netwatch.Enabled {
+		t.Fatalf("a version 2 config must stay as written: %v %+v", again, cfg.Netwatch)
+	}
+	// Windows has ETW network telemetry: nothing to turn on
+	win := &Config{Version: 1}
+	migrate(win, "windows")
+	if win.Netwatch.Enabled || win.Version != 2 {
+		t.Fatalf("windows: %+v version %d", win.Netwatch, win.Version)
+	}
+	// a config that already had it on keeps its own fallback choice
+	on := &Config{Version: 1, Netwatch: NetwatchConfig{Enabled: true}}
+	migrate(on, "linux")
+	if on.Netwatch.SnapshotFallback {
+		t.Fatal("an explicit netwatch section must not be rewritten")
+	}
+}
+
 func TestMigrateKeepsDryRunAndLaterChoices(t *testing.T) {
 	dry := &Config{}
 	dry.Firewall.DryRun = true

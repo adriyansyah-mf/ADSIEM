@@ -29,7 +29,20 @@ def test_remote_logins_are_hops():
                       {**win, "source.ip": "-"}, {**win, "source.ip": "127.0.0.1"}, {**win, "source.ip": "::1"},
                       {**win, "event.action": "login_failed"}):
         assert lateral.auth_edge("windows_security", not_a_hop, "fs-01") is None
-    assert lateral.auth_edge("syslog", ssh, "db-01") is None
+    assert lateral.auth_edge("apache_access", ssh, "db-01") is None
+
+
+def test_ssh_success_lines_filed_in_syslog():
+    # OpenSSH 9.8+ logs as sshd-session; some rsyslog setups file it in /var/log/syslog
+    raw = ("2026-11-11T16:59:58.888908+07:00 otakunesia sshd-session[3344039]: "
+           "Accepted password for root from 140.213.0.22 port 2508 ssh2")
+    assert lateral.auth_edge("syslog", {}, "otakunesia", raw) == ("140.213.0.22", "ssh", "root")
+    classic = "Nov 11 16:59:58 db-01 sshd[812]: Accepted publickey for deploy from 10.0.0.5 port 50122 ssh2: ED25519"
+    assert lateral.auth_edge("linux_auth", {}, "db-01", classic) == ("10.0.0.5", "ssh", "deploy")
+    for other in ("Nov 11 db-01 sshd[812]: Failed password for root from 1.2.3.4 port 22 ssh2",
+                  "Nov 11 db-01 CRON[9]: pam_unix(cron:session): session opened for user root",
+                  "Nov 11 db-01 myapp[3]: Accepted payment for order 7 from 10.0.0.9 port 1"):
+        assert lateral.auth_edge("syslog", {}, "db-01", other) is None
 
 
 def test_local_address_of_outbound_connections():
