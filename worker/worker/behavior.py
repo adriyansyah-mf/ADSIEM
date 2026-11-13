@@ -44,6 +44,9 @@ BEACON_REPORT_EVERY = 86400
 NOISY_PORTS = {53, 123, 137, 138, 5353}  # DNS, NTP, NetBIOS, mDNS: periodic by design
 
 PROCESS_TYPES = {"linux_process_exec", "windows_etw_process"}
+# the SIEM agent itself: agents before 1.27.1 reported their own connections to
+# the server (a feedback loop); they are never beaconing, UEBA or lateral input
+AGENT_PROGRAMS = {"siem-agent", "siem-agent.exe", "agent"}
 NETWORK_TYPES = {"linux_network_connect", "linux_network_snapshot", "windows_etw_network"}
 
 _USER_WRITABLE = ("/tmp/", "/var/tmp/", "/dev/shm/", "/home/", "/run/user/", "/root/",
@@ -214,7 +217,7 @@ def outbound_connection(log_type: str, decoded: dict, raw: str = "") -> tuple[st
         port_n = int(port)
     except ValueError:
         return None
-    if not dst or not proc:
+    if not dst or not proc or _base(proc) in AGENT_PROGRAMS:
         return None
     return dst, port_n, proc
 

@@ -1,11 +1,16 @@
 package winsensor
 
 import (
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/siem-platform/agent/internal/etw"
 )
+
+// selfPID is the agent: its own connections (shipping events to the server)
+// are not telemetry, and reporting them would feed itself.
+var selfPID = uint32(os.Getpid())
 
 // Log types for network connections and DNS queries (Sigma windows /
 // network_connection and dns_query).
@@ -56,6 +61,9 @@ func (j *processJoiner) network(ev *etw.Event) string {
 	pid, ok := number(ev, "PID")
 	if !ok {
 		pid = ev.PID
+	}
+	if pid == selfPID {
+		return "" // the agent's own connections to the SIEM server: a feedback loop
 	}
 	local, _ := ev.Get("saddr")
 	localPort, _ := ev.Get("sport")

@@ -125,6 +125,30 @@ func TestUint32ToIP(t *testing.T) {
 	}
 }
 
+// The packaged binary is "siem-agent": its connections to the SIEM server made
+// a feedback loop in production (one connect per shipped event) until they
+// were recognised by process id and by that name too.
+func TestAgentOwnTrafficIsFilteredByPIDAndPackagedName(t *testing.T) {
+	var ev event
+	ev.TGID = selfTGID
+	copy(ev.Comm[:], "renamed-binary")
+	if !isSelf(ev) {
+		t.Fatal("the agent's own process id must be filtered whatever its name")
+	}
+	var helper event
+	helper.TGID = selfTGID + 1
+	copy(helper.Comm[:], "siem-agent")
+	if !isSelf(helper) {
+		t.Fatal("the packaged binary name (helpers) must be filtered")
+	}
+	var other event
+	other.TGID = selfTGID + 2
+	copy(other.Comm[:], "curl")
+	if isSelf(other) {
+		t.Fatal("unrelated processes must not be filtered")
+	}
+}
+
 func TestAgentOwnTrafficIsFiltered(t *testing.T) {
 	var comm [commLen]byte
 	copy(comm[:], selfComm)
