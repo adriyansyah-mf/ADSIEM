@@ -61,7 +61,7 @@ export default function AgentUpdatesPage() {
     queryKey: ['agents', 'update-rings'],
     queryFn: () => api.get('/api/agents', { params: { page_size: 200 } }).then(r => r.data),
   })
-  const LATEST_RELEASE = '1.25.0'
+  const LATEST_RELEASE = '1.26.0'
   const versions = useMemo(() => {
     const list = (packages.data ?? []).filter(p => p.verified !== false).map(p => p.version)
     list.push(LATEST_RELEASE)
