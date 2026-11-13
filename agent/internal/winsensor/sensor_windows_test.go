@@ -71,6 +71,11 @@ func TestSensorReportsAProcessWithBothHalves(t *testing.T) {
 // A TCP connection and a DNS query from this process come out as Sysmon 3
 // and 22 lookalikes naming this test binary.
 func TestSensorReportsConnectionsAndQueries(t *testing.T) {
+	// The test process plays the monitored program here: the agent's
+	// own-connection filter (selfPID) must not hide its connections.
+	saved := selfPID
+	selfPID = 0
+	t.Cleanup(func() { selfPID = saved })
 	buf := buffer.New(10000)
 	s, err := Start(buf)
 	if err != nil {
