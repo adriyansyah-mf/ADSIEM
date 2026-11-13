@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 
 	"github.com/siem-platform/agent/internal/buffer"
+	"github.com/siem-platform/agent/internal/mountns"
 )
 
 //go:embed bpf/execve.bpf.o
@@ -124,7 +125,7 @@ func (m *Monitor) loop(buf *buffer.Buffer) {
 		if !ok {
 			continue
 		}
-		buf.Push(LogType + "\x00" + raw)
+		buf.Push(LogType + "\x00" + withHostImage(raw, ex, mountns.HostPath))
 		if m.onExec != nil {
 			m.onExec(ex)
 		}
@@ -137,6 +138,17 @@ func (m *Monitor) loop(buf *buffer.Buffer) {
 func decodeEvent(b []byte) (string, bool) {
 	line, _, ok := decodeExec(b)
 	return line, ok
+}
+
+// withHostImage adds HostImage, where the host has the program, when the
+// process is in another mount namespace and sees it elsewhere (systemd
+// PrivateTmp: apache's /var/tmp/x is the host's
+// /var/tmp/systemd-private-.../tmp/x). Image stays what the process ran.
+func withHostImage(line string, ex Exec, hostPath func(int, string) string) string {
+	if host := hostPath(int(ex.PID), ex.Image); host != "" {
+		return line + ` HostImage=` + kv(host)
+	}
+	return line
 }
 
 // Exec is one program start as the script scanner needs it.

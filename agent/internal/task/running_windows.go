@@ -10,6 +10,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// hostTarget: Windows has no mount namespaces; a reported path is the file.
+func hostTarget(path string) (string, error) { return filepath.Abs(filepath.Clean(path)) }
+
 // processesRunning lists the processes whose image is path (case-insensitive,
 // as Windows paths are).
 func processesRunning(path string) []int {

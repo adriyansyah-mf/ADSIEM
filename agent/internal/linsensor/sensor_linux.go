@@ -19,6 +19,8 @@ import (
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"golang.org/x/sys/unix"
+
+	"github.com/siem-platform/agent/internal/mountns"
 )
 
 //go:embed bpf/linsensor.bpf.o
@@ -109,6 +111,7 @@ func Start(opts Options) (*Sensor, error) {
 		disabled[g] = true
 	}
 	s.proc = newProcessor(opts.Push, opts.OnFile, disabled, linuxProc{})
+	s.proc.hostPath = func(tgid uint32, p string) string { return mountns.HostPath(int(tgid), p) }
 	s.self = self
 	if !disabled[GroupFile] {
 		s.health = newHealthChecker(fmt.Sprintf("/var/tmp/.siem-sensor-canary-%d", os.Getpid()))

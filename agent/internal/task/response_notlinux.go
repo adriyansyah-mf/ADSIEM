@@ -8,6 +8,12 @@ import (
 
 func processesRunning(string) []int { return nil }
 
+func hostTarget(path string) (string, error) { return path, nil }
+
+func assertQuarantinable(string) error {
+	return errors.New("quarantine_file requires Linux or Windows")
+}
+
 func killProcess(pid int, force bool, graceSeconds float64) (KillResult, error) {
 	return KillResult{}, errors.New("kill_process requires Linux or Windows")
 }

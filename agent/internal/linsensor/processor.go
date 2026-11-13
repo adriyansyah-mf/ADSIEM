@@ -83,6 +83,10 @@ type processor struct {
 	// birth is a file's creation time (statx btime; fileBirth). It tells
 	// an O_CREAT open that rewrote an existing file from one that made it.
 	birth func(path string) (time.Time, bool)
+
+	// hostPath maps a path as process tgid sees it to the host's path for
+	// the same file, "" when they are the same (mountns.HostPath).
+	hostPath func(tgid uint32, path string) string
 }
 
 // rewriteAge: an O_CREAT open of a file born longer ago than this rewrote
@@ -287,6 +291,9 @@ func (p *processor) handleFile(ev rawEvent) {
 		return
 	}
 	fe.Image = p.image(ev.tgid, ev.comm)
+	if p.hostPath != nil {
+		fe.HostPath = p.hostPath(ev.tgid, fe.Path)
+	}
 	if p.onFile != nil {
 		g := fe
 		// fopen("wb"), open(p, "wb"): O_CREAT|O_TRUNC of an existing file is
