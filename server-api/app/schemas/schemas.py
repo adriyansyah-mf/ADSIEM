@@ -191,6 +191,9 @@ class AgentOut(BaseModel):
     # served by GET /api/agents/{id}/evidence
     evidence_health: dict | None = Field(default=None, exclude=True)
     evidence_health_at: datetime | None = Field(default=None, exclude=True)
+    # per telemetry sensor from the last heartbeat (app/services/sensor_health.py)
+    sensor_health: dict | None = None
+    sensor_health_at: datetime | None = None
     model_config = {"from_attributes": True}
 
     @computed_field

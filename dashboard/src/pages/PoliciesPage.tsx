@@ -19,6 +19,8 @@ interface Settings {
   script_scan: 'off' | 'detect' | 'block'
   ml_action: 'off' | 'detect' | 'block'
   ioa: 'off' | 'detect'
+  ip_ioc: 'off' | 'detect' | 'block'
+  app_control: 'off' | 'audit' | 'enforce'
   quick_scan_time: string
   full_scan_schedule: string
   exclusions: Exclusion[]
@@ -133,7 +135,7 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
 
       <section className="grid gap-3 md:grid-cols-2">
         <Toggle label="Execution prevention" on={s.prevention_enabled} onChange={v => set({ prevention_enabled: v })}
-          hint="Prevention rules and blocking known malware at start (Linux: before it runs; Windows: right after)." />
+          hint="Prevention rules and blocking known malware at start (Linux: before it runs; Windows: right after, or before with App Control)." />
         <Toggle label="YARA on-access scanning" on={s.yara_on_access} onChange={v => set({ yara_on_access: v })}
           hint="Scan new and changed files in the watched folders with the enabled YARA rules." />
         <Toggle label="Pop-ups for the signed-in user" on={s.notify_user} onChange={v => set({ notify_user: v })}
@@ -194,6 +196,30 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
           </select>
           <span className="block text-xs text-muted-foreground">
             Follows a process tree for attack chains (Office starting PowerShell that reaches the internet, a web server's shell running recon, a downloaded file being run). Nothing is stopped yet. Exclude false positives with the Behaviour (IOA) scope.
+          </span>
+        </label>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">IP IoC blocklist</span>
+          <select value={s.ip_ioc ?? 'block'} onChange={e => set({ ip_ioc: e.target.value as Settings['ip_ioc'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="block">Block: drop traffic to and from listed addresses</option>
+            <option value="detect">Detect: alert on connections only</option>
+            <option value="off">Off</option>
+          </select>
+          <span className="block text-xs text-muted-foreground">
+            The addresses on the IP Blocklist page. Linux drops them with nftables, Windows with the Windows Filtering Platform; the SIEM server and the gateway are never blocked.
+          </span>
+        </label>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">Windows App Control (WDAC)</span>
+          <select value={s.app_control ?? 'off'} onChange={e => set({ app_control: e.target.value as Settings['app_control'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="off">Off</option>
+            <option value="audit">Audit: log what would be blocked</option>
+            <option value="enforce">Enforce: Windows refuses blocked programs before they run</option>
+          </select>
+          <span className="block text-xs text-muted-foreground">
+            Turns path and folder block rules (and files a hash rule stopped) into a Windows App Control policy. Everything else still runs. Try audit first and check the App Control alerts.
           </span>
         </label>
         <label className="rounded border border-border p-3 space-y-1">
