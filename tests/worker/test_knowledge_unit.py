@@ -1,4 +1,4 @@
-# tests/worker/test_knowledge.py
+# tests/worker/test_knowledge_unit.py
 """Knowledge base: PayloadsAllTheThings parsing, entity matching inputs, and
 what reaches the triage prompt."""
 import io

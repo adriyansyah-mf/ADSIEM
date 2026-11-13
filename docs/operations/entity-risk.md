@@ -25,4 +25,4 @@ When an entity reaches `entity_risk_alert_threshold` (platform setting, default 
 - API: `GET /api/entity-risk?entity_type=host|user|all&min_risk=&limit=`, `GET /api/entity-risk/{host|user}/{value}` (group scoped; the decay is applied when read).
 - Table `entity_risk` (one row per entity and group; the score stored is the value at `updated_at`).
 
-Tests: `tests/worker/test_entity_risk.py`, `tests/worker/test_entity_risk.int.py`, `tests/server-api/test_entity_risk_api.int.py`.
+Tests: `tests/worker/test_entity_risk_scoring.py`, `tests/worker/test_entity_risk.int.py`, `tests/server-api/test_entity_risk_api.int.py`.

@@ -61,7 +61,7 @@ Run the targeted regression suites with an isolated PostgreSQL test database:
 
 ```sh
 PYTHONPATH=worker:server-api pytest tests/server-api/test_case_evidence.py \
-  tests/worker/test_case_correlation.py tests/worker/test_case_grouping.py \
+  tests/worker/test_case_correlation.py tests/worker/test_case_grouping_unit.py \
   tests/worker/test_ueba_ai_triage.py
 cd dashboard && npm run build
 ```
