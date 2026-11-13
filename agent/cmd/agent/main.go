@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/siem-platform/agent/internal/heartbeat"
 	"github.com/siem-platform/agent/internal/hygiene"
 	"github.com/siem-platform/agent/internal/ioa"
+	"github.com/siem-platform/agent/internal/ipblock"
 	"github.com/siem-platform/agent/internal/linsensor"
 	"github.com/siem-platform/agent/internal/malhash"
 	"github.com/siem-platform/agent/internal/memscan"
@@ -282,8 +284,14 @@ func run(configPath string, stop <-chan struct{}) {
 	})
 	ioaEngine.Start()
 	slog.Info("ioa engine started", "rules", ioaEngine.RuleCount())
+	// IP IoCs: connections to or from a listed address become ioc_match lines
+	// (the list and its enforcement are wired after the firewall below).
+	var ipEnforced atomic.Bool
+	ipWatcher := ipblock.NewWatcher(func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		ipEnforced.Load)
 	buf.SetObserver(func(entry string) {
 		ioaEngine.Observe(entry)
+		ipWatcher.Observe(entry)
 		if notifier != nil {
 			logType, _, line := tailer.Decode(entry)
 			notifier.Observe(logType, line)
@@ -551,6 +559,32 @@ func run(configPath string, stop <-chan struct{}) {
 	go webCtl.ApplyCurrent(webStore.Current)
 	go webStore.SyncLoop(flowCtx, c)
 	go webCtl.Run(flowCtx, webStore)
+
+	// IP IoC blocklist: mode block hands it to the firewall (nft siem_ioc
+	// table, WFP or netsh on Windows); detect and block both report matches.
+	ipStore := ipblock.Open(filepath.Join(task.StateDir(cfg), "ip_blocklist.json"))
+	var ipApply sync.Mutex
+	applyIP := func(l *ipblock.List) {
+		ipApply.Lock()
+		defer ipApply.Unlock()
+		ipWatcher.Update(l)
+		var cidrs []string
+		if l.Mode == "block" {
+			cidrs = l.CIDRs()
+		}
+		res, err := fwEngine.SetIOCs(cidrs)
+		ipEnforced.Store(err == nil && len(cidrs) > 0)
+		switch {
+		case err != nil && len(cidrs) > 0:
+			slog.Warn("ipblock: firewall did not take the IP blocklist; matches are only reported", "err", err)
+		case len(res.Rejected) > 0:
+			slog.Warn("ipblock: entries refused by the firewall guard", "rejected", len(res.Rejected),
+				"first", res.Rejected[0])
+		}
+	}
+	ipStore.OnChange = func(*ipblock.List) { applyIP(ipStore.Current()) }
+	go applyIP(ipStore.Current())
+	go ipStore.SyncLoop(flowCtx, c)
 	malFiles.Excluded = func(path, sha string) bool {
 		return polStore.Current().Settings.Excluded(policy.ScopeMalware, policy.Match{Path: path, Image: path, SHA256: sha})
 	}
@@ -654,6 +688,7 @@ func run(configPath string, stop <-chan struct{}) {
 			yaraScanner.Want(resp.YaraRulesHash)
 			malStore.Want(resp.MalwareHashesVersion)
 			webStore.Want(resp.WebBlocklistVersion)
+			ipStore.Want(resp.IPBlocklistVersion)
 			polStore.Want(resp.PolicyVersion)
 			fwEngine.RefreshGuard(cfg.Server.URL)
 
@@ -839,7 +874,7 @@ func wait(ctx context.Context, d time.Duration) bool {
 var urgentLogTypes = map[string]bool{
 	malhash.LogType: true, webblock.LogType: true, yarascan.LogType: true, prevent.LogType: true, prevent.WindowsLogType: true,
 	ransomguard.LogType: true, mlscan.LogType: true, "local_detection": true, "linux_sensor_health": true,
-	scriptscan.LogType: true, ioa.LogType: true, projscan.LogType: true,
+	scriptscan.LogType: true, ioa.LogType: true, projscan.LogType: true, ipblock.LogType: true,
 }
 
 func isUrgentEntry(entry string) bool {

@@ -313,6 +313,10 @@ type HeartbeatResponse struct {
 	// server's format is "<group>:<seq>[+]"); "" when web protection is off
 	// (or the server is older). Changes come from /api/ingest/web-blocklist.
 	WebBlocklistVersion string `json:"web_blocklist_version"`
+	// "<group>:<seq>:<mode>[+]" of the IP IoC blocklist, "" when the group
+	// policy's ip_ioc is off (or the server is older); changes come from
+	// /api/ingest/ip-blocklist (internal/ipblock).
+	IPBlocklistVersion string `json:"ip_blocklist_version"`
 	// Version of the group policy (internal/policy); "" from older servers.
 	PolicyVersion string `json:"policy_version"`
 	// Set while this agent's group rollout wants it on another version.
