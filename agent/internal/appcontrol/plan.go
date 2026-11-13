@@ -134,8 +134,10 @@ func ApplyScript(p Plan, workDir string) string {
 	w("if ($doc.SiPolicy.BasePolicyID) { $doc.SiPolicy.BasePolicyID = $id }")
 	w("$doc.Save($xml)")
 	w("Set-CIPolicyIdInfo -FilePath $xml -PolicyName %s", psQuote(PolicyName))
-	// 0 user mode code integrity, 6 unsigned policy, 16 update without reboot
-	w("foreach ($o in 0, 6, 16) { Set-RuleOption -FilePath $xml -Option $o }")
+	// 0 user mode code integrity, 6 unsigned policy, 16 update without reboot,
+	// 18 no runtime admin-only-writable check on FilePath rules (it exists to
+	// stop allow rules on user-writable paths; deny rules target exactly those)
+	w("foreach ($o in 0, 6, 16, 18) { Set-RuleOption -FilePath $xml -Option $o }")
 	if p.Mode == ModeEnforce {
 		w("Set-RuleOption -FilePath $xml -Option 3 -Delete")
 	} else {
@@ -164,8 +166,9 @@ func RemoveScript() string {
 	var b strings.Builder
 	w := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
 	w("$ErrorActionPreference = 'Stop'")
+	w("$ProgressPreference = 'SilentlyContinue'")
 	w("$id = %s", psQuote(PolicyID))
-	w("$dest = Join-Path $env:windir (\"System32\\CodeIntegrity\\CiPolicies\\Active\\\" + $id + '.cip')")
+	w("$dest =Join-Path $env:windir (\"System32\\CodeIntegrity\\CiPolicies\\Active\\\" + $id + '.cip')")
 	w("$ci = Get-Command CiTool.exe -ErrorAction SilentlyContinue")
 	w("if ($ci) {")
 	w("  $listed = & $ci.Source --list-policies -json | Out-String")
