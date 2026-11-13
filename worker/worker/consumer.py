@@ -248,7 +248,8 @@ async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, h
     if log_type in lateral.AUTH_TYPES or log_type in behavior.NETWORK_TYPES:
         try:
             await lateral.observe(await get_redis(), log_type=log_type, decoded=decoded, group_id=group_id,
-                                  hostname=hostname, agent_id=agent_id, sessions=AsyncSessionLocal)
+                                  hostname=hostname, agent_id=agent_id, sessions=AsyncSessionLocal,
+                                  raw=raw_message)
         except Exception as _lat_exc:
             log.warning("lateral_observe_error", error=str(_lat_exc))
 

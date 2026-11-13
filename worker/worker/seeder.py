@@ -3,15 +3,22 @@ import glob
 import os
 import yaml
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, text
 from worker.config import DECODERS_DIR, RULES_DIR
 from worker.database import AsyncSessionLocal
 from worker.models import Decoder, Rule
 
 log = structlog.get_logger()
 
+# Postgres advisory lock serialising the seeding of worker replicas that start
+# together. rules.title has no unique constraint (analysts may reuse a title),
+# so without it two replicas both saw "no such rule" and both inserted it.
+SEED_LOCK = 0x5345454452554C45  # "SEEDRULE"
+
+
 async def seed_if_empty() -> None:
     async with AsyncSessionLocal() as db:
+        await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": SEED_LOCK})
         await _upsert_decoders(db)
         await _upsert_rules(db)
         await db.commit()

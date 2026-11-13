@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"runtime"
 
 	"gopkg.in/yaml.v3"
 )
@@ -164,7 +165,7 @@ type UpdateConfig struct {
 }
 
 // CurrentVersion is the config_version Migrate brings a config up to.
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 type Config struct {
 	// Version records which one-time migrations (Migrate) the file has had.
@@ -239,7 +240,16 @@ func Load(path string) (*Config, error) {
 // saved at enrollment), so every block_ip and isolate went to the no-op
 // backend while reporting success. Turn the firewall on unless the operator
 // chose dry-run.
-func Migrate(cfg *Config) []string {
+//
+// Version 2: before 1.27.0 the packaged templates had no netwatch section, so
+// every Linux agent ran without network telemetry (connect/accept/DNS): no
+// IP IoC matching, beaconing, UEBA network features or lateral paths from
+// connections. Turn it on, with the ss snapshot fallback for hosts without
+// eBPF. An operator who wants it off sets netwatch.enabled: false again; the
+// config is then at version 2 and stays as written.
+func Migrate(cfg *Config) []string { return migrate(cfg, runtime.GOOS) }
+
+func migrate(cfg *Config, goos string) []string {
 	var changed []string
 	if cfg.Version < 1 {
 		if !cfg.Firewall.Enabled && !cfg.Firewall.DryRun {
@@ -249,6 +259,10 @@ func Migrate(cfg *Config) []string {
 		if cfg.Firewall.Backend == "" {
 			cfg.Firewall.Backend = "auto"
 		}
+	}
+	if cfg.Version < 2 && !cfg.Netwatch.Enabled && goos == "linux" { // Windows has ETW network telemetry
+		cfg.Netwatch.Enabled, cfg.Netwatch.SnapshotFallback = true, true
+		changed = append(changed, "netwatch.enabled: false -> true (snapshot_fallback: true)")
 	}
 	if cfg.Version < CurrentVersion {
 		cfg.Version = CurrentVersion

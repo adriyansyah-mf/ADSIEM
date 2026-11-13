@@ -10,7 +10,7 @@ server:
   url: http://your-siem-server:8000
   heartbeat_interval: 30
 
-config_version: 1
+config_version: 2
 
 # Containment (block_ip / isolate from the console or SOAR) through Windows
 # Firewall, with persistence, expiry and an anti-lockout guard (the server's
