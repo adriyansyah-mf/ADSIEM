@@ -332,6 +332,7 @@ class HeartbeatResponse(BaseModel):
     policy_version: str = ""  # the group policy; agents fetch it from /api/ingest/policy
     malware_hashes_version: str = ""  # "<seq>:<action>"; agents sync from /api/ingest/malware-hashes ("" = off)
     web_blocklist_version: str = ""  # "<seq>"; agents sync from /api/ingest/web-blocklist ("" = Web Protection off)
+    ip_blocklist_version: str = ""  # "<group>:<seq>:<mode>"; agents sync from /api/ingest/ip-blocklist ("" = ip_ioc off)
     update: dict | None = None  # services.agent_update.offer_for: version, revision, url, signed
     agent_token: str | None = None  # a rotated token; only to agents that sent token_rotation
 

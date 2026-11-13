@@ -26,6 +26,7 @@ from app.services import yara_ruleset
 from app.api.routes import malware_hashes
 from app.services import agent_policy
 from app.services import web_blocks
+from app.services import ip_blocks
 from app.services.ingest import enqueue_log, refuse_if_backlogged
 from app.services.evidence_inbox import (MAX_BATCH_EVENTS, MAX_BATCH_REQUEST_BYTES, MAX_REQUEST_BYTES,
                                         accept_evidence, accept_evidence_batch, check_evidence_durability)
@@ -332,6 +333,7 @@ async def heartbeat(
     yara_hash, _ = await yara_ruleset.enabled_ruleset(db)
     malware_version = await malware_hashes.agent_version(db, agent)
     web_version = await web_blocks.agent_version(db, agent)
+    ip_version = await ip_blocks.agent_version(db, agent)
     policy_version = (await agent_policy.effective(db, agent.group_id))["version"] if agent.approved else ""
     # Agents hand these versions to their stores only when config_hash changes
     # (heartbeat.Loop → onConfig): every version must be part of the hash, or a
@@ -339,7 +341,8 @@ async def heartbeat(
     config_hash = hashlib.sha256(
         json.dumps(
             {"sources": sources_data, "fim_paths": fim_paths, "firewall": firewall_data, "yara": yara_hash,
-             "malware": malware_version, "web": web_version, "policy": policy_version},
+             "malware": malware_version, "web": web_version, "policy": policy_version,
+             "ip": ip_version},
             sort_keys=True,
         ).encode()
     ).hexdigest()
@@ -362,6 +365,7 @@ async def heartbeat(
         log_batch_max=LOG_BATCH_MAX,
         malware_hashes_version=malware_version,
         web_blocklist_version=web_version,
+        ip_blocklist_version=ip_version,
         policy_version=policy_version,
     )
 

@@ -28,7 +28,7 @@ NOTIFY_CHANNELS = ("webhook", "discord", "slack")
 SCAN_OPS = ("file_scan", "yara_scan", "memory_scan", "agent_integrity")
 FILE_SCAN_KINDS = ("quick", "full", "paths")
 HUNT_IOC_TYPES = ("ip", "hostname", "user", "hash")
-BLOCK_IOC_OPS = ("malware_hash", "prevention_rule")
+BLOCK_IOC_OPS = ("malware_hash", "prevention_rule", "ip_block", "web_block")
 PREVENTION_RULE_TYPES = ("hash", "path", "dir")
 PREVENTION_ACTIONS = ("block", "detect")
 LOG_SEARCH_FIELDS = ("source_ip", "user_name", "hostname", "log_type", "agent_id", "text")
@@ -202,6 +202,10 @@ def _params_errors(node: dict) -> list[str]:
                 errs.append(f"{where}: rule_type must be one of {', '.join(PREVENTION_RULE_TYPES)}")
             if p.get("action", "block") not in PREVENTION_ACTIONS:
                 errs.append(f"{where}: action must be block or detect")
+        if op in ("ip_block", "web_block"):
+            days = p.get("days", 30)
+            if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 365:
+                errs.append(f"{where}: days must be between 1 and 365")
     return errs
 
 

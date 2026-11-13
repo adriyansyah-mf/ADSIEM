@@ -581,6 +581,11 @@ async def run_block_ioc(node: dict, params: dict, ctx: dict) -> NodeResult:
         await _note(ctx, f"**SOAR block IOC**: SHA-256 `{sha}` added to known malware")
         return NodeResult("main", {"operation": op, "value": sha, "added": bool(res["added"])})
 
+    if op == "ip_block":
+        return await _block_ip_ioc(value, params, ctx, run_id, label)
+    if op == "web_block":
+        return await _block_domain_ioc(value, params, ctx, run_id, label)
+
     rule_type = params.get("rule_type", "hash")
     action = params.get("action", "block")
     if rule_type == "hash":
@@ -604,6 +609,82 @@ async def run_block_ioc(node: dict, params: dict, ctx: dict) -> NodeResult:
                      f"{'' if rule_id else ' (already existed)'}")
     return NodeResult("main", {"operation": op, "value": value, "rule_type": rule_type, "action": action,
                                "rule_id": str(rule_id) if rule_id else None, "added": rule_id is not None})
+
+
+def _alert_uuid(ctx: dict):
+    from uuid import UUID
+    try:
+        return UUID(str(_trigger(ctx).get("alert_id")))
+    except (TypeError, ValueError):
+        return None
+
+
+def _expiry(params: dict):
+    from datetime import datetime, timedelta, timezone
+    days = params.get("days", 30)
+    days = days if isinstance(days, int) and not isinstance(days, bool) and 1 <= days <= 365 else 30
+    return datetime.now(timezone.utc) + timedelta(days=days)
+
+
+async def _block_ip_ioc(value: str, params: dict, ctx: dict, run_id: str, label: str) -> NodeResult:
+    """The alert's group drops the address (group policy ip_ioc "block") on the
+    agents' next sync; automation never blocks private or special address space."""
+    from sqlalchemy import text
+    from worker.ip_iocs import IP_BLOCK_SEQ_LOCK, UPSERT_SQL, IPError, normalize
+    try:
+        cidr = normalize(value)
+    except IPError as exc:
+        raise NodeError(str(exc)) from None
+    group = _trigger(ctx).get("group_id") or "default"
+    expires = _expiry(params)
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": IP_BLOCK_SEQ_LOCK})
+        res = await db.execute(text(UPSERT_SQL), {"cidr": cidr, "group": group, "source": "soar",
+                                                  "reason": f"SOAR run {run_id}: {label}"[:500],
+                                                  "alert": _alert_uuid(ctx), "expires": expires})
+        entry_id = res.first()
+        await db.commit()
+    await _note(ctx, f"**SOAR block IOC**: IP `{cidr}` blocked for group {group} until {expires:%Y-%m-%d}")
+    return NodeResult("main", {"operation": "ip_block", "value": cidr, "group_id": group,
+                               "entry_id": str(entry_id[0]) if entry_id else None,
+                               "expires_at": expires.isoformat()})
+
+
+async def _block_domain_ioc(value: str, params: dict, ctx: dict, run_id: str, label: str) -> NodeResult:
+    """Web Protection block of a domain (or a URL's host) for the alert's group;
+    the group's allowlist still wins."""
+    from sqlalchemy import text
+    from worker.web_domains import WEB_BLOCK_SEQ_LOCK, DomainError, allow_match, normalize
+    try:
+        domain = normalize(value)
+    except DomainError as exc:
+        raise NodeError(str(exc)) from None
+    group = _trigger(ctx).get("group_id") or "default"
+    expires = _expiry(params)
+    async with AsyncSessionLocal() as db:
+        rows = await db.execute(text("SELECT domain, include_subdomains FROM web_allowlist "
+                                     "WHERE group_id IN (:g, '*') AND enabled"), {"g": group})
+        rule = allow_match(domain, [(r.domain, r.include_subdomains) for r in rows])
+        if rule:
+            raise NodeError(f"{domain} is allowlisted ({rule})")
+        await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": WEB_BLOCK_SEQ_LOCK})
+        res = await db.execute(text("""
+            INSERT INTO web_block_entries (id, domain, group_id, source, status, reason, alert_id,
+                                           created_at, updated_at, expires_at, seq)
+            VALUES (gen_random_uuid(), :domain, :group, 'soar', 'active', :reason, :alert, now(), now(), :expires,
+                    nextval('web_block_seq'))
+            ON CONFLICT (group_id, domain, source) DO UPDATE
+            SET status = 'active', reason = EXCLUDED.reason, expires_at = EXCLUDED.expires_at,
+                updated_at = now(), seq = nextval('web_block_seq')
+            RETURNING id
+        """), {"domain": domain, "group": group, "reason": f"SOAR run {run_id}: {label}"[:500],
+               "alert": _alert_uuid(ctx), "expires": expires})
+        entry_id = res.scalar_one_or_none()
+        await db.commit()
+    await _note(ctx, f"**SOAR block IOC**: domain `{domain}` web-blocked for group {group} until {expires:%Y-%m-%d}")
+    return NodeResult("main", {"operation": "web_block", "value": domain, "group_id": group,
+                               "entry_id": str(entry_id) if entry_id else None,
+                               "expires_at": expires.isoformat()})
 
 
 HANDLERS = {
