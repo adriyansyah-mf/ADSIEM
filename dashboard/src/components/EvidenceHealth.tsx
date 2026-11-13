@@ -16,6 +16,7 @@ const REASONS: Readonly<Record<string, string>> = {
   capacity: 'local evidence storage is full',
   storage_failure: 'local evidence storage failed',
   journal_unavailable: 'the evidence journal could not open',
+  loss_pending: 'events that cannot be re-read were lost; the count is not final yet',
   source_failure: 'a log source failed',
   quarantined: 'records were rejected and quarantined',
   held: 'records are held for an operator',

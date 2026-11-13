@@ -54,6 +54,19 @@ def test_invalid_or_unbounded_health_is_dropped_not_the_heartbeat():
     assert body.evidence_health.state == "degraded"
 
 
+def test_every_reason_the_agent_sends_is_accepted():
+    """A reason the server does not know drops the whole report, so the
+    Agents page says "not reported" exactly when delivery is in trouble. The
+    agent sets loss_pending when telemetry was lost and the count is not final
+    (agent/internal/evidence/publisher_loss.go)."""
+    from app.schemas.schemas import HeartbeatRequest
+    for reason in ("source_failure", "held", "quarantined", "storage_failure", "capacity",
+                   "journal_unavailable", "loss_pending"):
+        body = HeartbeatRequest(agent_id=uuid4(), evidence_health={
+            **HEALTH, "reason": reason, "loss_uncertain": True, "pending_loss": {"capacity": 3}})
+        assert body.evidence_health is not None and body.evidence_health.reason == reason, reason
+
+
 def test_status_needs_a_report_and_reads_the_sender():
     from app.services.evidence_status import evidence_status
     now = datetime.now(timezone.utc)

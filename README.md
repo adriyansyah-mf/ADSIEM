@@ -1008,7 +1008,7 @@ Runbooks live in [`docs/operations/`](docs/operations/):
 | Detection | `ioa`, `yara`, `static-ml`, `malware-hashes`, `detection-benchmark`, `policies`, `alert-statuses` |
 | Behaviour analytics | `behavior-baselines`, `entity-risk`, `lateral-movement` |
 | Endpoint protection | `anti-ransomware`, `exec-prevention`, `app-control`, `ip-ioc-blocking`, `script-scan`, `file-scan`, `memory-scan`, `process-tree`, `host-isolation`, `web-protection` |
-| Ingest and agents | `syslog-ingest`, `linux-sensor`, `windows-sensor`, `agent-self-update`, `agent-tamper` |
+| Ingest and agents | `agent-config-recommended`, `syslog-ingest`, `linux-sensor`, `windows-sensor`, `agent-self-update`, `agent-tamper` |
 | Agent evidence | `agent-evidence-recovery`, `agent-evidence-validation`, `agent-evidence-progress` |
 | Platform | `backup-restore`, `token-lifecycle`, `ai-triage-retry` |
 
