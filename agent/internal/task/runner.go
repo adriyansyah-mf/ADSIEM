@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/siem-platform/agent/internal/client"
@@ -49,9 +50,37 @@ func StateDir(cfg *config.Config) string { return stateDirFor(cfg) }
 // a program that already runs untouched: on a compromised host a quarantined
 // miner kept scanning the internet from memory for two days.
 func QuarantineFile(path string) error {
-	StopRunning(path)
-	_, err := quarantineFile(path)
+	_, err := quarantineAndStop(path)
 	return err
+}
+
+// QuarantineOutcome is a quarantine_file result: the record, plus the host
+// path it resolved to when the reported path came from another mount
+// namespace, and the processes stopped because they ran the file.
+type QuarantineOutcome struct {
+	QuarantineRecord
+	RequestedPath string `json:"requested_path,omitempty"`
+	StoppedPIDs   []int  `json:"stopped_pids,omitempty"`
+}
+
+// quarantineAndStop resolves path to the file on the host (hostTarget), stops
+// the programs running it, then locks it.
+func quarantineAndStop(path string) (QuarantineOutcome, error) {
+	target, err := hostTarget(path)
+	if err != nil {
+		return QuarantineOutcome{}, fmt.Errorf("quarantine_file: %w", err)
+	}
+	if err := assertQuarantinable(target); err != nil {
+		return QuarantineOutcome{}, err
+	}
+	out := QuarantineOutcome{StoppedPIDs: StopRunning(target)}
+	if abs, err := filepath.Abs(filepath.Clean(path)); err == nil && target != abs {
+		out.RequestedPath = path
+		slog.Info("quarantine: reported path is a file in another mount namespace", "path", path, "host_path", target)
+	}
+	rec, err := quarantineFile(target)
+	out.QuarantineRecord = rec
+	return out, err
 }
 
 // StopRunning kills the processes whose executable is path, with

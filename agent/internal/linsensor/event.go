@@ -124,6 +124,10 @@ type FileEvent struct {
 	Image  string
 	Comm   string
 	Dir    bool // a directory was removed
+	// HostPath is Path as the host has it, set only when the process is in
+	// another mount namespace that shows the file elsewhere (PrivateTmp,
+	// containers): what a response must act on.
+	HostPath string
 }
 
 // kv quotes a value for the decoder's key="value" grammar.
@@ -141,6 +145,9 @@ func identity(sb *strings.Builder, ev rawEvent, image string) {
 func (f FileEvent) line() string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `action=%s TargetFilename=%s`, f.Action, kv(f.Path))
+	if f.HostPath != "" {
+		fmt.Fprintf(&sb, ` HostTargetFilename=%s`, kv(f.HostPath))
+	}
 	if f.From != "" {
 		fmt.Fprintf(&sb, ` SourceFilename=%s`, kv(f.From))
 	}

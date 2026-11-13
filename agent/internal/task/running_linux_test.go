@@ -3,6 +3,7 @@
 package task
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -10,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/siem-platform/agent/internal/mountns"
 )
 
 // TestHelperSleep is the program the StopRunning test copies and runs: the
@@ -76,6 +79,65 @@ func waitRunning(t *testing.T, path string) []int {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// A program in another mount namespace (systemd PrivateTmp, a container)
+// reports its file under a path the host does not have: apache's
+// /var/tmp/.7625e6d2e was the host's /var/tmp/systemd-private-.../tmp/.7625e6d2e.
+// Here the program sees privdir as shared/ (bind mount in its own namespace),
+// so it runs shared/.7625e6d2e while the host has privdir/.7625e6d2e and an
+// empty shared/.
+func TestQuarantineFindsAProgramInAnotherMountNamespace(t *testing.T) {
+	if _, err := exec.LookPath("unshare"); err != nil {
+		t.Skip("unshare not installed")
+	}
+	if err := exec.Command("unshare", "-Urm", "true").Run(); err != nil {
+		t.Skipf("unprivileged mount namespaces unavailable: %v", err)
+	}
+	base := t.TempDir()
+	privdir, shared := filepath.Join(base, "privdir"), filepath.Join(base, "shared")
+	for _, d := range []string{privdir, shared} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hostFile := filepath.Join(privdir, ".7625e6d2e")
+	reported := filepath.Join(shared, ".7625e6d2e")
+	copyExe(t, hostFile)
+	initQuarantineState(t.TempDir())
+
+	cmd := exec.Command("unshare", "-Urm", "sh", "-c",
+		`mount --bind "$1" "$2" && exec "$3" -test.run='^TestHelperSleep$'`, "sh", privdir, shared, reported)
+	cmd.Env = append(os.Environ(), "STOPRUNNING_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+	if pids := waitRunning(t, hostFile); len(pids) != 1 || pids[0] != cmd.Process.Pid {
+		t.Fatalf("by inode the host file is what pid %d runs: %v", cmd.Process.Pid, pids)
+	}
+	if link, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", cmd.Process.Pid)); link != reported {
+		t.Fatalf("the process should report its own view %q, got %q", reported, link)
+	}
+	if got := mountns.HostPath(cmd.Process.Pid, reported); got != hostFile {
+		t.Fatalf("HostPath = %q, want %q", got, hostFile)
+	}
+
+	out, err := quarantineAndStop(reported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Path != hostFile || out.RequestedPath != reported {
+		t.Fatalf("quarantined %q (requested %q), want the host file %q", out.Path, out.RequestedPath, hostFile)
+	}
+	if len(out.StoppedPIDs) != 1 || !gone(cmd) {
+		t.Fatalf("the program must be stopped: %v", out.StoppedPIDs)
+	}
+	fi, err := os.Stat(hostFile)
+	if err != nil || fi.Mode().Perm() != 0 {
+		t.Fatalf("host file must be locked: %v %v", fi, err)
+	}
+	_ = os.Chmod(hostFile, 0o600) // let TempDir clean up (chattr needs root)
 }
 
 // A quarantined program that is already running must be stopped, including

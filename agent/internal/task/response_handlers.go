@@ -41,7 +41,10 @@ func (r *Runner) handleQuarantineFile(params map[string]any) (any, error) {
 	if abs, err := filepath.Abs(path); err == nil && cfgPath != "" && abs == cfgPath {
 		return nil, fmt.Errorf("quarantine_file: refusing to quarantine the agent's own config")
 	}
-	return quarantineFile(path)
+	// Same path as the automatic quarantine: the file the reported path means
+	// on this host (a process in another mount namespace reports its own
+	// view), and the programs running it are stopped first.
+	return quarantineAndStop(path)
 }
 
 func (r *Runner) handleRestoreFile(params map[string]any) (any, error) {

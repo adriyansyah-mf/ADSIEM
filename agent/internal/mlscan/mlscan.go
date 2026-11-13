@@ -35,6 +35,32 @@ const (
 	ELFSuspicious = 0.45
 )
 
+// ELF model thresholds for a file in a staging directory (stagingDirs). The
+// model's own thresholds sit where 1% / 0.1% of all benign ELF files score
+// higher, but packaged software does not live in /tmp: a dropped miner there
+// (otakunesia, 2026-11-11: /var/tmp/.7625e6d2e, model 0.98) ran for two days
+// as "clean". Of 8,542 ELF files on a Kali host (security tools included) 6
+// scored 0.95 or more, none of them in a staging directory; a go test binary
+// in /tmp scored 0.82.
+const (
+	ELFStagingMalicious  = 0.95
+	ELFStagingSuspicious = 0.90
+)
+
+// stagingDirs are where droppers write payloads: world-writable temp
+// directories. systemd PrivateTmp directories are below them on the host
+// (/var/tmp/systemd-private-.../tmp).
+var stagingDirs = []string{"/tmp/", "/var/tmp/", "/dev/shm/"}
+
+func inStaging(path string) bool {
+	for _, d := range stagingDirs {
+		if strings.HasPrefix(path, d) {
+			return true
+		}
+	}
+	return false
+}
+
 // Verdict is the score of one file.
 type Verdict struct {
 	Kind      string // pe or elf
@@ -64,6 +90,12 @@ func byThresholds(m *mlscore.Model, score float64) (level string, threshold floa
 // heuristic reasons are kept). ok is false for anything else, or a PE a
 // format-1 model cannot read. elf may be nil.
 func Classify(m, elf *mlscore.Model, data []byte) (v Verdict, ok bool) {
+	return ClassifyAt(m, elf, data, "")
+}
+
+// ClassifyAt is Classify for a file at path: an ELF file in a staging
+// directory is held to the stricter ELFStaging thresholds of the ELF model.
+func ClassifyAt(m, elf *mlscore.Model, data []byte, path string) (v Verdict, ok bool) {
 	// malware ships malformed headers on purpose: a parser panic must not
 	// take the agent down
 	defer func() {
@@ -101,6 +133,19 @@ func Classify(m, elf *mlscore.Model, data []byte) (v Verdict, ok bool) {
 		if s, scored := elf.ScoreFile(data); scored {
 			if level, th := byThresholds(elf, s); levelRank[level] >= levelRank[v.Level] {
 				v.Engine, v.Score, v.Level, v.Threshold = "ember2024_elf_lgbm", s, level, th
+			}
+			if inStaging(path) {
+				level, th := "clean", 0.0
+				switch {
+				case s >= ELFStagingMalicious:
+					level, th = "malicious", ELFStagingMalicious
+				case s >= ELFStagingSuspicious:
+					level, th = "suspicious", ELFStagingSuspicious
+				}
+				if levelRank[level] > levelRank[v.Level] {
+					v.Engine, v.Score, v.Level, v.Threshold = "ember2024_elf_lgbm", s, level, th
+					v.Reasons = append(v.Reasons, "ELF in a temp directory")
+				}
 			}
 		}
 	}
@@ -173,7 +218,7 @@ func (c *Checker) Check(path, sha string, data []byte, trigger string) bool {
 	if mode == ModeOff || (c.Known != nil && c.Known(sha)) {
 		return false
 	}
-	v, ok := Classify(c.Model, c.ELF, data)
+	v, ok := ClassifyAt(c.Model, c.ELF, data, path)
 	if !ok || v.Level == "clean" || !c.first(path+"|"+sha) {
 		return false
 	}
