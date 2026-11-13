@@ -34,6 +34,7 @@ from app.api.routes.malware_hashes import router as malware_hashes_router, agent
 from app.api.routes.web_protection import router as web_protection_router, agent_router as web_protection_agent_router
 from app.api.routes.ip_blocks import router as ip_blocks_router, agent_router as ip_blocks_agent_router
 from app.api.routes.entity_risk import router as entity_risk_router
+from app.api.routes.lateral import router as lateral_router
 from app.api.routes.policies import router as policies_router, agent_router as policies_agent_router
 from app.api.routes.enrollment_tokens import router as enrollment_tokens_router
 from app.api.routes.audit_logs import router as audit_logs_router
@@ -606,6 +607,6 @@ for router in [
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, investigation_chat_router, yara_drafts_router, knowledge_router, evidence_router,
     iocs_router,
-    prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, ip_blocks_agent_router, ip_blocks_router, entity_risk_router, policies_router, policies_agent_router, agent_updates_router,
+    prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, ip_blocks_agent_router, ip_blocks_router, entity_risk_router, lateral_router, policies_router, policies_agent_router, agent_updates_router,
 ]:
     app.include_router(router)

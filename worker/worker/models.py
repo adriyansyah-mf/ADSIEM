@@ -445,3 +445,20 @@ class EntityRisk(Base):
     risk_alert_at = Column(DateTime(timezone=True))                # last [Risk] alert raised
     updated_at    = Column(DateTime(timezone=True), nullable=False, default=now_utc)
     __table_args__ = (Index("ix_entity_risk_group_score", "group_id", "risk_score"),)
+
+
+class LateralEdge(Base):
+    """One observed path between two hosts of a group (worker/worker/lateral.py):
+    an authentication (SSH, Windows network/RDP logon) or a connection to a
+    remote-administration port. src/dst are agent hostnames when the address
+    is known, else the address. first_seen marks when the path was new."""
+    __tablename__ = "lateral_edges"
+    group_id   = Column(String(100), primary_key=True)
+    src        = Column(String(255), primary_key=True)
+    dst        = Column(String(255), primary_key=True)
+    protocol   = Column(String(20),  primary_key=True)   # ssh, smb, rdp, winrm, rpc, logon
+    users      = Column(JSONB,   nullable=False, default=list)
+    count      = Column(Integer, nullable=False, default=0)
+    first_seen = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    last_seen  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    __table_args__ = (Index("ix_lateral_edges_group_last", "group_id", "last_seen"),)

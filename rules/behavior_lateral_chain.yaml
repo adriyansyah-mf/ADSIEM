@@ -1,0 +1,18 @@
+title: Lateral Movement Chain Across Hosts
+id: rule-behavior-lateral-chain
+description: >-
+  A host that was just reached by a new lateral path went on to reach another
+  host by a new path within two hours (lateral.path, e.g. A -> B -> C): an
+  intruder hopping through the network. Isolate the hosts on the path and
+  check the logins on each hop.
+logsource:
+  product: siem
+  service: behavior
+detection:
+  selection:
+    event.action: behavior_lateral_chain
+  condition: selection
+level: high
+tags:
+  - attack.lateral_movement
+  - attack.t1021
