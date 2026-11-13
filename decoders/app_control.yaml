@@ -1,0 +1,18 @@
+# The agent's Windows App Control (WDAC) policy changes (agent/internal/appcontrol):
+# app_control_applied / app_control_removed / app_control_failed, with the
+# mode (audit, enforce, off), the number of deny rules and how it was
+# activated (citool, cim; reboot: removed, unloaded at the next boot).
+name: app_control
+log_type: app_control
+type: json
+priority: 3
+enabled: true
+fields:
+  event.action: event
+  app_control.mode: mode
+  app_control.rules: rules
+  app_control.method: method
+  app_control.policy_id: policy_id
+  error.message: error
+static_fields:
+  event.category: configuration

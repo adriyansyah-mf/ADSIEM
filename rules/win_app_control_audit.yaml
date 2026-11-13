@@ -1,0 +1,14 @@
+title: App Control Would Block A Program (Audit)
+id: rule-win-app-control-audit
+description: Windows App Control (WDAC) in audit mode logged a program an enforced policy would have refused (CodeIntegrity 3076). The program ran. Review these before switching the group policy's app_control to enforce.
+logsource:
+  product: windows
+  service: codeintegrity-operational
+detection:
+  selection:
+    EventID: 3076
+  condition: selection
+level: low
+tags:
+  - attack.execution
+  - attack.t1204

@@ -1,0 +1,24 @@
+# Microsoft-Windows-CodeIntegrity/Operational: App Control (WDAC) decisions,
+# 3077 a program blocked by an enforced policy, 3076 one an audit policy
+# would block (the agent's own policy: internal/appcontrol).
+# Input: the Windows agent's EventID=... key=value line (agent/internal/winevent).
+name: win_codeintegrity_generic
+log_type: windows_codeintegrity
+type: kv
+priority: 85
+enabled: true
+match: EventID=
+fields:
+  EventID: EventID
+  winlog.event_id: EventID
+  winlog.channel: Channel
+  winlog.provider_name: Provider
+  host.hostname: Computer
+  winlog.record_id: RecordID
+  file.path: FileName
+  process.executable: ProcessName
+  rule.name: PolicyName
+  file.hash.sha256: SHA256Hash
+static_fields:
+  event.category: process
+  event.action: code_integrity

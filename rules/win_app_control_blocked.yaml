@@ -1,0 +1,14 @@
+title: App Control Blocked A Program
+id: rule-win-app-control-blocked
+description: Windows App Control (WDAC) refused to run a program before it started (CodeIntegrity 3077), under an enforced policy such as the agent's (group policy app_control "enforce", built from the execution prevention block rules). The program never ran; the process that tried to start it is worth a look.
+logsource:
+  product: windows
+  service: codeintegrity-operational
+detection:
+  selection:
+    EventID: 3077
+  condition: selection
+level: medium
+tags:
+  - attack.execution
+  - attack.t1204

@@ -104,6 +104,10 @@ type Options struct {
 	// CacheFile keeps the last rule set from the server, enforced at start
 	// until the server answers (internal/rulecache). Empty: no cache.
 	CacheFile string
+	// OnTerminated sees each program a block rule stopped after it started
+	// (Windows: no veto before it runs) with the rule type that matched, so
+	// App Control can learn it and block the next start before it runs.
+	OnTerminated func(ruleType, path, sha256 string)
 }
 
 // Manager keeps the server's rules applied to the engines.
@@ -203,6 +207,24 @@ func (m *Manager) Apply(hash string, rules []Rule) {
 	slog.Info("prevent: rules applied", "rules", len(p.Rules), "blocking", blocking, "errors", len(errs))
 }
 
+// BlockRules are the server's block rules in force: none while the group
+// policy turns prevention off. App Control (Windows) turns the path and dir
+// ones into rules Windows enforces before a program runs.
+func (m *Manager) BlockRules() []Rule {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.off || m.policy == nil {
+		return nil
+	}
+	var out []Rule
+	for _, c := range m.policy.Rules {
+		if c.block && c.RuleType != TypeKnownMalware {
+			out = append(out, c.Rule)
+		}
+	}
+	return out
+}
+
 // SetKnownMalware makes every exec also be checked against set (saved in
 // file, where the Linux fanotify helper loads it). Detect or block comes
 // from the set's action; nothing is checked when it is off or empty.
@@ -252,6 +274,9 @@ func (m *Manager) gated(p *Policy) *Policy {
 // report pushes a decision line; the same rule, image and parent are
 // reported at most once a minute (a blocked loop would flood otherwise).
 func (m *Manager) report(d Decision) {
+	if d.Terminated && m.opts.OnTerminated != nil && d.Path != "" {
+		m.opts.OnTerminated(d.Rule.RuleType, d.Path, d.SHA256)
+	}
 	key := fmt.Sprintf("%d|%s|%s|%s|%t|%t", d.Rule.index, d.Rule.ID, d.Path, d.Parent, d.Blocked, d.Terminated)
 	m.lastMu.Lock()
 	now := time.Now()

@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/siem-platform/agent/internal/appcontrol"
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
@@ -376,10 +377,20 @@ func run(configPath string, stop <-chan struct{}) {
 	// terminating a matching process as soon as the ETW sensor reports its
 	// start; rules default to detect-only.
 	var preventer *prevent.Manager
+	// Windows App Control (WDAC): the group policy's app_control turns the
+	// block rules into a policy Windows enforces before a program runs; files
+	// a hash rule stopped after they started are learned and denied too.
+	appCtl := &appcontrol.Controller{
+		Dir:  filepath.Join(task.StateDir(cfg), "appcontrol"),
+		Run:  appcontrol.PowerShell(),
+		Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		In:   appcontrol.Inputs{Mode: func() string { return polStore.Current().Settings.AppControl }},
+	}
 	if (runtime.GOOS == "linux" || runtime.GOOS == "windows") && !cfg.Prevention.Disabled {
 		if pm, err := prevent.Start(prevent.Options{
-			Push:      func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
-			CacheFile: filepath.Join(task.StateDir(cfg), "prevention_rules.json"),
+			Push:         func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			CacheFile:    filepath.Join(task.StateDir(cfg), "prevention_rules.json"),
+			OnTerminated: appCtl.Learn,
 		}); err != nil {
 			slog.Warn("execution prevention unavailable", "err", err)
 		} else {
@@ -387,6 +398,21 @@ func run(configPath string, stop <-chan struct{}) {
 			go pm.Run(flowCtx, c)
 			preventer = pm
 		}
+	}
+	if runtime.GOOS == "windows" {
+		// runs without a preventer too, so turning app_control off still
+		// removes a policy an earlier run applied
+		appCtl.In.Rules = func() [][2]string {
+			var out [][2]string
+			if preventer == nil {
+				return nil
+			}
+			for _, r := range preventer.BlockRules() {
+				out = append(out, [2]string{r.RuleType, r.Value})
+			}
+			return out
+		}
+		go appCtl.Loop(flowCtx)
 	}
 
 	// Ransomware protection: canary files everywhere, the bulk-encryption
