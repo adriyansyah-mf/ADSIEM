@@ -123,7 +123,8 @@ service (`-install` / `-uninstall`).
   explanations and a cold-entity guard.
 - **Threat intelligence:** VirusTotal, AbuseIPDB, AlienVault OTX, GreyNoise, Shodan, URLhaus,
   WHOIS and GeoIP, run in parallel. A MalwareBazaar hash feed syncs into **Malware hashes**.
-- **Agent health:** silent agents and sensor failures raise alerts.
+- **Agent health:** silent agents, sensor failures, and agents that still heartbeat but have
+  shipped no logs for a set time (**Agent Log Silence Alert**) raise alerts.
 - **MITRE ATT&CK** tags on every alert, with a coverage heatmap.
 
 ### AI SOC layer
@@ -141,8 +142,12 @@ model to keep inference on-prem.
 - **Autonomous investigator** (**Investigate with AI** on a case): reads the case, searches
   logs and runs live-response artifacts on affected hosts. It writes new `AI.*` artifacts when
   none fits, then files a report with summary, evidence, IOCs, timeline, recommendations and
-  verdict. It only collects: isolate, kill, quarantine and block stay with the operator. Runs
-  have a budget and are scoped to the case's group. Steps are recorded in an investigation
+  verdict. Containment (isolate, kill, quarantine, block) stays with the operator. With
+  **AI Investigation Commands** set to `approval`, the investigator may also ask to run a program
+  on a host. Someone with `agents:manage` approves each command on the case before it runs.
+  An allowlist (**AI Commands Without Approval**, e.g. `whoami,hostname`) skips the prompt,
+  but shells, interpreters and credential paths always need approval. Runs have a budget and
+  are scoped to the case's group. Steps are recorded in an investigation
   ledger with hypotheses, decisions and pinned evidence, and the investigation has its own
   chat.
 - **SOC assistant:** a chat widget on every page that looks up alerts, cases, agents, UEBA,
@@ -153,7 +158,16 @@ model to keep inference on-prem.
   image, so retrieval works offline.
 - **Reports:** executive reports and PDF export with a language selector, including Bahasa
   Indonesia. A weekly email digest can include an AI narrative.
-- **YARA drafting:** the investigator proposes YARA rules from malware candidates.
+- **YARA drafting:** the investigator proposes YARA rules from malware candidates
+  (`yara_ai_generation`: `off`, `draft_only` or `full`).
+- **On the case page:** AI L1 triage report, AI web research, AI campaign analysis, a
+  narrative with MITRE techniques and recommended actions, and an attack timeline.
+- **Learning from analysts:** **Correct** / **Incorrect** feedback on AI verdicts feeds the
+  knowledge base (**Knowledge → Learned from feedback**). Later triage retrieves it.
+- **Tuning:** a minimum alert severity for AI triage (lower alerts land as *Below threshold*
+  and stay out of the New queue), a confidence threshold for opening or escalating cases, and
+  separate model choices for triage and **Investigate with AI**.
+- **Research:** `9router` web search through SearXNG, Tavily or a multi-provider search combo.
 
 ### Cases
 
@@ -185,9 +199,16 @@ model to keep inference on-prem.
   curl import, and pass the response to later nodes as `{{ steps.<node>.body... }}`.
 - **Live response console:** ad-hoc process lists, netstat, file pulls, YARA and memory scans,
   persistence checks, saved artifacts and fleet-wide hunts.
-- **Web protection:** domain block/allow lists per group, feed sync, auto-block from TI
-  verdicts, and a custom block page.
-- **Prevention rules:** execution prevention in detect or block mode, plus malware hash blocking.
+- **Web protection** (tabs: Blocklist, Allowlist, Block page, Feeds, Agents): domain block and
+  allow lists per group, URLhaus and PhishTank feeds, auto-block from TI verdicts, a custom block
+  page with preview, and per-agent status.
+- **Prevention rules:** execution prevention in detect or block mode.
+- **Known malware hashes:** the agent action is `off`, `detect` (critical alert) or `block`
+  (kill at start and quarantine the dropped file). Blocking can be limited to some groups.
+  The MalwareBazaar feed adds new samples every 30 minutes and has its own retention. A file
+  that matches a critical YARA rule on one host becomes a known-malware hash for every agent.
+  Analysts can add hashes or mark one *Not malware*.
+- **YARA rules:** seed the built-ins, write rules, and run scans from the dashboard.
 
 ### Hunting and investigation
 
@@ -195,8 +216,14 @@ model to keep inference on-prem.
 - Live events view with volume, auth failures, top sources and per-agent counts.
 - Threat hunts by IP, hostname, user or SHA-256 across endpoint history, with schedules.
 - Threat IoC search, process trees, source logs, and CSV/JSON alert export.
-- Command center: live attack map (GeoIP), backlog/SLA matrix, noisiest rules and most-targeted
-  hosts.
+- Command center: live attack map (GeoIP) and attack feed, backlog/SLA matrix, noisiest rules,
+  most-targeted hosts, and a **wall mode** for a SOC screen.
+- Overview: quick indicator lookup against threat intel, analyst workload and recent activity.
+- Alert detail: overview, process tree, table and raw JSON views, notes, and **Create case**.
+  From the alert list you can hunt the indicator or add a suppression.
+- Live response: **Collect** (run artifacts), saved **Artifacts**, and legacy tasks.
+- Knowledge base: vault articles, quick notes, a payload reference (PayloadsAllTheThings), lessons
+  learned from feedback, import, and a retrieval **Test** to see what the AI would find.
 
 ### Posture
 
@@ -216,7 +243,13 @@ model to keep inference on-prem.
   email.
 - Shift handover notes, SOP library and knowledge base.
 - Live alerts over WebSocket, an event stream over SSE, and Prometheus `/metrics`.
-- `pg_dump` backups every `BACKUP_INTERVAL_HOURS` (default 24), an Elasticsearch snapshot policy, and retention purge.
+- `pg_dump` backups every `BACKUP_INTERVAL_HOURS` (default 24), and an Elasticsearch snapshot
+  policy.
+- Separate retention periods for raw logs, events and closed alerts (**Settings**, 0 = keep).
+- **Settings** page: AI on/off and models, TI API keys (VirusTotal, AbuseIPDB, OTX, GreyNoise,
+  Shodan, abuse.ch, PhishTank), case grouping window and IOC exclusions, UEBA engine and
+  threshold, the SOAR HTTP allowlist, SMTP alerts, retention, and per-user MFA. Changes apply
+  within 60 seconds.
 
 ### Dashboard
 
