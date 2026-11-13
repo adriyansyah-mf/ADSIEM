@@ -167,3 +167,32 @@ def test_host_and_process_scoring_is_throttled(monkeypatch):
     for _ in range(5):
         run(scorer.score_event(r, started("/usr/bin/ls"), "blue", "linux_process_exec"))
     assert scored == [("host", "web-01"), ("process", "ls@blue")]
+
+
+@pytest.mark.parametrize("raw,want", [
+    ("alice", "alice"),
+    ("root", "root"),
+    ("28696E76616C6964207573657229", None),   # auditd hex of "(invalid user)"
+    ("(invalid user)", None),
+    ("(unknown)", None),
+    ("?", None),
+    ("-", None),
+    ("", None),
+    (None, None),
+    ("64657669636520757365", "device use"),   # other auditd hex is decoded, not dropped
+    ("deadbeef", "deadbeef"),                 # hex that is not printable text stays as written
+])
+def test_clean_user(raw, want):
+    assert scorer.clean_user(raw) == want
+
+
+def test_invalid_user_never_becomes_a_ueba_entity(monkeypatch):
+    r = FakeRedis()
+
+    async def cold(redis):
+        return False
+    monkeypatch.setattr(scorer, "_load_models", cold)
+    run(scorer.score_event(r, {"user.name": "28696E76616C6964207573657229", "source.ip": "45.148.10.157",
+                               "event.action": "login_failed", "hostname": "web-01"}, "blue", "linux_audit"))
+    assert "ueba:active:users" not in r.sets
+    assert r.sets["ueba:active:ips"] == {"45.148.10.157"}  # the source IP is still tracked

@@ -43,11 +43,34 @@ func NewRunner(cfg *config.Config, c *client.Client, fw *firewall.Engine) *Runne
 // StateDir is the agent's state directory (quarantine records, saved sets).
 func StateDir(cfg *config.Config) string { return stateDirFor(cfg) }
 
-// QuarantineFile locks a file as the quarantine_file task does (restorable
-// with restore_file); the known-malware check uses it in block mode.
+// QuarantineFile stops every process running the file, then locks the file as
+// the quarantine_file task does (restorable with restore_file); the
+// known-malware check and static ML use it in block mode. Locking alone leaves
+// a program that already runs untouched: on a compromised host a quarantined
+// miner kept scanning the internet from memory for two days.
 func QuarantineFile(path string) error {
+	StopRunning(path)
 	_, err := quarantineFile(path)
 	return err
+}
+
+// StopRunning kills the processes whose executable is path, with
+// kill_process's guards (never pid 1/4, the agent, its ancestors, or protected
+// and critical system processes): SIGTERM then SIGKILL after a second on
+// Linux, TerminateProcess on Windows. It returns the pids stopped.
+func StopRunning(path string) []int {
+	var stopped []int
+	for _, pid := range processesRunning(path) {
+		res, err := killProcess(pid, true, 1)
+		if err != nil {
+			slog.Warn("quarantine: could not stop a process running the file", "path", path, "pid", pid, "err", err)
+			continue
+		}
+		stopped = append(stopped, pid)
+		slog.Info("quarantine: stopped a process running the file", "path", path, "pid", pid, "comm", res.Comm,
+			"signal", res.Signal)
+	}
+	return stopped
 }
 
 func stateDirFor(cfg *config.Config) string {

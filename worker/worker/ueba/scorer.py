@@ -1,6 +1,7 @@
 # worker/worker/ueba/scorer.py
 import hashlib
 import json
+import re
 import time
 from datetime import datetime, timezone
 
@@ -41,6 +42,32 @@ _bundles: dict[str, ModelBundle | None] = {"user": None, "ip": None, "host": Non
 GROUP_BASELINE_KEY = "ueba:baseline:{}:{}"  # written by trainer._store_group_baselines
 _model_loaded_at: float = 0
 _reported: set[str] = set()  # blob digests already logged as unusable (log once, not per event)
+
+
+_PLACEHOLDER_USERS = {"(invalid user)", "(unknown)", "unknown", "invalid", "?", "-", "n/a", "none", "null"}
+_HEX = re.compile(r"^(?:[0-9A-Fa-f]{2}){2,}$")
+
+
+def clean_user(value) -> str | None:
+    """The user name UEBA models, or None for what is not a real account.
+
+    auditd hex-encodes a field that holds a space or a parenthesis, so sshd's
+    "(invalid user)" arrives as 28696E76616C6964207573657229; it was modelled
+    as a user and raised "signed in from a new IP" for every brute-force
+    source. Hex that decodes to printable text is decoded first."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if _HEX.match(s):
+        try:
+            text = bytes.fromhex(s).decode("utf-8")
+            if text.isprintable():
+                s = text.strip()
+        except ValueError:
+            pass
+    if not s or s.lower() in _PLACEHOLDER_USERS:
+        return None
+    return s
 
 
 def _decode(entity_type: str, blob: str) -> ModelBundle | None:
@@ -197,7 +224,7 @@ async def score_event(redis, decoded: dict, group_id: str, log_type: str = "") -
     """Entry point called from consumer.py after each event is saved. Logins
     feed the user and IP entities; agent process and network telemetry feed
     the host and process entities."""
-    user = decoded.get("user.name")
+    user = clean_user(decoded.get("user.name"))
     ip   = decoded.get("source.ip")
 
     # Always update counters (even when model is cold — builds training data)

@@ -21,6 +21,9 @@ func defaultLogSources() []config.LogSource {
 		{Path: "eventlog:Application", Type: "windows_application", Enabled: true},
 		{Path: "eventlog:Microsoft-Windows-Sysmon/Operational", Type: "windows_sysmon", Enabled: true},
 		{Path: "eventlog:Microsoft-Windows-PowerShell/Operational", Type: "windows_powershell", Enabled: true},
+		// App Control (WDAC) blocks: a program refused before it runs leaves no
+		// process start, only CodeIntegrity 3077 (3076 in audit mode)
+		{Path: "eventlog:Microsoft-Windows-CodeIntegrity/Operational", Type: "windows_codeintegrity", Enabled: true},
 	}
 }
 

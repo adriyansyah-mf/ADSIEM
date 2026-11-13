@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/siem-platform/agent/internal/config"
@@ -86,5 +87,10 @@ func defaultConfig() *config.Config {
 	cfg.Agent.BufferSize = 10000
 	cfg.Server.HeartbeatInterval = 30
 	cfg.Logs = defaultLogSources()
+	// as the packaged config: network telemetry on Linux (Windows has ETW). The
+	// config is written at CurrentVersion, so Migrate would not turn it on later.
+	if runtime.GOOS == "linux" {
+		cfg.Netwatch.Enabled, cfg.Netwatch.SnapshotFallback = true, true
+	}
 	return cfg
 }

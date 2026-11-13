@@ -6,6 +6,8 @@ import (
 	"errors"
 )
 
+func processesRunning(string) []int { return nil }
+
 func killProcess(pid int, force bool, graceSeconds float64) (KillResult, error) {
 	return KillResult{}, errors.New("kill_process requires Linux or Windows")
 }

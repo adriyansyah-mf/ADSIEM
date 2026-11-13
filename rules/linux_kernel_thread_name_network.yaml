@@ -1,0 +1,23 @@
+title: Process Named Like A Kernel Thread Making Network Connections
+id: rule-linux-kernel-thread-name-network
+description: >-
+  A process whose name looks like a kernel thread ([kworker/0:0], [kthreadd],
+  [migration/0]...) called connect(). Kernel threads never make outbound
+  connections from user space: this is a user-space program that renamed
+  itself to hide in ps/top, the way cryptominer worms (Kinsing, RedTail,
+  P2PInfect) do before scanning the internet for Redis, SSH or Docker. Seen on
+  a compromised DVWA host as "[kworker/0:0]" running from a deleted
+  /var/tmp/.<hex> file and scanning port 6379. Check /proc/<pid>/exe and the
+  owning user's crontab, then isolate the host.
+logsource:
+  product: linux
+  service: network_connect
+detection:
+  selection:
+    process.name|startswith: '['
+  condition: selection
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1036.004
+  - attack.command_and_control

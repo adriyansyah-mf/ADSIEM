@@ -1,0 +1,18 @@
+title: Program Started With A Kernel Thread Name
+id: rule-linux-kernel-thread-name-exec
+description: >-
+  A program was started with an argv[0] that imitates a kernel thread
+  ("[kworker/0:0]", "[kthreadd]"), so ps and top list it like one. Kernel
+  threads are never exec'd; Image names the real binary. Malware and
+  cryptominers do this to hide (often from /tmp, /var/tmp or /dev/shm).
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection:
+    CommandLine|startswith: '['
+  condition: selection
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1036.004
