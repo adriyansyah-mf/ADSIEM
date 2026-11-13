@@ -233,8 +233,10 @@ class EvidenceHealth(BaseModel):
     version: Literal[1]
     mode: Literal["durable"] = "durable"
     state: Literal["healthy", "degraded"]
+    # loss_pending: events from sources that cannot be replayed were lost and
+    # the count is not final yet (agent internal/evidence/publisher_loss.go)
     reason: Literal["", "source_failure", "held", "quarantined", "storage_failure", "capacity",
-                    "journal_unavailable"] = ""
+                    "journal_unavailable", "loss_pending"] = ""
     queued_events: EvidenceCount = 0
     queued_bytes: EvidenceCount = 0
     oldest_queued_at: datetime | None = None

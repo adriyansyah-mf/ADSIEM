@@ -174,6 +174,10 @@ services:
       SOC_HQ_LAT: ${SOC_HQ_LAT:-}
       SOC_HQ_LON: ${SOC_HQ_LON:-}
       SOC_HQ_LABEL: ${SOC_HQ_LABEL:-}
+      # Durable agent evidence (docs/operations/agent-evidence-recovery.md):
+      # enable here before any agent sets evidence.enabled.
+      EVIDENCE_INGEST_ENABLED: ${EVIDENCE_INGEST_ENABLED:-false}
+      EVIDENCE_GROUP_BUDGET_BYTES: ${EVIDENCE_GROUP_BUDGET_BYTES:-1073741824}
     volumes:
       - agent_packages:/app/packages:ro
       - ./mmdb:/app/mmdb:ro

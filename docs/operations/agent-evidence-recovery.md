@@ -23,8 +23,9 @@ This runbook is for when it does.
    Check: `GET /ready` returns `{"evidence": "disabled"}`; the `evidence_inbox`
    and `evidence_group_usage` tables exist; the worker logs no
    `evidence_dispatch_error`.
-2. **Enable the server.** Set `EVIDENCE_INGEST_ENABLED=true` and restart
-   server-api. Check: `/ready` returns `{"status": "ok", "evidence": "ready"}`.
+2. **Enable the server.** Set `EVIDENCE_INGEST_ENABLED=true` (with docker
+   compose: in `.env`, which `docker-compose.yml` passes to server-api) and
+   restart server-api. Check: `/ready` returns `{"status": "ok", "evidence": "ready"}`.
    If it returns 503, the database is not durable (`fsync`,
    `full_page_writes`) or the schema is incomplete: fix that first. Heartbeats
    advertise `evidence_protocols: [2]` only while `/ready` is ok.
