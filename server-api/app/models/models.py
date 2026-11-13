@@ -1169,3 +1169,24 @@ class ExecPreventionRule(Base):
     action      = Column(String(10), nullable=False, default="detect", server_default="detect")
     is_enabled  = Column(Boolean, nullable=False, default=True)
     created_at  = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+
+class EntityRisk(Base):
+    """Accumulated risk of a host or user from every alert it is part of
+    (Sigma, IOA, IoC matches, behaviour findings, UEBA), decaying with a 24 h
+    half-life (worker/worker/entity_risk.py). risk_score is the value at
+    updated_at; readers apply the decay to now."""
+    __tablename__ = "entity_risk"
+    entity_type   = Column(String(20),  primary_key=True)   # host, user
+    entity_value  = Column(String(255), primary_key=True)
+    group_id      = Column(String(100), primary_key=True)
+    risk_score    = Column(Float,   nullable=False, default=0.0)
+    peak_score    = Column(Float,   nullable=False, default=0.0)
+    alert_count   = Column(Integer, nullable=False, default=0)
+    tactics       = Column(JSONB,   nullable=False, default=dict)  # tactic -> last seen (epoch seconds)
+    sources       = Column(JSONB,   nullable=False, default=dict)  # sigma/ioa/ioc/behavior/ueba/... -> count
+    recent        = Column(JSONB,   nullable=False, default=list)  # last contributions, newest first
+    last_alert_at = Column(DateTime(timezone=True))
+    risk_alert_at = Column(DateTime(timezone=True))                # last [Risk] alert raised
+    updated_at    = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+    __table_args__ = (Index("ix_entity_risk_group_score", "group_id", "risk_score"),)

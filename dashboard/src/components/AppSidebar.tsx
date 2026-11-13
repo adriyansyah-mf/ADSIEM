@@ -27,6 +27,7 @@ export const NAVIGATION: readonly { readonly label: string; readonly items: read
     { to: '/hunts', label: 'Threat hunting', icon: Crosshair },
     { to: '/threat-iocs', label: 'Threat IoCs', icon: Fingerprint },
     { to: '/ueba', label: 'Behavior analytics', icon: Brain },
+    { to: '/entity-risk', label: 'Entity risk', icon: Crosshair },
     { to: '/mitre-heatmap', label: 'MITRE coverage', icon: Grid3x3 },
   ] },
   { label: 'Response', items: [

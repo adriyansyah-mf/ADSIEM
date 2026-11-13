@@ -29,6 +29,7 @@ const CaseDetailPage = lazy(() => import('@/pages/CaseDetailPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const HygienePage = lazy(() => import('@/pages/HygienePage'))
 const UEBAPage = lazy(() => import('@/pages/UEBAPage'))
+const EntityRiskPage = lazy(() => import('@/pages/EntityRiskPage'))
 const FimPage = lazy(() => import('@/pages/FimPage'))
 const HuntsPage = lazy(() => import('@/pages/HuntsPage'))
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'))
@@ -84,6 +85,7 @@ export default function App() {
             <Route path="/settings" element={<ProtectedRoute minRole="admin"><SettingsPage /></ProtectedRoute>} />
             <Route path="/hygiene" element={<HygienePage />} />
             <Route path="/ueba" element={<UEBAPage />} />
+            <Route path="/entity-risk" element={<EntityRiskPage />} />
             <Route path="/fim" element={<FimPage />} />
             <Route path="/hunts" element={<HuntsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
