@@ -18,5 +18,11 @@ fields:
   behavior.interval_s: interval_s
   behavior.jitter: jitter
   behavior.connections: connections
+  lateral.source: src
+  lateral.destination: dst
+  network.protocol: protocol
+  user.name: user
+  lateral.path: path
+  lateral.count: count
 static_fields:
   event.category: behavior

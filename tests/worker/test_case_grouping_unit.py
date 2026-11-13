@@ -1,4 +1,4 @@
-# tests/worker/test_case_grouping.py
+# tests/worker/test_case_grouping_unit.py
 """Case grouping by attack family, the brute-force digest, and the
 login-after-brute-force rule (sigma `after:` extension)."""
 import asyncio

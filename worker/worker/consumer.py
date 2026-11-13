@@ -24,7 +24,7 @@ from worker.es_client import bulk_index_items, index_log, ping as es_ping
 from worker import evidence_inbox
 from worker.policy_exclusions import excluded as excluded_by_policy
 from worker.malware_feed import learn_from_event
-from worker import behavior
+from worker import behavior, lateral
 
 log = structlog.get_logger()
 CONSUMER_NAME = f"worker-{socket.gethostname()}"
@@ -242,6 +242,15 @@ async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, h
                                    raw=raw_message)
         except Exception as _bhv_exc:
             log.warning("behavior_observe_error", error=str(_bhv_exc))
+
+    # lateral movement graph (remote logins and remote-administration connections) —
+    # best-effort, never block the main pipeline
+    if log_type in lateral.AUTH_TYPES or log_type in behavior.NETWORK_TYPES:
+        try:
+            await lateral.observe(await get_redis(), log_type=log_type, decoded=decoded, group_id=group_id,
+                                  hostname=hostname, agent_id=agent_id, sessions=AsyncSessionLocal)
+        except Exception as _lat_exc:
+            log.warning("lateral_observe_error", error=str(_lat_exc))
 
 
 def group_by_source(entries: list, dec_engine: DecoderEngine) -> list[list]:

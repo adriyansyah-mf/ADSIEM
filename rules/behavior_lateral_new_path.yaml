@@ -1,0 +1,20 @@
+title: New Lateral Movement Path
+id: rule-behavior-lateral-new-path
+description: >-
+  A host reached another host of the group in a way never seen before
+  (lateral.source → lateral.destination over network.protocol, as user.name):
+  a remote login (SSH, Windows network logon, RDP) or a connection to a
+  remote-administration port (SMB, WinRM, RPC). Admins doing something new
+  look like this too; the Lateral movement page shows the path in context.
+  Groups learn for behavior_learning_hours (default 72) first.
+logsource:
+  product: siem
+  service: behavior
+detection:
+  selection:
+    event.action: behavior_lateral_new_path
+  condition: selection
+level: medium
+tags:
+  - attack.lateral_movement
+  - attack.t1021

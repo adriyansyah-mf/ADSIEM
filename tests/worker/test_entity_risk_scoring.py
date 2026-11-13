@@ -1,4 +1,4 @@
-# tests/worker/test_entity_risk.py
+# tests/worker/test_entity_risk_scoring.py
 """Unified host/user risk (worker/worker/entity_risk.py): points, tactic
 bonus, decay, cap, risk-alert conditions, source/tactic/entity extraction."""
 import os

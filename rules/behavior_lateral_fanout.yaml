@@ -1,0 +1,19 @@
+title: Host Fanning Out To Many New Hosts
+id: rule-behavior-lateral-fanout
+description: >-
+  One host (lateral.source) opened at least five new lateral paths within an
+  hour (lateral.count destinations): worm-like spread, credential spraying
+  across machines, PsExec/WMI or SSH loops pushing a tool. Reported at most
+  every six hours per source.
+logsource:
+  product: siem
+  service: behavior
+detection:
+  selection:
+    event.action: behavior_lateral_fanout
+  condition: selection
+level: high
+tags:
+  - attack.lateral_movement
+  - attack.t1021
+  - attack.t1570
