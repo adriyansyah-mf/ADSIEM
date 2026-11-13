@@ -19,6 +19,11 @@ import (
 type NetshBackend struct {
 	run runner
 	ps  runner // PowerShell: rule enumeration, locale independent (netsh output is translated)
+	// wfp holds the IP IoC blocklist when the Windows Filtering Platform is
+	// usable (wfp_windows.go); nil (tests, an old Windows) keeps it in netsh rules.
+	wfp IOCSetter
+	// iocVia is what holds the IoC list now: "wfp", "netsh" or "" (none).
+	iocVia string
 }
 
 const (
@@ -26,7 +31,9 @@ const (
 	netshTimeout = 20 * time.Second
 )
 
-func NewNetsh() *NetshBackend { return &NetshBackend{run: execNetsh, ps: execPowerShell} }
+func NewNetsh() *NetshBackend {
+	return &NetshBackend{run: execNetsh, ps: execPowerShell, wfp: newPlatformIOC()}
+}
 
 // NewNetshWithRunners is for tests.
 func NewNetshWithRunners(run, ps runner) *NetshBackend { return &NetshBackend{run: run, ps: ps} }

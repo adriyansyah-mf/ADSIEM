@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"sort"
 	"strings"
@@ -23,7 +24,7 @@ var ErrIOCUnsupported = errors.New("firewall backend cannot enforce the IP IoC b
 type IOCResult struct {
 	Applied  int      // CIDRs handed to the backend
 	Rejected []string // "cidr: why", refused by the guard or unparseable
-	Backend  string
+	Backend  string   // the engine's backend, with what holds the list ("netsh/wfp")
 }
 
 // SetIOCs replaces the IoC blocklist with cidrs (addresses or CIDRs, IPv4 or
@@ -68,6 +69,9 @@ func (e *Engine) SetIOCs(cidrs []string) (IOCResult, error) {
 		return res, err
 	}
 	res.Applied = len(v4) + len(v6)
+	if via, ok := e.backend.(interface{ IOCVia() string }); ok && via.IOCVia() != "" {
+		res.Backend += "/" + via.IOCVia()
+	}
 	detail := ""
 	if len(res.Rejected) > 0 {
 		detail = fmt.Sprintf("%d rejected: %s", len(res.Rejected), strings.Join(firstN(res.Rejected, 5), "; "))
@@ -154,9 +158,42 @@ const (
 	netshIOCChunk = 200 // addresses per rule: netsh's remoteip list is bounded
 )
 
-// SetIOCs replaces the SIEM-IOC-in/-out rules: every rule of those names is
-// deleted, then one rule per chunk of addresses is added per direction.
+// SetIOCs holds the list in WFP filters when WFP works (a filter per CIDR and
+// direction, in a dynamic session, see wfp_windows.go), and otherwise in
+// SIEM-IOC-in/-out firewall rules. Whichever is not in use is emptied, so a
+// fallback after a WFP failure (or the reverse) never leaves two copies.
 func (b *NetshBackend) SetIOCs(v4, v6 []string) error {
+	if b.wfp != nil {
+		err := b.wfp.SetIOCs(v4, v6)
+		if err == nil {
+			if b.iocVia != "wfp" { // also rules a netsh fallback left before a restart
+				_ = b.setNetshIOCs(nil, nil)
+			}
+			b.iocVia = "wfp"
+			if len(v4)+len(v6) == 0 {
+				b.iocVia = ""
+			}
+			return nil
+		}
+		slog.Warn("firewall: WFP refused the IP IoC blocklist, using netsh rules", "err", err)
+		_ = b.wfp.SetIOCs(nil, nil)
+	}
+	if err := b.setNetshIOCs(v4, v6); err != nil {
+		return err
+	}
+	b.iocVia = "netsh"
+	if len(v4)+len(v6) == 0 {
+		b.iocVia = ""
+	}
+	return nil
+}
+
+// IOCVia names what holds the IoC list ("wfp", "netsh", "" for none).
+func (b *NetshBackend) IOCVia() string { return b.iocVia }
+
+// setNetshIOCs replaces the SIEM-IOC-in/-out rules: every rule of those names
+// is deleted, then one rule per chunk of addresses is added per direction.
+func (b *NetshBackend) setNetshIOCs(v4, v6 []string) error {
 	for _, name := range []string{netshIOCIn, netshIOCOut} {
 		// "No rules match" is the expected result when there are none; a real
 		// failure shows up when the add below finds the rules still there.
