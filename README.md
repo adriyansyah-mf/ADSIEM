@@ -67,8 +67,27 @@ across crashes and reboots (`-evidence-list`, `-evidence-salvage`, …).
 | Live response | ps, netstat, users, glob, hash, read file, persistence, dmesg, open files, YARA, memory YARA/RWX, exec | ps, netstat, users, services, programs, Event Log, YARA, memory scan | `internal/task` |
 | Hygiene inventory | OS, patches, ports, disk, packages (CVE matching) | OS, ports, disk, programs | `internal/hygiene` |
 | User pop-up notifications | ✓ | ✓ | `internal/notify` |
+| Local threshold detections | ✓ | ✓ | `internal/detect` |
+| Group protection policy (which protections run, exclusions) | ✓ | ✓ same policy | `internal/policy` |
+| Offline enforcement (last prevention + YARA rule set cached, tamper-evident) | ✓ | ✓ | `internal/rulecache` |
+| Encrypted sample archives (ZipCrypto, `infected`) scanned in memory | ✓ | ✓ | `internal/zipcrypto` |
+| Own-process tracking (spoofed parent PID can't pass as the agent) | ✓ | ✓ | `internal/ownproc` |
+| Durable evidence journal | ✓ | ✓ | `internal/evidence` |
+| Disk-backed send buffer, replay after outage | ✓ | ✓ | `internal/buffer` |
 | Signed self-update | systemd-run, Ed25519 manifest | MSI, Ed25519 manifest | `internal/update` |
 | Packaging | `.deb`, `.rpm` | `.msi`, `.zip` | `agent/packaging` |
+
+**Self-protection.** Uninstall needs an uninstall token (`-verify-uninstall`). Heartbeats
+check the token hash, and the `agent_integrity` task verifies the binary. Tampering raises
+`siem_agent_*` alerts (`docs/operations/agent-tamper.md`). On Windows the agent runs as a
+service (`-install` / `-uninstall`).
+
+**Agent tooling** (`agent/cmd/`):
+- `siem-update-sign` creates and checks the update signatures agents require.
+- `yaracheck` validates YARA rules on the server with the same engine the agents use.
+- `yarapack` builds the community YARA pack from YARA-Forge.
+- `detbench` benchmarks file detection on malware and known-good samples.
+- `winevent-fmt` feeds the SigmaHQ replay harness.
 
 ### Ingest and integrations
 
