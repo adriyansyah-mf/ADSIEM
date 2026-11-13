@@ -1,6 +1,7 @@
 package winsensor
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -83,5 +84,17 @@ func TestUnknownOwnerIsResolvedFromTheRunningProcess(t *testing.T) {
 	got := j.network(tcp(tcpConnectV4, "10.0.0.1", "1", "10.0.0.2", "443"))
 	if !strings.Contains(got, `Image="C:\Program Files\App\app.exe"`) || strings.Contains(got, "User=") {
 		t.Fatalf("line %s", got)
+	}
+}
+
+// The agent's own connections (shipping events to the SIEM server) are not
+// telemetry: reporting them would feed itself, one connect per batch.
+func TestAgentOwnConnectionsAreDropped(t *testing.T) {
+	j := joiner()
+	ev := tcp(tcpConnectV4, "10.1.0.103", "60181", "203.0.113.20", "443")
+	ev.PID = selfPID
+	ev.Props[0].Value = strconv.FormatUint(uint64(selfPID), 10)
+	if got := j.network(ev); got != "" {
+		t.Fatalf("own connection reported: %s", got)
 	}
 }

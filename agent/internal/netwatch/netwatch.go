@@ -45,15 +45,30 @@ const (
 	syscallDNS     = 4
 )
 
-// selfComm is the agent's own process name. Its ingest traffic is the
-// observer watching itself: emitting it floods the stream (one connect per
-// shipped event) and buries real activity.
+// The agent's own traffic is the observer watching itself: emitting it floods
+// the stream (one connect per shipped event, a feedback loop) and buries real
+// activity. It is recognised by process id first (whatever the binary is
+// called: "agent" when built by hand, "siem-agent" from the packages, which
+// the old name-only check missed), and by name for the agent's helper
+// processes (the fanotify helper is the same binary started again).
 const selfComm = "agent"
 
-// noiseComms are high-volume clients whose connect() calls carry no detection
-// value at this granularity.
+// noiseComms are process names whose connect() calls carry no detection value.
 var noiseComms = map[string]struct{}{
-	selfComm: {},
+	selfComm:     {},
+	"siem-agent": {},
+}
+
+// selfTGID is this process; its events are dropped.
+var selfTGID = uint32(os.Getpid())
+
+// isSelf reports whether ev comes from the agent itself.
+func isSelf(ev event) bool {
+	if ev.TGID == selfTGID {
+		return true
+	}
+	_, noisy := noiseComms[cstring(ev.Comm[:])]
+	return noisy
 }
 
 const (
@@ -172,7 +187,7 @@ func (m *Monitor) readLoop(buf *buffer.Buffer) {
 			continue
 		}
 		ev := decode(rec.RawSample)
-		if _, noisy := noiseComms[cstring(ev.Comm[:])]; noisy {
+		if isSelf(ev) {
 			continue
 		}
 		logType, line := render(ev, m.bootAt)

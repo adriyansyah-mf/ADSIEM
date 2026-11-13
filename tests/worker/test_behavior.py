@@ -181,6 +181,14 @@ def test_windows_and_snapshot_telemetry():
     assert found and found[0][1]["destination"] == "2606:4700:4700::1111"
 
 
+def test_the_agents_own_connections_are_ignored():
+    b = behavior.Behavior(FakeRedis())
+    assert beacon(b, "h1", "45.33.32.156", [5] * 3 + [30] * 9, comm="siem-agent") == []
+    assert behavior.outbound_connection("windows_etw_network", {
+        "Initiated": "true", "destination.ip": "45.33.32.156", "destination.port": "443",
+        "Image": "C:\\Program Files\\SIEMAgent\\siem-agent.exe"}) is None
+
+
 def test_event_time_is_preferred_over_arrival():
     b = behavior.Behavior(FakeRedis())
     found = []
