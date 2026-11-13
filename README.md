@@ -8,8 +8,9 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 
 | | |
 |---|---|
-| Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.25.0**, signed self-update |
-| Detection content | **201** Sigma rules, **131** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer |
+| Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.27.3**, signed self-update |
+| Detection content | **217** Sigma rules, **135** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer |
+| Behaviour analytics | Host baselines (rare parent → child, rare new executables, beaconing), UEBA for users, IPs, hosts and processes, entity risk scoring, lateral movement graph |
 | Ingest | Agent (HTTPS), agentless syslog UDP/TCP 514 (RFC 3164, RFC 5424, CEF), Suricata EVE, Zeek, FortiGate |
 | AI | Auto-triage of every alert, AI case correlation, autonomous case investigator, SOC assistant, RAG over your SOPs |
 | Response | Visual SOAR editor (15 node types, approval gates), isolate / kill / quarantine / block, live response |
@@ -17,8 +18,11 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 
 > **Ringkasan (Bahasa Indonesia).** ADSIEM adalah platform SIEM + EDR + SOAR berbasis AI
 > yang berjalan on-premise. Agen Go di endpoint Linux dan Windows mengumpulkan telemetri dan
-> mencegah ancaman langsung di host: RansomGuard, rantai IOA, isolasi host, karantina, YARA,
-> dan web protection. Setiap alert ditriase AI, alert digabung menjadi kasus per kampanye
+> mencegah ancaman langsung di host: RansomGuard, rantai IOA, isolasi host, karantina (yang
+> juga menghentikan program yang sedang berjalan), YARA, blokir IP IoC, Windows App Control,
+> dan web protection. Server mempelajari perilaku normal tiap host (proses induk-anak yang
+> langka, program baru di folder temp, beaconing), menghitung skor risiko per host dan user,
+> serta memetakan lateral movement antar host. Setiap alert ditriase AI, alert digabung menjadi kasus per kampanye
 > penyerang, dan respons berdampak besar menunggu persetujuan analis lewat playbook SOAR
 > visual. Log jaringan masuk tanpa agen lewat syslog/CEF, termasuk Suricata dan Zeek. Trafik
 > OT (Modbus/DNP3) bisa dipantau dengan meneruskan `eve.json` Suricata ke halaman
@@ -49,20 +53,22 @@ across crashes and reboots (`-evidence-list`, `-evidence-salvage`, …).
 
 | Capability | Linux | Windows | Where |
 |---|---|---|---|
-| Process, file, network, DNS telemetry | eBPF (exec, file write/rename/delete, kernel modules, ptrace, privilege gain, memfd exec, connect/accept/bind) | ETW (process, file, registry persistence, image load, network, DNS, AMSI) | `internal/procexec`, `linsensor`, `netwatch`, `etw`, `winsensor` |
+| Process, file, network, DNS telemetry | eBPF (exec, file write/rename/delete, kernel modules, ptrace, privilege gain, memfd exec, connect/accept/bind; network watch on by default). A process in another mount namespace (systemd PrivateTmp, containers) also reports the host path (`HostImage`, `HostTargetFilename`) | ETW (process, file, registry persistence, image load, network, DNS, AMSI) | `internal/procexec`, `linsensor`, `netwatch`, `mountns`, `etw`, `winsensor` |
+| Sensor health self-report (sensor stopped, silent, events lost) | ✓ | ✓ incl. ETW lost events | `internal/sensorstat` |
 | Log collection | File and glob tailing with rotation | Files + Event Log channels (`eventlog:<channel>`), Sysmon | `internal/tailer`, `winevent` |
 | IOA behaviour chains | ✓ | ✓ | `internal/ioa` (agent 1.23+) |
 | **RansomGuard** anti-ransomware | ✓ canary files, precursor rules, entropy and mass-modify heuristics, kill process tree or isolate | ✓ | `internal/ransomguard` |
-| Static ML (PE + ELF) | ✓ | ✓ | `internal/mlscore`, `mlscan` |
+| Static ML (PE + ELF; an ELF in `/tmp`, `/var/tmp` or `/dev/shm` is held to stricter thresholds) | ✓ | ✓ | `internal/mlscore`, `mlscan` |
 | YARA (pure Go, on-access, full-disk, memory) | ✓ | ✓ | `internal/yara`, `yarascan`, `fullscan`, `memscan` |
 | Script, archive and document scanning | ✓ | ✓ | `internal/scriptscan`, `unpack` |
 | Malware hash + TLSH matching | ✓ | ✓ | `internal/malhash`, `tlsh` |
 | Credential-store access watch | ✓ fanotify | — | `internal/credwatch` |
 | Developer/project compromise scan | ✓ | ✓ | `internal/projscan` |
 | File Integrity Monitoring | ✓ SHA-256, debounced | ✓ | `internal/fim` |
-| Execution prevention | Pre-exec (BPF LSM + fanotify) | Post-exec terminate on block rules | `internal/prevent` |
+| Execution prevention | Pre-exec (BPF LSM + fanotify) | Post-exec terminate on block rules, plus **App Control (WDAC)** in `audit` or `enforce` to block before start | `internal/prevent`, `appcontrol` |
 | Host isolation, block IP, firewall rules | nftables (anti-lockout guard, expiry) | netsh | `internal/firewall` |
-| Quarantine / restore, kill process | ✓ | ✓ protected DACL store | `internal/task` |
+| IP IoC blocklist (drop or report traffic to and from listed IPs/CIDRs) | nftables `inet siem_ioc` | WFP dynamic session, netsh fallback | `internal/ipblock`, `firewall` |
+| Quarantine / restore, kill process | ✓ stops the programs running the file (by inode, also inside PrivateTmp and containers) | ✓ protected DACL store, stops running programs | `internal/task` |
 | Web protection (domain block page, local CA) | ✓ | ✓ | `internal/webblock` |
 | Live response | ps, netstat, users, glob, hash, read file, persistence, dmesg, open files, YARA, memory YARA/RWX, exec | ps, netstat, users, services, programs, Event Log, YARA, memory scan | `internal/task` |
 | Hygiene inventory | OS, patches, ports, disk, packages (CVE matching) | OS, ports, disk, programs | `internal/hygiene` |
@@ -104,7 +110,7 @@ service (`-install` / `-uninstall`).
   [Syslog, Suricata, Zeek and OT](#syslog-suricata-zeek-and-ot).
 - **Firewalls and appliances:** FortiGate (traffic, UTM, event, VPN, admin login) and any CEF
   sender.
-- **131 decoders** in four types (`regex`, `kv`, `json`, `cef`), covering Linux auth, syslog,
+- **135 decoders** in four types (`regex`, `kv`, `json`, `cef`), covering Linux auth, syslog,
   auditd, iptables, Windows Security/System/PowerShell/Sysmon/ETW, Apache, Nginx, PHP,
   MySQL, Postfix and every agent-native detection.
 
@@ -114,17 +120,30 @@ service (`-install` / `-uninstall`).
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   numeric compare), keywords, boolean conditions, threshold and correlation windows,
   `after:` sequences, and per-entity suppression.
-- **201 bundled rules:** Linux, Windows, IOA chains, web attacks (SQLi, XSS, SSRF, LFI, RCE,
+- **217 bundled rules:** Linux, Windows, IOA chains, web attacks (SQLi, XSS, SSRF, LFI, RCE,
   Log4Shell, XXE, GraphQL, WordPress), network/firewall, Suricata/Zeek, ransomware, ML,
-  YARA, credential access, and agent tampering.
+  YARA, credential access, kernel-thread masquerading (a `[kworker/…]`-named process that
+  connects out or is exec'd), App Control, and agent tampering.
 - **SigmaHQ import:** import the official releases (Core through All) and keep them updated.
   Your edits are preserved. Replaying SigmaHQ's regression samples loads all 3,768 rules.
-- **UEBA:** Isolation Forest models for users and IPs, retrained hourly, with per-feature
-  explanations and a cold-entity guard.
+- **UEBA:** Isolation Forest models for users, IPs, hosts and processes, retrained hourly, with
+  baselines per group, per-feature explanations and a cold-entity guard. Placeholder users
+  such as auditd's `(invalid user)` are ignored.
+- **Host behaviour baselines** (`worker/worker/behavior.py`, server side): a rare parent →
+  child process, a new rare executable from a user-writable folder, and periodic beaconing to
+  an external host. First-seen findings start after `behavior_learning_hours` (default 72),
+  and what several hosts of the group do counts as normal.
+- **Entity risk** (`/entity-risk`): every alert adds risk to its host and user (by severity,
+  plus a bonus per new MITRE tactic, halving every 24 h). An entity over
+  `entity_risk_alert_threshold` (default 70) with two or more tactics raises one `[Risk]` alert.
+- **Lateral movement graph** (`/lateral`): who reaches which host, how (SSH, RDP, SMB, WinRM,
+  RPC, network logon) and as whom, built from SSH logins, Windows 4624 and agent connections.
+  New paths, one host fanning out to many, and `A → B → C` chains raise alerts.
 - **Threat intelligence:** VirusTotal, AbuseIPDB, AlienVault OTX, GreyNoise, Shodan, URLhaus,
   WHOIS and GeoIP, run in parallel. A MalwareBazaar hash feed syncs into **Malware hashes**.
-- **Agent health:** silent agents, sensor failures, and agents that still heartbeat but have
-  shipped no logs for a set time (**Agent Log Silence Alert**) raise alerts.
+- **Agent health:** silent agents, sensor failures (a sensor stopped, went silent or lost
+  events), and agents that still heartbeat but have shipped no logs for a set time
+  (**Agent Log Silence Alert**) raise alerts.
 - **MITRE ATT&CK** tags on every alert, with a coverage heatmap.
 
 ### AI SOC layer
@@ -202,7 +221,15 @@ model to keep inference on-prem.
 - **Web protection** (tabs: Blocklist, Allowlist, Block page, Feeds, Agents): domain block and
   allow lists per group, URLhaus and PhishTank feeds, auto-block from TI verdicts, a custom block
   page with preview, and per-agent status.
-- **Prevention rules:** execution prevention in detect or block mode.
+- **IP Blocklist** (`/ip-blocklist`, `/api/ip-blocks`): addresses or CIDRs per group with a
+  reason and an optional expiry, also fed by `/api/ingest/ip-blocklist`. The group policy's
+  `ip_ioc` mode decides whether agents drop the traffic (`block`) or only report it (`detect`).
+  SOAR's **Block IOC** node can add an IP (`ip_block`) or a domain (`web_block`). Automation
+  refuses private ranges and anything broader than /16.
+- **Prevention rules:** execution prevention in detect or block mode. On Windows, **App
+  Control** (Policies: `off` / `audit` / `enforce`) turns the block rules into a WDAC policy.
+- **Quarantine** (automatic or from the dashboard) also stops the programs running the file.
+  A path reported from inside a PrivateTmp or container is resolved to the file on the host.
 - **Known malware hashes:** the agent action is `off`, `detect` (critical alert) or `block`
   (kill at start and quarantine the dropped file). Blocking can be limited to some groups.
   The MalwareBazaar feed adds new samples every 30 minutes and has its own retention. A file
@@ -256,9 +283,9 @@ model to keep inference on-prem.
 | Section | Pages |
 |---|---|
 | Operations | Overview, Command center, Alerts, Cases, Shift handover |
-| Investigation | Log search, Events, Live events, Threat hunting, Threat IoCs, Behavior analytics (UEBA), MITRE coverage |
+| Investigation | Log search, Events, Live events, Threat hunting, Threat IoCs, Behavior analytics (UEBA), Entity risk, Lateral movement, MITRE coverage |
 | Response | Live response, SOAR workflows, Playbooks & SOPs, Knowledge base |
-| Environment | Agents (log sources, firewall), Syslog devices, Agent updates, Security posture, File integrity, YARA, Prevention, Malware hashes, Web protection, Policies, Reports |
+| Environment | Agents (log sources, firewall), Syslog devices, Agent updates, Security posture, File integrity, YARA, Prevention, Malware hashes, Web protection, IP Blocklist, Policies, Reports |
 | Administration | Detection rules, Decoders, Integrations, Audit log, Users, Settings |
 
 Global features: header search (Ctrl/Cmd+K), the SOC assistant on every page, and a live/polling
@@ -425,8 +452,8 @@ host is the dashboard's deploy command; the options below cover doing it by hand
 package from this server, installs it, enrolls the agent and starts it:
 
 ```bash
-curl -fsSLo /tmp/siem-agent_1.25.0_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.25.0_amd64.deb' \
-  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.25.0_amd64.deb
+curl -fsSLo /tmp/siem-agent_1.27.3_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.27.3_amd64.deb' \
+  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.27.3_amd64.deb
 ```
 
 The RPM command is the same with `rpm -Uvh`. On Windows, an elevated PowerShell
@@ -456,7 +483,7 @@ This stops anyone holding a key from taking over a live agent by reporting its h
 The platform builds the packages on every stack start: the `package-builder` service
 runs the same scripts as the release, at the version in `agent/VERSION`. The dashboard
 serves them, and so does each tagged GitHub release
-(`.github/workflows/agent-release.yml`, triggered by a tag like `agent-v1.25.0`).
+(`.github/workflows/agent-release.yml`, triggered by a tag like `agent-v1.27.3`).
 
 ```bash
 sudo dpkg -i siem-agent_<version>_amd64.deb          # or: sudo rpm -Uvh siem-agent-<version>-1.x86_64.rpm
@@ -978,8 +1005,9 @@ Runbooks live in [`docs/operations/`](docs/operations/):
 
 | Area | Runbooks |
 |---|---|
-| Detection | `ioa`, `yara`, `static-ml`, `malware-hashes`, `detection-benchmark`, `policies` |
-| Endpoint protection | `anti-ransomware`, `exec-prevention`, `script-scan`, `file-scan`, `memory-scan`, `process-tree`, `host-isolation`, `web-protection` |
+| Detection | `ioa`, `yara`, `static-ml`, `malware-hashes`, `detection-benchmark`, `policies`, `alert-statuses` |
+| Behaviour analytics | `behavior-baselines`, `entity-risk`, `lateral-movement` |
+| Endpoint protection | `anti-ransomware`, `exec-prevention`, `app-control`, `ip-ioc-blocking`, `script-scan`, `file-scan`, `memory-scan`, `process-tree`, `host-isolation`, `web-protection` |
 | Ingest and agents | `syslog-ingest`, `linux-sensor`, `windows-sensor`, `agent-self-update`, `agent-tamper` |
 | Agent evidence | `agent-evidence-recovery`, `agent-evidence-validation`, `agent-evidence-progress` |
 | Platform | `backup-restore`, `token-lifecycle`, `ai-triage-retry` |
