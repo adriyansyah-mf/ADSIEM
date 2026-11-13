@@ -1,0 +1,22 @@
+title: Periodic Beaconing To External Host
+id: rule-behavior-beaconing
+description: >-
+  One program (process.executable) connected to the same external address and
+  port at a steady rhythm: at least 8 connections, a median gap of
+  behavior.interval_s seconds (10 s to 1 h) with little jitter
+  (behavior.jitter, at most 0.2). Command-and-control implants check in like
+  this. Destinations that more than three hosts of the group call on a timer
+  (updaters, monitoring) are left out. Check the destination's reputation and
+  block it on the IP Blocklist page if it is malicious.
+logsource:
+  product: siem
+  service: behavior
+detection:
+  selection:
+    event.action: behavior_beaconing
+  condition: selection
+level: high
+tags:
+  - attack.command_and_control
+  - attack.t1071
+  - attack.t1573

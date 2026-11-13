@@ -39,6 +39,7 @@ worker/worker/
 | Health/metrics | `main.py` `HealthHandler` | `/health`, `/metrics` on port 8001 |
 | Rule/decoder seeding | `worker/worker/seeder.py` | idempotent by `title`/`name`; per-item SAVEPOINT (replica race safe) |
 | Sigma threshold/suppression state | Redis | expect Redis to be required for sigma, not just the stream |
+| Host behaviour baselines | `worker/worker/behavior.py` | rare parent→child, new rare executable (user-writable), beaconing from agent telemetry; Redis `siem:bhv:*`; findings re-enter the stream as `siem_behavior` — docs/operations/behavior-baselines.md |
 | Worker DB session | `worker/worker/database.py` `AsyncSessionLocal` | worker has its own engine, separate from server-api |
 
 ## CONVENTIONS

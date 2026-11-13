@@ -1,0 +1,19 @@
+title: New Rare Executable From User-Writable Folder
+id: rule-behavior-new-rare-executable
+description: >-
+  A program ran from a user-writable folder (temp, downloads, a user profile,
+  ProgramData, /tmp, /dev/shm, a home directory) for the first time on this
+  host, and no other host of the group runs it: dropped payloads, loaders and
+  tools brought in by an intruder look like this. Portable apps and fresh
+  installers do too; process.parent.executable shows what started it.
+logsource:
+  product: siem
+  service: behavior
+detection:
+  selection:
+    event.action: behavior_new_rare_executable
+  condition: selection
+level: medium
+tags:
+  - attack.execution
+  - attack.t1204.002

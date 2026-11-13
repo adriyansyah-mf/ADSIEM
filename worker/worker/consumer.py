@@ -24,6 +24,7 @@ from worker.es_client import bulk_index_items, index_log, ping as es_ping
 from worker import evidence_inbox
 from worker.policy_exclusions import excluded as excluded_by_policy
 from worker.malware_feed import learn_from_event
+from worker import behavior
 
 log = structlog.get_logger()
 CONSUMER_NAME = f"worker-{socket.gethostname()}"
@@ -231,6 +232,16 @@ async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, h
         await ueba_score_event(_redis, {**decoded, "hostname": hostname}, group_id)
     except Exception as _ueba_exc:
         log.warning("ueba_score_error", error=str(_ueba_exc))
+
+    # host behaviour baselines (rare parent → child, new rare executable, beaconing) —
+    # best-effort, never block the main pipeline
+    if log_type in behavior.PROCESS_TYPES or log_type in behavior.NETWORK_TYPES:
+        try:
+            await behavior.observe(await get_redis(), log_type=log_type, decoded=decoded, agent_id=agent_id,
+                                   group_id=group_id, hostname=hostname, received=time.time(),
+                                   raw=raw_message)
+        except Exception as _bhv_exc:
+            log.warning("behavior_observe_error", error=str(_bhv_exc))
 
 
 def group_by_source(entries: list, dec_engine: DecoderEngine) -> list[list]:

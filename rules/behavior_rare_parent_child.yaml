@@ -1,0 +1,20 @@
+title: Rare Parent-Child Process On Host
+id: rule-behavior-rare-parent-child
+description: >-
+  A process started a child this host has never seen it start, and at most two
+  hosts of the group ever ran that pair (behavior.pair, behavior.fleet_hosts):
+  Office or a browser starting a shell, a web server or database starting a
+  command interpreter, a service starting something new. Software updates can
+  do this once; look at process.command_line. Hosts learn for
+  behavior_learning_hours (default 72) before this reports.
+logsource:
+  product: siem
+  service: behavior
+detection:
+  selection:
+    event.action: behavior_rare_parent_child
+  condition: selection
+level: medium
+tags:
+  - attack.execution
+  - attack.t1059
