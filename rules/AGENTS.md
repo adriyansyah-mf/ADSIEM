@@ -74,7 +74,7 @@ static_fields:
 
 ## ANTI-PATTERNS
 
-- **Do not rename an existing rule `title`** to "update" it — seeding keys on `title`, so a rename creates a duplicate rule and leaves the old one active.
+- **Do not rename an existing rule `title`** to "update" it — seeding keys on `title`, so a rename creates a duplicate rule and leaves the old one active. When the detection must change on existing installs, give the file a new title and add `supersedes: <old title>`: the seeder turns the old row off once, when it seeds the new one (`worker/worker/seeder.py`).
 - **Do not mix field vocabularies** — using `Image` in an ECS-logsource rule (or `event.action` in a `process_creation` rule) makes it dead.
 - **Do not put `CREATE TABLE`-style config into these files** — they are pure content, no logic.
 - **Do not assume an edited DB row is permanent** — only *new* titles are seeded; edit YAML and bump the title, or edit in the dashboard and accept it lives only in the DB.

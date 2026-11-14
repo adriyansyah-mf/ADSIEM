@@ -69,3 +69,24 @@ async def test_replicas_seeding_together_insert_each_rule_once(sessions):
         doc = next((d for d in yaml.safe_load_all(open(path)) if isinstance(d, dict)), {})
         titles.add(doc.get("title", "Untitled"))
     assert n_rules == len(titles)
+
+
+async def test_renamed_rule_turns_off_the_row_it_supersedes_once(sessions):
+    # production before the rename: the old title is seeded and enabled
+    old, new = "Linux Web Server Spawning Interactive Shell", "Web Server Process Started A Shell"
+    async with sessions() as db:
+        db.add(Rule(title=old, content="title: x", level="critical", tags=[], mitre_tags=[], is_enabled=True))
+        await db.commit()
+    await seeder.seed_if_empty()
+    async with sessions() as db:
+        rows = dict((await db.execute(select(Rule.title, Rule.is_enabled)
+                                      .where(Rule.title.in_([old, new])))).all())
+    assert rows == {old: False, new: True}
+
+    # an analyst turns the old rule back on: the next start leaves it on
+    async with sessions() as db:
+        await db.execute(text("UPDATE rules SET is_enabled = true WHERE title = :t"), {"t": old})
+        await db.commit()
+    await seeder.seed_if_empty()
+    async with sessions() as db:
+        assert (await db.execute(select(Rule.is_enabled).where(Rule.title == old))).scalar_one() is True
