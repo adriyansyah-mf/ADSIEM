@@ -69,6 +69,12 @@ jobs:
         shell: pwsh
         run: go test ./agent/internal/task -run TestStopRunning -count=1 -v
 
+      # IT hygiene on a real Windows host: posture from the registry, listening
+      # ports with their address and process, network identity and sessions.
+      - name: IT hygiene collector
+        shell: pwsh
+        run: go test ./agent/internal/hygiene -count=1 -v
+
       # App Control (WDAC) on the disposable runner: the agent's policy, built
       # from AllowAll plus a path deny rule and activated in enforce mode,
       # stops a copied whoami.exe before it runs; the policy is removed after.
