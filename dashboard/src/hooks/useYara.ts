@@ -61,6 +61,16 @@ export function useYaraMemoryScan() {
   })
 }
 
+// The latest file and memory scans, from the server: a scan keeps running on
+// the agent when the analyst leaves the page, and is still listed on return.
+export function useYaraScanTasks(limit = 5) {
+  return useQuery<AgentTask[]>({
+    queryKey: ['tasks', 'yara-scans', limit],
+    queryFn: () => api.get('/api/tasks', { params: { task_type: 'yara_scan,memory_scan', limit } }).then(r => r.data),
+    refetchInterval: q => (q.state.data ?? []).some(t => t.status !== 'done' && t.status !== 'failed') ? 2000 : 15000,
+  })
+}
+
 export function useSeedBuiltinRules() {
   const qc = useQueryClient()
   return useMutation({
