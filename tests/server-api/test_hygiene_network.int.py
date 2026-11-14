@@ -59,6 +59,21 @@ async def test_network_identity_is_kept_with_where_the_report_came_from(hygiene_
     assert snap.open_ports[0]["process"] == "sshd" and snap.open_ports[0]["addr"] == "0.0.0.0"
 
 
+async def test_the_dashboard_gets_the_network_identity_back(hygiene_client):
+    # the Security posture page reads it from GET /api/hygiene/latest and
+    # /api/hygiene/{agent_id}, both built by _snap_out: 1.27.6 stored it
+    # but never returned it
+    from app.api.routes.hygiene import _snap_out
+    client, env = hygiene_client
+    r = await client.post("/api/hygiene", json=report(network=NETWORK),
+                          headers={"X-Agent-Token": "blue-token", "X-Real-IP": "116.212.75.236"})
+    assert r.status_code == 204, r.text
+    out = _snap_out((await _stored(env))[-1]).model_dump()
+    assert out["network"]["interfaces"][0]["addrs"] == ["116.212.75.236/24"]
+    assert out["network"]["seen_from"] == "116.212.75.236"
+    assert out["network"]["default_gateway"] == "116.212.75.1"
+
+
 async def test_older_agents_without_network_still_record_where_from(hygiene_client):
     client, env = hygiene_client
     r = await client.post("/api/hygiene", json=report(), headers={"X-Agent-Token": "blue-token", "X-Real-IP": "10.0.0.9"})

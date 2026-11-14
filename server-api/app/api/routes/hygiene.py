@@ -241,5 +241,6 @@ def _snap_out(s: HygieneSnapshot) -> HygieneSnapshotOut:
         hygiene_score=s.hygiene_score,
         issues=s.issues or [],
         packages=s.packages or [],
+        network=s.network,
         collected_at=s.collected_at,
     )

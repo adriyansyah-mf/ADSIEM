@@ -86,6 +86,18 @@ function KV({ k, v }: { k: string; v?: string | null }) {
   )
 }
 
+// The host's IPv4 addresses (no loopback or link-local), else the address
+// the server saw its reports come from (agents before 1.27.6).
+function hostIPs(net?: HostNetwork | null): string[] {
+  if (!net) return []
+  const v4 = (net.interfaces ?? [])
+    .flatMap(i => i.addrs)
+    .map(a => a.split('/')[0])
+    .filter(a => a.includes('.') && !a.startsWith('127.') && !a.startsWith('169.254.'))
+  if (v4.length) return v4
+  return net.seen_from ? [net.seen_from] : []
+}
+
 function NetworkSection({ net }: { net: HostNetwork }) {
   const ifaces = net.interfaces ?? []
   const sessions = net.sessions ?? []
@@ -463,9 +475,17 @@ function HostCard({ snap, onClick, selected }: { snap: HygieneSnapshot; onClick:
       <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', marginBottom: '2px', paddingRight: '50px' }}>
         {snap.hostname ?? snap.agent_id.slice(0, 8)}
       </div>
-      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+      <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginBottom: hostIPs(snap.network).length ? '2px' : '10px' }}>
         {snap.os_name} {snap.os_version} · {snap.arch}
       </div>
+      {hostIPs(snap.network).length > 0 && (
+        <div title={snap.network?.seen_from ? `Reports from ${snap.network.seen_from}` : undefined} style={{
+          fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-secondary)',
+          marginBottom: '10px', wordBreak: 'break-all',
+        }}>
+          {hostIPs(snap.network).join(' · ')}{snap.network?.fqdn ? ` · ${snap.network.fqdn}` : ''}
+        </div>
+      )}
 
       {memPct != null && (
         <div style={{ marginBottom: '8px' }}>
