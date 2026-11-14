@@ -73,6 +73,11 @@ func quarantineAndStop(path string) (QuarantineOutcome, error) {
 	if err := assertQuarantinable(target); err != nil {
 		return QuarantineOutcome{}, err
 	}
+	// Everything quarantine would refuse is refused before a process is
+	// stopped: a symlink to /usr/bin/sshd must not cost the host its sshd.
+	if err := preflightQuarantine(target); err != nil {
+		return QuarantineOutcome{}, err
+	}
 	out := QuarantineOutcome{StoppedPIDs: StopRunning(target)}
 	if abs, err := filepath.Abs(filepath.Clean(path)); err == nil && target != abs {
 		out.RequestedPath = path

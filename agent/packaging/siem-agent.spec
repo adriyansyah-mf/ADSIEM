@@ -32,10 +32,14 @@ getent passwd siem-agent >/dev/null || \
 exit 0
 
 %post
-chown -R siem-agent:siem-agent /var/lib/siem-agent
-# The durable evidence journal must belong to the user the service runs as
-# (root): the agent refuses a journal another user owns and ships nothing.
-[ -d /var/lib/siem-agent/evidence ] && chown -R root:root /var/lib/siem-agent/evidence || :
+# Top level only: the service runs as root and owns what it creates. The
+# evidence journal and the web protection CA and list must stay root's (the
+# agent refuses or regenerates state another user owns); packages before
+# 1.27.5 chowned the whole tree on every upgrade, so give those back.
+chown siem-agent:siem-agent /var/lib/siem-agent
+for d in evidence webblock; do
+  [ -d "/var/lib/siem-agent/$d" ] && chown -R root:root "/var/lib/siem-agent/$d" || :
+done
 chmod 750 /var/lib/siem-agent
 chown siem-agent:siem-agent /etc/siem-agent/config.yaml
 # explicit rather than %systemd_* macros: rpmbuild on the Debian-based builder doesn't define them

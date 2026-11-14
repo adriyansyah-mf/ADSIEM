@@ -59,13 +59,39 @@ func openDurable(cfg *config.Config, hostname string) *durableRuntime {
 	rt.journal = j
 	rt.publisher = evidence.NewPublisher(j, cfg.Agent.ID, hostname, rt.observe)
 	// Today's producers (tailers, eBPF monitors, firewall, local detection) are
-	// not replayable: their entries are bridge offers, not durable admissions.
-	rt.buf = buffer.NewWithSink(func(entry string) error {
-		logType, location, raw := tailer.Decode(entry)
-		return rt.publisher.TrySubmit(evidence.Draft{LogType: logType, Location: location, RawMessage: raw})
-	})
+	// not replayable: their entries are bridge offers, not durable admissions;
+	// detections are admitted durably (durableSink).
+	rt.buf = buffer.NewWithSink(func(entry string) error { return durableSink(rt.publisher, entry) })
 	slog.Info("durable evidence mode", "dir", e.Dir, "max_bytes", e.MaxBytes)
 	return rt
+}
+
+// urgentAdmitTimeout bounds how long a detection waits for its durable append.
+const urgentAdmitTimeout = 5 * time.Second
+
+type admitter interface {
+	Submit(context.Context, evidence.Draft) (evidence.Envelope, error)
+	TrySubmit(evidence.Draft) error
+}
+
+// durableSink offers telemetry to the bridge and admits detections
+// (urgentLogTypes, the legacy queue's urgent lane) durably right away: a
+// telemetry burst that fills the bridge must not cost a ransomware or malware
+// detection. If that admission fails, the bridge still gets the offer, so the
+// loss is counted if it fails there too.
+func durableSink(p admitter, entry string) error {
+	logType, location, raw := tailer.Decode(entry)
+	d := evidence.Draft{LogType: logType, Location: location, RawMessage: raw}
+	if urgentLogTypes[logType] {
+		ctx, cancel := context.WithTimeout(context.Background(), urgentAdmitTimeout)
+		_, err := p.Submit(ctx, d)
+		cancel()
+		if err == nil || errors.Is(err, evidence.ErrPublisherStopped) {
+			return err
+		}
+		slog.Warn("evidence: detection not admitted durably; offering it to the bridge", "log_type", logType, "err", err)
+	}
+	return p.TrySubmit(d)
 }
 
 // observe runs local detection on every live admitted event, before and

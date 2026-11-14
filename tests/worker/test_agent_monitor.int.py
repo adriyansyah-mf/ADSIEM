@@ -230,6 +230,20 @@ def test_durable_agents_that_cannot_ship_are_reported_at_once(env):
     env.events.clear()
     _sweep()
     assert env.events == []  # once per episode
+    from worker.agent_monitor import EVIDENCE_BLOCKED_FLAG, EVIDENCE_FLAG_TTL
+    assert EVIDENCE_FLAG_TTL > 0 and EVIDENCE_BLOCKED_FLAG.format(_ids_by_host()["broken-journal"]) in env.kv
+
+
+def test_odd_evidence_reports_do_not_stop_the_monitor():
+    from worker.agent_monitor import _evidence_blocked
+    now = datetime.now(timezone.utc)
+    naive = (now - timedelta(seconds=900)).replace(tzinfo=None).isoformat()
+    assert _evidence_blocked(_health(sender={"state": "blocked", "since": naive}), now)["reason"] == "sender_blocked"
+    assert _evidence_blocked(_health(sender={"state": "blocked", "since": None}), now) is None
+    assert _evidence_blocked({"mode": "durable", "reason": "", "sender": "garbage"}, now) is None
+    assert _evidence_blocked("not a dict", now) is None
+    nanos = (now - timedelta(seconds=900)).strftime("%Y-%m-%dT%H:%M:%S.123456789Z")
+    assert _evidence_blocked(_health(sender={"state": "blocked", "reason": "auth_blocked", "since": nanos}), now)
 
 
 def test_evidence_blocked_rule_alerts_on_the_event():
