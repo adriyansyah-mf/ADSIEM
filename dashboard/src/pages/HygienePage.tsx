@@ -1,8 +1,19 @@
 import { useState } from 'react'
 import { useHygieneLatest, useAgentVulns } from '@/hooks/useHygiene'
-import type { HygieneSnapshot, HygieneIssue, DiskPartition, OpenPort, InstalledPackage, VulnerablePackage } from '@/types'
+import type { HygieneSnapshot, HygieneIssue, DiskPartition, OpenPort, InstalledPackage, VulnerablePackage, HostNetwork } from '@/types'
 
-const RISKY_PORTS = new Set([21, 22, 23, 25, 445, 3389, 5900, 6379, 9200, 27017])
+// Same list as the agent's scoring (agent/internal/hygiene/score.go).
+const RISKY_PORTS = new Set([21, 23, 25, 135, 139, 445, 2375, 3306, 3389, 5432, 5900, 5984, 6379, 9200, 11211, 27017])
+
+// Reachable from other hosts: bound to anything but loopback (unknown: assume so).
+function exposed(p: OpenPort) {
+  if (!p.addr) return true
+  return !(p.addr.startsWith('127.') || p.addr === '::1')
+}
+
+function riskyExposed(p: OpenPort) {
+  return RISKY_PORTS.has(p.port) && exposed(p)
+}
 
 function scoreColor(score: number) {
   if (score >= 80) return 'var(--accent-green)'
@@ -49,17 +60,60 @@ function DiskBar({ part }: { part: DiskPartition }) {
 }
 
 function PortTag({ port }: { port: OpenPort }) {
-  const risky = RISKY_PORTS.has(port.port)
+  const risky = riskyExposed(port)
+  const local = !exposed(port)
+  const where = [port.process, port.addr && `on ${port.addr}`].filter(Boolean).join(' ')
   return (
-    <span style={{
+    <span title={local ? 'Bound to loopback: not reachable from other hosts' : where || undefined} style={{
       display: 'inline-block', padding: '1px 6px', borderRadius: '3px',
       fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', margin: '2px',
       border: `1px solid ${risky ? 'var(--accent-red)' : 'var(--border)'}`,
-      color: risky ? 'var(--accent-red)' : 'var(--text-secondary)',
+      color: risky ? 'var(--accent-red)' : local ? 'var(--text-muted, #6b7280)' : 'var(--text-secondary)',
       background: risky ? 'rgba(255,68,68,0.08)' : 'transparent',
     }}>
-      {port.port}/{port.proto}
+      {port.port}/{port.proto}{port.process ? ` ${port.process}` : ''}{port.addr ? ` @${port.addr}` : ''}
     </span>
+  )
+}
+
+function KV({ k, v }: { k: string; v?: string | null }) {
+  if (!v) return null
+  return (
+    <div style={{ display: 'flex', gap: '8px', fontSize: '11px', marginBottom: '3px' }}>
+      <span style={{ color: 'var(--text-secondary)', minWidth: '96px' }}>{k}</span>
+      <span style={{ fontFamily: 'Share Tech Mono, monospace', color: 'var(--text-primary)', wordBreak: 'break-all' }}>{v}</span>
+    </div>
+  )
+}
+
+function NetworkSection({ net }: { net: HostNetwork }) {
+  const ifaces = net.interfaces ?? []
+  const sessions = net.sessions ?? []
+  return (
+    <>
+      <div style={{ marginBottom: '16px' }}>
+        <SectionLabel>NETWORK</SectionLabel>
+        <KV k="FQDN" v={net.fqdn} />
+        <KV k="Domain" v={net.domain} />
+        <KV k="Seen from" v={net.seen_from} />
+        <KV k="Gateway" v={net.default_gateway} />
+        <KV k="DNS" v={(net.dns_servers ?? []).join(', ')} />
+        <KV k="Time zone" v={[net.timezone, net.utc_offset && `(UTC${net.utc_offset})`].filter(Boolean).join(' ')} />
+        <KV k="Booted" v={net.boot_time && new Date(net.boot_time).toLocaleString()} />
+        {ifaces.map(i => (
+          <KV key={i.name} k={i.name + (i.up ? '' : ' (down)')} v={[...i.addrs, i.mac].filter(Boolean).join('  ')} />
+        ))}
+      </div>
+      {sessions.length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <SectionLabel>LOGGED-IN SESSIONS ({sessions.length})</SectionLabel>
+          {sessions.map((s, i) => (
+            <KV key={i} k={s.user} v={[s.line, s.from && `from ${s.from}`, s.since && `since ${new Date(s.since).toLocaleString()}`]
+              .filter(Boolean).join('  ')} />
+          ))}
+        </div>
+      )}
+    </>
   )
 }
 
@@ -309,6 +363,8 @@ function DetailPanel({ snap, onClose }: { snap: HygieneSnapshot; onClose: () => 
               </div>
             )}
 
+            {snap.network && <NetworkSection net={snap.network} />}
+
             {/* Disk */}
             {snap.disk_partitions.length > 0 && (
               <div style={{ marginBottom: '16px' }}>
@@ -346,7 +402,7 @@ function DetailPanel({ snap, onClose }: { snap: HygieneSnapshot; onClose: () => 
                 <div style={{ display: 'flex', flexWrap: 'wrap' }}>
                   {snap.open_ports
                     .slice()
-                    .sort((a: OpenPort, b: OpenPort) => (RISKY_PORTS.has(b.port) ? 1 : 0) - (RISKY_PORTS.has(a.port) ? 1 : 0))
+                    .sort((a: OpenPort, b: OpenPort) => (riskyExposed(b) ? 2 : exposed(b) ? 1 : 0) - (riskyExposed(a) ? 2 : exposed(a) ? 1 : 0))
                     .map((p: OpenPort, i: number) => <PortTag key={i} port={p} />)}
                 </div>
               </div>

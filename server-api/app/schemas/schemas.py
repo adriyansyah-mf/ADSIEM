@@ -864,6 +864,7 @@ class HygieneSnapshotIn(BaseModel):
     issues: list[dict] | None = []
     packages: list[dict] | None = []
     collected_at: str | None = None
+    network: dict | None = None
 
 class HygieneSnapshotOut(BaseModel):
     id: str
@@ -884,6 +885,7 @@ class HygieneSnapshotOut(BaseModel):
     hygiene_score: int
     issues: list[dict]
     packages: list[dict]
+    network: dict | None = None
     collected_at: datetime
     model_config = {"from_attributes": True}
 

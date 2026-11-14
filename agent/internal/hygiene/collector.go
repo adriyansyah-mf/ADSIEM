@@ -4,8 +4,15 @@ package hygiene
 
 import (
 	"bufio"
+	"context"
+	"encoding/hex"
+	"io"
+	"net"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -28,6 +35,7 @@ func Collect(agentID, hostname string) (*Report, error) {
 	collectPorts(r)
 	collectUsers(r)
 	collectPackages(r)
+	collectNetwork(r, time.Now())
 	score(r)
 
 	return r, nil
@@ -166,49 +174,119 @@ func collectDisk(r *Report) {
 	}
 }
 
-// parseProcNetTCP reads /proc/net/tcp or /proc/net/tcp6 and returns LISTEN ports.
-func parseProcNetTCP(path, proto string) []OpenPort {
+// parseProcNetTCP reads /proc/net/tcp or /proc/net/tcp6 and returns the
+// LISTEN sockets with their bound address, and each one's socket inode.
+func parseProcNetTCP(path, proto string) ([]OpenPort, []string) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer f.Close()
+	return parseListen(f, proto)
+}
 
+func parseListen(r io.Reader, proto string) ([]OpenPort, []string) {
 	var ports []OpenPort
-	seen := map[int]bool{}
-	sc := bufio.NewScanner(f)
+	var inodes []string
+	seen := map[string]bool{}
+	sc := bufio.NewScanner(r)
 	sc.Scan() // skip header
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 4 {
+		if len(fields) < 10 {
 			continue
 		}
-		stateHex := fields[3]
-		state, _ := strconv.ParseUint(stateHex, 16, 8)
+		state, _ := strconv.ParseUint(fields[3], 16, 8)
 		if state != 0x0A { // TCP_LISTEN
 			continue
 		}
-		localAddr := fields[1]
-		parts := strings.Split(localAddr, ":")
-		if len(parts) < 2 {
+		addrHex, portHex, ok := strings.Cut(fields[1], ":")
+		if !ok {
 			continue
 		}
-		portHex := parts[len(parts)-1]
 		port, err := strconv.ParseInt(portHex, 16, 32)
 		if err != nil || port <= 0 || port > 65535 {
 			continue
 		}
-		if !seen[int(port)] {
-			seen[int(port)] = true
-			ports = append(ports, OpenPort{Port: int(port), Proto: proto, State: "LISTEN"})
+		addr := procNetAddr(addrHex)
+		key := addr + "|" + portHex
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		ports = append(ports, OpenPort{Port: int(port), Proto: proto, State: "LISTEN", Addr: addr})
+		inodes = append(inodes, fields[9])
+	}
+	return ports, inodes
+}
+
+// procNetAddr decodes /proc/net/tcp{,6} addresses: 32-bit words in host
+// (little-endian) order.
+func procNetAddr(h string) string {
+	b, err := hex.DecodeString(h)
+	if err != nil || (len(b) != 4 && len(b) != 16) {
+		return ""
+	}
+	ip := make(net.IP, len(b))
+	for w := 0; w < len(b); w += 4 {
+		ip[w], ip[w+1], ip[w+2], ip[w+3] = b[w+3], b[w+2], b[w+1], b[w]
+	}
+	return ip.String()
+}
+
+// socketOwners maps socket inodes to the name of a process holding them.
+func socketOwners(want map[string]bool) map[string]string {
+	owners := map[string]string{}
+	if len(want) == 0 {
+		return owners
+	}
+	procs, _ := os.ReadDir("/proc")
+	for _, p := range procs {
+		if _, err := strconv.Atoi(p.Name()); err != nil {
+			continue
+		}
+		fds, err := os.ReadDir("/proc/" + p.Name() + "/fd")
+		if err != nil {
+			continue
+		}
+		var comm string
+		for _, fd := range fds {
+			link, err := os.Readlink("/proc/" + p.Name() + "/fd/" + fd.Name())
+			if err != nil || !strings.HasPrefix(link, "socket:[") {
+				continue
+			}
+			inode := strings.TrimSuffix(strings.TrimPrefix(link, "socket:["), "]")
+			if !want[inode] || owners[inode] != "" {
+				continue
+			}
+			if comm == "" {
+				c, _ := os.ReadFile("/proc/" + p.Name() + "/comm")
+				comm = strings.TrimSpace(string(c))
+			}
+			owners[inode] = comm
+		}
+		if len(owners) == len(want) {
+			break
 		}
 	}
-	return ports
+	return owners
 }
 
 func collectPorts(r *Report) {
-	r.OpenPorts = append(r.OpenPorts, parseProcNetTCP("/proc/net/tcp", "tcp")...)
-	r.OpenPorts = append(r.OpenPorts, parseProcNetTCP("/proc/net/tcp6", "tcp6")...)
+	v4, i4 := parseProcNetTCP("/proc/net/tcp", "tcp")
+	v6, i6 := parseProcNetTCP("/proc/net/tcp6", "tcp6")
+	ports, inodes := append(v4, v6...), append(i4, i6...)
+	want := map[string]bool{}
+	for _, in := range inodes {
+		if in != "0" {
+			want[in] = true
+		}
+	}
+	owners := socketOwners(want)
+	for i := range ports {
+		ports[i].Process = owners[inodes[i]]
+	}
+	r.OpenPorts = ports
 }
 
 func collectUsers(r *Report) {
@@ -241,6 +319,36 @@ func collectPackages(r *Report) {
 		r.Packages = pkgs
 		return
 	}
+	// RHEL, Rocky, Alma, Fedora, SUSE: the rpm database is not a text file
+	if out, err := runTimeout("rpm", "-qa", "--qf", `%{NAME}\t%{VERSION}-%{RELEASE}\n`); err == nil {
+		r.Packages = parseRpmQuery(out)
+	}
+}
+
+// parseRpmQuery reads `rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\n'`.
+func parseRpmQuery(out string) []InstalledPackage {
+	var pkgs []InstalledPackage
+	for _, line := range strings.Split(out, "\n") {
+		name, version, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok || name == "" || version == "" || name == "gpg-pubkey" {
+			continue
+		}
+		pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "rpm"})
+	}
+	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].Name < pkgs[j].Name })
+	if len(pkgs) > 1000 {
+		pkgs = pkgs[:1000]
+	}
+	return pkgs
+}
+
+// runTimeout runs a system tool for the posture checks, bounded so a hung
+// tool cannot stall the report.
+func runTimeout(name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	return string(out), err
 }
 
 func parseDpkg(path string) []InstalledPackage {
@@ -318,7 +426,23 @@ func parseApk(path string) []InstalledPackage {
 	return pkgs
 }
 
-// Linux has no extra posture checks or OS-default ports yet.
-func platformIssues(*Report) []Issue { return nil }
+// platformIssues runs the Linux posture checks (linux_posture.go) on this host.
+func platformIssues(r *Report) []Issue {
+	return linuxPosture(linuxHost{
+		readFile: func(p string) (string, error) {
+			b, err := os.ReadFile(p)
+			return string(b), err
+		},
+		glob: func(p string) []string {
+			m, _ := filepath.Glob(p)
+			return m
+		},
+		exists: func(p string) bool {
+			_, err := os.Stat(p)
+			return err == nil
+		},
+		run: runTimeout,
+	}, r)
+}
 
 var baselinePorts = map[int]bool{}

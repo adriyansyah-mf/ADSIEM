@@ -1,6 +1,9 @@
 package hygiene
 
-import "strconv"
+import (
+	"sort"
+	"strconv"
+)
 
 // Scoring is shared by every platform's collector: it works on the Report
 // alone, plus platformIssues for checks only the platform can make.
@@ -14,6 +17,31 @@ var riskyPorts = map[int]string{
 	445:  "SMB",
 	3389: "RDP exposed",
 	5900: "VNC exposed",
+	// data stores and daemons that are meant for localhost or a private
+	// network and are attacked within hours when reachable (the otakunesia
+	// miner scanned the internet for Redis)
+	2375:  "Docker API (no authentication)",
+	3306:  "MySQL",
+	5432:  "PostgreSQL",
+	5984:  "CouchDB",
+	6379:  "Redis",
+	9200:  "Elasticsearch",
+	11211: "Memcached",
+	27017: "MongoDB",
+}
+
+// portLabel names a listening socket for an issue: "3306 (mysqld on 0.0.0.0)".
+func portLabel(p OpenPort) string {
+	s := strconv.Itoa(p.Port)
+	switch {
+	case p.Process != "" && p.Addr != "":
+		s += " (" + p.Process + " on " + p.Addr + ")"
+	case p.Process != "":
+		s += " (" + p.Process + ")"
+	case p.Addr != "":
+		s += " (on " + p.Addr + ")"
+	}
+	return s
 }
 
 func score(r *Report) {
@@ -46,23 +74,33 @@ func score(r *Report) {
 		}
 	}
 
-	// risky ports
+	// risky ports: only where other hosts can reach them. A database or
+	// telnet bound to 127.0.0.1 is not exposure.
 	seen := map[int]bool{}
+	exposed := map[int]OpenPort{}
 	for _, p := range r.OpenPorts {
-		if seen[p.Port] {
-			continue
-		}
 		seen[p.Port] = true
-		if baselinePorts[p.Port] {
+		if _, done := exposed[p.Port]; !done && p.Exposed() {
+			exposed[p.Port] = p
+		}
+	}
+	ports := make([]int, 0, len(exposed))
+	for port := range exposed {
+		ports = append(ports, port)
+	}
+	sort.Ints(ports)
+	for _, port := range ports {
+		p := exposed[port]
+		if baselinePorts[port] {
 			// always listening on this OS (e.g. Windows RPC/SMB): exposure is the firewall's job
 			s -= issuePenalty["low"]
-			issues = append(issues, Issue{"low", "port", "Port " + strconv.Itoa(p.Port) + " listening (" +
-				riskyPorts[p.Port] + ", OS default) — keep it blocked at the firewall"})
+			issues = append(issues, Issue{"low", "port", "Port " + portLabel(p) + " listening (" +
+				riskyPorts[port] + ", OS default) — keep it blocked at the firewall"})
 			continue
 		}
-		if desc, bad := riskyPorts[p.Port]; bad {
+		if desc, bad := riskyPorts[port]; bad {
 			s -= 15
-			issues = append(issues, Issue{"high", "port", "Port " + strconv.Itoa(p.Port) + " open: " + desc})
+			issues = append(issues, Issue{"high", "port", "Port " + portLabel(p) + " reachable from the network: " + desc})
 		}
 	}
 
@@ -73,7 +111,8 @@ func score(r *Report) {
 		issues = append(issues, Issue{"medium", "port", strconv.Itoa(unique) + " ports listening"})
 	}
 
-	// platform posture checks (firewall, AV, ...) — none on Linux yet
+	// platform posture checks: firewall, remote login, credentials, pending
+	// reboot, automatic updates, protection (linux_posture.go, windows_posture.go)
 	for _, is := range platformIssues(r) {
 		s -= issuePenalty[is.Severity]
 		issues = append(issues, is)
