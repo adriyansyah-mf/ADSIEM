@@ -70,6 +70,9 @@ _DEFAULT_SETTINGS = [
     ("ninerouter_api_key", "",                          True,  "9router API key for AI analyst — generate via POST /api/keys against the 9router dashboard API (see docs/PROJECT_OVERVIEW.md)"),
     ("ninerouter_model",   "combo",                      False, "9router combo name to route AI analyst requests through"),
     ("investigation_model", "",                          False, "9router model/combo for AI case investigations — pick one with native tool calling and a large context window; empty = ninerouter_model"),
+    ("investigation_debate_agents", "3",                 False, "AI investigation review panel: reviewers (0-6) who debate the lead investigator's draft before it is final; 0 = off"),
+    ("investigation_debate_rounds", "2",                 False, "AI investigation review panel: debate rounds (1-3); reviewers answer each other from the second round"),
+    ("investigation_debate_model", "",                   False, "9router model/combo for the review panel's reviewers (no tools); empty = the investigation model"),
     ("ai_command_execution", "off",                     False, "Let AI investigations ask to run commands on endpoints: off, or approval (an analyst with agents:manage approves each command before it runs)"),
     ("ai_command_autoapprove", "",                      False, "Comma-separated programs AI commands may run without approval (e.g. whoami,hostname,ipconfig); shells and interpreters always need approval"),
     ("agent_log_silence_minutes", "240",                False, "Alert when an agent still heartbeats but has sent no logs for this many minutes (0 = off)"),
@@ -379,7 +382,8 @@ async def _migrate_investigation_ledger_columns() -> None:
     """Columns the investigation ledger (services/investigation_ledger.py) adds to existing tables."""
     from sqlalchemy import text
     async with engine.begin() as conn:
-        for col in ("phase VARCHAR(20)", "report_json JSONB", "budget_overrides JSONB NOT NULL DEFAULT '{}'::jsonb",
+        for col in ("phase VARCHAR(20)", "report_json JSONB", "debate JSONB",
+                    "budget_overrides JSONB NOT NULL DEFAULT '{}'::jsonb",
                     "lease_owner VARCHAR(120)", "lease_expires_at TIMESTAMPTZ",
                     "rounds_used INTEGER NOT NULL DEFAULT 0", "active_seconds DOUBLE PRECISION NOT NULL DEFAULT 0"):
             await conn.execute(text(f"ALTER TABLE case_investigations ADD COLUMN IF NOT EXISTS {col}"))

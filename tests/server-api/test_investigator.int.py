@@ -95,6 +95,24 @@ def env():
     _run(engine.dispose())
 
 
+@pytest.fixture(autouse=True)
+def _no_review_panel(env):
+    """_seed_settings() (run by a test above) seeds a 3-reviewer panel; the
+    scripted lead model would then also answer as every reviewer. Each test
+    starts without the setting (panel off); the panel tests set it."""
+    from sqlalchemy import delete
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import PlatformSetting
+
+    async def go():
+        async with AsyncSessionLocal() as db:
+            await db.execute(delete(PlatformSetting).where(PlatformSetting.key.in_(
+                ("investigation_debate_agents", "investigation_debate_rounds"))))
+            await db.commit()
+    _run(go())
+
+
 def _seed(hostname="web01"):
     from app.core.database import AsyncSessionLocal
     from app.models.models import Agent, Alert, Case, PlatformSetting, Role, User
@@ -1463,3 +1481,121 @@ def test_an_ai_rule_activates_only_after_validation_test_and_confirmation(env, m
         _run(go())
     finally:
         _set_setting("yara_ai_generation", "draft_only")
+
+
+# ─── Review panel ────────────────────────────────────────────────
+
+class Panel:
+    """A reviewer model for every panel seat; answers by role and round."""
+
+    def __init__(self, answer):
+        self.answer, self.calls = answer, []
+
+    def __call__(self, *a, **k):
+        return self
+
+    async def ainvoke(self, messages):
+        from langchain_core.messages import AIMessage
+        name = messages[0].content.split("You are the ", 1)[1].split(" on a review panel", 1)[0]
+        round_no = int(messages[1].content.split("Round ", 1)[1].split(" ", 1)[0])
+        self.calls.append((name, round_no, messages[1].content))
+        out = self.answer(name, round_no)
+        if isinstance(out, Exception):
+            raise out
+        return AIMessage(content=json.dumps(out))
+
+
+def _position(verdict, agrees, summary, missing=()):
+    return {"verdict": verdict, "confidence": 80, "agrees_with_draft": agrees, "summary": summary,
+            "challenges": [] if agrees else [{"claim": "the shell is malicious", "issue": "no proof yet",
+                                              "evidence_ids": []}],
+            "missing_evidence": list(missing), "responses": []}
+
+
+def _panel(agents, rounds):
+    _set_setting("investigation_debate_agents", str(agents))
+    _set_setting("investigation_debate_rounds", str(rounds))
+
+
+def test_review_panel_debates_the_draft_and_the_lead_settles_it(env, monkeypatch):
+    from app.services import investigator
+
+    user_id, _, case_id = _seed(f"deb-{uuid.uuid4().hex[:8]}")
+    draft = "## Summary\nA webshell ran recon as www-data.\nVERDICT: true_positive"
+
+    def lead(turn, results, messages):
+        if turn == 1:
+            return draft
+        if turn == 2:  # briefed by the panel, it settles the dispute with another collection
+            assert "A review panel of 2 reviewers debated your draft over 2 rounds" in messages[-1].content
+            assert "- Skeptic: true_positive (80%), agrees" in messages[-1].content
+            # the Skeptic withdrew its check once convinced: only final positions brief the lead
+            assert "apache access log for p.php" not in messages[-1].content
+            return ("list_hosts", {})
+        if turn == 3:
+            return "## Summary\nConfirmed after the panel.\nVERDICT: true_positive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    def reviewers(name, round_no):
+        if name == "Skeptic" and round_no == 1:
+            return _position("false_positive", False, "could be a test page", ["apache access log for p.php"])
+        return _position("true_positive", True, f"{name}: the recon under www-data is not admin work")
+
+    panel = Panel(reviewers)
+    monkeypatch.setattr(investigator, "make_debate_model", panel)
+    _panel(2, 2)
+    try:
+        inv, model = _investigate(lead, monkeypatch, user_id, case_id)
+    finally:
+        _panel(0, 2)
+    assert inv.status == "finished", inv.error
+    assert inv.verdict == "true_positive" and "Confirmed after the panel" in inv.report and inv.phase is None
+    assert inv.debate["agents"] == ["Skeptic", "Threat hunter"] and len(inv.debate["rounds"]) == 2
+    assert inv.debate["consensus"] == "true_positive" and "A review panel of 2" in inv.debate["brief"]
+    # every reviewer read the draft; in round 2 they saw each other
+    assert [(n, r) for n, r, _ in panel.calls] in ([("Skeptic", 1), ("Threat hunter", 1), ("Skeptic", 2),
+                                                    ("Threat hunter", 2)],
+                                                   [("Threat hunter", 1), ("Skeptic", 1), ("Skeptic", 2),
+                                                    ("Threat hunter", 2)],
+                                                   [("Skeptic", 1), ("Threat hunter", 1), ("Threat hunter", 2),
+                                                    ("Skeptic", 2)],
+                                                   [("Threat hunter", 1), ("Skeptic", 1), ("Threat hunter", 2),
+                                                    ("Skeptic", 2)])
+    assert all("A webshell ran recon" in ask for _, _, ask in panel.calls)
+    hunter_r2 = next(ask for n, r, ask in panel.calls if n == "Threat hunter" and r == 2)
+    assert "Skeptic: false_positive" in hunter_r2 and "wants checked: apache access log for p.php" in hunter_r2
+    kinds = [s["kind"] for s in inv.steps]
+    assert kinds.count("debate_round") == 2 and "debate_started" in kinds and "debate_finished" in kinds
+    assert kinds.index("debate_finished") < kinds.index("finished")
+    assert len(model.seen) == 3
+
+
+def test_review_panel_is_off_unless_set(env, monkeypatch):
+    from app.services import investigator
+
+    user_id, _, case_id = _seed(f"deb-{uuid.uuid4().hex[:8]}")
+    panel = Panel(lambda name, r: AssertionError("the panel must not sit"))
+    monkeypatch.setattr(investigator, "make_debate_model", panel)
+    inv, model = _investigate(lambda turn, results: "## Summary\nok\nVERDICT: false_positive", monkeypatch,
+                              user_id, case_id)
+    assert inv.status == "finished" and inv.verdict == "false_positive"
+    assert inv.debate is None and panel.calls == [] and len(model.seen) == 1
+    assert not any(s["kind"].startswith("debate") for s in inv.steps)
+
+
+def test_a_panel_nobody_answers_leaves_the_draft_as_the_report(env, monkeypatch):
+    from app.services import investigator
+
+    user_id, _, case_id = _seed(f"deb-{uuid.uuid4().hex[:8]}")
+    panel = Panel(lambda name, r: RuntimeError("9router is down"))
+    monkeypatch.setattr(investigator, "make_debate_model", panel)
+    _panel(3, 2)
+    try:
+        inv, model = _investigate(lambda turn, results: "## Summary\nDraft.\nVERDICT: inconclusive", monkeypatch,
+                                  user_id, case_id)
+    finally:
+        _panel(0, 2)
+    assert inv.status == "finished" and inv.verdict == "inconclusive" and "Draft." in inv.report
+    assert len(model.seen) == 1 and len(panel.calls) == 3  # one round, then the panel gives up
+    assert inv.debate["brief"] is None
+    assert any(s["kind"] == "warning" and "no reviewer" in s["text"] for s in inv.steps)

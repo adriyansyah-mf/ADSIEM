@@ -78,8 +78,10 @@ TOOL_RESULT_CHARS = 8_000    # what one tool result may put in the model's conte
 CONTEXT_CHARS = 60_000       # older tool results are shortened to keep the prompt under this
 KEEP_FULL_RESULTS = 3        # ...except the most recent ones
 STALE_AFTER = timedelta(minutes=5)  # a lease-less run (from before leases) not updated this long is adopted
+DEBATE_EXTRA_ROUNDS = 4      # tool rounds the lead gets after the review panel to settle what it disputes
+DEBATE_MIN_SECONDS = 300     # the panel is skipped when less time than this is left
 MAX_COMMANDS = 8
-APPROVAL_WAIT = 15 * 60      # a command nobody decides on in this long expires
+APPROVAL_WAIT = 15 * 60     # a command nobody decides on in this long expires
 COMMAND_MAX_TIMEOUT = 300    # the agent's exec cap
 COMMAND_OUTPUT_CHARS = 6_000  # per stream, in the tool result
 
@@ -197,6 +199,12 @@ class Ctx:
     hash_intel: HashEnrichment = field(default_factory=HashEnrichment)
     max_flows: int = MAX_FLOWS             # + an analyst's one-time raise (budget_overrides)
     current_action: uuid.UUID | None = None  # the ledger row of the tool call in progress
+    # review panel (investigation_debate): reviewers (0 = off), rounds, model ("" = the lead's)
+    debate_agents: int = 0
+    debate_rounds: int = 2
+    debate_model: str = ""
+    debate_brief: str | None = None  # what the panel told the lead; set once it has run
+    debated: bool = False
 
     def elapsed(self) -> float:
         return time.monotonic() - self.started
@@ -1140,6 +1148,82 @@ async def investigation_model(db, default: str) -> str:
     return (row.value or "").strip() if row and (row.value or "").strip() else default
 
 
+async def debate_settings(db) -> tuple[int, int, str]:
+    """Settings → (reviewers 0..6, rounds 1..3, model). 0 reviewers or no
+    setting turns the review panel off."""
+    from app.services import investigation_debate as debate
+
+    def number(raw: str | None, default: int, low: int, high: int) -> int:
+        try:
+            return max(low, min(high, int(str(raw).strip())))
+        except (TypeError, ValueError):
+            return default
+    rows = {r.key: (r.value or "") for r in (await db.execute(select(PlatformSetting).where(PlatformSetting.key.in_(
+        ("investigation_debate_agents", "investigation_debate_rounds", "investigation_debate_model"))))).scalars()}
+    return (number(rows.get("investigation_debate_agents"), 0, 0, debate.MAX_AGENTS),
+            number(rows.get("investigation_debate_rounds"), 2, 1, debate.MAX_ROUNDS),
+            rows.get("investigation_debate_model", "").strip())
+
+
+def make_debate_model(api_key: str, model: str, effort: str | None):
+    """A reviewer's LLM client (no tools); tests replace this with a scripted model."""
+    return make_chat_model(api_key, model, effort)
+
+
+async def _ledger_digest(ctx: Ctx) -> tuple[str, set[str]]:
+    """The evidence and hypotheses so far, for reviewers: (text, evidence_ids)."""
+    async with AsyncSessionLocal() as db:
+        index = await ledger.evidence_index(db, ctx.inv_id)
+        hypotheses = (await db.execute(select(InvestigationHypothesis).where(
+            InvestigationHypothesis.investigation_id == ctx.inv_id)
+            .order_by(InvestigationHypothesis.ordinal))).scalars().all()
+    lines = [f"- evidence_id {eid}: {ev.title} — {_clip(ev.summary or '', 400)}" for eid, ev in index.items()]
+    if hypotheses:
+        lines += ["", "Hypotheses:"] + [
+            f"- {h.statement} [{h.state}, {h.confidence}%]"
+            + (f" for: {', '.join(h.supporting_evidence_ids)}" if h.supporting_evidence_ids else "")
+            + (f" against: {', '.join(h.contradicting_evidence_ids)}" if h.contradicting_evidence_ids else "")
+            for h in hypotheses]
+    return ("\n".join(lines) or "(no evidence collected)"), set(index)
+
+
+async def _run_debate(ctx: Ctx, api_key: str, model: str, effort: str | None, context: dict,
+                      draft: str) -> str | None:
+    """Put the draft before the review panel; its positions go to the run
+    (debate column, one step per round) and the brief for the lead is returned
+    (None when no reviewer answered)."""
+    from app.services import investigation_debate as debate
+
+    ctx.debated = True
+    await _set(ctx.inv_id, phase="debating")
+    roles = [name for _, name, _ in debate.ROLES[:ctx.debate_agents]]
+    await _step(ctx.inv_id, "debate_started", reviewers=roles, rounds=ctx.debate_rounds,
+                model=ctx.debate_model or model)
+    digest, known = await _ledger_digest(ctx)
+
+    async def on_round(round_no: int, positions: list[dict]) -> None:
+        await _step(ctx.inv_id, "debate_round", round=round_no, positions=[
+            {"name": p["name"], "error": p["error"]} if p.get("error") else
+            {"name": p["name"], "verdict": p["verdict"], "confidence": p["confidence"],
+             "agrees": p["agrees_with_draft"], "summary": p["summary"]}
+            for p in positions])
+        await _check_cancel(ctx)
+
+    result = await debate.run(
+        lambda: make_debate_model(api_key, ctx.debate_model or model, effort),
+        case_brief=_json(context, 8_000), draft=draft, ledger_digest=digest, known_ids=known,
+        agents=ctx.debate_agents, rounds=ctx.debate_rounds, on_round=on_round)
+    brief = debate.brief_for_lead(result, DEBATE_EXTRA_ROUNDS)
+    result["brief"] = brief
+    ctx.debate_brief = brief
+    await _set(ctx.inv_id, debate=result, phase="analyzing")
+    if brief is None:
+        await _step(ctx.inv_id, "warning", text="no reviewer on the panel answered; the draft is reported as written")
+    else:
+        await _step(ctx.inv_id, "debate_finished", tally=result["tally"], consensus=result["consensus"])
+    return brief
+
+
 def make_chat_model(api_key: str, model: str, effort: str | None):
     """The LLM client; tests replace this with a scripted model."""
     from app.core.config import settings
@@ -1274,11 +1358,17 @@ async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None, r
         await _check_cancel(ctx)
         await _reconcile(ctx, by_name)
         messages.append(HumanMessage(content=await _resume_brief(ctx, rounds_done)))
+        if ctx.debate_brief:  # the panel already ran before the move: its verdict stands
+            messages.append(HumanMessage(content="Before the interruption a review panel debated your draft.\n"
+                                                 + ctx.debate_brief))
 
-    for round_no in range(min(rounds_done + 1, MAX_ROUNDS), MAX_ROUNDS + 1):
+    # after the review panel the lead gets a few more rounds to settle what it disputes
+    limit = MAX_ROUNDS + (DEBATE_EXTRA_ROUNDS if ctx.debated else 0)
+    round_no = min(rounds_done + 1, limit)
+    while round_no <= limit:
         await _check_cancel(ctx)
         await _set(ctx.inv_id, rounds_used=round_no - 1, active_seconds=ctx.elapsed())
-        final = round_no == MAX_ROUNDS or ctx.seconds_left() < 120
+        final = round_no == limit or ctx.seconds_left() < 120
         if not final:
             await _run_analyst_actions(ctx, by_name, messages)
         if final:
@@ -1298,6 +1388,17 @@ async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None, r
         if content and calls:
             await _step(ctx.inv_id, "thought", text=_clip(content, 1500))
         if not calls or final:
+            # the draft goes before the review panel once, while there is time to act on it
+            if (not ctx.debated and ctx.debate_agents and content.strip()
+                    and ctx.seconds_left() > DEBATE_MIN_SECONDS):
+                if calls:  # a forced final answer that still asked for tools: keep only its text
+                    messages[-1] = AIMessage(content=content)
+                brief = await _run_debate(ctx, api_key, model, effort, context, content)
+                if brief:
+                    messages.append(HumanMessage(content=brief))
+                    limit = round_no + DEBATE_EXTRA_ROUNDS
+                    round_no += 1
+                    continue
             return await _final_report(ctx, chat, messages[:-1], content)
 
         await _set(ctx.inv_id, phase="collecting")
@@ -1308,6 +1409,7 @@ async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None, r
             result = await _run_action(ctx, name, args, by_name)
             _observe(ctx, name, result)
             messages.append(ToolMessage(content=_json(result), tool_call_id=call.get("id") or name, name=name))
+        round_no += 1
     return "", "inconclusive", None  # unreachable: the last round always answers
 
 
@@ -1421,6 +1523,9 @@ async def run_investigation(inv_id: uuid.UUID) -> None:
         api_key, model, effort = await _graph_config(db, inv.group_id)
         model = await investigation_model(db, model)
         ctx.commands_enabled, ctx.autoapprove = await command_settings(db)
+        ctx.debate_agents, ctx.debate_rounds, ctx.debate_model = await debate_settings(db)
+        if inv.debate:  # an adopted run whose panel already sat
+            ctx.debated, ctx.debate_brief = True, inv.debate.get("brief")
         resumed, rounds_done = inv.status == "running", inv.rounds_used or 0
         ctx.started = time.monotonic() - (inv.active_seconds or 0.0)
     if resumed and not api_key:  # the AI provider went away while the run waited for a replica
@@ -1432,7 +1537,8 @@ async def run_investigation(inv_id: uuid.UUID) -> None:
         await _step(inv_id, "resumed", replica=REPLICA_ID, after_rounds=rounds_done)
     else:
         await _set(inv_id, status="running", model=model)
-        await _step(inv_id, "started", by=ctx.username, model=model, commands=ctx.commands_enabled)
+        await _step(inv_id, "started", by=ctx.username, model=model, commands=ctx.commands_enabled,
+                    reviewers=ctx.debate_agents)
     ended = False
     try:
         report, verdict, report_json = await _investigate(ctx, api_key, model, effort, resumed, rounds_done)

@@ -35,6 +35,8 @@ async def list_settings(
 
 # alerts under ai_min_severity are created as below_threshold (worker alert_manager)
 _SEVERITIES = ("info", "low", "medium", "high", "critical")
+# whole-number settings and their range (services/investigation_debate.py: MAX_AGENTS, MAX_ROUNDS)
+_NUMBER_RANGES = {"investigation_debate_agents": (0, 6), "investigation_debate_rounds": (1, 3)}
 
 
 @router.put("/api/settings/{key}", response_model=SettingOut)
@@ -52,6 +54,11 @@ async def update_setting(
         body.value = (body.value or "").strip().lower()
         if body.value not in _SEVERITIES:
             raise HTTPException(status_code=422, detail=f"ai_min_severity must be one of {', '.join(_SEVERITIES)}")
+    if key in _NUMBER_RANGES:
+        low, high = _NUMBER_RANGES[key]
+        body.value = (body.value or "").strip()
+        if not body.value.isdigit() or not low <= int(body.value) <= high:
+            raise HTTPException(status_code=422, detail=f"{key} must be a whole number from {low} to {high}")
     setting.value = body.value
     setting.updated_by = current_user.id
     await db.commit()
