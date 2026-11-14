@@ -50,10 +50,16 @@ func processesRunning(path string) []int {
 				}
 			}
 		}
+		if ino != 0 {
+			// The file exists: only its inode counts. A process in a container
+			// or PrivateTmp may name a different file by the same path.
+			continue
+		}
 		link, err := os.Readlink(exe)
 		if err != nil {
 			continue // kernel thread, gone, or not ours to read
 		}
+		// The file is gone: a program that removed it still runs it.
 		if link == abs || strings.TrimSuffix(link, " (deleted)") == abs {
 			pids = append(pids, pid)
 		}

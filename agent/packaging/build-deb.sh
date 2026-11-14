@@ -65,7 +65,18 @@ case "$1" in
       useradd --system --no-create-home --shell /sbin/nologin \
               --home /var/lib/siem-agent siem-agent
     fi
-    chown -R siem-agent:siem-agent /var/lib/siem-agent
+    # Top level only: the service runs as root (siem-agent.service) and owns
+    # what it creates. State whose owner the agent checks must stay root's:
+    # the durable evidence journal (refused when another user owns it: no
+    # events at all) and the web protection CA and list (moved aside and
+    # regenerated). Packages before 1.27.5 chowned the whole tree on every
+    # upgrade; give those back to root here.
+    chown siem-agent:siem-agent /var/lib/siem-agent
+    for d in evidence webblock; do
+      if [ -d "/var/lib/siem-agent/$d" ]; then
+        chown -R root:root "/var/lib/siem-agent/$d"
+      fi
+    done
     chmod 750 /var/lib/siem-agent
     # Agent must write token+id back to config after enrollment
     chown siem-agent:siem-agent /etc/siem-agent/config.yaml
@@ -76,12 +87,21 @@ case "$1" in
     if [ -n "${SIEM_SERVER_URL:-}" ] || [ -n "${SIEM_ENROLLMENT_KEY:-}" ]; then
       # one-line install from the dashboard: configure, enroll and start now
       /usr/sbin/siem-agent-configure --if-env
-    elif [ -n "$2" ] && grep -Eq '^[[:space:]]*token: *"?[A-Za-z0-9_-]{8,}' /etc/siem-agent/config.yaml; then
-      systemctl restart siem-agent.service || true   # upgrade of an enrolled agent
+    elif [ -n "$2" ] && { [ -e /run/siem-agent.upgrade-restart ] || \
+         grep -Eq "^[[:space:]]*token:[[:space:]]*[\"']?[^\"'[:space:]#]{8,}" /etc/siem-agent/config.yaml; }; then
+      # upgrade of an agent that was running (prerm left the marker) or is enrolled
+      rm -f /run/siem-agent.upgrade-restart
+      systemctl restart siem-agent.service || true
     else
       echo "siem-agent installed. Point it at your server and enroll it with:"
       echo "  sudo siem-agent-configure --server https://<siem-server> --key <enrollment key>"
     fi
+    ;;
+  abort-upgrade|abort-remove|abort-deconfigure)
+    # a failed upgrade or removal leaves the old package in place: run it again
+    rm -f /run/siem-agent.upgrade-restart
+    systemctl enable siem-agent.service 2>/dev/null || true
+    systemctl start siem-agent.service 2>/dev/null || true
     ;;
 esac
 EOF
@@ -107,7 +127,15 @@ case "$1" in
     ;;
 esac
 case "$1" in
-  remove|upgrade|deconfigure)
+  upgrade)
+    # Stop only: disabling here left the agent disabled for good when the
+    # upgrade then failed. postinst restarts it when this marker says it ran.
+    if systemctl is-active --quiet siem-agent.service 2>/dev/null; then
+      touch /run/siem-agent.upgrade-restart
+    fi
+    systemctl stop siem-agent.service 2>/dev/null || true
+    ;;
+  remove|deconfigure)
     systemctl stop siem-agent.service  2>/dev/null || true
     systemctl disable siem-agent.service 2>/dev/null || true
     ;;

@@ -10,6 +10,10 @@ func processesRunning(string) []int { return nil }
 
 func hostTarget(path string) (string, error) { return path, nil }
 
+func preflightQuarantine(string) error {
+	return errors.New("quarantine_file requires Linux or Windows")
+}
+
 func assertQuarantinable(string) error {
 	return errors.New("quarantine_file requires Linux or Windows")
 }

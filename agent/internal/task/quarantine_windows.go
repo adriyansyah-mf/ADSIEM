@@ -3,6 +3,7 @@
 package task
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -146,6 +147,27 @@ func restoreFile(path string) (QuarantineRecord, error) {
 	delete(qStore.entries, abs)
 	qStore.save()
 	return rec, nil
+}
+
+// preflightQuarantine refuses, before any process is stopped, a directory or a
+// link/reparse point (its target's processes would be stopped). A missing
+// file passes: the programs still running it are stopped, and quarantine then
+// reports it gone.
+func preflightQuarantine(abs string) error {
+	info, err := os.Lstat(abs)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("quarantine_file: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("quarantine_file: %s is a directory", abs)
+	}
+	if info.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		return fmt.Errorf("quarantine_file: %s is a link or reparse point", abs)
+	}
+	return nil
 }
 
 // assertQuarantinable refuses what would break Windows or the agent.

@@ -27,6 +27,9 @@ class Agent(Base):
     version      = Column(String(50))
     flow_poll_at = Column(DateTime(timezone=True))
     is_isolated  = Column(Boolean, nullable=False, default=False)
+    # durable evidence health from heartbeats (server-api writes them)
+    evidence_health    = Column(JSONB)
+    evidence_health_at = Column(DateTime(timezone=True))
 
 class FleetHunt(Base):
     __tablename__ = "fleet_hunts"

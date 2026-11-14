@@ -1,0 +1,21 @@
+title: SIEM Agent Evidence Delivery Blocked
+id: rule-siem-agent-evidence-blocked
+description: >-
+  A durable-evidence agent still heartbeats but ships no events: its evidence
+  journal cannot be used (journal_unavailable, storage_failure: every
+  collector waits on it) or its sender has been blocked for 5 minutes or more.
+  The host is unmonitored until it is fixed. Check the agent log for
+  "durable evidence journal unavailable" and the journal directory owner
+  (docs/operations/agent-evidence-recovery.md). Tampering with the journal
+  directory produces the same picture (T1562.001).
+logsource:
+  product: siem
+  service: agent
+detection:
+  blocked:
+    event.action: agent_evidence_blocked
+  condition: blocked
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
