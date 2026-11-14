@@ -53,6 +53,7 @@ class InvestigationOut(BaseModel):
     verdict: str | None = None
     report: str | None = None
     report_json: dict[str, Any] | None = None
+    debate: dict[str, Any] | None = None  # the review panel (services/investigation_debate.py)
     budget_overrides: dict[str, Any] = {}
     error: str | None = None
     steps: list[dict[str, Any]] = []

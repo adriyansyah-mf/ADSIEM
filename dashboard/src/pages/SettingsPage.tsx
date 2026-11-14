@@ -10,6 +10,9 @@ const SETTING_LABELS: Record<string, string> = {
   ninerouter_api_key: '9router API Key',
   ninerouter_model: '9router Combo',
   investigation_model: 'AI Investigation Model',
+  investigation_debate_agents: 'AI Investigation Review Panel: Reviewers',
+  investigation_debate_rounds: 'AI Investigation Review Panel: Rounds',
+  investigation_debate_model: 'AI Investigation Review Panel: Model',
   bruteforce_digest_enabled: 'Brute-Force Daily Digest',
   case_ioc_exclusions: 'Case Grouping: Excluded IOCs',
   case_ioc_window_days: 'Case Grouping Window (days)',
@@ -52,6 +55,9 @@ const SETTING_HINTS: Record<string, string> = {
   ninerouter_api_key: 'Generated once via the 9router dashboard API (POST /api/keys) — see docs/PROJECT_OVERVIEW.md',
   ninerouter_model: 'Combo name created in the 9router dashboard, e.g. "combo"',
   investigation_model: 'Model for "Investigate with AI" on cases, through 9router — pick a frontier model with native tool calling and a long context. Empty = the combo above',
+  investigation_debate_agents: 'Before an AI investigation\'s report is final, this many reviewers (Skeptic, Threat hunter, Evidence auditor, Incident responder, Threat intel analyst, Detection engineer, in that order) debate the draft against the evidence; the lead investigator then checks what they dispute and writes the report. 0 = off. Each reviewer is one AI call per round',
+  investigation_debate_rounds: 'Debate rounds. From the second round each reviewer answers the others\' positions; the panel stops early once everyone agrees',
+  investigation_debate_model: 'Model for the reviewers (no tools, one call each per round). A cheaper model keeps the panel affordable. Empty = the AI Investigation Model',
   bruteforce_digest_enabled: 'Collect failed-only brute force from public IPs into one AI case per day (true / false)',
   case_ioc_exclusions: 'IPs, CIDRs and domains that never tie alerts into one campaign case: your own public IPs, proxies, shared SaaS. Public DNS resolvers and big update/CDN domains are excluded already',
   case_ioc_window_days: 'A case keeps collecting alerts with the same IOCs (from any host) while not resolved and active within this many days',
@@ -92,10 +98,12 @@ const SETTING_HINTS: Record<string, string> = {
 const MASKED = '••••••••'
 
 // settings whose value is a 9router model or combo: offer what 9router lists
-const MODEL_KEYS = new Set(['ninerouter_model', 'investigation_model'])
+const MODEL_KEYS = new Set(['ninerouter_model', 'investigation_model', 'investigation_debate_model'])
 // settings with a fixed set of values: a select instead of free text
 const CHOICE_KEYS: Readonly<Record<string, readonly string[]>> = {
   ai_min_severity: ['info', 'low', 'medium', 'high', 'critical'],
+  investigation_debate_agents: ['0', '1', '2', '3', '4', '5', '6'],
+  investigation_debate_rounds: ['1', '2', '3'],
 }
 // settings where an empty value means something (none auto-approved)
 const EMPTY_OK_KEYS = new Set(['ai_command_autoapprove', 'case_ioc_exclusions', 'malware_hash_block_groups'])

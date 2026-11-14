@@ -322,6 +322,9 @@ class CaseInvestigation(Base):
     report           = Column(Text)
     # the structured report the Markdown above is rendered from (investigation_ledger.validate_report)
     report_json      = Column(JSONB)
+    # the review panel's debate of the draft (services/investigation_debate.py): agents, rounds of
+    # positions, tally, consensus, and the brief the lead acted on
+    debate           = Column(JSONB)
     budget_overrides = Column(JSONB, nullable=False, default=dict)  # {"flows": extra runs an analyst granted}
     # the replica running it (investigator.REPLICA_ID); another replica adopts it once the lease expires
     lease_owner      = Column(String(120))

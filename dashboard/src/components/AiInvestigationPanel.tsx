@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceStrict } from 'date-fns'
 import {
   AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleStop, Clock, FileCode2, FileText,
-  Lightbulb, Play, Search, Server, ShieldQuestion, Terminal, XCircle,
+  Lightbulb, MessagesSquare, Play, Search, Server, ShieldQuestion, Terminal, XCircle,
 } from 'lucide-react'
+import DebateView, { type Debate } from '@/components/InvestigationDebate'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 import { useInvestigationControls, useInvestigationLedger } from '@/hooks/useInvestigationLedger'
@@ -37,11 +38,12 @@ interface Investigation {
   id: string
   case_id: string
   status: 'queued' | 'running' | 'finished' | 'error' | 'cancelled' | 'interrupted'
-  phase: 'planning' | 'collecting' | 'analyzing' | 'reporting' | null
+  phase: 'planning' | 'collecting' | 'analyzing' | 'debating' | 'reporting' | null
   model: string | null
   verdict: string | null
   report: string | null
   report_json: { citations_unchecked?: boolean; unverified_claims?: number; confidence?: number; verdict_downgraded_from?: string } | null
+  debate: Debate | null
   budget_overrides: { flows?: number; raised_by?: string }
   error: string | null
   steps: Step[]
@@ -178,6 +180,20 @@ function describe(step: Step, open: boolean, toggle: () => void): Row | null {
     case 'report_check':
       return { icon: <AlertTriangle size={13} />, tone: 'var(--accent-yellow)', title: 'Report citations checked',
         detail: `${(s.problems ?? []).length} problems sent back to the model for one repair` }
+    case 'debate_started':
+      return { icon: <MessagesSquare size={13} />, tone: 'var(--accent-purple, #a78bfa)',
+        title: `Review panel: ${(s.reviewers ?? []).length} reviewers debate the draft`,
+        detail: `${(s.reviewers ?? []).join(', ')} · up to ${s.rounds} rounds · ${s.model}` }
+    case 'debate_round': {
+      const positions = (s.positions ?? []) as Record<string, any>[]
+      return { icon: <MessagesSquare size={13} />, tone: 'var(--accent-purple, #a78bfa)', title: `Debate round ${s.round}`,
+        detail: positions.map(p => p.error ? `${p.name}: no answer`
+          : `${p.name}: ${String(p.verdict).replace('_', ' ')} ${p.confidence}%${p.agrees ? '' : ' (disputes)'}`).join(' · ') }
+    }
+    case 'debate_finished':
+      return { icon: <MessagesSquare size={13} />, tone: 'var(--accent-purple, #a78bfa)',
+        title: s.consensus ? `Panel agreed: ${String(s.consensus).replace('_', ' ')}` : 'Panel split; the lead weighs the evidence',
+        detail: Object.entries(s.tally ?? {}).map(([v, n]) => `${n}× ${v.replace('_', ' ')}`).join(' · ') }
     case 'warning':
       return { icon: <AlertTriangle size={13} />, tone: 'var(--accent-yellow)', title: 'Warning', detail: s.text }
     case 'finished':
@@ -273,7 +289,7 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
   })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showReasoning, setShowReasoning] = useState(false)
-  const [tab, setTab] = useState<'activity' | 'queue' | 'evidence' | 'hypotheses' | 'chat'>('activity')
+  const [tab, setTab] = useState<'activity' | 'queue' | 'evidence' | 'hypotheses' | 'debate' | 'chat'>('activity')
   const current = runs.find(r => r.id === selectedId) ?? runs[0]
   const active = current ? ACTIVE.has(current.status) : false
   const ledger = useInvestigationLedger(caseId, current?.id, active)
@@ -380,6 +396,7 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
               ['queue', `Queue (${ledger.actions.length})`],
               ['evidence', `Evidence (${ledger.evidence.length})`],
               ['hypotheses', `Hypotheses (${ledger.hypotheses.length})`],
+              ['debate', current.debate ? `Debate (${current.debate.agents.length})` : 'Debate'],
               ...(active ? [] : [['chat', 'Chat'] as const]),
             ] as const).map(([key, text]) => (
               <button key={key} onClick={() => setTab(key)}
@@ -404,6 +421,7 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
           {tab === 'hypotheses' && (
             <HypothesesView caseId={caseId} invId={current.id} hypotheses={ledger.hypotheses} evidence={ledger.evidence} />
           )}
+          {tab === 'debate' && <DebateView debate={current.debate ?? null} steps={current.steps} />}
           {tab === 'chat' && !active && <InvestigationChat key={current.id} invId={current.id} />}
           {current.report && (
             <>
