@@ -33,6 +33,9 @@ exit 0
 
 %post
 chown -R siem-agent:siem-agent /var/lib/siem-agent
+# The durable evidence journal must belong to the user the service runs as
+# (root): the agent refuses a journal another user owns and ships nothing.
+[ -d /var/lib/siem-agent/evidence ] && chown -R root:root /var/lib/siem-agent/evidence || :
 chmod 750 /var/lib/siem-agent
 chown siem-agent:siem-agent /etc/siem-agent/config.yaml
 # explicit rather than %systemd_* macros: rpmbuild on the Debian-based builder doesn't define them

@@ -95,6 +95,7 @@ def _sweep():
             await agent_monitor._mark_offline(s)
             await agent_monitor._report_stops(s)
             await agent_monitor._check_quiet_agents(s)
+            await agent_monitor._check_evidence(s)
     _run(go())
 
 
@@ -186,6 +187,58 @@ def test_heartbeating_agents_whose_logs_or_polls_stopped(env):
     env.kv[LAST_LOG_KEY.format(ids["muted"])] = str(now.timestamp() - 2 * 3600)
     _sweep()
     assert _events(env) == [("muted", "event=agent_logs_silent")]
+
+
+def _health(state="healthy", reason="", sender=None):
+    return {"version": 1, "mode": "durable", "state": state, "reason": reason, "queued_events": 3,
+            "sender": sender or {"state": "idle", "reason": ""}}
+
+
+def test_durable_agents_that_cannot_ship_are_reported_at_once(env):
+    """otakunesia, 2026-11-14: a package upgrade chowned the root-owned journal,
+    the agent reported journal_unavailable and shipped nothing for 2 h 45 min;
+    the 240-minute log-silence alert never fired."""
+    _agents(
+        dict(hostname="broken-journal", status="online", last_seen_at=_ago(10),
+             evidence_health=_health("degraded", "journal_unavailable"), evidence_health_at=_ago(10)),
+        dict(hostname="disk-failed", status="online", last_seen_at=_ago(10),
+             evidence_health=_health("degraded", "storage_failure"), evidence_health_at=_ago(10)),
+        dict(hostname="token-revoked", status="online", last_seen_at=_ago(10),
+             evidence_health=_health(sender={"state": "blocked", "reason": "auth_blocked",
+                                             "since": _ago(900).isoformat()}), evidence_health_at=_ago(10)),
+        # starting up: blocked until the first heartbeat answers, seconds only
+        dict(hostname="just-started", status="online", last_seen_at=_ago(10),
+             evidence_health=_health(sender={"state": "blocked", "reason": "protocol_unsupported",
+                                             "since": _ago(20).isoformat()}), evidence_health_at=_ago(10)),
+        # lost some telemetry but ships: degraded is not blocked
+        dict(hostname="lossy", status="online", last_seen_at=_ago(10),
+             evidence_health=_health("degraded", "source_failure"), evidence_health_at=_ago(10)),
+        dict(hostname="legacy", status="online", last_seen_at=_ago(10)),
+        # an old report from an agent that has since stopped reporting health
+        dict(hostname="stale-report", status="online", last_seen_at=_ago(10),
+             evidence_health=_health("degraded", "journal_unavailable"), evidence_health_at=_ago(3600)),
+    )
+    _sweep()
+    assert sorted(_events(env)) == [("broken-journal", "event=agent_evidence_blocked"),
+                                    ("disk-failed", "event=agent_evidence_blocked"),
+                                    ("token-revoked", "event=agent_evidence_blocked")], env.events
+    broken = next(e for e in env.events if e["hostname"] == "broken-journal")
+    assert "reason=journal_unavailable" in broken["raw_message"] and broken["log_type"] == "siem_agent"
+    assert "reason=sender_auth_blocked" in next(
+        e for e in env.events if e["hostname"] == "token-revoked")["raw_message"]
+
+    env.events.clear()
+    _sweep()
+    assert env.events == []  # once per episode
+
+
+def test_evidence_blocked_rule_alerts_on_the_event():
+    from pathlib import Path
+
+    import yaml
+    rule = yaml.safe_load((Path(__file__).parents[2] / "rules/siem_agent_evidence_blocked.yaml").read_text())
+    assert rule["detection"]["blocked"] == {"event.action": "agent_evidence_blocked"}
+    assert rule["level"] == "high" and rule["logsource"] == {"product": "siem", "service": "agent"}
 
 
 def test_everyone_quiet_at_once_is_not_tampering(env):

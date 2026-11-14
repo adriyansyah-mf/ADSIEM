@@ -26,6 +26,15 @@ FLOW_POLL_STALE = 600        # heartbeating but no live-response poll for this l
 LAST_LOG_KEY = "siem:agent:lastlog:{}"
 LOGS_SILENT_FLAG = "siem:agent:logs_silent:{}"
 NO_POLL_FLAG = "siem:agent:no_poll:{}"
+EVIDENCE_BLOCKED_FLAG = "siem:agent:evidence_blocked:{}"
+
+# Durable evidence states in which the agent ships nothing at all: the journal
+# cannot be used (every collector waits on it), or the sender has been blocked
+# longer than a restart takes to clear it. On otakunesia a package upgrade
+# chowned the root-owned journal to siem-agent: no logs for 2 h 45 min, and
+# the log-silence alert (240 min) never fired.
+EVIDENCE_DEAD_REASONS = ("journal_unavailable", "storage_failure")
+EVIDENCE_BLOCKED_GRACE = 300
 TASK_PICKUP_TIMEOUT = 600    # pending: no heartbeat fetched it in 10 minutes
 TASK_RESULT_TIMEOUT = 1800   # dispatched: fetched, but no result in 30 minutes
 
@@ -138,6 +147,52 @@ async def _check_quiet_agents(db) -> None:
                 event, agent_id=agent_id, group_id=group_id, hostname=hostname, **fields))
 
 
+def _evidence_blocked(health, now: datetime) -> dict | None:
+    """Why a durable agent ships nothing, or None."""
+    if not isinstance(health, dict) or health.get("mode", "durable") != "durable":
+        return None
+    reason = health.get("reason") or ""
+    if reason in EVIDENCE_DEAD_REASONS:
+        return {"reason": reason, "queued_events": health.get("queued_events", 0)}
+    sender = health.get("sender") or {}
+    if sender.get("state") == "blocked":
+        try:
+            since = datetime.fromisoformat(str(sender.get("since", "")).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if (now - since).total_seconds() >= EVIDENCE_BLOCKED_GRACE:
+            return {"reason": f"sender_{sender.get('reason') or 'blocked'}",
+                    "blocked_since": since.isoformat(), "queued_events": health.get("queued_events", 0)}
+    return None
+
+
+async def _check_evidence(db) -> None:
+    """Durable agents that heartbeat but can ship nothing: one event when it
+    starts, none again until it recovers. Many at once is a server-side
+    problem and is only logged."""
+    now = datetime.now(timezone.utc)
+    agents = (await db.execute(
+        select(Agent.id, Agent.hostname, Agent.group_id, Agent.evidence_health)
+        .where(Agent.status == "online", Agent.approved.is_(True),
+               Agent.last_seen_at >= now - timedelta(seconds=120),
+               Agent.evidence_health_at >= now - timedelta(seconds=600))
+    )).all()
+    if not agents:
+        return
+    redis = await get_redis()
+    rows = []
+    for agent_id, hostname, group_id, health in agents:
+        why = _evidence_blocked(health, now)
+        if await _flag_once(redis, EVIDENCE_BLOCKED_FLAG.format(agent_id), why is not None):
+            rows.append((agent_id, hostname, group_id, why))
+    if len(rows) >= MASS_OFFLINE_MIN and len(rows) * 2 >= len(agents):
+        log.warning("agents_evidence_blocked_together", count=len(rows), total=len(agents))
+        return
+    for agent_id, hostname, group_id, why in rows:
+        await redis.xadd(REDIS_STREAM_KEY, health_event(
+            "agent_evidence_blocked", agent_id=agent_id, group_id=group_id, hostname=hostname, **why))
+
+
 async def _report_stops(db) -> None:
     """A stop notice still unanswered after STOP_GRACE is a real stop: report it.
     Restarts and upgrades heartbeat again first, which clears stop_reason."""
@@ -237,6 +292,7 @@ async def agent_monitor_loop() -> None:
                 await _mark_offline(db)
                 await _report_stops(db)
                 await _check_quiet_agents(db)
+                await _check_evidence(db)
                 await _expire_stale_tasks(db)
                 await _expire_stale_flows(db)
         except Exception as exc:

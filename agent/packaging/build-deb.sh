@@ -66,6 +66,12 @@ case "$1" in
               --home /var/lib/siem-agent siem-agent
     fi
     chown -R siem-agent:siem-agent /var/lib/siem-agent
+    # The durable evidence journal must belong to the user the service runs as
+    # (root, siem-agent.service): the agent refuses a journal another user owns,
+    # and then ships no events at all.
+    if [ -d /var/lib/siem-agent/evidence ]; then
+      chown -R root:root /var/lib/siem-agent/evidence
+    fi
     chmod 750 /var/lib/siem-agent
     # Agent must write token+id back to config after enrollment
     chown siem-agent:siem-agent /etc/siem-agent/config.yaml

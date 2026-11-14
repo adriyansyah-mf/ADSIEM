@@ -9,7 +9,7 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 | | |
 |---|---|
 | Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.27.3**, signed self-update |
-| Detection content | **217** Sigma rules, **135** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer |
+| Detection content | **218** Sigma rules, **135** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer |
 | Behaviour analytics | Host baselines (rare parent → child, rare new executables, beaconing), UEBA for users, IPs, hosts and processes, entity risk scoring, lateral movement graph |
 | Ingest | Agent (HTTPS), agentless syslog UDP/TCP 514 (RFC 3164, RFC 5424, CEF), Suricata EVE, Zeek, FortiGate |
 | AI | Auto-triage of every alert, AI case correlation, autonomous case investigator, SOC assistant, RAG over your SOPs |
@@ -120,7 +120,7 @@ service (`-install` / `-uninstall`).
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   numeric compare), keywords, boolean conditions, threshold and correlation windows,
   `after:` sequences, and per-entity suppression.
-- **217 bundled rules:** Linux, Windows, IOA chains, web attacks (SQLi, XSS, SSRF, LFI, RCE,
+- **218 bundled rules:** Linux, Windows, IOA chains, web attacks (SQLi, XSS, SSRF, LFI, RCE,
   Log4Shell, XXE, GraphQL, WordPress), network/firewall, Suricata/Zeek, ransomware, ML,
   YARA, credential access, kernel-thread masquerading (a `[kworker/…]`-named process that
   connects out or is exec'd), App Control, and agent tampering.

@@ -112,7 +112,9 @@ fixing the cause.
 | `Blocked (repeated_rejections)` | server rejects every record (validation bug) | fix the server; records were not quarantined past the first 5 |
 | `Backlogged` | events waiting, sender retrying | check connectivity, server 5xx/429 (group budget) |
 | `Degraded (capacity)` | local journal full; sources paused | restore delivery; never delete unconfirmed events to make space |
-| `Degraded (journal_unavailable)` | journal could not open; collection blocked | see agent log: permissions, disk, NTFS requirement on Windows; for `corrupt` see below |
+| `Degraded (journal_unavailable)` | journal could not open; collection blocked (alert **SIEM Agent Evidence Delivery Blocked**) | see agent log: permissions, disk, NTFS requirement on Windows; for `corrupt` see below |
+| agent log `journal directory owner: permission denied` | the journal belongs to another user than the service (root). Packages before 1.27.5 chowned `/var/lib/siem-agent` to `siem-agent` on every upgrade | `chown -R root:root /var/lib/siem-agent/evidence` and restart; file sources resume from their cursors, telemetry from the outage is lost |
+| `Degraded (non_replayable_loss)` on `publisher_bridge` | telemetry (process, network, detections) was dropped while the journal could not keep up; the count is in Known loss | 1.27.4+ admits bursts in group commits and logs `evidence: telemetry dropped`; healthy again after an hour without new loss |
 | `Degraded (storage_failure)` | a journal write or read failed | check the disk; restart once fixed |
 | Unknown gaps > 0 | a file was rotated/truncated or a channel cleared while unread | expected occasionally; investigate if frequent |
 | `Stale` | no heartbeat for two intervals | agent down or unreachable; the last state is shown |
