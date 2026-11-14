@@ -8,7 +8,7 @@ package hygiene
 // pending reboot, no automatic updates, no mandatory access control.
 
 import (
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 )
@@ -176,9 +176,9 @@ func sshdKeyword(out, key string) string {
 // included; the first value of a keyword wins (outside Match blocks).
 func sshdFromFiles(h linuxHost) (root, pass string) {
 	var lines []string
-	var load func(path string, depth int)
-	load = func(path string, depth int) {
-		text, err := h.readFile(path)
+	var load func(file string, depth int)
+	load = func(file string, depth int) {
+		text, err := h.readFile(file)
 		if err != nil || depth > 4 {
 			return
 		}
@@ -186,8 +186,8 @@ func sshdFromFiles(h linuxHost) (root, pass string) {
 			f := strings.Fields(line)
 			if len(f) >= 2 && strings.EqualFold(f[0], "include") {
 				for _, pattern := range f[1:] {
-					if !filepath.IsAbs(pattern) {
-						pattern = filepath.Join("/etc/ssh", pattern)
+					if !path.IsAbs(pattern) {
+						pattern = path.Join("/etc/ssh", pattern)
 					}
 					matches := h.glob(pattern)
 					sort.Strings(matches)
@@ -233,8 +233,10 @@ func sshdFromFiles(h linuxHost) (root, pass string) {
 // sudo skips files in sudoers.d whose names end in ~ or contain a dot.
 func sudoNopasswd(h linuxHost) []string {
 	files := []string{"/etc/sudoers"}
-	for _, f := range h.glob("/etc/sudoers.d/*") {
-		base := filepath.Base(f)
+	included := h.glob("/etc/sudoers.d/*")
+	sort.Strings(included) // sudo reads them in lexical order
+	for _, f := range included {
+		base := path.Base(f)
 		if strings.HasSuffix(base, "~") || strings.Contains(base, ".") {
 			continue
 		}

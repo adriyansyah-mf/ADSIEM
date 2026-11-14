@@ -3,7 +3,7 @@ package hygiene
 import (
 	"encoding/binary"
 	"errors"
-	"path/filepath"
+	"path"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +25,7 @@ func (f fakeHost) host() linuxHost {
 		glob: func(pattern string) []string {
 			var out []string
 			for p := range f.files {
-				if ok, _ := filepath.Match(pattern, p); ok {
+				if ok, _ := path.Match(pattern, p); ok {
 					out = append(out, p)
 				}
 			}
@@ -78,7 +78,7 @@ func TestLinuxPostureOnACompromisedHost(t *testing.T) {
 			"/etc/shadow":                             "root:$6$x:1:0:::::\nwww-data:*:1::::::\ntoor:$6$y:1::::::\ndev::1::::::\n",
 			"/etc/sudoers":                            "root ALL=(ALL:ALL) ALL\n%sudo ALL=(ALL:ALL) ALL\n# deploy ALL=(ALL) NOPASSWD: ALL\n",
 			"/etc/sudoers.d/90-cloud":                 "ubuntu ALL=(ALL) NOPASSWD:ALL\n",
-			"/etc/sudoers.d/README":                   "x NOPASSWD: ALL\n",
+			"/etc/sudoers.d/README":                   "# files here are read by sudo; a dot in the name skips one\n# e.g. bob ALL=(ALL) NOPASSWD: ALL\n",
 			"/etc/sudoers.d/old.bak":                  "y NOPASSWD: ALL\n",
 			"/var/run/reboot-required":                "*** System restart required ***\n",
 			"/var/run/reboot-required.pkgs":           "linux-image-7.0.0-23-generic\nlinux-base\n",
@@ -114,8 +114,8 @@ func TestLinuxPostureOnACompromisedHost(t *testing.T) {
 		switch {
 		case strings.Contains(is.Message, "UID 0: toor"):
 			uid0 = is.Severity == "critical"
-		case strings.HasPrefix(is.Message, "sudo without a password for: ubuntu") && !strings.Contains(is.Message, "x,"):
-			sudo = !strings.Contains(is.Message, "deploy") && !strings.Contains(is.Message, " y")
+		case strings.HasPrefix(is.Message, "sudo without a password for: "):
+			sudo = is.Message == "sudo without a password for: ubuntu" // not the commented deploy, README or old.bak
 		case strings.Contains(is.Message, "linux-image-7.0.0-23-generic"):
 			reboot = true
 		}
