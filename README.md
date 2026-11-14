@@ -156,6 +156,13 @@ model to keep inference on-prem.
   RAG over past alerts and your SOPs. It then gives a verdict, escalates severity, opens or
   joins a case, starts auto-hunts and, from TI verdicts, web auto-blocks. Rate-limited calls
   go to a backoff retry queue (`ai_retry.py`).
+- **Guardrails:**
+  - Logs reach every model as wrapped untrusted data, never instructions.
+  - An alert whose data tries to talk to the AI is never closed on the model's word.
+  - In SOAR, an AI decision cannot reach containment without an Approval node.
+  - A web block that only the AI verdict supports waits for an analyst's approval.
+
+  See [`docs/operations/ai-guardrails.md`](docs/operations/ai-guardrails.md).
 - **AI case correlation:** the LLM picks the right existing case from validated candidates.
   Each alert-to-case link keeps its evidence (`case_correlation.py`).
 - **Autonomous investigator** (**Investigate with AI** on a case): reads the case, searches

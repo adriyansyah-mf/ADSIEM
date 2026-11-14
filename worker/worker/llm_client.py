@@ -10,6 +10,7 @@ import structlog
 from worker.config import NINEROUTER_API_KEY, NINEROUTER_MODEL
 from worker.settings_cache import get_setting
 from worker.llm_gateway import Completion, LLMError, complete, extract_json
+from worker.untrusted import UNTRUSTED_RULE, wrap
 
 log = structlog.get_logger()
 
@@ -88,7 +89,9 @@ Rules the strings must satisfy:
 - No field:value or field=value syntax of any kind (src_ip:, source.ip:, host:, hostname:, uri:, url:, event.*, http.*).
 - No IP addresses, no hostnames, no usernames, no file paths from the alert.
 - No boolean operators (AND, OR, NOT).
-- Describe the ATTACK TECHNIQUE and the PRODUCT, not our specific event, so a public search returns advisories and write-ups."""
+- Describe the ATTACK TECHNIQUE and the PRODUCT, not our specific event, so a public search returns advisories and write-ups.
+
+""" + UNTRUSTED_RULE
 
 
 def rag_sections(similar_cases: list[dict] | None, sop_context: list[str] | None,
@@ -190,12 +193,11 @@ async def analyze_alert_with_ai(
 
     rag_context = rag_sections(similar_cases, sop_context, feedback_context)
 
+    alert_data = wrap(f"Title    : {title}\nSource IP: {source_ip or 'unknown'}\nHostname : {hostname or 'unknown'}\n"
+                      f"Fields   : {json.dumps(decoded_fields, default=str)[:500]}", "alert")
     prompt = f"""ALERT TO TRIAGE:
-Title    : {title}
 Severity : {severity}
-Source IP: {source_ip or 'unknown'}
-Hostname : {hostname or 'unknown'}
-Fields   : {json.dumps(decoded_fields, default=str)[:500]}{ioc_list}{mitre_hint}{enrichment_section}{rag_context}
+{alert_data}{ioc_list}{mitre_hint}{enrichment_section}{rag_context}
 
 Perform triage and provide your verdict as an L1 analyst."""
 
@@ -265,7 +267,9 @@ Respond ONLY with valid JSON — no markdown outside the JSON:
   "recommended_actions": ["<specific action>", ...],
   "confidence": <0.0-1.0>,
   "sophistication": "<low|medium|high|apt>"
-}"""
+}
+
+""" + UNTRUSTED_RULE
 
 
 async def analyze_campaign_with_ai(
@@ -287,7 +291,7 @@ async def analyze_campaign_with_ai(
 Total alerts in 24h window: {alert_count}
 
 CHRONOLOGICAL ATTACK TIMELINE:
-{timeline}
+{wrap(timeline, "alert_timeline")}
 
 Analyze this as a complete attack campaign. What is the full story?"""
 

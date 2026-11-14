@@ -144,11 +144,59 @@ def test_legacy_playbook_converts_to_a_linear_workflow():
     ))
     assert trigger_event(g) == "alert.triaged"   # looked at the AI verdict → runs once, after triage
     types = [n["type"] for n in g["nodes"]]
-    assert types == ["trigger", "case", "response"]
-    assert g["nodes"][1]["params"]["title"] == "SOAR: {{ trigger.rule_title }}"
-    assert all(n["continue_on_error"] for n in g["nodes"][1:])
-    assert [(e["from"], e["to"]) for e in g["edges"]] == [("trigger", "step_1"), ("step_1", "step_2")]
+    # it blocks on the AI verdict: an analyst approves before any step runs
+    assert types == ["trigger", "approval", "case", "response"]
+    assert g["nodes"][2]["params"]["title"] == "SOAR: {{ trigger.rule_title }}"
+    assert all(n["continue_on_error"] for n in g["nodes"][2:])
+    assert [(e["from"], e["output"], e["to"]) for e in g["edges"]] == [
+        ("trigger", "main", "approval"), ("approval", "approved", "step_1"), ("step_1", "main", "step_2")]
     assert trigger_event(validate(from_legacy({}, []))) == "alert.created"
+    # no AI condition: runs on creation, straight through, as before
+    plain = validate(from_legacy({"conditions": [{"field": "severity", "operator": "eq", "value": "critical"}]},
+                                 [{"action_type": "block_ip", "order_index": 0, "params": {}}]))
+    assert [n["type"] for n in plain["nodes"]] == ["trigger", "response"]
+
+
+def test_an_ai_decision_never_acts_without_an_approval():
+    """AI Decide, or a branch on the AI triage verdict, may lead to containment,
+    blocks or outbound changes only through an Approval node."""
+    def node(nid, ntype, **params):
+        return {"id": nid, "type": ntype, "params": params}
+    trigger = node("t", "trigger", event="alert.created")
+    ai = node("ai", "ai_decide", question="Is this host compromised?")
+    iso = node("iso", "response", operation="isolate_host")
+    appr = node("ok", "approval", timeout_minutes=30)
+    note = node("note", "case", operation="add_note", content="AI says yes")
+
+    direct = {"nodes": [trigger, ai, iso], "edges": [
+        {"from": "t", "to": "ai"}, {"from": "ai", "output": "yes", "to": "iso"}]}
+    assert "acts on the AI decision of node ai without an Approval node" in _errors(direct)
+
+    # a detour through a harmless step is still ungated
+    detour = {"nodes": [trigger, ai, note, iso], "edges": [
+        {"from": "t", "to": "ai"}, {"from": "ai", "output": "yes", "to": "note"}, {"from": "note", "to": "iso"}]}
+    assert "node iso" in _errors(detour)
+
+    gated = {"nodes": [trigger, ai, appr, note, iso], "edges": [
+        {"from": "t", "to": "ai"}, {"from": "ai", "output": "yes", "to": "note"},
+        {"from": "ai", "output": "yes", "to": "ok"}, {"from": "ok", "output": "approved", "to": "iso"}]}
+    validate(gated)  # notes may follow the AI directly; isolation waits for the analyst
+
+    on_verdict = {"nodes": [node("t", "trigger", event="alert.triaged",
+                                 conditions=[{"field": "trigger.ai_verdict", "operator": "eq", "value": "escalate"}]),
+                            node("blk", "block_ioc", operation="ip_block", value="{{ trigger.source_ip }}")],
+                  "edges": [{"from": "t", "to": "blk"}]}
+    assert "node blk" in _errors(on_verdict)
+
+    post = {"nodes": [trigger, ai, node("fw", "http", method="POST", url="https://fw.example/api/block")],
+            "edges": [{"from": "t", "to": "ai"}, {"from": "ai", "output": "yes", "to": "fw"}]}
+    assert "node fw" in _errors(post)
+    get = {"nodes": [trigger, ai, node("ti", "http", method="GET", url="https://ti.example/lookup")],
+           "edges": [{"from": "t", "to": "ai"}, {"from": "ai", "output": "yes", "to": "ti"}]}
+    validate(get)  # reading is not acting
+
+    # without an AI anywhere, containment needs no approval (the analyst wrote the rule)
+    validate({"nodes": [trigger, iso], "edges": [{"from": "t", "to": "iso"}]})
 
 
 # ─── conditions ─────────────────────────────────────────────────────────────

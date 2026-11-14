@@ -7,7 +7,7 @@ allowlist filters the whole set)."""
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -101,6 +101,29 @@ async def block_domain(db, user, group: str, value: str, reason: str, expires_at
         row = WebBlockEntry(domain=domain, group_id=group, source="manual", created_by=await actor_id(db, user))
         db.add(row)
     row.status, row.reason, row.expires_at, row.seq = "active", reason.strip(), expires_at, next_seq()
+    await commit_or_conflict(db)
+    await db.refresh(row)
+    invalidate()
+    return row
+
+
+async def approve_proposed(db, row: WebBlockEntry, default_days: int = 30) -> WebBlockEntry:
+    """A block the AI proposed (status pending, worker/webblock_auto.py) becomes
+    active, so agents receive it on their next sync. Commits. 409 when it is not
+    pending or the domain was allowlisted since. A proposal whose expiry passed
+    while it waited gets `default_days` from now."""
+    await lock_seq_writes(db)
+    await db.refresh(row)
+    if row.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Only a pending block can be approved; this one is {row.status}")
+    rule = allow_match(row.domain, await allow_rules(db, row.group_id))
+    if rule:
+        raise HTTPException(status_code=409, detail=f"{row.domain} is allowlisted ({rule})")
+    now = datetime.now(timezone.utc)
+    expires = row.expires_at
+    if expires is not None and (expires if expires.tzinfo else expires.replace(tzinfo=timezone.utc)) <= now:
+        expires = now + timedelta(days=default_days)
+    row.status, row.expires_at, row.seq = "active", expires, next_seq()
     await commit_or_conflict(db)
     await db.refresh(row)
     invalidate()

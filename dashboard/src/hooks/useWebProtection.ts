@@ -6,7 +6,7 @@ export interface WebBlock {
   domain: string
   group_id: string
   source: 'manual' | 'alert' | 'urlhaus' | 'phishtank'
-  status: 'active' | 'removed' | 'suppressed'
+  status: 'active' | 'pending' | 'removed' | 'suppressed'  // pending: AI-proposed, waits for approval
   reason: string
   sample_url: string | null
   alert_id: string | null
@@ -82,6 +82,15 @@ export function useBlockWeb() {
   return useMutation({
     mutationFn: (body: { value: string; reason?: string; expires_at?: string | null; group_id?: string }) =>
       api.post('/api/web-blocks', body).then(r => r.data as WebBlock),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: KEY }); qc.invalidateQueries({ queryKey: ['iocs'] }) },
+  })
+}
+
+// A block the AI proposed from an alert verdict (status pending) becomes active
+export function useApproveWeb() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/api/web-blocks/${id}/approve`).then(r => r.data as WebBlock),
     onSuccess: () => { qc.invalidateQueries({ queryKey: KEY }); qc.invalidateQueries({ queryKey: ['iocs'] }) },
   })
 }

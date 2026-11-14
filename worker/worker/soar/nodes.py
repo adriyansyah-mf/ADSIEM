@@ -85,19 +85,27 @@ async def run_enrich(node: dict, params: dict, ctx: dict) -> NodeResult:
 
 # ─── AI Decide ──────────────────────────────────────────────────────────────
 
-_AI_SYSTEM = (
-    "You are a SOC analyst deciding one yes/no question inside an automated playbook. "
-    "Use only the JSON context given. Reply with JSON only: "
-    '{"answer": "yes" or "no", "confidence": 0.0-1.0, "reason": "one or two sentences"}.'
-)
+def _ai_system() -> str:
+    from worker.untrusted import UNTRUSTED_RULE
+    return ("You are a SOC analyst deciding one yes/no question inside an automated playbook. "
+            "Use only the JSON context given. Reply with JSON only: "
+            '{"answer": "yes" or "no", "confidence": 0.0-1.0, "reason": "one or two sentences"}.\n\n'
+            + UNTRUSTED_RULE)
 
 
 async def run_ai_decide(node: dict, params: dict, ctx: dict) -> NodeResult:
     from worker.llm_gateway import LLMError, complete, extract_json
-    context = json.dumps({"trigger": ctx.get("trigger"), "steps": ctx.get("steps")}, default=str)[:AI_CONTEXT_CHARS]
+    from worker.untrusted import injection_signals, wrap
+    raw = {"trigger": ctx.get("trigger"), "steps": ctx.get("steps")}
+    signals = injection_signals(raw)
+    if signals:  # the playbook's own data talks to an AI: never let it pick the branch that acts
+        return NodeResult("no", {"answer": "no", "confidence": 1.0, "injection_signals": signals,
+                                 "reason": f"prompt-injection attempt in the playbook context ({', '.join(signals)}); "
+                                           "the AI was not asked and the playbook takes the 'no' branch"})
+    context = json.dumps(raw, default=str)[:AI_CONTEXT_CHARS]
     messages = [
-        {"role": "system", "content": _AI_SYSTEM},
-        {"role": "user", "content": f"Question: {params.get('question')}\n\nContext:\n{context}"},
+        {"role": "system", "content": _ai_system()},
+        {"role": "user", "content": f"Question: {params.get('question')}\n\nContext:\n{wrap(context, 'playbook_context')}"},
     ]
     try:
         reply = await complete(messages, temperature=0.0, max_tokens=400)
