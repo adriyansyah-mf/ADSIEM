@@ -27,9 +27,13 @@ async def list_tasks(
     _=Depends(get_current_user),
     agent_id: UUID | None = None,
     status: str | None = None,
+    task_type: str | None = None,
     limit: int = 50,
 ):
-    q = select(AgentTask).order_by(AgentTask.created_at.desc()).limit(limit)
+    """task_type takes one type or several, comma-separated (yara_scan,memory_scan)."""
+    q = select(AgentTask).order_by(AgentTask.created_at.desc()).limit(min(max(limit, 1), 500))
+    if task_type:
+        q = q.where(AgentTask.task_type.in_([t.strip() for t in task_type.split(",") if t.strip()]))
     if group_filter is not None:
         q = q.where(AgentTask.agent_id.in_(select(Agent.id).where(Agent.group_id == group_filter)))
     if agent_id:

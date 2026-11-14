@@ -3,9 +3,8 @@ import { format } from 'date-fns'
 import { Shield, Plus, Trash2, Edit2, Play, CheckCircle, XCircle, Loader2, ToggleLeft, ToggleRight, Download } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { useYaraRules, useCreateYaraRule, useUpdateYaraRule, useToggleYaraRule, useDeleteYaraRule, useYaraScan, useYaraMemoryScan, useSeedBuiltinRules } from '@/hooks/useYara'
-import { useTask } from '@/hooks/useTasks'
-import type { Agent, YaraRule } from '@/types'
+import { useYaraRules, useCreateYaraRule, useUpdateYaraRule, useToggleYaraRule, useDeleteYaraRule, useYaraScan, useYaraMemoryScan, useSeedBuiltinRules, useYaraScanTasks } from '@/hooks/useYara'
+import type { Agent, AgentTask, YaraRule } from '@/types'
 
 const DEFAULT_RULE = `rule new_rule {
     meta:
@@ -17,13 +16,54 @@ const DEFAULT_RULE = `rule new_rule {
         any of them
 }`
 
-function ScanResultView({ taskId }: { taskId: string }) {
-  const { data: task } = useTask(taskId)
-  if (!task) return <Loader2 size={14} className="animate-spin" />
+function describeTarget(task: AgentTask): string {
+  const p = task.params as { path?: string; recursive?: boolean; pid?: number }
+  if (task.task_type === 'memory_scan') return p.pid ? `memory of pid ${p.pid}` : 'memory of every process'
+  return `${p.path ?? '?'}${p.recursive ? ' (recursive)' : ''}`
+}
+
+function RecentScans({ agents }: { agents: Agent[] }) {
+  const { data: tasks = [], isLoading } = useYaraScanTasks()
+  const [open, setOpen] = useState<string | null>(null)
+  if (isLoading) return <Loader2 size={14} className="animate-spin" />
+  if (tasks.length === 0) return null
+  const host = (id: string | null) => agents.find(a => a.id === id)?.hostname ?? id?.slice(0, 8) ?? '?'
+  return (
+    <div className="space-y-1 pt-1 border-t border-border">
+      <p className="text-xs text-muted-foreground uppercase font-semibold pt-2">Recent scans</p>
+      {tasks.map((t, i) => {
+        // the newest scan shows its result; older ones open on click
+        const expanded = open === t.id || (open === null && i === 0)
+        const running = t.status !== 'done' && t.status !== 'failed'
+        const matches = (t.result as { matches?: unknown[] } | null)?.matches?.length ?? 0
+        return (
+          <div key={t.id} className="text-xs">
+            <button onClick={() => setOpen(expanded ? '' : t.id)}
+              className="flex items-center gap-2 w-full text-left py-1 hover:text-primary">
+              {running ? <Loader2 size={12} className="animate-spin shrink-0" />
+                : t.status === 'failed' ? <XCircle size={12} className="text-destructive shrink-0" />
+                : matches > 0 ? <XCircle size={12} className="text-red-400 shrink-0" />
+                : <CheckCircle size={12} className="text-emerald-400 shrink-0" />}
+              <span className="font-medium">{host(t.agent_id)}</span>
+              <span className="font-mono text-muted-foreground truncate">{describeTarget(t)}</span>
+              <span className="ml-auto text-muted-foreground shrink-0">
+                {running ? t.status : t.status === 'failed' ? 'failed' : `${matches} match${matches === 1 ? '' : 'es'}`}
+                {' · '}{format(new Date(t.created_at), 'dd MMM HH:mm')}
+              </span>
+            </button>
+            {expanded && <div className="pl-5 pb-2"><ScanResultView task={t} /></div>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ScanResultView({ task }: { task: AgentTask }) {
   if (task.status === 'failed') return <p className="text-xs text-destructive">{task.error}</p>
   if (task.status !== 'done') return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      <Loader2 size={12} className="animate-spin" /> Scanning…
+      <Loader2 size={12} className="animate-spin" /> {task.status === 'running' ? 'Scanning…' : 'Waiting for the agent…'}
     </div>
   )
   const memory = task.task_type === 'memory_scan'
@@ -94,7 +134,6 @@ export default function YaraPage() {
   const [scanRecursive, setScanRecursive] = useState(true)
   const [scanTarget, setScanTarget] = useState<'files' | 'memory'>('files')
   const [scanPid, setScanPid] = useState('0')
-  const [lastTaskId, setLastTaskId] = useState<string | null>(null)
 
   const openForm = (rule?: YaraRule) => {
     if (rule) {
@@ -117,10 +156,12 @@ export default function YaraPage() {
 
   const handleScan = async () => {
     if (!scanAgent) return
-    const t = scanTarget === 'memory'
-      ? await memScan.mutateAsync({ agent_id: scanAgent, pid: Math.max(0, parseInt(scanPid, 10) || 0) })
-      : await scan.mutateAsync({ agent_id: scanAgent, path: scanPath, recursive: scanRecursive })
-    setLastTaskId(t.id)
+    // the new task shows in Recent scans: the mutations invalidate ['tasks']
+    if (scanTarget === 'memory') {
+      await memScan.mutateAsync({ agent_id: scanAgent, pid: Math.max(0, parseInt(scanPid, 10) || 0) })
+    } else {
+      await scan.mutateAsync({ agent_id: scanAgent, path: scanPath, recursive: scanRecursive })
+    }
   }
 
   return (
@@ -190,7 +231,7 @@ export default function YaraPage() {
             Scan
           </button>
         </div>
-        {lastTaskId && <ScanResultView taskId={lastTaskId} />}
+        <RecentScans agents={agents} />
       </div>
 
       {/* Rule editor modal */}
