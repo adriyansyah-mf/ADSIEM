@@ -104,6 +104,9 @@ func Scan(ctx context.Context, rules *yara.Rules, pid int, lim Limits) (Result, 
 		return res, err
 	}
 	defer rd.Close()
+	// one read buffer for every chunk (yara copies the data it reports), so
+	// a scan holds a chunk at a time rather than a heap of discarded ones
+	var chunk []byte
 	for _, r := range regions {
 		if ctx.Err() != nil {
 			return res, ctx.Err()
@@ -119,7 +122,10 @@ func Scan(ctx context.Context, rules *yara.Rules, pid int, lim Limits) (Result, 
 		seen := map[string]bool{} // a match in an overlap is found twice
 		for start := r.Start; start < r.End && res.Bytes < lim.MaxTotal; start += uint64(lim.Chunk - lim.Overlap) {
 			size := min(int64(r.End-start), lim.Chunk, lim.MaxTotal-res.Bytes)
-			buf := make([]byte, size)
+			if int64(cap(chunk)) < size {
+				chunk = make([]byte, min(lim.Chunk, max(size, 1<<20)))
+			}
+			buf := chunk[:size]
 			n, _ := rd.ReadAt(buf, start)
 			if n == 0 {
 				res.Skipped++

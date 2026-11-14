@@ -33,7 +33,18 @@ func memTargets(pid int) ([]memscan.Proc, error) {
 
 func hexAddr(a uint64) string { return "0x" + strconv.FormatUint(a, 16) }
 
+// memChunk is the buffer a task's memory scan reads at once: with the
+// lowered copy and the prefilter's hit lists, a chunk costs a few times
+// its size, so 4 MiB keeps a scan on a small host well under the 16 MiB
+// default's peak.
+const memChunk = 4 << 20
+
 func pluginMemYara(ctx context.Context, args map[string]any, emit func(map[string]any) error) error {
+	_, err := heavyScan(func() (struct{}, error) { return struct{}{}, memYara(ctx, args, emit) })
+	return err
+}
+
+func memYara(ctx context.Context, args map[string]any, emit func(map[string]any) error) error {
 	rulesRaw, _ := args["rules"].([]any)
 	rules, ruleErrs := compileYaraRules(rulesRaw)
 	for _, e := range ruleErrs {
@@ -48,7 +59,7 @@ func pluginMemYara(ctx context.Context, args map[string]any, emit func(map[strin
 	if err != nil {
 		return err
 	}
-	lim := memscan.Limits{AnonOnly: argBool(args, "anon_only", false)}
+	lim := memscan.Limits{Chunk: memChunk, AnonOnly: argBool(args, "anon_only", false)}
 	for _, p := range procs {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -125,7 +136,7 @@ func runMemoryScan(pid int, rulesRaw []any) (MemoryScanResult, error) {
 			res.Warnings = append(res.Warnings, "scan timed out; remaining processes skipped")
 			break
 		}
-		r, err := memscan.Scan(ctx, rules, p.PID, memscan.Limits{})
+		r, err := memscan.Scan(ctx, rules, p.PID, memscan.Limits{Chunk: memChunk})
 		if err != nil {
 			res.ProcessesSkipped++
 			continue
