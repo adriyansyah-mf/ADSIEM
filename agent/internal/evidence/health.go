@@ -126,6 +126,14 @@ func (j *Journal) Snapshot() Health {
 	defer j.mu.Unlock()
 	totals := cloneTotals(j.checkpoint.Health)
 	h := Health{Version: 1, State: "healthy", Reason: "", LastReceiptAt: totals.LastReceiptAt, Retries: totals.Retries, Quarantined: totals.Quarantined, Held: totals.Held, KnownLoss: totals.KnownLoss, UnknownGaps: totals.UnknownGaps, Sources: totals.Sources}
+	// Telemetry the bridge dropped is gone for good and stays counted in
+	// KnownLoss; once no new loss has been recorded for bridgeLossQuiet the
+	// bridge is healthy again, or one burst would mark the agent degraded for
+	// the life of its journal.
+	if s, ok := h.Sources[bridgeSource]; ok && s.State == "degraded" && s.Reason == bridgeLossReason &&
+		j.now().Sub(s.UpdatedAt) >= bridgeLossQuiet && j.bridgeLossIdle() {
+		h.Sources[bridgeSource] = SourceHealth{State: "healthy", Reason: bridgeLossPast, UpdatedAt: s.UpdatedAt}
+	}
 	for _, source := range h.Sources {
 		if source.State != "healthy" {
 			h.State = "degraded"

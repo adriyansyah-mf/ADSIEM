@@ -4,9 +4,25 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
 
 var bridgeLossReasons = [3]string{"capacity", "oversize", "storage_failure"}
+
+const (
+	bridgeSource     = "publisher_bridge"
+	bridgeLossReason = "non_replayable_loss"
+	// bridgeLossPast: the source is healthy again; KnownLoss keeps the count.
+	bridgeLossPast  = "past_non_replayable_loss"
+	bridgeLossQuiet = time.Hour
+)
+
+// bridgeLossIdle reports no loss waiting to be recorded.
+func (j *Journal) bridgeLossIdle() bool {
+	j.bridgeLoss.mu.Lock()
+	defer j.bridgeLoss.mu.Unlock()
+	return j.bridgeLoss.counts == [3]int64{} && !j.bridgeLoss.saturated
+}
 
 // This lock protects fixed-size counters only. Never hold it across I/O or
 // callbacks. Journal.mu may acquire it; the callback path never acquires mu.
@@ -55,11 +71,10 @@ func (j *Journal) flushBridgeLoss(ctx context.Context) error {
 		}
 		c.Health.KnownLoss[reason] += counts[i]
 	}
-	const source = "publisher_bridge"
-	if _, ok := c.Health.Sources[source]; !ok && len(c.Health.Sources) >= 256 {
+	if _, ok := c.Health.Sources[bridgeSource]; !ok && len(c.Health.Sources) >= 256 {
 		return ErrInvalidControl
 	}
-	c.Health.Sources[source] = SourceHealth{State: "degraded", Reason: "non_replayable_loss", UpdatedAt: j.now().UTC()}
+	c.Health.Sources[bridgeSource] = SourceHealth{State: "degraded", Reason: bridgeLossReason, UpdatedAt: j.now().UTC()}
 	generation := j.generation
 	err := j.publish(ctx, c)
 	// Cleanup failure may follow a fully committed checkpoint. Those counters

@@ -10,9 +10,16 @@ import (
 	"time"
 )
 
+// bigJournalOptions holds a full bridge (bridgeSlots small events).
+func bigJournalOptions(t *testing.T) Options {
+	o := journalOptions(t)
+	o.MaxBytes, o.SegmentBytes, o.ReservedBytes = 64<<20, 4<<20, 64<<10
+	return o
+}
+
 func TestTrySubmitBoundsQueueWithoutWaitingForJournal(t *testing.T) {
 	// Given a worker blocked in journal fsync.
-	j := openJournal(t, journalOptions(t))
+	j := openJournal(t, bigJournalOptions(t))
 	g := gatePublisherSync(t, j)
 	p := NewPublisher(j, j.options.AgentID, "host", nil)
 	if err := p.TrySubmit(Draft{RawMessage: "active"}); err != nil {
@@ -20,9 +27,9 @@ func TestTrySubmitBoundsQueueWithoutWaitingForJournal(t *testing.T) {
 	}
 	waitPublisherSignal(t, g.entered)
 	finished := make(chan error, 1)
-	// When the callback fills the 64 pending slots then rejects another offer.
+	// When the callback fills the pending slots then rejects another offer.
 	go func() {
-		for range 64 {
+		for range bridgeSlots {
 			if err := p.TrySubmit(Draft{RawMessage: "pending"}); err != nil {
 				finished <- err
 				return
@@ -44,8 +51,9 @@ func TestTrySubmitBoundsQueueWithoutWaitingForJournal(t *testing.T) {
 	}
 	// Then admitted work drains, and the rejected item is durably counted.
 	h := j.Snapshot()
-	if h.QueuedEvents != 65 || h.KnownLoss["capacity"] != 1 || len(h.PendingLoss) != 0 || h.LossUncertain {
-		t.Fatalf("bridge health: %#v", h)
+	if h.QueuedEvents != bridgeSlots+1 || h.KnownLoss["capacity"] != 1 || len(h.PendingLoss) != 0 || h.LossUncertain {
+		t.Fatalf("bridge health: queued %d, known %v, pending %v, uncertain %v",
+			h.QueuedEvents, h.KnownLoss, h.PendingLoss, h.LossUncertain)
 	}
 	if err := j.Close(); err != nil {
 		t.Fatal(err)
