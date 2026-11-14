@@ -1,0 +1,28 @@
+title: Modbus PLC Programming Command (UMAS)
+id: rule-ot-modbus-plc-programming
+description: >-
+  Modbus function 90 (0x5A) is Schneider Electric's UMAS channel: the
+  engineering protocol that stops and starts a Modicon PLC, reads and
+  downloads its program and changes its configuration. Outside a planned
+  maintenance window from the engineering workstation, it is the step that
+  changes what the PLC does (TRITON-style logic changes, CVE-2021-22779 auth
+  bypass) (T0843 Program Download, T0858 Change Operating Mode, T0845
+  Program Upload)
+logsource:
+  product: suricata
+  service: modbus
+detection:
+  umas:
+    ot.function_code: '90'
+  condition: umas
+suppression:
+  timewindow: 900
+  group_by: [source.ip, destination.ip]
+level: critical
+tags:
+  - attack.lateral_movement
+  - attack.t0843
+  - attack.execution
+  - attack.t0858
+  - attack.collection
+  - attack.t0845

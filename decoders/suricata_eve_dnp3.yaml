@@ -1,0 +1,32 @@
+# Suricata EVE JSON: DNP3 application messages (event_type dnp3; enable the
+# dnp3 app-layer and eve logger). SCADA traffic between a master station and
+# outstations (RTUs / IEDs) in power, water and fuel systems, usually port 20000.
+# ot.function_code is the application function code (13 cold restart,
+# 18 stop application, 21 disable unsolicited, ...): rules/ot_dnp3_*.yaml.
+name: suricata_eve_dnp3
+log_type: suricata
+type: json
+priority: 15
+enabled: true
+raw_fields: true
+when:
+  event_type: dnp3
+fields:
+  source.ip: src_ip
+  source.port: src_port
+  destination.ip: dest_ip
+  destination.port: dest_port
+  network.transport: proto
+  network.protocol: app_proto
+  observer.hostname: host
+  event.id: flow_id
+  ot.message_type: dnp3.type
+  ot.function_code: dnp3.application.function_code
+  ot.source_address: dnp3.src
+  ot.destination_address: dnp3.dst
+static_fields:
+  event.kind: event
+  event.category: network
+  event.module: suricata
+  event.dataset: suricata.dnp3
+  ot.protocol: dnp3

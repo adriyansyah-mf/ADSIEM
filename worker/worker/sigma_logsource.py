@@ -229,6 +229,10 @@ SOURCES: list[Source] = [
     # Suricata EVE JSON (decoders/suricata_eve.yaml): one stream, event_type per record
     Source("suricata", log_types=("suricata",)),
     Source("suricata", "alert", log_types=("suricata",), when=(("event.dataset", "eq", ("suricata.alert",)),)),
+    # OT / ICS protocols (decoders/suricata_eve_modbus.yaml, suricata_eve_dnp3.yaml) and flow records
+    *(Source("suricata", svc, log_types=("suricata",), when=(("event.dataset", "eq", (f"suricata.{svc}",)),))
+      for svc in ("modbus", "dnp3")),
+    Source("suricata", "flow", log_types=("suricata",), when=(("event.action", "eq", ("flow", "netflow")),)),
     # Zeek JSON logs (decoders/zeek_json.yaml): one Sigma service per Zeek log
     Source("zeek", log_types=("zeek",)),
     *(Source("zeek", svc, log_types=("zeek",), when=(("event.dataset", "eq", (f"zeek.{svc}",)),))

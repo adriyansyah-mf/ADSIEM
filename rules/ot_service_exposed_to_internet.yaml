@@ -1,0 +1,35 @@
+title: OT Service Reached From The Internet
+id: rule-ot-service-exposed-to-internet
+description: >-
+  Traffic from a public address reached an industrial control port: Modbus
+  502, DNP3 20000, Siemens S7 102, IEC 60870-5-104 2404, EtherNet/IP 44818,
+  BACnet 47808, Niagara Fox 1911/4911, OMRON FINS 9600, GE SRTP 18245/18246.
+  The device is reachable from the internet, where scanners (Shodan, Censys)
+  and attackers find it within hours. Isolate it behind the OT firewall or a
+  VPN (T0883 Internet Accessible Device, T0846 Remote System Discovery)
+logsource:
+  product: suricata
+detection:
+  ot_port:
+    destination.port: ['502', '20000', '102', '2404', '44818', '47808', '1911', '4911', '9600', '18245', '18246']
+  private_source:
+    source.ip|cidr:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 127.0.0.0/8
+      - 100.64.0.0/10
+      - 169.254.0.0/16
+      - fc00::/7
+      - fe80::/10
+      - ::1/128
+  condition: ot_port and not private_source
+suppression:
+  timewindow: 86400
+  group_by: [destination.ip, destination.port]
+level: high
+tags:
+  - attack.initial_access
+  - attack.t0883
+  - attack.discovery
+  - attack.t0846

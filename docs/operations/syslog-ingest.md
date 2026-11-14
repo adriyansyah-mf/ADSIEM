@@ -82,7 +82,7 @@ header.
 
 | Sensor | Agent log source | Log type | Decoders |
 |---|---|---|---|
-| Suricata | `/var/log/suricata/eve.json` | `suricata` | `suricata_eve_{alert,dns,http,tls,generic}` |
+| Suricata | `/var/log/suricata/eve.json` | `suricata` | `suricata_eve_{alert,dns,http,tls,modbus,dnp3,generic}` (OT: [ot-ics-detection.md](ot-ics-detection.md)) |
 | Zeek (`LogAscii::use_json=T`) | `/opt/zeek/logs/current/{conn,dns,http,ssl,notice}.log` | `zeek` | `zeek_{conn,dns,http,ssl,notice}` |
 
 rsyslog forwarding of `eve.json` (`/etc/rsyslog.d/91-suricata.conf`), with the

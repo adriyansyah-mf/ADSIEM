@@ -1,0 +1,24 @@
+title: DNP3 File Deleted On Outstation
+id: rule-ot-dnp3-file-delete
+description: >-
+  A DNP3 Delete File request (function 27): removes a file from an RTU or
+  IED, such as its configuration, settings or event records. Destroys the
+  device's setup or the evidence of an intrusion (T0809 Data Destruction,
+  T0872 Indicator Removal on Host)
+logsource:
+  product: suricata
+  service: dnp3
+detection:
+  delete_file:
+    ot.message_type: request
+    ot.function_code: '27'
+  condition: delete_file
+suppression:
+  timewindow: 900
+  group_by: [source.ip, destination.ip]
+level: high
+tags:
+  - attack.inhibit_response_function
+  - attack.t0809
+  - attack.evasion
+  - attack.t0872

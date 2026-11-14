@@ -1,0 +1,30 @@
+title: Modbus Diagnostics Restart Or Listen-Only Command
+id: rule-ot-modbus-diagnostics-dos
+description: >-
+  Modbus function 8 (Diagnostics) with sub-function 1 (Restart Communications
+  Option), 4 (Force Listen Only Mode) or 10 (Clear Counters and Diagnostic
+  Register). Listen-only makes the device stop answering its master until it
+  is restarted: the operators lose view and control of the process. A
+  restart interrupts it; clearing counters hides the attack's traces
+  (T0816 Device Restart/Shutdown, T0814 Denial of Service, T0815 Denial of
+  View, T0872 Indicator Removal on Host)
+logsource:
+  product: suricata
+  service: modbus
+detection:
+  diagnostics:
+    ot.function_code: '8'
+    ot.subfunction: ['1', '4', '10']
+  condition: diagnostics
+suppression:
+  timewindow: 900
+  group_by: [source.ip, destination.ip]
+level: high
+tags:
+  - attack.inhibit_response_function
+  - attack.t0816
+  - attack.t0814
+  - attack.impair_process_control
+  - attack.t0815
+  - attack.evasion
+  - attack.t0872

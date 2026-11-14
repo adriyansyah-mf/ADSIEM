@@ -1,0 +1,28 @@
+title: DNP3 Outstation Restart Or Stop Command
+id: rule-ot-dnp3-restart-or-stop
+description: >-
+  A DNP3 request to restart an outstation (13 cold restart, 14 warm restart)
+  or stop its application (18), or to reinitialise its data (15) or
+  application (16). It interrupts the RTU or IED controlling a substation,
+  pumping station or fuel system; the 2015-2016 Ukrainian grid attacks
+  disabled field devices the same way. Outside planned maintenance from the
+  SCADA master, treat it as an attack (T0816 Device Restart/Shutdown, T0881
+  Service Stop, T0813 Denial of Control)
+logsource:
+  product: suricata
+  service: dnp3
+detection:
+  restart_or_stop:
+    ot.message_type: request
+    ot.function_code: ['13', '14', '15', '16', '18']
+  condition: restart_or_stop
+suppression:
+  timewindow: 900
+  group_by: [source.ip, destination.ip]
+level: critical
+tags:
+  - attack.inhibit_response_function
+  - attack.t0816
+  - attack.t0881
+  - attack.impair_process_control
+  - attack.t0813

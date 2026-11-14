@@ -1,0 +1,42 @@
+title: OT Control Command From The Internet
+id: rule-ot-control-command-from-internet
+description: >-
+  A public (non-RFC1918) address sent a PLC or RTU a command that changes the
+  physical process: a Modbus write (function 5, 6, 15, 16, 22, 23) or a DNP3
+  write, select/operate, direct operate, restart, stop or disable-unsolicited.
+  OT protocols have no authentication, so whoever reaches the port controls
+  the device; an engineering workstation never sits on the internet. Seen by
+  Suricata's Modbus/DNP3 parsers (T0883 Internet Accessible Device, T0855
+  Unauthorized Command Message)
+logsource:
+  product: suricata
+detection:
+  modbus_write:
+    ot.protocol: modbus
+    ot.function_code: ['5', '6', '15', '16', '22', '23']
+  dnp3_control:
+    ot.protocol: dnp3
+    ot.message_type: request
+    ot.function_code: ['2', '3', '4', '5', '6', '13', '14', '18', '21']
+  private_source:
+    source.ip|cidr:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - 127.0.0.0/8
+      - 100.64.0.0/10
+      - 169.254.0.0/16
+      - fc00::/7
+      - fe80::/10
+      - ::1/128
+  condition: (modbus_write or dnp3_control) and not private_source
+suppression:
+  timewindow: 3600
+  group_by: [source.ip, destination.ip]
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t0883
+  - attack.impair_process_control
+  - attack.t0855
+  - attack.t0836
