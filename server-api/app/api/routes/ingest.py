@@ -59,21 +59,47 @@ async def _update_offer(db: AsyncSession, redis: aioredis.Redis, agent: Agent, s
     return agent_update.offer_for(agent, policy, status)
 
 
-async def _session_anomaly(redis: aioredis.Redis, agent_id, body: HeartbeatRequest) -> str | None:
-    """Heartbeat continuity (agent_tamper.heartbeat_anomaly), state kept in Redis.
-    Best-effort: Redis trouble must never fail a heartbeat."""
+async def _session_anomaly(redis: aioredis.Redis, agent_id, body: HeartbeatRequest) -> tuple[str | None, bool]:
+    """Heartbeat continuity (agent_tamper.heartbeat_anomaly), state kept in Redis:
+    (anomaly to report, whether the agent process restarted since its last
+    heartbeat). Best-effort: Redis trouble must never fail a heartbeat."""
     if not body.session:
-        return None
+        return None, False
     try:
         key = HB_STATE_KEY.format(agent_id)
-        state, anomaly = heartbeat_anomaly(await redis.hgetall(key) or {}, body.session, body.seq, time.time())
+        previous = await redis.hgetall(key) or {}
+        state, anomaly = heartbeat_anomaly(previous, body.session, body.seq, time.time())
         await redis.hset(key, mapping={k: str(v) for k, v in state.items()})
         await redis.expire(key, 86400)
+        # a new session that is not a clone flipping back: the process restarted
+        restarted = bool(previous.get("session")) and previous.get("session") != body.session and not anomaly
         if anomaly and await redis.set(HB_ANOMALY_KEY.format(agent_id, anomaly), "1", ex=600, nx=True):
-            return anomaly
+            return anomaly, restarted
+        return None, restarted
     except Exception as exc:  # noqa: BLE001
         log.warning("heartbeat_session_check_failed", agent_id=str(agent_id), error=str(exc))
-    return None
+    return None, False
+
+
+RESTARTED_TASK_ERROR = "The agent restarted before it reported a result (it may have run out of memory); run the task again"
+
+
+async def _fail_interrupted_tasks(db: AsyncSession, agent_id, now: datetime) -> list:
+    """Tasks the previous agent process took and never answered: it keeps them
+    only in memory, so they would otherwise wait for the 30-minute timeout.
+    Fleet hunt tasks are left to that sweep, which also counts the hunt."""
+    result = await db.execute(
+        update(AgentTask)
+        .where(AgentTask.agent_id == agent_id, AgentTask.status.in_(("dispatched", "running")),
+               AgentTask.fleet_hunt_id.is_(None))
+        .values(status="failed", error=RESTARTED_TASK_ERROR, completed_at=now)
+        .returning(AgentTask.id)
+    )
+    ids = [row[0] for row in result.fetchall()]
+    await db.commit()
+    for task_id in ids:
+        log.info("agent_task_interrupted_by_restart", task_id=str(task_id), agent_id=str(agent_id))
+    return ids
 
 @router.post("/log", status_code=202)
 async def ingest_log(
@@ -255,7 +281,9 @@ async def heartbeat(
                if body.sensor_health is not None else None)
     if sensors is not None:
         evidence |= {"sensor_health": sensors, "sensor_health_at": now}
-    anomaly = await _session_anomaly(redis, agent.id, body)
+    anomaly, restarted = await _session_anomaly(redis, agent.id, body)
+    if restarted:
+        await _fail_interrupted_tasks(db, agent.id, now)
     if anomaly and agent.approved:
         await enqueue_log(redis, health("agent_heartbeat_anomaly", kind=anomaly, session=body.session,
                                         seq=body.seq, version=body.version))

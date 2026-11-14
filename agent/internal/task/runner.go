@@ -179,7 +179,7 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 		}
 		recursive, _ := task.Params["recursive"].(bool)
 		rulesRaw, _ := task.Params["rules"].([]any)
-		return runYaraScan(path, recursive, rulesRaw)
+		return heavyScan(func() (YaraScanResult, error) { return runYaraScan(path, recursive, rulesRaw) })
 	case "file_scan":
 		if r.FileScan == nil {
 			return nil, fmt.Errorf("file scanning is not available on this agent")
@@ -197,7 +197,7 @@ func (r *Runner) execute(task TaskDef) (any, error) {
 	case "memory_scan":
 		pid, _ := task.Params["pid"].(float64) // 0: every process
 		rulesRaw, _ := task.Params["rules"].([]any)
-		return runMemoryScan(int(pid), rulesRaw)
+		return heavyScan(func() (MemoryScanResult, error) { return runMemoryScan(int(pid), rulesRaw) })
 
 	case "isolate_host":
 		return r.handleIsolateHost()

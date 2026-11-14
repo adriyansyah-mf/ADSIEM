@@ -279,3 +279,55 @@ def test_heartbeat_integrity_and_stop_notice(env):
         hb(version="1.8.0", session=session, seq=seq)
     anomalies = [i[1]["raw_message"] for i in redis.items]
     assert anomalies == [anomalies[0]] and "kind=duplicate_session" in anomalies[0]
+
+
+def test_restart_fails_the_tasks_the_old_process_took(env):
+    """otakunesia, 14 Nov: a memory scan got the agent OOM-killed; the new
+    process never knew the task, which sat "Waiting for the agent" until the
+    30-minute timeout. A heartbeat from a new session fails it at once."""
+    from sqlalchemy import select
+    from app.api.routes.ingest import RESTARTED_TASK_ERROR, heartbeat
+    from app.models.models import Agent, AgentTask
+    from app.schemas.schemas import HeartbeatRequest
+
+    res = _enroll(env, _key(env, max_uses=None), "restart-01")
+    redis = _Redis()
+
+    def hb(session, seq):
+        async def go():
+            async with env() as db:
+                agent = await db.get(Agent, res.agent_id)
+                return await heartbeat(HeartbeatRequest(agent_id=agent.id, version="1.27.8", session=session, seq=seq),
+                                       agent, db, redis)
+        return _run(go())
+
+    def queue(task_type):
+        async def go():
+            async with env() as db:
+                db.add(AgentTask(agent_id=res.agent_id, task_type=task_type, params={}, status="pending"))
+                await db.commit()
+        _run(go())
+
+    def tasks():
+        async def go():
+            async with env() as db:
+                rows = (await db.execute(select(AgentTask).where(AgentTask.agent_id == res.agent_id)
+                                         .order_by(AgentTask.created_at))).scalars().all()
+                return [(t.task_type, t.status, t.error) for t in rows]
+        return _run(go())
+
+    queue("memory_scan")
+    queue("yara_scan")
+    assert len(hb("s1", 1).tasks) == 2
+    hb("s1", 2)  # same process: still running the scans
+    assert [s for _, s, _ in tasks()] == ["dispatched", "dispatched"]
+
+    queue("process_list")
+    sent = hb("s2", 1)  # OOM-killed, restarted
+    assert [t.task_type for t in sent.tasks] == ["process_list"]
+    assert tasks() == [("memory_scan", "failed", RESTARTED_TASK_ERROR), ("yara_scan", "failed", RESTARTED_TASK_ERROR),
+                       ("process_list", "dispatched", None)]
+
+    # a cloned agent flipping back to the old session is not a restart
+    hb("s1", 3)
+    assert tasks()[-1] == ("process_list", "dispatched", None)

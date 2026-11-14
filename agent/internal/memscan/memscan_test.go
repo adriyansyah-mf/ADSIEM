@@ -6,9 +6,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/siem-platform/agent/internal/yara"
 )
@@ -44,6 +47,38 @@ func TestScanFindsMarkerInOwnMemory(t *testing.T) {
 		t.Fatalf("string not addressed virtually: %s", m.Strings[0])
 	}
 	_ = held[0]
+}
+
+// The read buffer is reused from chunk to chunk: every marker in a region
+// spanning hundreds of chunks is found, at its own address, including the
+// ones that straddle a chunk boundary.
+func TestEveryChunkFoundAtItsAddress(t *testing.T) {
+	const n, step = 100, 10007 // not a multiple of the chunk: markers land across boundaries
+	buf := make([]byte, n*step+64)
+	want := map[string]bool{}
+	for i := 0; i < n; i++ {
+		off := i * step
+		copy(buf[off:], fmt.Sprintf("ADSIEM-REUSE-%04d!", i))
+		want[fmt.Sprintf("0x%x", uintptr(unsafe.Pointer(&buf[off])))] = true
+	}
+	rules, err := yara.Compile(`rule reuse { strings: $m = /ADSIEM-REUSE-[0-9]{4}!/ condition: $m }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Scan(context.Background(), rules, os.Getpid(), Limits{Chunk: 4096, AnonOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range res.Matches {
+		for _, s := range m.Strings { // "$m@0xaddr: data"
+			at := strings.TrimPrefix(strings.SplitN(s, ":", 2)[0], "$m@")
+			delete(want, at)
+		}
+	}
+	runtime.KeepAlive(buf)
+	if len(want) != 0 {
+		t.Fatalf("%d of %d markers not found at their address", len(want), n)
+	}
 }
 
 func TestLimits(t *testing.T) {
