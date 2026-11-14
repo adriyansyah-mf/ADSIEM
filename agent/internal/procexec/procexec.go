@@ -16,6 +16,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/cilium/ebpf"
@@ -125,7 +126,8 @@ func (m *Monitor) loop(buf *buffer.Buffer) {
 		if !ok {
 			continue
 		}
-		buf.Push(LogType + "\x00" + withHostImage(raw, ex, mountns.HostPath))
+		line := withParentImage(raw, ex, procExe)
+		buf.Push(LogType + "\x00" + withHostImage(line, ex, mountns.HostPath))
 		if m.onExec != nil {
 			m.onExec(ex)
 		}
@@ -138,6 +140,31 @@ func (m *Monitor) loop(buf *buffer.Buffer) {
 func decodeEvent(b []byte) (string, bool) {
 	line, _, ok := decodeExec(b)
 	return line, ok
+}
+
+// withParentImage fills ParentImage from /proc/<ppid>/exe when the eBPF
+// program had none. The kernel side only knows parents it saw exec, so a
+// web server started before the agent (an apache2 worker running a PHP
+// system() call) arrived without one, and the rules on ParentImage never
+// fired for it.
+func withParentImage(line string, ex Exec, exe func(uint32) string) string {
+	if ex.ParentImage != "" || ex.PPID == 0 {
+		return line
+	}
+	if p := exe(ex.PPID); p != "" {
+		return line + ` ParentImage=` + kv(p)
+	}
+	return line
+}
+
+// procExe is the program a running process executes, as that process sees
+// it ("" once it has exited or is a kernel thread).
+func procExe(pid uint32) string {
+	p, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(p, " (deleted)")
 }
 
 // withHostImage adds HostImage, where the host has the program, when the
@@ -153,9 +180,10 @@ func withHostImage(line string, ex Exec, hostPath func(int, string) string) stri
 
 // Exec is one program start as the script scanner needs it.
 type Exec struct {
-	PID, PPID uint32
-	Image     string
-	Args      []string
+	PID, PPID   uint32
+	Image       string
+	ParentImage string // "" when the eBPF program never saw the parent exec
+	Args        []string
 }
 
 func decodeExec(b []byte) (string, Exec, bool) {
@@ -191,7 +219,7 @@ func decodeExec(b []byte) (string, Exec, bool) {
 		return "", Exec{}, false
 	}
 
-	ex := Exec{PID: pid, PPID: ppid, Image: filename, Args: splitArgs(argsBuf, int(argsSize))}
+	ex := Exec{PID: pid, PPID: ppid, Image: filename, ParentImage: parentFilename, Args: splitArgs(argsBuf, int(argsSize))}
 	commandLine := joinArgs(argsBuf, int(argsSize))
 	if commandLine == "" {
 		commandLine = filename

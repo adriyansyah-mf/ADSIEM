@@ -3,7 +3,7 @@ import glob
 import os
 import yaml
 import structlog
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from worker.config import DECODERS_DIR, RULES_DIR
 from worker.database import AsyncSessionLocal
 from worker.models import Decoder, Rule
@@ -74,6 +74,13 @@ async def _upsert_rules(db) -> None:
                     is_enabled=True,
                     group_id=None,
                 ))
-            log.info("rule_seeded", title=title)
+                # a rule file renamed to change its detection (rows are keyed on
+                # title) turns off the row it replaces, once, as it is seeded:
+                # both would alert on the same event. An analyst who turns the
+                # old one back on keeps it on.
+                old = d.get("supersedes")
+                if old and old != title:
+                    await db.execute(update(Rule).where(Rule.title == old).values(is_enabled=False))
+            log.info("rule_seeded", title=title, supersedes=d.get("supersedes"))
         except Exception as exc:
             log.error("rule_seed_failed", path=path, error=str(exc))

@@ -1,0 +1,35 @@
+title: Web Server User Ran Discovery Or Download Tool
+id: rule-webserver-user-recon
+description: >-
+  The web server account (www-data, uid 33 on Debian/Ubuntu; apache, uid 48
+  on RHEL) ran, under a shell, a program a webshell operator uses to look
+  around or fetch a payload: id, whoami, uname, ps, netstat, wget, curl,
+  nc, base64, crontab, or a find for writable files, a read of
+  /etc/passwd or the MySQL maintenance credentials, an inline python/perl.
+  The eBPF counterpart of the auditd "Webshell Remote Command Execution"
+  rule, so it does not depend on the host's audit rules. On 14 Nov 2026 a
+  webshell on otakunesia ran exactly this (T1505.003 / T1082 / T1105)
+logsource:
+  product: linux
+detection:
+  web_user:
+    User:
+      - '33'
+      - '48'
+  under_shell_parent:
+    ParentImage|re: '(?i)/(?:bash|sh|dash|zsh|ash|ksh)$'
+  under_shell_caller:
+    OriginalFileName|re: '(?i)^(?:bash|sh|dash|zsh|ash|ksh)$'
+  recon_tool:
+    Image|re: '(?i)/(?:id|whoami|uname|hostname|ifconfig|netstat|ss|ps|w|who|last|getent|wget|curl|nc|ncat|netcat|socat|base64|crontab)$'
+  recon_args:
+    CommandLine|re: '(?i)(?:\bfind\b.*-perm|/etc/(?:passwd|shadow|sudoers)|debian\.cnf|\bpython[\d.]*\s+-c\b|\bperl\s+-e\b|\bchmod\s+\+x\b|\bsudo\s+-l\b)'
+  condition: web_user and (under_shell_parent or under_shell_caller) and (recon_tool or recon_args)
+level: high
+tags:
+  - attack.persistence
+  - attack.t1505.003
+  - attack.discovery
+  - attack.t1082
+  - attack.command_and_control
+  - attack.t1105

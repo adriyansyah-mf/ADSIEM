@@ -22,9 +22,10 @@ func Start(buf *buffer.Buffer) (*Monitor, error) {
 
 // Exec is one program start (Linux only).
 type Exec struct {
-	PID, PPID uint32
-	Image     string
-	Args      []string
+	PID, PPID   uint32
+	Image       string
+	ParentImage string
+	Args        []string
 }
 
 // StartWith is only available on Linux.
