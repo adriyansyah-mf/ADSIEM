@@ -1,0 +1,25 @@
+title: Modbus Device Identification Query
+id: rule-ot-modbus-device-fingerprint
+description: >-
+  A Modbus Read Device Identification (function 43, MEI type 14) or Report
+  Server ID (function 17) request: it returns the PLC's vendor, product code
+  and firmware revision. HMIs don't need it; scanners (nmap modbus-discover,
+  plcscan, Shodan) and attackers choosing an exploit do (T0888 Remote System
+  Information Discovery)
+logsource:
+  product: suricata
+  service: modbus
+detection:
+  read_device_id:
+    ot.function_code: '43'
+    ot.subfunction: '14'
+  report_server_id:
+    ot.function_code: '17'
+  condition: read_device_id or report_server_id
+suppression:
+  timewindow: 3600
+  group_by: [source.ip, destination.ip]
+level: medium
+tags:
+  - attack.discovery
+  - attack.t0888

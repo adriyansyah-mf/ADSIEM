@@ -1,0 +1,25 @@
+title: DNP3 Unsolicited Reporting Disabled
+id: rule-ot-dnp3-disable-unsolicited
+description: >-
+  A DNP3 Disable Unsolicited Responses request (function 21): the outstation
+  stops pushing events and alarms to the SCADA master, so operators no longer
+  see changes in the process while an attacker acts on it. Masters set this
+  at start-up, rarely afterwards (T0815 Denial of View, T0878 Alarm
+  Suppression)
+logsource:
+  product: suricata
+  service: dnp3
+detection:
+  disable_unsolicited:
+    ot.message_type: request
+    ot.function_code: '21'
+  condition: disable_unsolicited
+suppression:
+  timewindow: 900
+  group_by: [source.ip, destination.ip]
+level: high
+tags:
+  - attack.impair_process_control
+  - attack.t0815
+  - attack.inhibit_response_function
+  - attack.t0878

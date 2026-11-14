@@ -1,0 +1,24 @@
+title: Modbus User-Defined Function Code
+id: rule-ot-modbus-user-defined-function
+description: >-
+  A Modbus request used a function code from the user-defined ranges (65-72,
+  100-110): vendor-specific maintenance and programming commands that an HMI
+  polling registers never sends. Tools that fuzz or abuse PLC firmware use
+  them too (T0855 Unauthorized Command Message, T0843 Program Download)
+logsource:
+  product: suricata
+  service: modbus
+detection:
+  user_defined:
+    ot.function_code: ['65', '66', '67', '68', '69', '70', '71', '72',
+                       '100', '101', '102', '103', '104', '105', '106', '107', '108', '109', '110']
+  condition: user_defined
+suppression:
+  timewindow: 3600
+  group_by: [source.ip, destination.ip, ot.function_code]
+level: high
+tags:
+  - attack.impair_process_control
+  - attack.t0855
+  - attack.lateral_movement
+  - attack.t0843

@@ -859,42 +859,40 @@ if $programname == 'suricata' then @@<siem-host>:514
 
 **OT / ICS networks.** PLCs, RTUs and relays cannot run an agent, so monitor them from the
 network. Put a Suricata sensor on a mirror (SPAN) port of the OT segment, with the `modbus`
-and `dnp3` app-layer parsers and EVE output enabled, and forward `eve.json` as above.
-`suricata_eve_generic` ingests every record type, so Modbus/DNP3 transactions arrive with
-`network.protocol: modbus|dnp3`, `event.action` set to the EVE type, and source and
-destination addresses. Suricata alerts on OT signatures arrive through `suricata_eve_alert`.
+and `dnp3` app-layer parsers and their EVE loggers enabled, and forward `eve.json` as above.
 Run the agent on the Windows/Linux hosts around the process (HMI, SCADA server, historian,
 engineering workstation).
 
-To alert on specific Modbus operations, map the function code with a decoder in the dashboard,
-then write rules against it. Check the exact EVE field names against your Suricata version,
-and test the decoder with a sample record before enabling the rule:
+The Modbus and DNP3 records are decoded (`decoders/suricata_eve_{modbus,dnp3}.yaml`: function
+code, unit ID, register address, exception, DNP3 addresses) and these rules ship enabled, tagged
+with MITRE ATT&CK for ICS:
+
+| Rule | Level | Catches |
+|---|---|---|
+| OT Control Command From The Internet | critical | Modbus write / DNP3 operate, restart or stop from a public address (T0883, T0855) |
+| Modbus PLC Programming Command (UMAS) | critical | function 90: stop/start PLC, program download (T0843, T0858) |
+| DNP3 Outstation Restart Or Stop Command | critical | cold/warm restart, stop application, re-initialise (T0816, T0881) |
+| OT Service Reached From The Internet | high | traffic from the internet to 502, 20000, 102, 2404, 44818, 47808, ... (T0883) |
+| Modbus Function Code Scan | high | 6+ function codes from one source in 5 min (T0846, T0888) |
+| Modbus Unit ID Sweep | high | 10+ unit IDs from one source in 5 min (T0846) |
+| Modbus Diagnostics Restart Or Listen-Only Command | high | function 8 sub 1/4/10: the device stops answering its master (T0814, T0815) |
+| Modbus User-Defined Function Code | high | functions 65-72, 100-110: vendor maintenance/programming (T0855) |
+| DNP3 Unsolicited Reporting Disabled | high | function 21: the SCADA master stops seeing events (T0815, T0878) |
+| DNP3 File Deleted On Outstation | high | function 27 (T0809) |
+| Suricata ICS/SCADA Signature Alert | high | ET SCADA and other ICS signatures, whatever their own priority |
+| Modbus Device Identification Query | medium | function 43/14 and 17: vendor, model, firmware (T0888) |
+
+None needs your addresses. To also alert on writes from anything but your HMIs, add a rule in
+the dashboard (**Rules → New Rule**):
 
 ```yaml
-# Decoders → New Decoder
-name: suricata_eve_modbus
-log_type: suricata
-type: json
-priority: 20
-when:
-  event_type: modbus
-fields:
-  source.ip: src_ip
-  destination.ip: dest_ip
-  network.protocol: app_proto
-  modbus.function_code: modbus.request.function_raw
-  modbus.unit_id: modbus.request.unit_id
-static_fields:
-  event.action: modbus
----
-# Rules → New Rule
 title: Modbus write from a host that is not an HMI
 logsource:
   product: suricata
+  service: modbus
 detection:
   write:
-    event.action: modbus
-    modbus.function_code: ['5', '6', '15', '16']
+    ot.function_code: ['5', '6', '15', '16', '22', '23']
   hmi:
     source.ip: ['10.20.0.10', '10.20.0.11']   # your HMIs / engineering workstations
   condition: write and not hmi
@@ -902,6 +900,12 @@ level: high
 tags:
   - attack.t0855   # ATT&CK for ICS: Unauthorized Command Message
 ```
+
+**Demo.** `scripts/ot-demo-replay.py` replays an attack on a fuel depot's pump PLC and its
+substation RTU as Suricata would log it (fingerprinting, function-code scan, UMAS stop, listen-only,
+DNP3 disable-unsolicited, restart, file delete, writes from the internet), with routine HMI polling
+mixed in: `python3 scripts/ot-demo-replay.py --host <siem-host>` raises the ten alerts above.
+Details in [`docs/operations/ot-ics-detection.md`](docs/operations/ot-ics-detection.md).
 
 Full runbook: [`docs/operations/syslog-ingest.md`](docs/operations/syslog-ingest.md).
 

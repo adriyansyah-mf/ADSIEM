@@ -1,0 +1,27 @@
+title: Suricata ICS/SCADA Signature Alert
+id: rule-ot-ics-ids-signature
+description: >-
+  Suricata fired a signature for industrial control traffic (ET SCADA,
+  Digital Bond Quickdraw, or a rule naming Modbus, DNP3, S7, IEC 104,
+  EtherNet/IP, BACnet, PROFINET or a PLC). Raised as high whatever the
+  signature's own priority: in an OT network any of these is worth an
+  analyst's look (T0855 Unauthorized Command Message, T0846 Remote System
+  Discovery)
+logsource:
+  product: suricata
+  service: alert
+detection:
+  ics_signature:
+    rule.name|re: '(?i)\b(?:scada|ics|modbus|dnp3|s7comm|siemens s7|iec[- ]?104|iec 60870|bacnet|enip|ethernet/ip|cip|profinet|plc|quickdraw)\b'
+  ics_category:
+    rule.category|re: '(?i)\bscada\b|\bindustrial\b|\bics\b'
+  condition: ics_signature or ics_category
+suppression:
+  timewindow: 3600
+  group_by: [rule.name, source.ip, destination.ip]
+level: high
+tags:
+  - attack.impair_process_control
+  - attack.t0855
+  - attack.discovery
+  - attack.t0846

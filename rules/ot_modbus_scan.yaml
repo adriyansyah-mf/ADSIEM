@@ -1,0 +1,63 @@
+title: Modbus Request
+id: rule-ot-modbus-request-base
+name: ot_modbus_request
+description: >-
+  Any Modbus request (base rule for the function-code and unit-ID scan
+  correlations below; it raises no alert of its own).
+logsource:
+  product: suricata
+  service: modbus
+detection:
+  request:
+    ot.function_code|exists: true
+  condition: request
+level: low
+tags:
+  - attack.discovery
+---
+title: Modbus Function Code Scan
+id: rule-ot-modbus-function-code-scan
+description: >-
+  One source sent a device six or more different Modbus function codes within
+  five minutes. An HMI polls with two or three (read holding/input registers,
+  write register); trying many is how a scanner or attacker learns what the
+  PLC supports before acting (T0846 Remote System Discovery, T0888 Remote
+  System Information Discovery)
+correlation:
+  type: value_count
+  rules:
+    - ot_modbus_request
+  group-by:
+    - source.ip
+    - destination.ip
+  timespan: 5m
+  condition:
+    field: ot.function_code
+    gte: 6
+level: high
+tags:
+  - attack.discovery
+  - attack.t0846
+  - attack.t0888
+---
+title: Modbus Unit ID Sweep
+id: rule-ot-modbus-unit-id-sweep
+description: >-
+  One source addressed ten or more different Modbus unit IDs on a device
+  within five minutes: enumerating the slaves behind a gateway or serial
+  bridge to find which PLCs answer (T0846 Remote System Discovery)
+correlation:
+  type: value_count
+  rules:
+    - ot_modbus_request
+  group-by:
+    - source.ip
+    - destination.ip
+  timespan: 5m
+  condition:
+    field: ot.unit_id
+    gte: 10
+level: high
+tags:
+  - attack.discovery
+  - attack.t0846

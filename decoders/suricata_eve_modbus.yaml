@@ -1,0 +1,38 @@
+# Suricata EVE JSON: Modbus/TCP transactions (event_type modbus; enable the
+# modbus app-layer and the "modbus" eve logger in suricata.yaml). OT traffic
+# between HMIs / engineering workstations and PLCs, usually port 502.
+# rules/ot_modbus_*.yaml detect on the function code (ot.function_code is the
+# raw number: names differ between Suricata versions, numbers do not).
+name: suricata_eve_modbus
+log_type: suricata
+type: json
+priority: 15
+enabled: true
+raw_fields: true
+when:
+  event_type: modbus
+fields:
+  source.ip: src_ip
+  source.port: src_port
+  destination.ip: dest_ip
+  destination.port: dest_port
+  network.transport: proto
+  network.protocol: app_proto
+  observer.hostname: host
+  event.id: flow_id
+  ot.unit_id: [modbus.request.unit_id, modbus.response.unit_id]
+  ot.function_code: [modbus.request.function_raw, modbus.response.function_raw]
+  ot.function_name: [modbus.request.function_code, modbus.response.function_code]
+  ot.access_type: [modbus.request.access_type, modbus.response.access_type]
+  ot.category: [modbus.request.category, modbus.response.category]
+  ot.subfunction: [modbus.request.diagnostic.raw, modbus.request.mei.raw]
+  ot.address: [modbus.request.write.address, modbus.request.read.address]
+  ot.quantity: [modbus.request.write.quantity, modbus.request.read.quantity]
+  ot.exception: [modbus.response.exception.raw]
+  ot.exception_name: [modbus.response.exception.code]
+static_fields:
+  event.kind: event
+  event.category: network
+  event.module: suricata
+  event.dataset: suricata.modbus
+  ot.protocol: modbus
