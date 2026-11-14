@@ -366,6 +366,35 @@ export interface OpenPort {
   port: number
   proto: string
   state: string
+  addr?: string     // bound address: 0.0.0.0, ::, 127.0.0.1, ... (agent 1.27.6+)
+  process?: string  // the program listening
+}
+
+export interface NetInterface {
+  name: string
+  mac?: string
+  addrs: string[]   // CIDR
+  up: boolean
+}
+
+export interface HostSession {
+  user: string
+  line?: string
+  from?: string
+  since?: string
+}
+
+export interface HostNetwork {
+  fqdn?: string
+  domain?: string
+  interfaces?: NetInterface[]
+  default_gateway?: string
+  dns_servers?: string[]
+  timezone?: string
+  utc_offset?: string
+  boot_time?: string
+  sessions?: HostSession[]
+  seen_from?: string  // address the report came from (server side)
 }
 
 export interface LocalUser {
@@ -393,6 +422,7 @@ export interface HygieneSnapshot {
   hygiene_score: number
   issues: HygieneIssue[]
   packages: InstalledPackage[]
+  network?: HostNetwork | null
   collected_at: string
 }
 

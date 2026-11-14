@@ -358,6 +358,11 @@ async def _migrate_agent_evidence_health() -> None:
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health JSONB"))
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS evidence_health_at TIMESTAMPTZ"))
 
+async def _migrate_hygiene_network() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE hygiene_snapshots ADD COLUMN IF NOT EXISTS network JSONB"))
+
 async def _migrate_agent_web_block_health() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -544,6 +549,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_evidence_health()
         await _migrate_agent_web_block_health()
         await _migrate_agent_sensor_health()
+        await _migrate_hygiene_network()
         await _migrate_agent_update_columns()
         await _migrate_malware_hashes_tlsh()
         await _migrate_web_block_indexes()

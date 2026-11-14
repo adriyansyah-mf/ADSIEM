@@ -71,7 +71,7 @@ across crashes and reboots (`-evidence-list`, `-evidence-salvage`, …).
 | Quarantine / restore, kill process | ✓ stops the programs running the file (by inode, also inside PrivateTmp and containers) | ✓ protected DACL store, stops running programs | `internal/task` |
 | Web protection (domain block page, local CA) | ✓ | ✓ | `internal/webblock` |
 | Live response | ps, netstat, users, glob, hash, read file, persistence, dmesg, open files, YARA, memory YARA/RWX, exec | ps, netstat, users, services, programs, Event Log, YARA, memory scan | `internal/task` |
-| Hygiene inventory | OS, patches, ports, disk, packages (CVE matching) | OS, ports, disk, programs | `internal/hygiene` |
+| Hygiene and posture | OS, packages (dpkg, apk, rpm; CVE matching), ports with address and process, disk, network identity (interfaces, gateway, DNS, FQDN, sessions); checks: host firewall, SSH root/password login, sudo NOPASSWD, empty passwords and extra UID 0, pending reboot, automatic updates, AppArmor/SELinux | OS, programs, ports with address and process, disk, network identity, RDP/console sessions; checks: firewall, Defender (real-time, signature age), UAC, SMBv1, Guest, RDP without NLA, WDigest, AutoAdminLogon password, pending reboot, automatic updates | `internal/hygiene` |
 | User pop-up notifications | ✓ | ✓ | `internal/notify` |
 | Local threshold detections | ✓ | ✓ | `internal/detect` |
 | Group protection policy (which protections run, exclusions) | ✓ | ✓ same policy | `internal/policy` |
@@ -254,8 +254,11 @@ model to keep inference on-prem.
 
 ### Posture
 
-- Hygiene per host: score, packages with vulnerable versions, open ports with risky ports
-  flagged, disk and patch level.
+- Hygiene per host: score from posture checks (firewall, remote login, credentials, pending
+  reboot, automatic updates, protection) on Linux and Windows, packages with vulnerable
+  versions, listening ports with their address and process (databases and other risky ports
+  are flagged only when reachable from the network), disk, and the host's network identity:
+  interfaces, gateway, DNS, FQDN, logged-in sessions and the address its reports come from.
 - File Integrity Monitoring with paths managed from the dashboard.
 - Developer/project compromise findings (`project_scan_*` rules).
 

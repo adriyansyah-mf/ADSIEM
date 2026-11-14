@@ -21,4 +21,6 @@ func Collect(agentID, hostname string) (*Report, error) {
 
 func platformIssues(*Report) []Issue { return nil }
 
+func collectNetworkPlatform(*NetworkInfo) {}
+
 var baselinePorts = map[int]bool{}

@@ -299,6 +299,9 @@ class HygieneSnapshot(Base):
     hygiene_score   = Column(Integer, nullable=False, default=100)
     issues          = Column(JSONB, nullable=False, default=list)
     packages        = Column(JSONB, nullable=False, default=list)
+    # interfaces, gateway, DNS, FQDN, time zone, sessions (agent) and
+    # seen_from: the address the report came from (server)
+    network         = Column(JSONB)
     collected_at    = Column(DateTime(timezone=True), default=now_utc)
 
 class CaseInvestigation(Base):

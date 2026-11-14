@@ -4,6 +4,8 @@ package hygiene
 
 import (
 	"encoding/binary"
+	"net"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -32,6 +34,7 @@ func Collect(agentID, hostname string) (*Report, error) {
 	r.OpenPorts = listeningPorts()
 	r.Users = localUsers()
 	r.Packages = installedPrograms()
+	collectNetwork(r, time.Now())
 	score(r)
 	return r, nil
 }
@@ -167,14 +170,16 @@ func tcpListenTable(family uint32) []byte {
 
 func listeningPorts() []OpenPort {
 	var ports []OpenPort
+	names := map[uint32]string{}
 	for _, t := range []struct {
-		family  uint32
-		proto   string
-		rowSize int
-		portOff int // offset of dwLocalPort in the row
+		family          uint32
+		proto           string
+		rowSize         int
+		addrOff, addrN  int // local address bytes in the row
+		portOff, pidOff int
 	}{
-		{windows.AF_INET, "tcp", 24, 8},   // MIB_TCPROW_OWNER_PID
-		{windows.AF_INET6, "tcp6", 56, 20}, // MIB_TCP6ROW_OWNER_PID
+		{windows.AF_INET, "tcp", 24, 4, 4, 8, 20},     // MIB_TCPROW_OWNER_PID
+		{windows.AF_INET6, "tcp6", 56, 0, 16, 20, 52}, // MIB_TCP6ROW_OWNER_PID
 	} {
 		buf := tcpListenTable(t.family)
 		if len(buf) < 4 {
@@ -188,11 +193,39 @@ func listeningPorts() []OpenPort {
 			}
 			raw := binary.LittleEndian.Uint32(buf[off+t.portOff:])
 			port := int(raw&0xff)<<8 | int(raw>>8&0xff) // network byte order in the low 16 bits
-			ports = append(ports, OpenPort{Port: port, Proto: t.proto, State: "LISTEN"})
+			addr := net.IP(append([]byte(nil), buf[off+t.addrOff:off+t.addrOff+t.addrN]...)).String()
+			pid := binary.LittleEndian.Uint32(buf[off+t.pidOff:])
+			name, ok := names[pid]
+			if !ok {
+				name = processName(pid)
+				names[pid] = name
+			}
+			ports = append(ports, OpenPort{Port: port, Proto: t.proto, State: "LISTEN", Addr: addr, Process: name})
 		}
 	}
 	sort.Slice(ports, func(i, j int) bool { return ports[i].Port < ports[j].Port })
 	return ports
+}
+
+// processName is the executable file name of pid, "" when it cannot be read.
+func processName(pid uint32) string {
+	switch pid {
+	case 0:
+		return ""
+	case 4:
+		return "System"
+	}
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return ""
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, windows.MAX_PATH)
+	size := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
+		return ""
+	}
+	return filepath.Base(windows.UTF16ToString(buf[:size]))
 }
 
 // USER_INFO_1
@@ -291,38 +324,37 @@ func installedPrograms() []InstalledPackage {
 // RPC endpoint mapper, NetBIOS and SMB listen on every Windows host.
 var baselinePorts = map[int]bool{135: true, 139: true, 445: true}
 
-// platformIssues checks the Windows security baseline the detections rely on.
-func platformIssues(r *Report) []Issue {
-	var issues []Issue
-	const fw = `SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\`
-	for _, p := range []struct{ key, label string }{
-		{"DomainProfile", "domain"}, {"StandardProfile", "private"}, {"PublicProfile", "public"},
-	} {
-		if v, ok := regDword(registry.LOCAL_MACHINE, fw+p.key, "EnableFirewall"); ok && v == 0 {
-			issues = append(issues, Issue{"high", "firewall", "Windows Firewall is off for the " + p.label + " profile"})
-		}
+// platformIssues checks the Windows security baseline (windows_posture.go).
+func platformIssues(*Report) []Issue {
+	return windowsPosture(hklm{}, time.Now(), guestEnabled)
+}
+
+// hklm reads HKEY_LOCAL_MACHINE (64-bit view).
+type hklm struct{}
+
+func (hklm) dword(path, name string) (uint64, bool) {
+	return regDword(registry.LOCAL_MACHINE, path, name)
+}
+func (hklm) str(path, name string) string { return regString(registry.LOCAL_MACHINE, path, name) }
+
+func (hklm) binary(path, name string) []byte {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, path, registry.QUERY_VALUE|registry.WOW64_64KEY)
+	if err != nil {
+		return nil
 	}
-	if v, ok := regDword(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows Defender\Real-Time Protection`,
-		"DisableRealtimeMonitoring"); ok && v == 1 {
-		issues = append(issues, Issue{"high", "antivirus", "Microsoft Defender real-time protection is disabled"})
+	defer k.Close()
+	v, _, err := k.GetBinaryValue(name)
+	if err != nil {
+		return nil
 	}
-	if v, ok := regDword(registry.LOCAL_MACHINE, `SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System`,
-		"EnableLUA"); ok && v == 0 {
-		issues = append(issues, Issue{"high", "uac", "User Account Control (UAC) is disabled"})
+	return v
+}
+
+func (hklm) exists(path string) bool {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, path, registry.QUERY_VALUE|registry.WOW64_64KEY)
+	if err != nil {
+		return false
 	}
-	if v, ok := regDword(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters`,
-		"SMB1"); ok && v == 1 {
-		issues = append(issues, Issue{"medium", "smb", "SMBv1 server is enabled"})
-	}
-	if guestEnabled {
-		issues = append(issues, Issue{"medium", "user", "The Guest account is enabled"})
-	}
-	if v, ok := regDword(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\Terminal Server`,
-		"fDenyTSConnections"); ok && v == 0 {
-		if nla, ok := regDword(registry.LOCAL_MACHINE,
-			`SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp`, "UserAuthentication"); ok && nla == 0 {
-			issues = append(issues, Issue{"high", "rdp", "Remote Desktop is enabled without Network Level Authentication"})
-		}
-	}
-	return issues
+	k.Close()
+	return true
 }

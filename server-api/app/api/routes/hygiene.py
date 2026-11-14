@@ -1,13 +1,15 @@
 from typing import Annotated
 import httpx
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_agent, get_current_user, require_permission, get_scoped_group
 from app.core.http_client import get_http_client
+from app.core.limiter import _real_ip
 from app.models.models import Agent, HygieneSnapshot, User
 from app.schemas.schemas import HygieneSnapshotIn, HygieneSnapshotOut
 
@@ -99,15 +101,32 @@ async def _query_osv(packages: list[dict]) -> list[dict]:
     return vulnerable
 
 
+MAX_NETWORK_BYTES = 64 * 1024
+
+
+def _network(body: HygieneSnapshotIn, request: Request) -> dict | None:
+    """The agent's network identity plus where the report came from: for a
+    host on the internet, its public address (nginx sets X-Real-IP)."""
+    network = dict(body.network or {})
+    if len(json.dumps(network, default=str)) > MAX_NETWORK_BYTES:
+        network = {k: network[k] for k in ("fqdn", "domain", "default_gateway", "timezone", "utc_offset") if k in network}
+    seen_from = _real_ip(request)
+    if seen_from:
+        network["seen_from"] = seen_from
+    return network or None
+
+
 @router.post("/api/hygiene", status_code=204)
 async def ingest_hygiene(
     body: HygieneSnapshotIn,
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     agent: Annotated[Agent, Depends(get_agent)],
 ):
     if not agent.approved:
         return
     snap = HygieneSnapshot(
+        network=_network(body, request),
         agent_id=agent.id,
         hostname=body.hostname or agent.hostname,
         group_id=agent.group_id,
