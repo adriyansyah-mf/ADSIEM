@@ -8,7 +8,12 @@ triage graph, so they are never auto-blocked. Every condition must hold:
 group policy `enabled` and `alert_enabled`; family in OUTBOUND_FAMILIES; the
 indicator is malicious by TI (URLhaus listed / VirusTotal >= 3) or the AI
 verdict is escalate/create_case; the domain is not allowlisted for the group;
-the alert is not itself a web_block event. Never raises into triage."""
+the alert is not itself a web_block event. Never raises into triage.
+
+Only threat intelligence blocks on its own. A domain the AI verdict alone
+vouches for becomes a 'pending' entry: agents don't receive it until an
+analyst approves it (POST /api/web-blocks/{id}/approve), so text an attacker
+planted in a log cannot get a domain blocked by steering the verdict."""
 from __future__ import annotations
 
 import json
@@ -41,10 +46,26 @@ RETURNING domain
 """)
 
 
+# A domain only the AI verdict vouches for is proposed, not blocked: the entry
+# waits as 'pending' (agents only receive 'active' ones) until an analyst
+# approves it on the Web Protection page. It never downgrades an active block.
+_PROPOSE = text("""
+INSERT INTO web_block_entries (id, domain, group_id, source, status, reason, alert_id,
+                               created_at, updated_at, expires_at, seq)
+VALUES (gen_random_uuid(), :domain, :group, 'alert', 'pending', :reason, :alert, now(), now(), :expires,
+        nextval('web_block_seq'))
+ON CONFLICT (group_id, domain, source) DO UPDATE
+SET status = 'pending', reason = EXCLUDED.reason, alert_id = EXCLUDED.alert_id,
+    expires_at = EXCLUDED.expires_at, updated_at = now()
+WHERE web_block_entries.status IN ('pending', 'removed')
+RETURNING domain
+""")
+
+
 # no user acts here: actor_id stays NULL, the action name marks it as automatic
 _AUDIT = text("""
 INSERT INTO audit_logs (id, actor_id, group_id, action, resource_type, resource_id, detail, created_at)
-VALUES (gen_random_uuid(), NULL, :group, 'web_block.auto_block', 'web_block', :target,
+VALUES (gen_random_uuid(), NULL, :group, :action, 'web_block', :target,
         CAST(:detail AS jsonb), now())
 """)
 
@@ -139,25 +160,33 @@ async def _maybe_block(alert_id, group_id, title, verdict, fields, enrichment, t
     expires = datetime.now(timezone.utc) + timedelta(days=days)
     async with AsyncSessionLocal() as db:
         await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": WEB_BLOCK_SEQ_LOCK})
-        changed = []
+        changed, proposed = [], []
         for domain in chosen:
-            res = await db.execute(_UPSERT, {"domain": domain, "group": group_id, "reason": reasons[domain],
-                                             "alert": UUID(str(alert_id)), "expires": expires})
+            # threat intelligence blocks at once; the AI's verdict alone only proposes
+            stmt, into = (_UPSERT, changed) if domain in bad else (_PROPOSE, proposed)
+            res = await db.execute(stmt, {"domain": domain, "group": group_id, "reason": reasons[domain],
+                                          "alert": UUID(str(alert_id)), "expires": expires})
             if res.first():
-                changed.append(domain)
-        if changed:
+                into.append(domain)
+        for domains, verb, action in ((changed, "blocked", "web_block.auto_block"),
+                                      (proposed, "proposed blocking (pending an analyst's approval on the "
+                                                 "Web Protection page)", "web_block.auto_propose")):
+            if not domains:
+                continue
             await db.execute(
                 text("INSERT INTO alert_notes (id, alert_id, content, created_at) "
                      "VALUES (gen_random_uuid(), :a, :c, now())"),
                 {"a": UUID(str(alert_id)),
-                 "c": f"Web Protection: blocked {', '.join(changed)} for group {group_id} "
+                 "c": f"Web Protection: {verb} {', '.join(domains)} for group {group_id} "
                       f"until {expires:%Y-%m-%d}"})
             await db.execute(_AUDIT, {
-                "group": group_id, "target": ", ".join(changed),
-                "detail": json.dumps({"alert_id": str(alert_id), "group_id": group_id, "domains": changed,
+                "group": group_id, "target": ", ".join(domains), "action": action,
+                "detail": json.dumps({"alert_id": str(alert_id), "group_id": group_id, "domains": domains,
                                       "expires_at": expires.isoformat(),
-                                      "evidence": {d: evidence[d] for d in changed}})})
+                                      "evidence": {d: evidence[d] for d in domains}})})
         await db.commit()
     if changed:
         log.info("webblock_auto_blocked", alert_id=alert_id, group=group_id, domains=changed)
-    return changed
+    if proposed:
+        log.info("webblock_auto_proposed", alert_id=alert_id, group=group_id, domains=proposed)
+    return changed + proposed

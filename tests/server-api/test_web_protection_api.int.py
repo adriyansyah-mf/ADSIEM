@@ -126,6 +126,39 @@ async def test_groups_cannot_see_or_change_each_other(env):
     assert (await env.api.get("/api/web-block-policies/red")).status_code == 404
 
 
+async def test_an_ai_proposed_block_waits_for_an_analyst(env):
+    """worker/webblock_auto.py writes a domain only the AI verdict vouches for as
+    pending: listed for review, enforced only once approved, or rejected."""
+    async with env.sessions() as db:
+        proposed = WebBlockEntry(domain="dest.example", group_id="blue", source="alert", status="pending",
+                                 reason="Alert: Beacon (AI verdict escalate)")
+        rejected = WebBlockEntry(domain="other.example", group_id="blue", source="alert", status="pending", reason="r")
+        red = WebBlockEntry(domain="red.example", group_id="red", source="alert", status="pending", reason="r")
+        allowed = WebBlockEntry(domain="raw.github.com", group_id="blue", source="alert", status="pending", reason="r")
+        db.add_all([proposed, rejected, red, allowed])
+        await db.commit()
+    pending = (await env.api.get("/api/web-blocks", params={"status": "pending"})).json()["items"]
+    assert {i["domain"] for i in pending} >= {"dest.example", "other.example"}
+    assert all(i["status"] == "pending" for i in pending)
+    assert "dest.example" not in {i["domain"] for i in (await env.api.get("/api/web-blocks")).json()["items"]}
+
+    env.user = env.make_user(perms=("alerts:read",))
+    assert (await env.api.post(f"/api/web-blocks/{proposed.id}/approve")).status_code == 403
+    env.user = env.make_user(perms=MANAGE)
+
+    r = await env.api.post(f"/api/web-blocks/{proposed.id}/approve")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "active" and ("web_block.approve", str(proposed.id)) in env.audit_calls
+    again = await env.api.post(f"/api/web-blocks/{proposed.id}/approve")
+    assert again.status_code == 409 and "this one is active" in again.json()["detail"]
+
+    assert (await env.api.delete(f"/api/web-blocks/{rejected.id}")).json() == {"status": "removed"}
+    assert (await env.api.post(f"/api/web-blocks/{rejected.id}/approve")).status_code == 409
+    assert (await env.api.post(f"/api/web-blocks/{red.id}/approve")).status_code == 404
+    blocked = await env.api.post(f"/api/web-blocks/{allowed.id}/approve")
+    assert blocked.status_code == 409 and "allowlisted" in blocked.json()["detail"]
+
+
 async def test_changes_need_agents_manage(env):
     env.user = env.make_user(perms=("alerts:read",))
     assert (await env.api.post("/api/web-blocks", json={"value": "evil.example"})).status_code == 403

@@ -209,6 +209,47 @@ def _params_errors(node: dict) -> list[str]:
     return errs
 
 
+# Steps that change something outside the SIEM: hosts, firewalls, blocklists,
+# or (any non-read HTTP call) a third party's API.
+GATED_TYPES = ("response", "block_ioc", "case_block_ips")
+_AI_FIELDS = ("ai_verdict", "ai_confidence")
+
+
+def acts(node: dict) -> bool:
+    return node["type"] in GATED_TYPES or (
+        node["type"] == "http" and str(node["params"].get("method", "GET")).upper() not in ("GET", "HEAD"))
+
+
+def ai_decides(node: dict) -> bool:
+    """An AI decision: an AI Decide node, or a Trigger/If that branches on the AI triage verdict."""
+    if node["type"] == "ai_decide":
+        return True
+    if node["type"] in ("trigger", "if"):
+        return any(any(f in str(c.get("field", "")) for f in _AI_FIELDS)
+                   for c in node["params"].get("conditions", []) or [] if isinstance(c, dict))
+    return False
+
+
+def ungated_ai_actions(by_id: dict[str, dict], edges: list[dict]) -> list[tuple[str, str]]:
+    """(AI decision, action) pairs where the action can run on the AI's word
+    alone: a path from the decision to the action with no Approval node on it."""
+    children: dict[str, list[str]] = {}
+    for e in edges:
+        children.setdefault(e["from"], []).append(e["to"])
+    found: list[tuple[str, str]] = []
+    for src in (n["id"] for n in by_id.values() if ai_decides(n)):
+        seen, stack = set(), list(children.get(src, []))
+        while stack:
+            cur = stack.pop()
+            if cur in seen or by_id[cur]["type"] == "approval":
+                continue  # an analyst confirms everything past an Approval node
+            seen.add(cur)
+            if acts(by_id[cur]):
+                found.append((src, cur))
+            stack.extend(children.get(cur, []))
+    return found
+
+
 def ancestors(node_id: str, edges: list[dict]) -> set[str]:
     parents: dict[str, set[str]] = {}
     for e in edges:
@@ -309,6 +350,13 @@ def validate(graph: Any) -> dict:
     for n in by_id.values():
         errs += _params_errors(n)
 
+    # An AI's decision never acts on its own: containment, blocks and outbound
+    # changes after an AI Decide (or a branch on the AI verdict) wait for an analyst.
+    if not errs:
+        for src, act in ungated_ai_actions(by_id, clean_edges):
+            errs.append(f"node {act}: {by_id[act]['label']} acts on the AI decision of node {src} without an "
+                        f"Approval node in between; add one so an analyst confirms it")
+
     if not errs:
         for n in by_id.values():
             ups = ancestors(n["id"], clean_edges)
@@ -357,7 +405,13 @@ def from_legacy(trigger_conditions: dict | None, actions: list[dict]) -> dict:
     nodes = [{"id": "trigger", "type": "trigger", "label": "Trigger", "position": [0, 0],
               "params": {"event": event, "match": tc.get("match", "all"), "conditions": conds}}]
     edges = []
-    prev = "trigger"
+    prev, prev_out = "trigger", "main"
+    # isolate / block on the AI verdict: an analyst confirms first (see validate)
+    if event == "alert.triaged" and any(a.get("action_type") in ("isolate_agent", "block_ip") for a in actions):
+        nodes.append({"id": "approval", "type": "approval", "label": "Approval", "position": [260, 0],
+                      "params": {"timeout_minutes": 60}, "retry": 0, "continue_on_error": False})
+        edges.append({"from": "trigger", "output": "main", "to": "approval"})
+        prev, prev_out = "approval", "approved"
     for i, a in enumerate(sorted(actions, key=lambda x: x.get("order_index", 0))):
         p = a.get("params") or {}
         t = a.get("action_type")
@@ -388,6 +442,6 @@ def from_legacy(trigger_conditions: dict | None, actions: list[dict]) -> dict:
         node.update({"id": nid, "label": NODE_TYPES[node["type"]]["label"], "position": [260 * (len(nodes)), 0],
                      "retry": 0, "continue_on_error": True})
         nodes.append(node)
-        edges.append({"from": prev, "output": "main", "to": nid})
-        prev = nid
+        edges.append({"from": prev, "output": prev_out, "to": nid})
+        prev, prev_out = nid, "main"
     return {"nodes": nodes, "edges": edges}

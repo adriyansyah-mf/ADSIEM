@@ -196,6 +196,21 @@ async def remove_block(entry_id: UUID, db: AsyncSession = Depends(get_db), user:
     return await _unblock_one(db, user, group, entry_id)
 
 
+@router.post("/api/web-blocks/{entry_id}/approve")
+async def approve_block(entry_id: UUID, db: AsyncSession = Depends(get_db), user: User = Manage,
+                        group: Optional[str] = Depends(get_scoped_group)):
+    """Approve a block the AI proposed from an alert verdict (status pending):
+    agents enforce it from their next sync. Rejecting it is DELETE (removed)."""
+    row = await db.get(WebBlockEntry, entry_id)
+    if row is None or (group is not None and row.group_id != group):
+        raise HTTPException(status_code=404, detail="Block not found")
+    policy = await db.get(WebBlockPolicy, row.group_id)
+    row = await web_blocks.approve_proposed(db, row, default_days=getattr(policy, "alert_block_days", None) or 30)
+    await audit_log(db, user.id, "web_block.approve", "web_block", str(row.id),
+                    {"domain": row.domain, "group_id": row.group_id, "alert_id": str(row.alert_id) if row.alert_id else None})
+    return _block_out(row)
+
+
 @router.post("/api/web-blocks/bulk")
 async def bulk_blocks(body: BulkIn, db: AsyncSession = Depends(get_db), user: User = Manage,
                       group: Optional[str] = Depends(get_scoped_group)):

@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 
 from worker.graph.chat_model import NineRouterChatModel
 from worker.llm_client import rag_sections
+from worker.untrusted import UNTRUSTED_RULE, injection_signals, wrap
 
 log = structlog.get_logger()
 
@@ -55,7 +56,9 @@ Respond ONLY with valid JSON:
   "false_positive_reason": "<reason if FP, null if not FP>",
   "threat_type": "<brute_force|scan|malware|c2|exfiltration|lateral_movement|privilege_escalation|other|benign>",
   "search_queries": ["<1-3 search queries>"]
-}"""
+}
+
+""" + UNTRUSTED_RULE
 
 
 class TriageState(TypedDict):
@@ -223,18 +226,22 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
         return None
 
     async def triage_node(state: TriageState):
-        prompt_parts = [
-            f"ALERT TO TRIAGE:",
+        # the alert's own data comes from the monitored systems: wrapped as untrusted (worker/untrusted.py)
+        alert_data = "\n".join([
             f"Title    : {state['title']}",
-            f"Severity : {state.get('effective_severity', state['severity'])}",
             f"Source IP: {state.get('source_ip') or 'unknown'}",
             f"Hostname : {state.get('hostname') or 'unknown'}",
             f"Fields   : {json.dumps(state.get('decoded_fields') or {}, default=str)[:500]}",
+        ])
+        prompt_parts = [
+            "ALERT TO TRIAGE:",
+            f"Severity : {state.get('effective_severity', state['severity'])}",
+            wrap(alert_data, "alert"),
         ]
         enrichment = state.get("enrichment")
         if enrichment and getattr(enrichment, "provider_bullets", None):
             lines = "\n".join(f"  - {b}" for b in enrichment.provider_bullets[:20])
-            prompt_parts.append(f"\nTHREAT INTEL:\n{lines}")
+            prompt_parts.append("\nTHREAT INTEL:\n" + wrap(lines, "threat_intel"))
         if state.get("heuristic_mitre"):
             prompt_parts.append(f"\nHeuristic MITRE: {', '.join(state['heuristic_mitre'])}")
         if state.get("ueba_context"):
@@ -281,6 +288,25 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
             log.info("ai_low_confidence_downgrade", alert_id=state["alert_id"],
                      confidence=confidence, threshold=threshold, original_verdict=verdict)
             verdict = "monitor"
+
+        # Text in the alert that talks to an AI: the model's word alone never
+        # closes or parks it (that is what such text is written to achieve).
+        signals = injection_signals(state.get("title"), state.get("decoded_fields"))
+        if signals:
+            analysis["injection_signals"] = signals
+            log.warning("ai_triage_prompt_injection", alert_id=state.get("alert_id"), signals=signals,
+                        model_verdict=verdict)
+            if verdict in ("false_positive", "monitor"):
+                analysis["triage_notes"] = (
+                    f"Prompt-injection attempt in this alert's data ({', '.join(signals)}): text addressed to an "
+                    f"AI tried to steer the triage. The model's verdict '{verdict}' was not applied; a case is "
+                    f"opened for an analyst. " + str(analysis.get("triage_notes") or ""))
+                analysis["false_positive_reason"] = None
+                verdict = "create_case"
+            else:
+                analysis["triage_notes"] = (
+                    f"Prompt-injection attempt in this alert's data ({', '.join(signals)}). "
+                    + str(analysis.get("triage_notes") or ""))
 
         return {
             "analysis": analysis,

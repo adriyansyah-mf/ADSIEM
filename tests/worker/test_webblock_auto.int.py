@@ -168,3 +168,44 @@ async def test_each_domain_cites_its_own_evidence(auto, sessions):
     reasons = {r.domain: r.reason for r in await entries(sessions)}
     assert "threat intelligence" in reasons["bad.example.org"] and "AI verdict" not in reasons["bad.example.org"]
     assert "AI verdict escalate" in reasons["dest.example.com"] and "threat intelligence" not in reasons["dest.example.com"]
+
+
+def no_ti():
+    return SimpleNamespace(iocs=[], reputation=[])
+
+
+async def test_the_ai_verdict_alone_only_proposes_a_block(auto, sessions):
+    """Text an attacker planted can steer the verdict, so the verdict alone never
+    blocks: the domain waits as pending (agents get only active entries) for an analyst."""
+    mod, alert_id = auto
+    e = SimpleNamespace(iocs=[{"type": "domain", "value": "bad.example.org"}],
+                        reputation=[SimpleNamespace(ioc_value="bad.example.org", ioc_type="domain", malicious=True)])
+    await mod.maybe_block(alert_id, "g", "Beacon", "escalate", {"url.domain": "dest.example.com"}, e, tags=TAGS)
+    status = {r.domain: r.status for r in await entries(sessions)}
+    assert status == {"bad.example.org": "active", "dest.example.com": "pending"}
+    async with sessions() as db:
+        audits = dict((await db.execute(text("SELECT resource_id, action FROM audit_logs"))).all())
+        notes = (await db.execute(text("SELECT content FROM alert_notes ORDER BY content"))).scalars().all()
+    assert audits == {"bad.example.org": "web_block.auto_block", "dest.example.com": "web_block.auto_propose"}
+    assert any("blocked bad.example.org" in n for n in notes)
+    assert any("proposed blocking (pending an analyst's approval" in n and "dest.example.com" in n for n in notes)
+
+
+async def test_a_proposal_never_downgrades_an_active_block(auto, sessions):
+    mod, alert_id = auto
+    await mod.maybe_block(alert_id, "g", "Beacon", "monitor", {}, enrichment("dest.example.com"), tags=TAGS)
+    assert [r.status for r in await entries(sessions)] == ["active"]
+    assert await mod.maybe_block(alert_id, "g", "Beacon", "escalate", {"url.domain": "dest.example.com"},
+                                 no_ti(), tags=TAGS) == []
+    assert [r.status for r in await entries(sessions)] == ["active"]
+
+
+async def test_a_rejected_proposal_can_be_proposed_again_but_stays_pending(auto, sessions):
+    mod, alert_id = auto
+    fields = {"url.domain": "dest.example.com"}
+    assert await mod.maybe_block(alert_id, "g", "Beacon", "create_case", fields, no_ti(), tags=TAGS) == ["dest.example.com"]
+    async with sessions() as db:  # the analyst rejects it
+        await db.execute(text("UPDATE web_block_entries SET status = 'removed'"))
+        await db.commit()
+    assert await mod.maybe_block(alert_id, "g", "Beacon", "escalate", fields, no_ti(), tags=TAGS) == ["dest.example.com"]
+    assert [r.status for r in await entries(sessions)] == ["pending"]

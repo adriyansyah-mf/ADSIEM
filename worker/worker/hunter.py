@@ -15,6 +15,7 @@ from worker.settings_cache import get_setting
 from worker.config import NINEROUTER_API_KEY, NINEROUTER_MODEL
 from worker.llm_client import _llm_post
 from worker.es_client import search as es_search
+from worker.untrusted import UNTRUSTED_RULE, wrap
 
 log = structlog.get_logger()
 
@@ -35,7 +36,9 @@ Respond ONLY in valid JSON:
   "kill_chain_phase": "recon|initial_access|execution|persistence|lateral_movement|exfiltration|impact|unknown",
   "recommended_actions": ["<action 1>", "<action 2>", "<action 3>"],
   "confidence": 0.0
-}"""
+}
+
+""" + UNTRUSTED_RULE
 
 
 async def _call_llm(ioc_type: str, ioc_value: str, timeline_text: str) -> dict:
@@ -44,10 +47,10 @@ async def _call_llm(ioc_type: str, ioc_value: str, timeline_text: str) -> dict:
     if not api_key:
         return {"risk_level": "unknown", "attack_narrative": "AI not configured", "confidence": 0.0}
 
-    prompt = f"""Threat Hunt Results for IoC: {ioc_type}={ioc_value}
+    prompt = f"""Threat Hunt Results for IoC: {wrap(f"{ioc_type}={ioc_value}", "ioc")}
 
 Timeline of appearances ({len(timeline_text.splitlines())} entries):
-{timeline_text[:3000]}
+{wrap(timeline_text, "hunt_timeline", 3000)}
 
 Analyze this IoC's historical footprint and determine the attack pattern."""
 

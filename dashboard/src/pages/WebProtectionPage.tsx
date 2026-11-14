@@ -4,7 +4,7 @@ import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import {
   BLOCK_PAGE, type BlockFilter, type WebPolicy, apiError, useAddAllowRule, useAgentWebHealth, useAllowlist, useBlockWeb,
-  useDeleteAllowRule, usePreviewPage, useSaveWebPolicy, useSyncFeed, useUnblockWeb, useUpdateAllowRule, useWebBlocks, useWebFeeds, useWebPolicy,
+  useApproveWeb, useDeleteAllowRule, usePreviewPage, useSaveWebPolicy, useSyncFeed, useUnblockWeb, useUpdateAllowRule, useWebBlocks, useWebFeeds, useWebPolicy,
 } from '@/hooks/useWebProtection'
 
 type Tab = 'blocklist' | 'allowlist' | 'page' | 'feeds' | 'agents'
@@ -88,6 +88,7 @@ function Blocklist({ group, superadmin }: { group: string; superadmin: boolean }
   const { data, isLoading, isError } = useWebBlocks(filter)
   const block = useBlockWeb()
   const unblock = useUnblockWeb()
+  const approve = useApproveWeb()
   const update = (patch: Partial<BlockFilter>) => setFilter(f => ({ ...f, offset: 0, ...patch }))
   const submit = () => block.mutate({ value: value.trim(), reason: reason.trim(), ...(superadmin ? { group_id: group } : {}) }, { onSuccess: () => { setValue(''); setReason('') } })
 
@@ -120,6 +121,7 @@ function Blocklist({ group, superadmin }: { group: string; superadmin: boolean }
         </select>
         <select value={filter.status} onChange={e => update({ status: e.target.value })} aria-label="Status" className={input}>
           <option value="active">Blocked</option>
+          <option value="pending">Pending approval (AI)</option>
           <option value="removed">Unblocked</option>
           <option value="suppressed">Allowlisted</option>
         </select>
@@ -156,6 +158,12 @@ function Blocklist({ group, superadmin }: { group: string; superadmin: boolean }
                           {b.group_id === '*' ? 'Allow for my group' : 'Unblock'}
                         </button>
                       )}
+                      {b.status === 'pending' && (
+                        <span className="inline-flex gap-1">
+                          <button className={button} disabled={approve.isPending} onClick={() => approve.mutate(b.id)}>Approve</button>
+                          <button className={button} disabled={unblock.isPending} onClick={() => unblock.mutate(b.id)}>Reject</button>
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -163,7 +171,14 @@ function Blocklist({ group, superadmin }: { group: string; superadmin: boolean }
             </table>
           </div>
         )}
+      {filter.status === 'pending' && (
+        <p className="text-xs text-muted-foreground">
+          Domains only an AI triage verdict vouches for. Agents don't block them until you approve; threat-intel
+          matches are blocked at once.
+        </p>
+      )}
       {unblock.isError && <p className="text-xs text-destructive">{apiError(unblock.error, 'Could not unblock.')}</p>}
+      {approve.isError && <p className="text-xs text-destructive">{apiError(approve.error, 'Could not approve.')}</p>}
       {data && data.total > BLOCK_PAGE && (
         <div className="flex items-center gap-2 text-xs">
           <button className={button} disabled={filter.offset === 0}
