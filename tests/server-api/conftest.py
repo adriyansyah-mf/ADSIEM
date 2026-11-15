@@ -77,6 +77,9 @@ async def evidence_api(monkeypatch):
     engine = create_async_engine(url, connect_args={"server_settings": {"search_path": f"{namespace},public"}},
                                  execution_options={"schema_translate_map": {None: namespace}})
     sessions = async_sessionmaker(engine, expire_on_commit=False)
+    from app.core import database as api_database
+    # code that opens its own session (retro_hunts.enqueue_safely) stays in this schema and event loop
+    monkeypatch.setattr(api_database, "AsyncSessionLocal", sessions)
     try:
         async with engine.begin() as db:
             await db.run_sync(Base.metadata.create_all)

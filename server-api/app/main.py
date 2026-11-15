@@ -50,6 +50,7 @@ from app.api.routes.soar import router as soar_router
 from app.api.routes.search import router as search_router
 from app.api.routes.reports import router as reports_router
 from app.api.routes.assistant import router as assistant_router
+from app.api.routes.retro_hunts import router as retro_hunts_router
 from app.api.routes.ai_skills import router as ai_skills_router
 from app.api.routes.mitre import router as mitre_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
@@ -117,6 +118,8 @@ _DEFAULT_SETTINGS = [
     ("retention_alerts_days",   "180",  False, "Delete closed alerts older than N days (0=disabled)"),
     ("es_disk_guard_percent",   "85",   False, "When Elasticsearch disk usage reaches this percent, delete the oldest days of logs until it is below (0=off). Elasticsearch stops ingest at its 95% flood stage"),
     ("es_disk_guard_keep_days", "3",    False, "The disk guard never deletes logs newer than this many days"),
+    ("retro_hunt_on_block",     "true", False, "Adding an IP, domain or hash to a blocklist searches the stored logs for it (retro-hunt) and alerts on every host that saw it (true / false)"),
+    ("retro_hunt_days",         "30",   False, "How many days back a retro-hunt searches by default (1-365)"),
 ]
 
 async def _seed_settings() -> None:
@@ -622,7 +625,7 @@ for router in [
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, investigation_chat_router, yara_drafts_router, knowledge_router, evidence_router,
-    iocs_router, ai_skills_router,
+    iocs_router, ai_skills_router, retro_hunts_router,
     prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, ip_blocks_agent_router, ip_blocks_router, entity_risk_router, lateral_router, policies_router, policies_agent_router, agent_updates_router,
 ]:
     app.include_router(router)

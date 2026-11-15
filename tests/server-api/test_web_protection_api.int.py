@@ -59,6 +59,17 @@ async def test_manual_block_normalises_and_audits(env):
     assert ("web_block.add", r.json()["id"]) in env.audit_calls
 
 
+async def test_a_manual_block_queues_a_retro_hunt(env):
+    """Has the domain already been here? The block queues a hunt in a session of its own."""
+    from app.models.models import RetroHunt
+    r = await env.api.post("/api/web-blocks", json={"value": "https://C2.Example/payload", "reason": "c2"})
+    assert r.status_code == 201, r.text
+    async with env.sessions() as db:
+        hunts = (await db.execute(select(RetroHunt))).scalars().all()
+    assert [(h.ioc_type, h.ioc_value, h.group_id, h.trigger, h.status) for h in hunts] == \
+        [("domain", "c2.example", "blue", "web_block", "pending")]
+
+
 async def test_ip_and_allowlisted_values_are_refused(env):
     r = await env.api.post("/api/web-blocks", json={"value": "45.33.32.156"})
     assert r.status_code == 422 and "IP addresses cannot be web-blocked" in r.json()["detail"]

@@ -33,6 +33,7 @@ const EntityRiskPage = lazy(() => import('@/pages/EntityRiskPage'))
 const LateralMovementPage = lazy(() => import('@/pages/LateralMovementPage'))
 const FimPage = lazy(() => import('@/pages/FimPage'))
 const HuntsPage = lazy(() => import('@/pages/HuntsPage'))
+const RetroHuntPage = lazy(() => import('@/pages/RetroHuntPage'))
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'))
 const SopPage = lazy(() => import('@/pages/SopPage'))
 const KnowledgePage = lazy(() => import('@/pages/KnowledgePage'))
@@ -91,6 +92,7 @@ export default function App() {
             <Route path="/lateral" element={<LateralMovementPage />} />
             <Route path="/fim" element={<FimPage />} />
             <Route path="/hunts" element={<HuntsPage />} />
+            <Route path="/retro-hunt" element={<RetroHuntPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/sop" element={<SopPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />

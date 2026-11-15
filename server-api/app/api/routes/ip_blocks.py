@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import get_agent, get_scoped_group, require_permission
 from app.models.models import Agent, IPBlockEntry, User
-from app.services import ip_blocks
+from app.services import ip_blocks, retro_hunts
 from app.services.audit import audit_log
 from worker.ip_iocs import ALL_GROUPS
 
@@ -116,6 +116,9 @@ async def _block_one(db: AsyncSession, user: User, target: str, value: str, reas
                      expires_at: Optional[datetime]) -> IPBlockEntry:
     row = await ip_blocks.block_ip(db, user, target, value, reason, expires_at)
     await audit_log(db, user.id, "ip_block.add", "ip_block", str(row.id), {"cidr": row.cidr, "group_id": target})
+    ip = retro_hunts.single_ip(row.cidr)
+    if ip:  # has it already been here? (a range is not hunted)
+        await retro_hunts.enqueue_safely(db, "ip", ip, target, "ip_block", user.id)
     return row
 
 
