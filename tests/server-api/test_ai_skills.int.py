@@ -67,6 +67,33 @@ def test_the_shipped_skills_parse():
     assert "ot-ics-attack-investigation" in pack and "webshell-investigation" in pack
 
 
+def test_the_shipped_skills_name_only_artifacts_and_tools_that_exist():
+    """A skill that names a missing artifact or tool sends the investigator down a dead end."""
+    import re
+
+    from app.services.assistant_tools import TOOLS
+    from app.services.flow_artifacts import builtin_artifacts
+    from app.services.investigator import READ_ONLY_TOOLS
+
+    artifacts = set(builtin_artifacts())
+    tools = {t["name"] for t in TOOLS} | READ_ONLY_TOOLS | {
+        "list_hosts", "list_artifacts", "run_artifact", "get_flow_rows", "record_hypothesis", "create_artifact",
+        "lookup_malwarebazaar", "load_skill", "run_command"}
+    # backticked snake_case words are tool names, except these log types, files and commands
+    not_tools = {"log_type", "linux_auth", "linux_process_exec", "siem_agent", "project_scan", "nginx_access",
+                 "apache_access", "authorized_keys", "information_schema", "pam_unix", "pg_dump"}
+    problems = []
+    for path in REPO_SKILLS.glob("*.md"):
+        text = path.read_text()
+        for art in re.findall(r"\b((?:Linux|Windows|Generic)\.[A-Za-z]+\.[A-Za-z]+)\b", text):
+            if art not in artifacts:
+                problems.append(f"{path.name}: artifact {art}")
+        for name in re.findall(r"`([a-z]+(?:_[a-z]+)+)`", text):
+            if name not in tools and name not in not_tools:
+                problems.append(f"{path.name}: tool {name}")
+    assert problems == []
+
+
 async def test_sync_adds_updates_keeps_toggles_and_leaves_custom_alone(env):
     (env.skill_dir / "a.md").write_text(_skill("alpha-skill", body="# v1"))
     (env.skill_dir / "b.md").write_text(_skill("beta-skill"))

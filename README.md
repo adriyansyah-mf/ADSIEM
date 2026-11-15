@@ -172,8 +172,11 @@ model to keep inference on-prem.
 - **AI skills:** the investigator sees each skill's name and description, and loads
   (`load_skill`) the procedures that fit the case. A skill covers what to collect with which
   artifacts, how to tell a true positive from a false positive, and what the report must cover.
-  - Built-in skills: webshell, cryptominer, ransomware, brute force then login, lateral
-    movement, and OT/ICS attacks.
+  - 15 built-in skills: webshell, cryptominer, ransomware, brute force then login, lateral
+    movement, OT/ICS attacks, phishing, credential theft, C2 beaconing, exfiltration, Linux
+    privilege escalation, Windows persistence and LOLBins, defense evasion, web application
+    attacks, and malicious code projects.
+  - Each skill can be switched on or off.
   - Write your own, or copy and adapt a built-in one, under **Response → AI skills**.
 
   See [`docs/operations/ai-skills.md`](docs/operations/ai-skills.md).

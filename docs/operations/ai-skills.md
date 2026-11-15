@@ -36,6 +36,19 @@ enabled, changed ones updated, and your on/off choice is kept.
 | `bruteforce-then-login` | SSH/RDP/web brute force or spraying, above all when a login then succeeds |
 | `lateral-movement-investigation` | remote logins or remote-admin connections that are new for a host or account |
 | `ot-ics-attack-investigation` | Modbus/DNP3 writes, PLC programming or stop, scans, OT exposed to the internet, ICS signatures |
+| `phishing-initial-access` | Office/LibreOffice starting a shell or script host, Office dropping programs, ClickFix, the Office IOA chains |
+| `credential-access-investigation` | LSASS read or dumped, /etc/shadow read, browser/wallet credential stores, credential process memory |
+| `c2-beaconing-investigation` | periodic beaconing, C2 blocked by the firewall, suspicious-TLD DNS, dangerous outbound services, odd listeners |
+| `data-exfiltration-investigation` | large or HTTP POST uploads, file-sharing destinations, archives staged before a transfer |
+| `linux-privilege-escalation` | sudo/su to root, sudoers or PAM written, privilege change to root, privileged group added |
+| `windows-persistence-lolbins` | encoded PowerShell, script blocks, new services and scheduled tasks, Defender disabled, LOLBins |
+| `defense-evasion-tampering` | logs cleared, SIEM agent tampered or stopped, sensor exclusions, backups deleted |
+| `web-application-attack` | SQLi, XSS, NoSQL, Log4Shell, LFI, WordPress probes: whether any request succeeded |
+| `malicious-project-supply-chain` | malicious repositories or packages (fake job tests), interpreters dropping programs or reading credential stores |
+
+`tests/server-api/test_ai_skills.int.py` checks that every artifact and tool
+a built-in skill names exists. A skill that sends the investigator to a
+missing artifact fails CI.
 
 ## Your own skills
 
