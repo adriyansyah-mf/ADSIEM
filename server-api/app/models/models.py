@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer,
+    BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer, LargeBinary,
     String, Text, ARRAY, UniqueConstraint, CheckConstraint, Index, Sequence, text
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -624,6 +624,34 @@ class SoarCaseEvent(Base):
     created_at = Column(DateTime(timezone=True), default=now_utc)
     processed_at = Column(DateTime(timezone=True), index=True)
 
+
+class IncidentReport(Base):
+    """A written report of one case (services/incident_report.py). A draft is
+    edited freely; finalizing numbers it, renders the PDF once, stores that
+    exact file and its SHA-256, and locks it."""
+    __tablename__ = "incident_reports"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id         = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="SET NULL"), index=True)
+    group_id        = Column(String(100), nullable=False, default="default", index=True)
+    number          = Column(String(40), unique=True)          # IR-2026-0001, set when finalized
+    status          = Column(String(20), nullable=False, default="draft")  # draft / final
+    language        = Column(String(5), nullable=False, default="id")      # id / en
+    title           = Column(String(300), nullable=False)
+    classification  = Column(String(20), nullable=False, default="confidential")
+    priority        = Column(String(20), nullable=False, default="normal")  # low / normal / high / urgent
+    audience        = Column(String(300))
+    content         = Column(JSONB, nullable=False, default=dict)  # sections, timeline, iocs, actions, evidence
+    ai_used         = Column(Boolean, nullable=False, default=False)
+    created_by      = Column(UUID(as_uuid=True))
+    created_by_name = Column(String(255))
+    finalized_by    = Column(UUID(as_uuid=True))
+    finalized_by_name = Column(String(255))
+    finalized_at    = Column(DateTime(timezone=True))
+    pdf             = Column(LargeBinary)
+    pdf_sha256      = Column(String(64), index=True)
+    content_sha256  = Column(String(64))
+    created_at      = Column(DateTime(timezone=True), default=now_utc)
+    updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 class CaseNote(Base):
     __tablename__ = "case_notes"
