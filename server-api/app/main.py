@@ -647,3 +647,5 @@ from app.api.routes.saved_searches import router as saved_searches_router  # noq
 from app.api.routes.dashboards import router as dashboards_router  # noqa: E402
 app.include_router(saved_searches_router)
 app.include_router(dashboards_router)
+from app.api.routes.incident_reports import router as incident_reports_router  # noqa: E402
+app.include_router(incident_reports_router)

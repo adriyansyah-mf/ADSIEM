@@ -38,6 +38,7 @@ const FimPage = lazy(() => import('@/pages/FimPage'))
 const HuntsPage = lazy(() => import('@/pages/HuntsPage'))
 const RetroHuntPage = lazy(() => import('@/pages/RetroHuntPage'))
 const ReportsPage = lazy(() => import('@/pages/ReportsPage'))
+const IncidentReportPage = lazy(() => import('@/pages/IncidentReportPage'))
 const SopPage = lazy(() => import('@/pages/SopPage'))
 const KnowledgePage = lazy(() => import('@/pages/KnowledgePage'))
 const HandoverPage = lazy(() => import('@/pages/HandoverPage'))
@@ -100,6 +101,7 @@ export default function App() {
             <Route path="/hunts" element={<HuntsPage />} />
             <Route path="/retro-hunt" element={<RetroHuntPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/reports/incidents/:id" element={<IncidentReportPage />} />
             <Route path="/sop" element={<SopPage />} />
             <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/handover" element={<HandoverPage />} />

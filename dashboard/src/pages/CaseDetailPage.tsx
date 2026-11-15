@@ -18,6 +18,7 @@ import AttackGraph from '@/components/AttackGraph'
 import AlertDetailModal from '@/components/AlertDetailModal'
 import AiFeedbackWidget from '@/components/AiFeedbackWidget'
 import AiInvestigationPanel from '@/components/AiInvestigationPanel'
+import IncidentReportButton from '@/components/reports/IncidentReportButton'
 
 function Box({ title, children, actions }: { title: string; children: React.ReactNode; actions?: React.ReactNode }) {
   return <Panel title={title} actions={actions}>{children}</Panel>
@@ -177,7 +178,10 @@ export default function CaseDetailPage() {
   return (
     <div className="workspace case-page">
       <PageHeader eyebrow="Investigations" title={caseData.title}
-        actions={<button className="ui-button" onClick={() => navigate('/cases')}><ArrowLeft size={14} /> Back to cases</button>} />
+        actions={<div className="control-cluster">
+          <IncidentReportButton caseId={caseData.id} />
+          <button className="ui-button" onClick={() => navigate('/cases')}><ArrowLeft size={14} /> Back to cases</button>
+        </div>} />
       <div className="control-cluster">
         <SeverityBadge severity={caseData.severity} />
         <StatusBadge status={caseData.status} />
