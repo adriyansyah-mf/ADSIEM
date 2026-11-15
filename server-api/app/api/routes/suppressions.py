@@ -1,4 +1,5 @@
 # server-api/app/api/routes/suppressions.py
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
@@ -26,13 +27,11 @@ class SuppressionOut(BaseModel):
     reason: str | None
     group_id: str
     is_active: bool
-    created_at: str | None = None
+    # a datetime, sent as ISO 8601: declared as str it failed response validation (500)
+    # after the row was already committed, so every retry stored another copy
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
-
-    def model_post_init(self, __context):
-        if self.created_at and hasattr(self.created_at, "isoformat"):
-            object.__setattr__(self, "created_at", self.created_at.isoformat())
 
 
 @router.get("", response_model=list[SuppressionOut])
@@ -58,11 +57,21 @@ async def create_suppression(
     allowed_types = {"ip", "hostname", "user", "rule_title"}
     if body.entity_type not in allowed_types:
         raise HTTPException(400, f"entity_type must be one of: {', '.join(allowed_types)}")
+    value, group = body.entity_value.strip(), group_filter or user.group_id
+    if not value:
+        raise HTTPException(422, "entity_value is empty")
+    # the same suppression clicked twice stays one row
+    existing = (await db.execute(select(AlertSuppression).where(
+        AlertSuppression.is_active == True, AlertSuppression.entity_type == body.entity_type,
+        AlertSuppression.entity_value == value, AlertSuppression.group_id == group,
+    ).limit(1))).scalars().first()
+    if existing is not None:
+        return existing
     s = AlertSuppression(
         entity_type=body.entity_type,
-        entity_value=body.entity_value.strip(),
+        entity_value=value,
         reason=body.reason,
-        group_id=group_filter or user.group_id,
+        group_id=group,
         created_by=user.id,
     )
     db.add(s)
