@@ -1,6 +1,7 @@
 # server-api/app/api/routes/auth.py
 from typing import Annotated
 import pyotp
+from uuid import UUID
 import qrcode
 import io
 import base64
@@ -24,7 +25,7 @@ from app.core.security import (
 )
 from app.models.models import Role, User
 from app.schemas.schemas import LoginRequest, TokenResponse, UserMe
-from app.services.audit import audit_log
+from app.services.audit import audit_log, audit_safe
 from app.core.limiter import limiter
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -63,12 +64,16 @@ async def login(
     redis: Annotated[aioredis.Redis, Depends(get_redis)],
 ):
     result = await db.execute(
-        select(User).options(selectinload(User.role))
-        .where(User.username == body.username, User.is_active == True)
+        select(User).options(selectinload(User.role)).where(User.username == body.username)
     )
     user = result.scalar_one_or_none()
-    if not user or not verify_password(body.password, user.password_hash):
-        background.add_task(audit_log, db, None, "login_failed", "user", body.username, {"reason": "bad credentials"})
+    # Audited inline, not as background tasks: those only run when the response succeeds.
+    # The caller always gets the same answer; only the audit log says which check failed.
+    if user is None or not user.is_active or not verify_password(body.password, user.password_hash):
+        reason = "unknown_user" if user is None else "disabled_account" if not user.is_active else "bad_password"
+        await audit_safe(db, user.id if user else None, "login_failed", "user", str(user.id) if user else None,
+                        {"username": body.username[:255], "reason": reason}, outcome="failure",
+                        actor_name=body.username[:255])
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     # MFA enforcement
@@ -79,11 +84,14 @@ async def login(
             return {"mfa_required": True, "access_token": ""}
         totp = pyotp.TOTP(user.mfa_secret)
         if not totp.verify(mfa_code, valid_window=1):
+            await audit_safe(db, user.id, "login_failed", "user", str(user.id),
+                            {"username": user.username, "reason": "bad_mfa_code"}, outcome="failure")
             raise HTTPException(status_code=401, detail="Invalid MFA code")
 
     access_token = create_access_token(str(user.id))
     await _issue_refresh(response, redis, str(user.id))
-    background.add_task(audit_log, db, user.id, "login_success", "user", str(user.id))
+    background.add_task(audit_log, db, user.id, "login_success", "user", str(user.id),
+                        {"mfa": bool(user.mfa_enabled and user.mfa_secret)})
     return TokenResponse(access_token=access_token)
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -123,7 +131,8 @@ async def refresh(
             # revoked (logout), expired, or replaced longer ago than the grace: a
             # replayed old token is a theft signal, so it's audited
             # inline, not a background task: those only run when the response succeeds
-            await audit_log(db, user.id, "refresh_token_rejected", "user", str(user.id))
+            await audit_safe(db, user.id, "refresh_token_rejected", "user", str(user.id),
+                            {"reason": "revoked or replayed"}, outcome="denied")
             raise HTTPException(status_code=401, detail="Refresh token revoked")
         if state == "rotated":
             rotate = False  # a concurrent refresh already replaced it; its cookie is on the way
@@ -147,9 +156,12 @@ async def logout(
     token: an expired session must still be able to log out."""
     if refresh_token:
         try:
-            jti = decode_token(refresh_token).get("jti")
+            payload = decode_token(refresh_token)
+            jti = payload.get("jti")
             if jti:
                 await redis.delete(REFRESH_KEY.format(jti))
+            if payload.get("sub"):
+                await audit_safe(None, UUID(str(payload["sub"])), "logout", "user", str(payload["sub"]))
         except Exception as exc:  # noqa: BLE001 — bad/expired token or Redis down: still clear the cookie
             log.info("logout_revoke_skipped", error=str(exc))
     response.delete_cookie("refresh_token", httponly=True, samesite="lax", secure=settings.REFRESH_COOKIE_SECURE)
@@ -186,6 +198,7 @@ async def mfa_setup(
     current_user.mfa_secret = secret
     current_user.mfa_enabled = False
     await db.commit()
+    await audit_log(db, current_user.id, "mfa_setup_started", "user", str(current_user.id))
     return {"secret": secret, "qr_code": f"data:image/png;base64,{qr_b64}", "uri": uri}
 
 
@@ -200,9 +213,12 @@ async def mfa_enable(
         raise HTTPException(status_code=400, detail="MFA setup not started. Call /mfa/setup first.")
     totp = pyotp.TOTP(current_user.mfa_secret)
     if not totp.verify(str(body.get("code", "")), valid_window=1):
+        await audit_safe(db, current_user.id, "mfa_enable", "user", str(current_user.id),
+                        {"reason": "bad_code"}, outcome="failure")
         raise HTTPException(status_code=400, detail="Invalid TOTP code")
     current_user.mfa_enabled = True
     await db.commit()
+    await audit_log(db, current_user.id, "mfa_enable", "user", str(current_user.id))
     return {"ok": True, "message": "MFA enabled successfully"}
 
 
@@ -216,8 +232,11 @@ async def mfa_disable(
     if current_user.mfa_enabled and current_user.mfa_secret:
         totp = pyotp.TOTP(current_user.mfa_secret)
         if not totp.verify(str(body.get("code", "")), valid_window=1):
+            await audit_safe(db, current_user.id, "mfa_disable", "user", str(current_user.id),
+                            {"reason": "bad_code"}, outcome="failure")
             raise HTTPException(status_code=400, detail="Invalid TOTP code")
     current_user.mfa_enabled = False
     current_user.mfa_secret = None
     await db.commit()
+    await audit_log(db, current_user.id, "mfa_disable", "user", str(current_user.id))
     return {"ok": True}

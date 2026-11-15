@@ -11,6 +11,26 @@ def event_loop():
     loop.close()
 
 
+@pytest.fixture(autouse=True)
+def _unpooled_side_sessions(monkeypatch):
+    """Audit writes (a 403, a failed login) open app.core.database.AsyncSessionLocal
+    themselves. On the shared pooled engine that leaves a connection made on one
+    test's event loop for a later test on another loop ("attached to a different
+    loop"). A NullPool factory keeps nothing; fixtures that point AsyncSessionLocal
+    at their own schema still override this one."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        yield
+        return
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+    from app.core import database as api_database
+    engine = create_async_engine(url, poolclass=NullPool)
+    monkeypatch.setattr(api_database, "AsyncSessionLocal",
+                        async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession))
+    yield
+
+
 class _Redis:
     """Enough of Redis for the heartbeat route (session continuity, log queue)."""
 
