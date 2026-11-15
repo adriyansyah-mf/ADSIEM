@@ -1,0 +1,64 @@
+title: SPN Added To A User Account
+id: rule-win-ad-spn-added-to-user
+description: >-
+  A servicePrincipalName was written on a user object (5136). An attacker with
+  write rights adds an SPN to an account to make it Kerberoastable
+  (targeted Kerberoasting), then requests its ticket. Admins set SPNs on
+  service accounts rarely; confirm the change. Needs "Audit Directory Service
+  Changes" (T1558.003 Kerberoasting, T1098 Account Manipulation)
+logsource:
+  product: windows
+  service: security
+detection:
+  spn_written:
+    EventID: '5136'
+    AttributeLDAPDisplayName: servicePrincipalName
+    ObjectClass: user
+    OperationType: '%%14674'
+  condition: spn_written
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1558.003
+  - attack.persistence
+  - attack.t1098
+---
+title: SID History Added To An Account
+id: rule-win-ad-sid-history
+description: >-
+  SID history was added to an account (4765), or the attempt failed (4766).
+  An account with a privileged SID (Domain Admins, Enterprise Admins) in its
+  history has those rights everywhere: a stealthy persistence path after a
+  domain compromise. Legitimate only during a planned domain migration
+  (T1134.005 SID-History Injection)
+logsource:
+  product: windows
+  service: security
+detection:
+  sid_history:
+    EventID: ['4765', '4766']
+  condition: sid_history
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1134.005
+  - attack.persistence
+---
+title: Directory Services Restore Mode Password Changed
+id: rule-win-ad-dsrm-password
+description: >-
+  The Directory Services Restore Mode administrator password was set on a
+  domain controller (4794). DSRM is a local admin account on every DC; with
+  DsrmAdminLogonBehavior changed it becomes a backdoor that survives domain
+  password resets (T1098 Account Manipulation, T1003 OS Credential Dumping)
+logsource:
+  product: windows
+  service: security
+detection:
+  dsrm:
+    EventID: '4794'
+  condition: dsrm
+level: high
+tags:
+  - attack.persistence
+  - attack.t1098

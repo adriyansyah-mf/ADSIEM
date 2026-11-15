@@ -1,0 +1,47 @@
+title: AS-REP Roasting - Ticket Issued Without Pre-Authentication
+id: rule-win-ad-asrep-roasting
+description: >-
+  A domain controller issued a TGT (4768) for an account without Kerberos
+  pre-authentication (PreAuthType 0), RC4-encrypted. Anyone can request
+  such a ticket for that account and crack its password offline
+  (Rubeus asreproast, GetNPUsers.py). The account has "Do not require
+  Kerberos preauthentication" set: fix that too (T1558.004 AS-REP Roasting)
+logsource:
+  product: windows
+  service: security
+detection:
+  tgt_without_preauth:
+    EventID: '4768'
+    Status: '0x0'
+    PreAuthType: '0'
+    TicketEncryptionType: ['0x17', '0x18']
+  condition: tgt_without_preauth
+suppression:
+  timewindow: 3600
+  group_by: [IpAddress, TargetUserName]
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1558.004
+---
+title: Account Made AS-REP Roastable
+id: rule-win-ad-dont-require-preauth
+description: >-
+  A user account was changed (4738) to "Don't Require Preauth - Enabled"
+  (%%2096). That makes it AS-REP roastable by anyone on the domain; attackers
+  set it on accounts they control to keep an offline-crackable foothold
+  (T1558.004 AS-REP Roasting, T1098 Account Manipulation)
+logsource:
+  product: windows
+  service: security
+detection:
+  preauth_disabled:
+    EventID: '4738'
+    UserAccountControl|contains: '%%2096'
+  condition: preauth_disabled
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1558.004
+  - attack.persistence
+  - attack.t1098
