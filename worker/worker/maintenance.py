@@ -10,7 +10,6 @@ from worker import alert_iocs, es_client, es_snapshots
 from worker.database import AsyncSessionLocal
 from worker.models import Alert
 from worker.settings_cache import get_setting
-from worker.es_client import delete_by_query as es_delete_by_query
 
 log = structlog.get_logger()
 
@@ -18,10 +17,13 @@ RUN_INTERVAL = 86400  # once per day
 
 
 async def _purge_logs(days: int) -> int:
+    """Delete logs older than `days`. Runs as an Elasticsearch task: a day of logs
+    takes far longer to delete than the client's 15-second timeout."""
     if days <= 0:
         return 0
+    from worker.es_disk_guard import delete_before
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    return await es_delete_by_query({"range": {"created_at": {"lt": cutoff.isoformat()}}})
+    return await delete_before(es_client._get_client(), cutoff)
 
 
 async def _purge_alerts(days: int) -> int:

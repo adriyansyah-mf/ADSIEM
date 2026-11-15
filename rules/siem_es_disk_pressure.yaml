@@ -1,0 +1,38 @@
+title: Elasticsearch Disk Full - Old Logs Deleted Early
+id: rule-siem-es-disk-pressure
+description: >-
+  The Elasticsearch disk reached the disk-guard threshold (Settings,
+  es_disk_guard_percent), so the guard deleted the oldest days of logs before
+  their retention period ended to keep ingest running. The deleted range is
+  in deleted_before. Add disk or shorten the retention settings. Logs can no
+  longer be searched as far back as the retention promises
+  (worker/es_disk_guard.py).
+logsource:
+  product: siem
+  service: agent
+detection:
+  pressure:
+    event.action: es_disk_pressure
+  condition: pressure
+level: medium
+tags:
+  - attack.impact
+---
+title: Elasticsearch Disk Full - Ingest At Risk
+id: rule-siem-es-disk-full
+description: >-
+  The Elasticsearch disk is above the disk-guard threshold and nothing more
+  may be deleted: only the protected newest days of logs are left
+  (es_disk_guard_keep_days), or something other than logs fills the disk. At
+  Elasticsearch's 95% flood stage the logs index turns read-only and ingest
+  stops. Free or add disk now (worker/es_disk_guard.py).
+logsource:
+  product: siem
+  service: agent
+detection:
+  full:
+    event.action: es_disk_full
+  condition: full
+level: critical
+tags:
+  - attack.impact
