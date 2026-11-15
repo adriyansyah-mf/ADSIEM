@@ -1,0 +1,35 @@
+/* Custom dashboards (pages/CustomDashboardsPage.tsx, components/dashboards/*). */
+.workspace-dialog--wide:has(.viz-editor) { width: min(1120px, calc(100% - 32px)); }
+.viz-editor { display: grid; gap: var(--space-4, 16px); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .viz-editor { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); } }
+.viz-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
+.viz-type {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-height: 64px; padding: 6px; border: 1px solid var(--border-default); border-radius: var(--radius-control, 6px);
+  background: transparent; color: var(--text-secondary); font-size: 12px; text-align: center; line-height: 1.2;
+}
+.viz-type:hover { color: var(--text-primary); border-color: var(--accent-cyan); }
+.viz-type--on { color: var(--text-primary); border-color: var(--accent-cyan); background: color-mix(in srgb, var(--accent-cyan) 14%, transparent); }
+.viz-preview { display: flex; flex-direction: column; gap: 6px; }
+.viz-preview__body {
+  height: 300px; padding: 10px; overflow: auto; border: 1px dashed var(--border-default);
+  border-radius: var(--radius-control, 6px); background: var(--bg-panel, transparent);
+}
+
+.dash-pill {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 4px 2px 8px; font-size: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-cyan) 50%, transparent); border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cyan) 12%, transparent);
+}
+.dash-pill--not { border-color: color-mix(in srgb, var(--accent-red) 60%, transparent); background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
+.dash-pill button { display: inline-flex; align-items: center; min-height: 20px; padding: 0 2px; border-radius: 4px; }
+.dash-pill button:hover { background: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+
+.viz-panel { height: 100%; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.viz-panel__head { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; min-width: 0; }
+.viz-panel__drag { cursor: grab; color: var(--text-muted); }
+.viz-panel__body { flex: 1; min-height: 0; overflow: auto; padding: 4px 10px 6px; }
+.viz-panel__foot { padding: 0 10px 6px; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-grid--editing .viz-panel { outline: 1px dashed color-mix(in srgb, var(--accent-cyan) 45%, transparent); }
+.dash-grid .react-grid-item.react-grid-placeholder { background: var(--accent-cyan); opacity: 0.15; border-radius: 8px; }
+.dash-grid .react-resizable-handle { filter: invert(1); opacity: 0.6; }

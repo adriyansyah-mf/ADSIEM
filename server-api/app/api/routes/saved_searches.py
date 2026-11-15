@@ -164,10 +164,11 @@ async def run_saved(
     hours: int = Query(24, ge=1, le=svc.MAX_HOURS),
     field: str = "log_type",
     limit: int = Query(10, ge=1, le=50),
+    tz: Optional[str] = Query(None, max_length=64),
 ):
     s = await load_visible(db, search_id, user, group_filter)
     try:
-        out = await svc.run(s, group_filter, viz, hours, field, limit)
+        out = await svc.run(s, group_filter, viz, hours, field, limit, tz)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     return {"search": {"id": str(s.id), "name": s.name, "kind": s.kind}, **out}
