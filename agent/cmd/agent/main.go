@@ -51,6 +51,7 @@ import (
 	"github.com/siem-platform/agent/internal/tailer"
 	"github.com/siem-platform/agent/internal/task"
 	"github.com/siem-platform/agent/internal/unpack"
+	"github.com/siem-platform/agent/internal/usbguard"
 	"github.com/siem-platform/agent/internal/webblock"
 	"github.com/siem-platform/agent/internal/winsensor"
 	"github.com/siem-platform/agent/internal/yarascan"
@@ -631,6 +632,16 @@ func run(configPath string, stop <-chan struct{}) {
 		return polStore.Current().Settings.Excluded(policy.ScopeMalware, policy.Match{Path: path, Image: path, SHA256: sha})
 	}
 	polStore.OnChange(func(p *policy.Policy) { applyPolicy(p.Settings, preventer, notifier, guard) })
+	// USB mass storage: reported or blocked by the group policy (usb_storage, usb_allow)
+	if usbGuard, err := usbguard.Start(flowCtx, usbguard.Options{
+		Mode:  func() string { return polStore.Current().Settings.USBStorage },
+		Allow: func() []string { return polStore.Current().Settings.USBAllow },
+		Push:  func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+	}); err != nil {
+		slog.Warn("usb storage control off", "err", err)
+	} else {
+		polStore.OnChange(func(*policy.Policy) { usbGuard.Reapply() })
+	}
 	go polStore.SyncLoop(flowCtx, c)
 
 	// Static ML on the files the on-access scanner reads: models trained on

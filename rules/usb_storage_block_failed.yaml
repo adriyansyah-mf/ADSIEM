@@ -1,0 +1,15 @@
+title: USB Storage Device Not Blocked
+id: rule-usb-storage-block-failed
+description: The group policy blocks USB storage, but the agent could not cut off this device (usb.error says why, e.g. Windows refused the eject because files on it were open). The device is usable. Check the host and remove the device.
+logsource:
+  product: usb
+detection:
+  selection:
+    event.action: usb_storage
+    usb.action: block_failed
+  condition: selection
+level: high
+tags:
+  - attack.exfiltration
+  - attack.t1052.001
+  - attack.defense_evasion
