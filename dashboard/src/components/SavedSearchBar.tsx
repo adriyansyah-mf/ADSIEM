@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bookmark, Save, X } from 'lucide-react'
 import { api } from '@/api/client'
@@ -40,11 +41,12 @@ export default function SavedSearchBar({ kind, query, filterTree, onLoad }: {
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState('')
   const [shared, setShared] = useState(false)
+  const [justSaved, setJustSaved] = useState('')
   const save = useMutation({
     mutationFn: () => api.post('/api/saved-searches', {
       name: name.trim(), kind, query, shared, filter_tree: filterTree ? JSON.parse(filterTree) : null,
     }),
-    onSuccess: () => { setSaving(false); setName(''); setShared(false); void qc.invalidateQueries({ queryKey: ['saved-searches'] }) },
+    onSuccess: () => { setJustSaved(name.trim()); setSaving(false); setName(''); setShared(false); void qc.invalidateQueries({ queryKey: ['saved-searches'] }) },
   })
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/saved-searches/${id}`),
@@ -79,7 +81,7 @@ export default function SavedSearchBar({ kind, query, filterTree, onLoad }: {
       )}
       {!saving ? (
         <button type="button" className="ui-button" disabled={empty} title={empty ? 'Type a query or apply filters first' : undefined}
-          onClick={() => setSaving(true)}><Save size={14} /> Save search</button>
+          onClick={() => { setSaving(true); setJustSaved('') }}><Save size={14} /> Save search</button>
       ) : (
         <form className="control-cluster flex-wrap" onSubmit={e => { e.preventDefault(); if (name.trim()) save.mutate() }}>
           <input className="ui-input w-56" autoFocus placeholder="Name, e.g. SSH failures on web servers" value={name}
@@ -90,6 +92,11 @@ export default function SavedSearchBar({ kind, query, filterTree, onLoad }: {
           <button className="ui-button ui-button--primary" disabled={!name.trim() || save.isPending}>Save</button>
           <button type="button" className="ui-button ui-button--quiet" onClick={() => setSaving(false)}>Cancel</button>
         </form>
+      )}
+      {justSaved && !saving && (
+        <span className="text-xs">
+          Saved “{justSaved}”. <Link className="underline" to="/dashboards">Add it to a dashboard →</Link>
+        </span>
       )}
       {(save.isError || remove.isError) && (
         <span role="alert" className="text-destructive text-xs">
