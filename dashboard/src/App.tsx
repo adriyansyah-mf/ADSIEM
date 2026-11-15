@@ -20,6 +20,7 @@ const LiveEventsPage = lazy(() => import('@/pages/LiveEventsPage'))
 const AlertsPage = lazy(() => import('@/pages/AlertsPage'))
 const AlertDetailPage = lazy(() => import('@/pages/AlertDetailPage'))
 const RulesPage = lazy(() => import('@/pages/RulesPage'))
+const RuleQualityPage = lazy(() => import('@/pages/RuleQualityPage'))
 const DecodersPage = lazy(() => import('@/pages/DecodersPage'))
 const UsersPage = lazy(() => import('@/pages/UsersPage'))
 const WebhooksPage = lazy(() => import('@/pages/WebhooksPage'))
@@ -81,6 +82,7 @@ export default function App() {
             <Route path="/cases" element={<CasesPage />} />
             <Route path="/cases/:id" element={<CaseDetailPage />} />
             <Route path="/rules" element={<RulesPage />} />
+            <Route path="/rule-quality" element={<RuleQualityPage />} />
             <Route path="/decoders" element={<DecodersPage />} />
             <Route path="/syslog" element={<SyslogSourcesPage />} />
             <Route path="/users" element={<ProtectedRoute minRole="superadmin"><UsersPage /></ProtectedRoute>} />

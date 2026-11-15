@@ -169,6 +169,8 @@ class Rule(Base):
     sigma_status  = Column(String(20))   # stable / test / experimental
     # sha256 of the content as last imported; differs from content once edited locally
     upstream_hash = Column(String(64))
+    # analyst tuning: alerts take this level instead of the rule's own (NULL = rule level)
+    level_override = Column(String(20))
     created_at  = Column(DateTime(timezone=True), default=now_utc)
     updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -770,6 +772,9 @@ class AlertSuppression(Base):
     is_active    = Column(Boolean, nullable=False, default=True)
     created_by   = Column(UUID(as_uuid=True))
     created_at   = Column(DateTime(timezone=True), default=now_utc)
+    expires_at   = Column(DateTime(timezone=True))  # NULL = never
+    hit_count    = Column(BigInteger, nullable=False, default=0, server_default="0")
+    last_hit_at  = Column(DateTime(timezone=True))
 
 class SyslogSource(Base):
     """A network device that sends syslog to the agentless receiver: messages

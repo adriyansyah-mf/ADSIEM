@@ -542,6 +542,7 @@ class RuleOut(BaseModel):
     source: str = "custom"
     external_id: str | None = None
     sigma_status: str | None = None
+    level_override: str | None = None  # alerts take this level instead (rule quality tuning)
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
