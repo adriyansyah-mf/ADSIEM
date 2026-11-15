@@ -8,13 +8,15 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 
 | | |
 |---|---|
-| Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.27.8**, signed self-update |
-| Detection content | **233** Sigma rules (12 for OT/ICS), **137** decoders, 7 built-in + 15 community YARA sets, SigmaHQ importer |
+| Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.28.0**, signed self-update, USB storage control |
+| Detection content | **248** Sigma rules in 239 files (13 for OT/ICS, 10 for Active Directory attacks), **138** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
 | OT / ICS | Modbus/TCP and DNP3 decoded from Suricata; MITRE ATT&CK for ICS rules for PLC programming, stop/restart, listen-only, scans, internet exposure |
 | Behaviour analytics | Host baselines (rare parent → child, rare new executables, beaconing), UEBA for users, IPs, hosts and processes, entity risk scoring, lateral movement graph |
+| Vulnerabilities | Package CVEs per host (OSV.dev per distro) and Windows builds against Microsoft's KB fixes, ranked by CISA KEV, FIRST EPSS and severity |
 | Ingest | Agent (HTTPS), agentless syslog UDP/TCP 514 (RFC 3164, RFC 5424, CEF), Suricata EVE, Zeek, FortiGate |
 | AI | Auto-triage of every alert, AI case correlation, autonomous case investigator with a multi-agent review panel, SOC assistant, RAG over your SOPs; prompt-injection guardrails |
-| Response | Visual SOAR editor (17 node types; AI decisions need an approval gate), isolate / kill / quarantine / block, live response |
+| Response | Visual SOAR editor (16 node types; AI decisions need an approval gate), isolate / kill / quarantine / block, USB block, live response |
+| Search | Log search and event explorer, saved searches shared per team, custom dashboards, rule quality analytics |
 | Storage | PostgreSQL 16 (pgvector) · Elasticsearch 8 · Redis 7 |
 
 ## Untuk Juri — Kartika Cyber Hackathon 2026
@@ -36,9 +38,13 @@ model lokal (Ollama lewat 9router), sehingga tidak ada data yang keluar.
 
 | Kebutuhan satuan | Yang ADSIEM lakukan |
 |---|---|
-| PLC/RTU tidak bisa dipasangi agen | Sensor Suricata pasif di SPAN port. ADSIEM membaca function code Modbus/DNP3 dan memberi alert untuk program download ke PLC (UMAS), stop/restart RTU, mode listen-only, scan function code atau unit ID, perintah kontrol dari internet, dan layanan OT yang terekspos. 12 rule bertag MITRE ATT&CK for ICS ([runbook](docs/operations/ot-ics-detection.md)) |
+| PLC/RTU tidak bisa dipasangi agen | Sensor Suricata pasif di SPAN port. ADSIEM membaca function code Modbus/DNP3 dan memberi alert untuk program download ke PLC (UMAS), stop/restart RTU, mode listen-only, scan function code atau unit ID, perintah kontrol dari internet, dan layanan OT yang terekspos. 13 rule bertag MITRE ATT&CK for ICS ([runbook](docs/operations/ot-ics-detection.md)) |
 | Jembatan IT → OT (HMI, SCADA server, engineering workstation) | Agen EDR dengan eBPF/ETW: proses, jaringan, file, YARA (file dan memori), RansomGuard, rantai IOA (web server → shell → recon), isolasi host, karantina |
 | Analis sedikit, alert banyak | AI L1 men-triase **setiap** alert. Alert digabung menjadi satu kasus per penyerang. AI Investigate mengumpulkan bukti sendiri lalu diuji panel debat beberapa agen (Skeptic, Threat hunter, Evidence auditor, ...) sebelum laporan final |
+| Flashdisk dan media lepasan | Kontrol USB storage per grup: `audit` (catat setiap flashdisk yang dicolok) atau `block` dengan daftar perangkat yang diizinkan, di Linux dan Windows ([runbook](docs/operations/usb-control.md)) |
+| Serangan ke Active Directory | Rule untuk Kerberoasting, AS-REP roasting, DCSync, password spray, dan persistence (SPN baru, SID History, password DSRM) ([runbook](docs/operations/ad-detections.md)) |
+| Patch mana dulu? | Halaman **Vulnerabilities**: CVE di setiap host diurutkan menurut CISA KEV (sudah dieksploitasi), EPSS, dan tingkat keparahan, termasuk KB Windows yang belum terpasang |
+| Sensor dimatikan penyerang | Alert saat agen offline, sensor berhenti atau "buta" (kanari eBPF, event ETW hilang), atau agen masih heartbeat tapi tidak lagi mengirim log |
 | Data tidak boleh keluar | On-premise penuh, LLM bisa lokal, laporan AI bisa berbahasa Indonesia |
 | Respons tidak boleh ngawur | Keputusan AI yang berdampak (isolasi, blok) wajib lewat approval analis. Log diperlakukan sebagai data, sehingga teks penyerang di log tidak bisa memerintah AI ([guardrails](docs/operations/ai-guardrails.md)) |
 
@@ -77,8 +83,10 @@ dengan paket bertanda tangan.
    mulai dari fingerprinting PLC sampai perintah stop PLC dan restart RTU gardu.
 4. **SOAR:** coba sambungkan node *AI Decide* langsung ke *Response → isolate*. Editor
    menolaknya sampai ada node *Approval* di antaranya.
-5. **Security posture:** IP, gateway, DNS, port terbuka dan proses, serta postur
-   keamanan tiap host.
+5. **Security posture** dan **Vulnerabilities:** IP, gateway, DNS, port terbuka dan proses,
+   postur keamanan tiap host, lalu CVE yang harus ditambal lebih dulu (KEV/EPSS).
+6. **Investigation → Dashboards:** dashboard sendiri dari query Log search, dan
+   **Retro-hunt** untuk mencari IoC baru di log yang sudah tersimpan.
 
 **Arsitektur singkat.**
 
@@ -112,8 +120,13 @@ flowchart LR
 - Respons otomatis tanpa manusia hanya berasal dari engine deterministik yang diatur
   policy: RansomGuard, hash malware, prevention rule, dan threat intel. Keputusan AI
   selalu menunggu analis.
+- Deteksi, decoder, rule, dan pencegahan di endpoint berjalan tanpa internet. Feed
+  (KEV, EPSS, OSV, MalwareBazaar, URLhaus) dan threat intel butuh internet. AI butuh
+  model: arahkan 9router ke model lokal untuk jaringan tertutup. Paket instalasi
+  air-gapped dan audit log berantai hash belum ada.
 
-**Kualitas.** Sekitar 1.700 test Python dan 244 file test Go berjalan di CI setiap PR,
+**Kualitas.** Lebih dari 1.200 fungsi test Python (sekitar 190 file) dan 990 fungsi test Go
+(251 file) berjalan di CI setiap PR,
 termasuk test penerimaan evidence durability dan self-update agen. Detail teknis lengkap
 ada di bawah ini (bahasa Inggris).
 
@@ -144,7 +157,7 @@ across crashes and reboots (`-evidence-list`, `-evidence-salvage`, …).
 | Capability | Linux | Windows | Where |
 |---|---|---|---|
 | Process, file, network, DNS telemetry | eBPF (exec, file write/rename/delete, kernel modules, ptrace, privilege gain, memfd exec, connect/accept/bind; network watch on by default). A process in another mount namespace (systemd PrivateTmp, containers) also reports the host path (`HostImage`, `HostTargetFilename`) | ETW (process, file, registry persistence, image load, network, DNS, AMSI) | `internal/procexec`, `linsensor`, `netwatch`, `mountns`, `etw`, `winsensor` |
-| Sensor health self-report (sensor stopped, silent, events lost) | ✓ | ✓ incl. ETW lost events | `internal/sensorstat` |
+| Sensor health self-report (sensor stopped, silent, blinded, events lost) | ✓ incl. eBPF canary | ✓ incl. ETW lost events | `internal/sensorstat`, `linsensor` |
 | Log collection | File and glob tailing with rotation | Files + Event Log channels (`eventlog:<channel>`), Sysmon | `internal/tailer`, `winevent` |
 | IOA behaviour chains | ✓ | ✓ | `internal/ioa` (agent 1.23+) |
 | **RansomGuard** anti-ransomware | ✓ canary files, precursor rules, entropy and mass-modify heuristics, kill process tree or isolate | ✓ | `internal/ransomguard` |
@@ -156,7 +169,8 @@ across crashes and reboots (`-evidence-list`, `-evidence-salvage`, …).
 | Developer/project compromise scan | ✓ | ✓ | `internal/projscan` |
 | File Integrity Monitoring | ✓ SHA-256, debounced | ✓ | `internal/fim` |
 | Execution prevention | Pre-exec (BPF LSM + fanotify) | Post-exec terminate on block rules, plus **App Control (WDAC)** in `audit` or `enforce` to block before start | `internal/prevent`, `appcontrol` |
-| Host isolation, block IP, firewall rules | nftables (anti-lockout guard, expiry) | netsh | `internal/firewall` |
+| Host isolation, block IP, firewall rules | nftables (anti-lockout guard, expiry; isolation lifts itself after a set time offline) | netsh | `internal/firewall` |
+| USB storage control (`off` / `audit` / `block`, allow list by vendor:product or serial) | kernel USB authorization via netlink uevents | SetupAPI watch, ejects blocked devices | `internal/usbguard` |
 | IP IoC blocklist (drop or report traffic to and from listed IPs/CIDRs) | nftables `inet siem_ioc` | WFP dynamic session, netsh fallback | `internal/ipblock`, `firewall` |
 | Quarantine / restore, kill process | ✓ stops the programs running the file (by inode, also inside PrivateTmp and containers) | ✓ protected DACL store, stops running programs | `internal/task` |
 | Web protection (domain block page, local CA) | ✓ | ✓ | `internal/webblock` |
@@ -176,7 +190,8 @@ across crashes and reboots (`-evidence-list`, `-evidence-salvage`, …).
 **Self-protection.** Uninstall needs an uninstall token (`-verify-uninstall`). Heartbeats
 check the token hash, and the `agent_integrity` task verifies the binary. Tampering raises
 `siem_agent_*` alerts (`docs/operations/agent-tamper.md`). On Windows the agent runs as a
-service (`-install` / `-uninstall`).
+service (`-install` / `-uninstall`) whose security descriptor is locked, so a local admin
+cannot simply stop it.
 
 **Agent tooling** (`agent/cmd/`):
 - `siem-update-sign` creates and checks the update signatures agents require.
@@ -200,7 +215,7 @@ service (`-install` / `-uninstall`).
   [Syslog, Suricata, Zeek and OT](#syslog-suricata-zeek-and-ot).
 - **Firewalls and appliances:** FortiGate (traffic, UTM, event, VPN, admin login) and any CEF
   sender.
-- **135 decoders** in four types (`regex`, `kv`, `json`, `cef`), covering Linux auth, syslog,
+- **138 decoders** in four types (`regex`, `kv`, `json`, `cef`), covering Linux auth, syslog,
   auditd, iptables, Windows Security/System/PowerShell/Sysmon/ETW, Apache, Nginx, PHP,
   MySQL, Postfix and every agent-native detection.
 
@@ -210,10 +225,18 @@ service (`-install` / `-uninstall`).
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   numeric compare), keywords, boolean conditions, threshold and correlation windows,
   `after:` sequences, and per-entity suppression.
-- **218 bundled rules:** Linux, Windows, IOA chains, web attacks (SQLi, XSS, SSRF, LFI, RCE,
-  Log4Shell, XXE, GraphQL, WordPress), network/firewall, Suricata/Zeek, ransomware, ML,
-  YARA, credential access, kernel-thread masquerading (a `[kworker/…]`-named process that
-  connects out or is exec'd), App Control, and agent tampering.
+- **248 bundled rules** (239 files): Linux, Windows, IOA chains, web attacks (SQLi, XSS,
+  SSRF, LFI, RCE, Log4Shell, XXE, GraphQL, WordPress), network/firewall, Suricata/Zeek,
+  OT/ICS, Active Directory, ransomware, ML, YARA, USB storage, credential access,
+  kernel-thread masquerading (a `[kworker/…]`-named process that connects out or is
+  exec'd), App Control, and agent tampering.
+- **Active Directory attacks** (`win_ad_*`): Kerberoasting (RC4 service tickets), AS-REP
+  roasting and accounts made AS-REP roastable, DCSync from a non-DC account, password spray
+  across many accounts, and persistence: an SPN added to a user, SID History added, or the
+  DSRM password changed. Golden tickets are not covered (the Security log alone cannot show
+  them). See `docs/operations/ad-detections.md`.
+- **Retro-hunt** (`/retro-hunt`): search the logs already stored for a new IoC, or run a
+  rule over a past window, and get the matching events. See `docs/operations/retro-hunt.md`.
 - **SigmaHQ import:** import the official releases (Core through All) and keep them updated.
   Your edits are preserved. Replaying SigmaHQ's regression samples loads all 3,768 rules.
 - **UEBA:** Isolation Forest models for users, IPs, hosts and processes, retrained hourly, with
@@ -231,9 +254,11 @@ service (`-install` / `-uninstall`).
   New paths, one host fanning out to many, and `A → B → C` chains raise alerts.
 - **Threat intelligence:** VirusTotal, AbuseIPDB, AlienVault OTX, GreyNoise, Shodan, URLhaus,
   WHOIS and GeoIP, run in parallel. A MalwareBazaar hash feed syncs into **Malware hashes**.
-- **Agent health:** silent agents, sensor failures (a sensor stopped, went silent or lost
-  events), and agents that still heartbeat but have shipped no logs for a set time
-  (**Agent Log Silence Alert**) raise alerts.
+- **Agent and platform health:** silent agents (many at once raise one outage alert
+  instead), sensor failures (a sensor stopped, went silent, was blinded or lost events),
+  agents that still heartbeat but have shipped no logs for a set time (**Agent Log Silence
+  Alert**), heartbeat spoofing, and Elasticsearch disk pressure (the oldest day of logs is
+  dropped before the disk fills) raise alerts.
 - **MITRE ATT&CK** tags on every alert, with a coverage heatmap.
 
 ### AI SOC layer
@@ -319,10 +344,10 @@ model to keep inference on-prem.
 
 - **Visual playbook editor** (`/soar`): playbooks run when an alert or case event fires. Every
   run keeps each node's input, output and errors.
-- **15 node types:** trigger, alert event, log search, scan, hunt, block IOC, if, TI enrich,
+- **16 node types:** trigger, alert event, log search, scan, hunt, block IOC, if, TI enrich,
   AI decide (yes/no with confidence), **approval** (pauses the run with a timeout until an
   analyst decides), response (isolate, kill, scan, block IP), case, case evidence, case block
-  IPs, notify (Slack, Teams, generic), and HTTP request. HTTP requests are SSRF-checked, accept
+  IPs, notify (Slack, Discord, generic webhook), and HTTP request. HTTP requests are SSRF-checked, accept
   curl import, and pass the response to later nodes as `{{ steps.<node>.body... }}`.
 - **Live response console:** ad-hoc process lists, netstat, file pulls, YARA and memory scans,
   persistence checks, saved artifacts and fleet-wide hunts.
@@ -348,6 +373,10 @@ model to keep inference on-prem.
 ### Hunting and investigation
 
 - Log search and event explorer with a query builder (Elasticsearch, cursor pagination).
+- **Saved searches:** keep a query by name and share it with your team. Running one always
+  applies the caller's group, so a shared search cannot reach past it.
+- **Custom dashboards** (`/dashboards`): your own pages of widgets over saved searches,
+  personal or shared with the team.
 - Live events view with volume, auth failures, top sources and per-agent counts.
 - Threat hunts by IP, hostname, user or SHA-256 across endpoint history, with schedules.
 - Threat IoC search, process trees, source logs, and CSV/JSON alert export.
@@ -367,6 +396,12 @@ model to keep inference on-prem.
   versions, listening ports with their address and process (databases and other risky ports
   are flagged only when reachable from the network), disk, and the host's network identity:
   interfaces, gateway, DNS, FQDN, logged-in sessions and the address its reports come from.
+- **Vulnerabilities** (`/vulnerabilities`): every host's package CVEs (OSV.dev per distro:
+  Ubuntu, Debian, Alpine, Rocky, Alma, Red Hat) and Windows builds checked against
+  Microsoft's CVRF KB fixes. Each finding is ranked by CISA KEV (exploited in the wild),
+  FIRST EPSS and severity, refreshed daily and every few hours per host.
+- **USB storage control** (Policies): audit every removable drive plugged in, or block
+  them except an allow list. See `docs/operations/usb-control.md`.
 - File Integrity Monitoring with paths managed from the dashboard.
 - Developer/project compromise findings (`project_scan_*` rules).
 
@@ -383,7 +418,11 @@ model to keep inference on-prem.
 - Live alerts over WebSocket, an event stream over SSE, and Prometheus `/metrics`.
 - `pg_dump` backups every `BACKUP_INTERVAL_HOURS` (default 24), and an Elasticsearch snapshot
   policy.
-- Separate retention periods for raw logs, events and closed alerts (**Settings**, 0 = keep).
+- Separate retention periods for raw logs, events and closed alerts (**Settings**, 0 = keep),
+  plus an hourly Elasticsearch disk guard.
+- **Rule quality** (`/rule-quality`): per rule, how often it fires, how often analysts close
+  it as a false positive, and when it last fired. Override a rule's level, and give
+  suppressions an expiry with a hit count.
 - **Settings** page: AI on/off and models, TI API keys (VirusTotal, AbuseIPDB, OTX, GreyNoise,
   Shodan, abuse.ch, PhishTank), case grouping window and IOC exclusions, UEBA engine and
   threshold, the SOAR HTTP allowlist, SMTP alerts, retention, and per-user MFA. Changes apply
@@ -394,10 +433,10 @@ model to keep inference on-prem.
 | Section | Pages |
 |---|---|
 | Operations | Overview, Command center, Alerts, Cases, Shift handover |
-| Investigation | Log search, Events, Live events, Threat hunting, Threat IoCs, Behavior analytics (UEBA), Entity risk, Lateral movement, MITRE coverage |
-| Response | Live response, SOAR workflows, Playbooks & SOPs, Knowledge base |
-| Environment | Agents (log sources, firewall), Syslog devices, Agent updates, Security posture, File integrity, YARA, Prevention, Malware hashes, Web protection, IP Blocklist, Policies, Reports |
-| Administration | Detection rules, Decoders, Integrations, Audit log, Users, Settings |
+| Investigation | Log search, Dashboards, Events, Live events, Threat hunting, Retro-hunt, Threat IoCs, Behavior analytics (UEBA), Entity risk, Lateral movement, MITRE coverage |
+| Response | Live response, SOAR workflows, Playbooks & SOPs, Knowledge base, AI skills |
+| Environment | Agents (log sources, firewall), Syslog devices, Agent updates, Security posture, Vulnerabilities, File integrity, YARA, Prevention, Malware hashes, Web protection, IP Blocklist, Policies (incl. USB control), Reports |
+| Administration | Detection rules, Rule quality, Decoders, Integrations, Audit log, Users, Settings |
 
 Global features: header search (Ctrl/Cmd+K), the SOC assistant on every page, and a live/polling
 indicator.
@@ -563,8 +602,8 @@ host is the dashboard's deploy command; the options below cover doing it by hand
 package from this server, installs it, enrolls the agent and starts it:
 
 ```bash
-curl -fsSLo /tmp/siem-agent_1.27.3_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.27.3_amd64.deb' \
-  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.27.3_amd64.deb
+curl -fsSLo /tmp/siem-agent_1.28.0_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.28.0_amd64.deb' \
+  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.28.0_amd64.deb
 ```
 
 The RPM command is the same with `rpm -Uvh`. On Windows, an elevated PowerShell
@@ -594,7 +633,7 @@ This stops anyone holding a key from taking over a live agent by reporting its h
 The platform builds the packages on every stack start: the `package-builder` service
 runs the same scripts as the release, at the version in `agent/VERSION`. The dashboard
 serves them, and so does each tagged GitHub release
-(`.github/workflows/agent-release.yml`, triggered by a tag like `agent-v1.27.3`).
+(`.github/workflows/agent-release.yml`, triggered by a tag like `agent-v1.28.0`).
 
 ```bash
 sudo dpkg -i siem-agent_<version>_amd64.deb          # or: sudo rpm -Uvh siem-agent-<version>-1.x86_64.rpm
@@ -1120,12 +1159,13 @@ Runbooks live in [`docs/operations/`](docs/operations/):
 
 | Area | Runbooks |
 |---|---|
-| Detection | `ioa`, `yara`, `static-ml`, `malware-hashes`, `detection-benchmark`, `policies`, `alert-statuses` |
+| Detection | `ioa`, `yara`, `static-ml`, `malware-hashes`, `ad-detections`, `ot-ics-detection`, `retro-hunt`, `detection-benchmark`, `policies`, `alert-statuses` |
 | Behaviour analytics | `behavior-baselines`, `entity-risk`, `lateral-movement` |
-| Endpoint protection | `anti-ransomware`, `exec-prevention`, `app-control`, `ip-ioc-blocking`, `script-scan`, `file-scan`, `memory-scan`, `process-tree`, `host-isolation`, `web-protection` |
+| Endpoint protection | `anti-ransomware`, `exec-prevention`, `app-control`, `usb-control`, `ip-ioc-blocking`, `script-scan`, `file-scan`, `memory-scan`, `process-tree`, `host-isolation`, `web-protection` |
+| AI | `ai-guardrails`, `ai-skills`, `ai-triage-retry` |
 | Ingest and agents | `agent-config-recommended`, `syslog-ingest`, `linux-sensor`, `windows-sensor`, `agent-self-update`, `agent-tamper` |
 | Agent evidence | `agent-evidence-recovery`, `agent-evidence-validation`, `agent-evidence-progress` |
-| Platform | `backup-restore`, `token-lifecycle`, `ai-triage-retry` |
+| Platform | `backup-restore`, `token-lifecycle` |
 
 Design references: [`docs/CASE_CORRELATION.md`](docs/CASE_CORRELATION.md) (IOC-keyed case model),
 [`docs/llm-gateway-spec.md`](docs/llm-gateway-spec.md), [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md),
@@ -1133,7 +1173,7 @@ and dated specs and plans in `docs/superpowers/`.
 
 ## Testing and CI
 
-- **Python:** `tests/worker/` and `tests/server-api/` (pytest, roughly 150 files), the evidence
+- **Python:** `tests/worker/` and `tests/server-api/` (pytest, about 190 files), the evidence
   acceptance harness in `tests/evidence/`, and Playwright UI checks in `tests/dashboard/`.
 - **Go:** unit tests across `agent/` and `tests/agent/`, run with `go test -race`.
 - **SigmaHQ compatibility:** `tests/sigmahq/run.sh` replays SigmaHQ's regression samples through
@@ -1162,7 +1202,15 @@ and `scripts/` holds backup, GeoIP update and Let's Encrypt renewal helpers.
 - [x] Sigma rule import from community repos (SigmaHQ)
 - [x] Agentless syslog / CEF ingest, Suricata and Zeek decoders
 - [x] AI triage, AI case correlation and autonomous investigator
-- [ ] Bundled Modbus / DNP3 decoders and ICS rule pack
+- [x] Bundled Modbus / DNP3 decoders and ICS rule pack
+- [x] USB storage control (Linux and Windows)
+- [x] Vulnerability prioritisation with CISA KEV, EPSS and Windows KBs
+- [x] Active Directory attack detections, retro-hunt and rule quality analytics
+- [x] Saved searches and custom dashboards
+- [ ] Tamper-evident (hash-chained) audit log
+- [ ] Situation reports in military format (LAPSUS / LAPSIT)
+- [ ] Offline / air-gapped install bundle with a local LLM
+- [ ] SSO (OIDC, LDAP), STIX/TAXII and MISP sharing, cloud log ingest (M365, Entra ID, CloudTrail, Okta)
 - [ ] Bahasa Indonesia dashboard UI (AI reports already support it)
 - [ ] Multi-tenancy group management UI
 - [ ] macOS endpoint agent
