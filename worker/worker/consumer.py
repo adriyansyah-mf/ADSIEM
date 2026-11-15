@@ -88,7 +88,8 @@ async def load_engines(db: AsyncSession) -> tuple[DecoderEngine, SigmaEngine]:
     rule_rows = result.scalars().all()
     redis = await get_redis()
     sig_engine = SigmaEngine(redis=redis)
-    sig_engine.load_from_yaml_list([r.content for r in rule_rows], [str(r.id) for r in rule_rows])
+    sig_engine.load_from_yaml_list([r.content for r in rule_rows], [str(r.id) for r in rule_rows],
+                                   [r.level_override for r in rule_rows])
 
     return dec_engine, sig_engine
 

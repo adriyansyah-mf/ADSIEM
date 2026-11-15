@@ -801,9 +801,11 @@ class SigmaEngine:
     def rules(self) -> list[RuleDef]:
         return self._rules
 
-    def load_from_yaml_list(self, yaml_contents: list[str], rule_ids: list[str | None] | None = None) -> None:
+    def load_from_yaml_list(self, yaml_contents: list[str], rule_ids: list[str | None] | None = None,
+                            levels: list[str | None] | None = None) -> None:
         """rule_ids, aligned with yaml_contents, are the DB ids of the rule rows;
-        matches carry them as rule_db_id."""
+        matches carry them as rule_db_id. levels, aligned too, are analysts'
+        level overrides (None keeps the rule's own level)."""
         global _compile_cache
         rules: list[RuleDef] = []
         correlations: list[CorrelationDef] = []
@@ -811,15 +813,16 @@ class SigmaEngine:
         cache: dict[str, list[tuple[str, Any]]] = {}
         for idx, content in enumerate(yaml_contents):
             db_id = rule_ids[idx] if rule_ids and idx < len(rule_ids) else None
+            override = levels[idx] if levels and idx < len(levels) else None
             compiled = cache.get(content) or _compile_cache.get(content)
             if compiled is None:
                 compiled = _compile_content(content)
             cache[content] = compiled
             for kind, value in compiled:
                 if kind == "rule":
-                    rules.append(dataclasses.replace(value, db_id=db_id))
+                    rules.append(dataclasses.replace(value, db_id=db_id, level=override or value.level))
                 elif kind == "corr":
-                    correlations.append(dataclasses.replace(value, db_id=db_id))
+                    correlations.append(dataclasses.replace(value, db_id=db_id, level=override or value.level))
                 else:
                     errors.append(value)
         _compile_cache = cache  # drop entries for rules that were removed

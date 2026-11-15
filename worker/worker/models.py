@@ -73,6 +73,8 @@ class Rule(Base):
     mitre_tags  = Column(ARRAY(Text), nullable=False, default=list)
     is_enabled  = Column(Boolean, nullable=False, default=True)
     group_id    = Column(String(100))
+    # analyst tuning: alerts take this level instead of the rule's own (NULL = rule level)
+    level_override = Column(String(20))
 
 class Decoder(Base):
     __tablename__ = "decoders"
@@ -298,6 +300,9 @@ class AlertSuppression(Base):
     is_active    = Column(Boolean, nullable=False, default=True)
     created_by   = Column(UUID(as_uuid=True))
     created_at   = Column(DateTime(timezone=True), default=now_utc)
+    expires_at   = Column(DateTime(timezone=True))  # NULL = never
+    hit_count    = Column(BigInteger, nullable=False, default=0, server_default="0")
+    last_hit_at  = Column(DateTime(timezone=True))
 
 class ShiftHandover(Base):
     __tablename__ = "shift_handovers"

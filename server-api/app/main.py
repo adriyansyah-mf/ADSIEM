@@ -52,6 +52,7 @@ from app.api.routes.reports import router as reports_router
 from app.api.routes.assistant import router as assistant_router
 from app.api.routes.retro_hunts import router as retro_hunts_router
 from app.api.routes.ai_skills import router as ai_skills_router
+from app.api.routes.rule_quality import router as rule_quality_router
 from app.api.routes.mitre import router as mitre_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
 from app.api.routes.stream import router as stream_router
@@ -219,6 +220,12 @@ async def _migrate_alerts_columns() -> None:
                 created_by UUID REFERENCES users(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
+        """))
+        await conn.execute(text("""
+            ALTER TABLE alert_suppressions
+            ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS hit_count BIGINT NOT NULL DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS last_hit_at TIMESTAMPTZ
         """))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS shift_handovers (
@@ -483,7 +490,8 @@ async def _migrate_rule_source_columns() -> None:
             ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'custom',
             ADD COLUMN IF NOT EXISTS external_id VARCHAR(255),
             ADD COLUMN IF NOT EXISTS sigma_status VARCHAR(20),
-            ADD COLUMN IF NOT EXISTS upstream_hash VARCHAR(64)
+            ADD COLUMN IF NOT EXISTS upstream_hash VARCHAR(64),
+            ADD COLUMN IF NOT EXISTS level_override VARCHAR(20)
         """))
         # SigmaHQ import upserts by rule id
         await conn.execute(text("""
@@ -625,7 +633,7 @@ for router in [
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, investigation_chat_router, yara_drafts_router, knowledge_router, evidence_router,
-    iocs_router, ai_skills_router, retro_hunts_router,
+    iocs_router, ai_skills_router, retro_hunts_router, rule_quality_router,
     prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, ip_blocks_agent_router, ip_blocks_router, entity_risk_router, lateral_router, policies_router, policies_agent_router, agent_updates_router,
 ]:
     app.include_router(router)

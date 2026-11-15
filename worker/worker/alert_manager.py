@@ -107,9 +107,10 @@ async def _is_suppressed(
         checks.append(("user", user))
     checks.append(("rule_title", rule_title))
 
+    from sqlalchemy import or_, update
+    now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as db:
         for etype, evalue in checks:
-            from sqlalchemy import or_
             row = (await db.execute(
                 select(AlertSuppression).where(
                     AlertSuppression.is_active == True,
@@ -117,11 +118,18 @@ async def _is_suppressed(
                     AlertSuppression.entity_value == evalue,
                     or_(AlertSuppression.group_id == group_id,
                         AlertSuppression.group_id == "default"),
+                    or_(AlertSuppression.expires_at.is_(None), AlertSuppression.expires_at > now),
                 ).limit(1)  # duplicates (a group's and default's, or old double clicks) must not raise
             )).scalars().first()
             if row:
                 log.info("alert_suppressed", entity_type=etype, entity_value=evalue,
                          rule=rule_title, reason=row.reason)
+                try:  # rule quality: how much each suppression hides
+                    await db.execute(update(AlertSuppression).where(AlertSuppression.id == row.id)
+                                     .values(hit_count=AlertSuppression.hit_count + 1, last_hit_at=now))
+                    await db.commit()
+                except Exception as exc:  # noqa: BLE001 — counting must never let the alert through
+                    log.warning("suppression_hit_count_failed", error=str(exc))
                 return True
     return False
 
