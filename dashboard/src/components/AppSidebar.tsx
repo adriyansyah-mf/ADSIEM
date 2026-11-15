@@ -4,6 +4,7 @@ import { Activity, ArrowUpCircle, Ban, Bell, BookOpen, Brain, ClipboardList, Cro
   Network, PanelLeftOpen, Radar, Radio, ScanLine, Server, Settings, Shield, ShieldCheck, ShieldX, Terminal, Users, Webhook, Wrench, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { ShieldAlert } from 'lucide-react'
+import { LayoutGrid } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 
 interface NavigationItem {
@@ -23,6 +24,7 @@ export const NAVIGATION: readonly { readonly label: string; readonly items: read
   ] },
   { label: 'Investigation', items: [
     { to: '/logs', label: 'Log search', icon: FileText },
+    { to: '/dashboards', label: 'Dashboards', icon: LayoutGrid },
     { to: '/events', label: 'Events', icon: Activity },
     { to: '/live-events', label: 'Live events', icon: Radio },
     { to: '/hunts', label: 'Threat hunting', icon: Crosshair },

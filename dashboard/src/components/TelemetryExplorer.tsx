@@ -9,6 +9,7 @@ import { PageHeader, Panel, QueryState } from '@/components/Workspace'
 import { TelemetryDetails, type TelemetryRecord } from '@/components/TelemetryDetails'
 import { useCursorPagination } from '@/hooks/useCursorPagination'
 import { useTelemetryRecords } from '@/hooks/useTelemetryRecords'
+import SavedSearchBar from '@/components/SavedSearchBar'
 
 type Kind = 'logs' | 'events'
 const FIELDS: Readonly<Record<Kind, string[]>> = {
@@ -47,6 +48,11 @@ export default function TelemetryExplorer({ kind }: { readonly kind: Kind }) {
         <div className="filter-footer p-0"><span id="telemetry-query-help">Lucene field:value, AND / OR, and quoted phrases are supported. Press Enter to search.</span>
           {(search || filterTree) && <button className="ui-button ui-button--quiet" onClick={clearFilters}>Clear filters</button>}</div>
         {filterTree && <p className="text-xs text-muted-foreground mb-0">Advanced filters applied</p>}
+        <SavedSearchBar kind={kind} query={search} filterTree={filterTree} onLoad={s => {
+          setDraft(s.query); updateSearch(s.query)
+          const loaded = (s.filter_tree as Group | null) ?? EMPTY_GROUP
+          setTree(loaded); setApplied(loaded)
+        }} />
       </div>
     </section>
     {showBuilder && <div id="telemetry-advanced-filters"><Panel title="Advanced filters" description="Combine conditions with AND / OR. Changes take effect only when applied.">

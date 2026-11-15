@@ -15,6 +15,7 @@ const LogSourcesPage = lazy(() => import('@/pages/LogSourcesPage'))
 const FirewallPage = lazy(() => import('@/pages/FirewallPage'))
 const AgentUpdatesPage = lazy(() => import('@/pages/AgentUpdatesPage'))
 const LogsPage = lazy(() => import('@/pages/LogsPage'))
+const CustomDashboardsPage = lazy(() => import('@/pages/CustomDashboardsPage'))
 const EventsPage = lazy(() => import('@/pages/EventsPage'))
 const LiveEventsPage = lazy(() => import('@/pages/LiveEventsPage'))
 const AlertsPage = lazy(() => import('@/pages/AlertsPage'))
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="/agents/:id/sources" element={<ProtectedRoute minRole="admin"><LogSourcesPage /></ProtectedRoute>} />
         <Route path="/agents/:id/firewall" element={<ProtectedRoute minRole="admin"><FirewallPage /></ProtectedRoute>} />
             <Route path="/logs" element={<LogsPage />} />
+            <Route path="/dashboards" element={<CustomDashboardsPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/live-events" element={<LiveEventsPage />} />
             <Route path="/alerts" element={<AlertsPage />} />
