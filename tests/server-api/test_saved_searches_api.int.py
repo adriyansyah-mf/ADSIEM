@@ -1,7 +1,8 @@
 """Saved searches and custom dashboards (routes/saved_searches.py,
 routes/dashboards.py, services/saved_searches.py): who sees and edits what,
-running always scoped to the caller's group, the four widget shapes, and a
-shared dashboard needing shared searches."""
+running always scoped to the caller's group, the widget shapes, the
+dashboard's query bar and filter pills, and a shared dashboard needing shared
+searches."""
 import asyncio
 from types import SimpleNamespace
 from uuid import uuid4
@@ -37,10 +38,19 @@ async def env(evidence_api, monkeypatch):
         calls.append(("aggregate", query, aggs))
         out = {}
         if "t" in aggs:
-            out = {"t": {"buckets": [{"key_as_string": "2026-11-15T10:00:00Z", "key": 1, "doc_count": 4}]}}
+            bucket = {"key_as_string": "2026-11-15T10:00:00Z", "key": 1, "doc_count": 4}
+            if "aggs" in aggs["t"]:  # split
+                bucket["s"] = {"buckets": [{"key": "web-01", "doc_count": 3}, {"key": "db-01", "doc_count": 1}]}
+            out = {"t": {"buckets": [bucket]}}
         if "top" in aggs:
-            out = {"top": {"buckets": [{"key": "linux_auth", "doc_count": 9}]}}
-        return {"total": 42, "aggregations": out}
+            out = {"top": {"buckets": [{"key": "linux_auth", "doc_count": 9}], "sum_other_doc_count": 5}}
+        if "u" in aggs:
+            out = {"u": {"value": 7}}
+        if "h" in aggs:  # Monday 2026-11-16 03:00 UTC = 10:00 in Jakarta
+            out = {"h": {"buckets": [{"key": 1794798000000, "doc_count": 6}]}}
+        ranged = [f["range"]["created_at"] for f in query.get("bool", {}).get("filter", []) if "range" in f]
+        before = bool(ranged and "lt" in ranged[0])
+        return {"total": 30 if before else 42, "aggregations": out}
 
     async def search(query, size=25, sort=None, search_after=None):
         calls.append(("search", query, size))
@@ -167,7 +177,72 @@ async def test_a_shared_dashboard_needs_shared_searches(env):
 
 async def test_widget_validation(env):
     s = await _save(env)
-    bad_field = {"search_id": s["id"], "viz": "top", "field": "password"}
-    assert (await env.api.post("/api/dashboards", json={"name": "x", "widgets": [bad_field]})).status_code == 422
+    for viz in ("top", "donut", "split", "unique"):
+        bad_field = {"search_id": s["id"], "viz": viz, "field": "password"}
+        assert (await env.api.post("/api/dashboards", json={"name": "x", "widgets": [bad_field]})).status_code == 422
+    bad_size = {"search_id": s["id"], "w": 13}
+    assert (await env.api.post("/api/dashboards", json={"name": "x", "widgets": [bad_size]})).status_code == 422
     too_many = [{"search_id": s["id"]} for _ in range(25)]
     assert (await env.api.post("/api/dashboards", json={"name": "x", "widgets": too_many})).status_code == 422
+
+
+async def test_every_widget_shape(env):
+    s = await _save(env)
+
+    async def run(**params):
+        r = await env.api.get(f"/api/saved-searches/{s['id']}/run", params=params)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    trend = await run(viz="trend", hours=24)
+    assert (trend["total"], trend["previous"], trend["change_pct"]) == (42, 30, 40.0)
+    assert (await run(viz="unique", field="host.name"))["unique"] == 7
+    _, _, aggs = env.calls[-1]
+    assert aggs["u"]["cardinality"]["field"] == "decoded_fields.host.name.keyword"
+    split = await run(viz="split", field="host.name")
+    assert split["keys"] == ["web-01", "db-01"] and split["points"][0]["series"] == {"web-01": 3, "db-01": 1}
+    for viz in ("donut", "datatable", "tagcloud"):
+        out = await run(viz=viz, field="log_type")
+        assert out["values"] == [{"value": "linux_auth", "count": 9}] and out["other"] == 5
+    await run(viz="rare", field="user.name")
+    _, _, aggs = env.calls[-1]
+    assert aggs["top"]["terms"]["order"] == {"_count": "asc"}
+    heat = await run(viz="heatmap", tz="Asia/Jakarta")
+    assert heat["tz"] == "Asia/Jakarta" and heat["grid"][0][10] == 6 and sum(map(sum, heat["grid"])) == 6
+    assert (await run(viz="heatmap", tz="Not/AZone"))["tz"] == "UTC"
+
+
+async def test_dashboard_query_bar_filters_and_inline_widgets(env):
+    s = await _save(env)
+    body = {"widget": {"search_id": s["id"], "viz": "count"}, "hours": 6, "query": "root",
+            "filters": [{"field": "host.name", "value": "web-01"},
+                        {"field": "source_ip", "value": "10.0.0.1", "negate": True}]}
+    r = await env.api.post("/api/dashboards/widget-data", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["search"]["name"] == "SSH failures"
+    _, query, _ = env.calls[-1]
+    filters = query["bool"]["filter"]
+    assert {"term": {"group_id": "blue"}} in filters
+    assert {"term": {"decoded_fields.host.name.keyword": "web-01"}} in filters
+    assert query["bool"]["must_not"] == [{"term": {"source_ip": "10.0.0.1"}}]
+    texts = [f["query_string"]["query"] for f in filters if "query_string" in f]
+    assert texts == ["Failed password", "root"]
+
+    # a widget with its own query needs no saved search, and still runs in the caller's group
+    inline = {"widget": {"kind": "events", "query": "event.outcome:failure", "viz": "top", "field": "user.name"}}
+    r = await env.api.post("/api/dashboards/widget-data", json=inline)
+    assert r.status_code == 200, r.text
+    assert r.json()["search"] == {"id": None, "name": None, "kind": "events", "query": "event.outcome:failure"}
+    _, query, aggs = env.calls[-1]
+    assert {"term": {"group_id": "blue"}} in query["bool"]["filter"]
+    assert aggs["top"]["terms"]["field"] == "decoded_fields.user.name.keyword"
+    r = await env.api.post("/api/dashboards", json={"name": "Inline", "widgets": [
+        {**inline["widget"], "x": 0, "y": 0, "w": 6, "h": 4, "chart": "bar"}]})
+    assert r.status_code == 201, r.text
+    assert r.json()["widgets"][0]["w"] == 6
+
+    # filters on fields outside the list are refused; another group's search is not found
+    bad = {**body, "filters": [{"field": "password_hash", "value": "x"}]}
+    assert (await env.api.post("/api/dashboards/widget-data", json=bad)).status_code == 422
+    env.user = await env.person("rudi", group="red")
+    assert (await env.api.post("/api/dashboards/widget-data", json=body)).status_code == 404
