@@ -439,6 +439,8 @@ async def _migrate_audit_log_group() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS group_id VARCHAR(100) NOT NULL DEFAULT 'default'"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_audit_logs_group_created ON audit_logs(group_id, created_at DESC)"))
+        from app.services import audit_chain
+        await audit_chain.ensure(conn)
 
 async def _migrate_web_block_indexes() -> None:
     from sqlalchemy import text
@@ -616,7 +618,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="SIEM Platform API", version="1.0.0", lifespan=lifespan)
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def _rate_limited(request, exc):
+    """A login hitting the limit is a brute-force signal: audit it, then answer 429 as before."""
+    if request.url.path == "/api/auth/login":
+        from app.services.audit import audit_safe
+        await audit_safe(None, None, "login_rate_limited", "user", None, {"limit": str(exc.detail)}, outcome="denied")
+    return _rate_limit_exceeded_handler(request, exc)
+
+app.add_exception_handler(RateLimitExceeded, _rate_limited)
 
 app.add_middleware(
     CORSMiddleware,
@@ -647,3 +658,5 @@ from app.api.routes.saved_searches import router as saved_searches_router  # noq
 from app.api.routes.dashboards import router as dashboards_router  # noqa: E402
 app.include_router(saved_searches_router)
 app.include_router(dashboards_router)
+from app.core.request_context import RequestContextMiddleware  # noqa: E402
+app.add_middleware(RequestContextMiddleware)

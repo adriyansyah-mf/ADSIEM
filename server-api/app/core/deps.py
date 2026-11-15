@@ -46,9 +46,19 @@ def require_permission(permission_name: str):
             return current_user
         perms = {p.name for p in current_user.role.permissions}
         if permission_name not in perms:
+            await _audit_denied(current_user, permission_name)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
         return current_user
     return checker
+
+
+async def _audit_denied(user, permission_name: str) -> None:
+    """Someone reached for something their role does not allow: worth a line in
+    the audit log. A failure to write it never changes the 403."""
+    from app.services.audit import audit_safe
+    await audit_safe(None, user.id, "permission_denied", "permission", permission_name,
+                     {"role": getattr(user.role, "name", None)}, outcome="denied",
+                     actor_name=getattr(user, "username", None), group_id=getattr(user, "group_id", None))
 
 def get_scoped_group(current_user: Annotated[User, Depends(get_current_user)]) -> str | None:
     """The group a request is limited to; None (no filter) only for superadmin.

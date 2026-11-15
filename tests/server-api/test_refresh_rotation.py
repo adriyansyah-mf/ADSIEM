@@ -77,6 +77,7 @@ def api(monkeypatch):
     app.dependency_overrides[get_db] = db
     app.dependency_overrides[get_redis] = r
     monkeypatch.setattr(auth, "audit_log", record_audit)
+    monkeypatch.setattr(auth, "audit_safe", record_audit)  # refusals audit through audit_safe
     app.state.audits = audits
     return app, redis, user
 

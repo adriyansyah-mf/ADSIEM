@@ -219,14 +219,25 @@ class AlertNote(Base):
     alert      = relationship("Alert", back_populates="notes")
 
 class AuditLog(Base):
+    """Append-only and hash-chained by database triggers (services/audit_chain.py).
+    actor_id has no foreign key on purpose: deleting a user must not rewrite
+    the rows they left; actor_name keeps who it was."""
     __tablename__ = "audit_logs"
     id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    actor_id      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    actor_id      = Column(UUID(as_uuid=True))
+    actor_name    = Column(String(255))
     group_id      = Column(String(100), nullable=False, default="default")
     action        = Column(String(100), nullable=False)
     resource_type = Column(String(100))
     resource_id   = Column(Text)
     detail        = Column(JSONB, nullable=False, default=dict)
+    outcome       = Column(String(20))       # success / failure / denied
+    ip_address    = Column(String(64))
+    user_agent    = Column(String(512))
+    request       = Column(String(300))      # "POST /api/auth/login"
+    seq           = Column(BigInteger)       # set by the chain trigger
+    prev_hash     = Column(String(64))
+    hash          = Column(String(64))
     created_at    = Column(DateTime(timezone=True), default=now_utc)
 
 class WebhookConfig(Base):
