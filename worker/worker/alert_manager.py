@@ -117,8 +117,8 @@ async def _is_suppressed(
                     AlertSuppression.entity_value == evalue,
                     or_(AlertSuppression.group_id == group_id,
                         AlertSuppression.group_id == "default"),
-                )
-            )).scalar_one_or_none()
+                ).limit(1)  # duplicates (a group's and default's, or old double clicks) must not raise
+            )).scalars().first()
             if row:
                 log.info("alert_suppressed", entity_type=etype, entity_value=evalue,
                          rule=rule_title, reason=row.reason)
