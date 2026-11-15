@@ -359,6 +359,37 @@ class HostVulnerability(Base):
     last_seen         = Column(DateTime(timezone=True), default=now_utc)
     resolved_at       = Column(DateTime(timezone=True))
 
+class SavedSearch(Base):
+    """A Log search or Events query kept by name (routes/saved_searches.py):
+    personal, or shared with the owner's group. Dashboard widgets run it."""
+    __tablename__ = "saved_searches"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(120), nullable=False)
+    description = Column(Text)
+    kind        = Column(String(10), nullable=False, default="logs")  # logs | events
+    query       = Column(Text, nullable=False, default="")             # Lucene, as typed in the search box
+    filter_tree = Column(JSONB)                                        # the visual builder's tree
+    log_type    = Column(String(100))
+    owner_id    = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id    = Column(String(100), nullable=False, default="default", index=True)
+    shared      = Column(Boolean, nullable=False, default=False)
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class CustomDashboard(Base):
+    """A page of widgets, each a saved search shown as a count, timeline,
+    top values or latest rows (routes/dashboards.py)."""
+    __tablename__ = "custom_dashboards"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(120), nullable=False)
+    description = Column(Text)
+    widgets     = Column(JSONB, nullable=False, default=list)
+    owner_id    = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id    = Column(String(100), nullable=False, default="default", index=True)
+    shared      = Column(Boolean, nullable=False, default=False)
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
 class AiSkill(Base):
     """A skill the AI investigator loads when a case matches it
     (services/ai_skills.py): the procedure for one kind of attack. The model
