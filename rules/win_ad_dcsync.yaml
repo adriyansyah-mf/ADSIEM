@@ -1,0 +1,32 @@
+title: DCSync - Directory Replication By A Non-DC Account
+id: rule-win-ad-dcsync
+description: >-
+  An account that is not a domain controller used the directory replication
+  rights (4662 with DS-Replication-Get-Changes, -Get-Changes-All or
+  -Get-Changes-In-Filtered-Set). Only DCs replicate; mimikatz lsadump::dcsync
+  and secretsdump.py use these rights to pull every password hash, krbtgt
+  included, from a DC without touching it. Needs "Audit Directory Service
+  Access" on the domain controllers (T1003.006 DCSync)
+logsource:
+  product: windows
+  service: security
+detection:
+  replication:
+    EventID: '4662'
+    AccessMask: '0x100'
+    Properties|contains:
+      - '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'
+      - '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2'
+      - '89e95b76-444d-4c62-991a-0facbeda640c'
+  dc_account:
+    SubjectUserName|endswith: '$'
+  azure_ad_connect:
+    SubjectUserName|startswith: 'MSOL_'
+  condition: replication and not dc_account and not azure_ad_connect
+suppression:
+  timewindow: 3600
+  group_by: [SubjectUserName]
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.006

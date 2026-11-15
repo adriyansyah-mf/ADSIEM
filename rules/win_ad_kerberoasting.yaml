@@ -1,0 +1,52 @@
+title: Kerberos Service Ticket Requested With RC4
+id: rule-win-ad-kerberos-tgs-rc4
+name: ad_tgs_rc4
+description: >-
+  A domain controller issued a Kerberos service ticket (4769) encrypted with
+  RC4 (0x17) or DES (0x1/0x3) for a user account's service, not a computer
+  account or krbtgt. Modern domains use AES; an RC4 ticket for a user SPN is
+  what Kerberoasting tools (Rubeus, GetUserSPNs.py) ask for, because RC4
+  hashes crack offline fastest. Legitimate only for very old services that
+  cannot do AES (T1558.003 Kerberoasting)
+logsource:
+  product: windows
+  service: security
+detection:
+  tgs:
+    EventID: '4769'
+    Status: '0x0'
+    TicketEncryptionType: ['0x17', '0x18', '0x1', '0x3']
+  machine_or_krbtgt:
+    - ServiceName|endswith: '$'
+    - ServiceName: krbtgt
+  condition: tgs and not machine_or_krbtgt
+suppression:
+  timewindow: 3600
+  group_by: [IpAddress, ServiceName]
+level: medium
+tags:
+  - attack.credential_access
+  - attack.t1558.003
+---
+title: Kerberoasting - Many RC4 Service Tickets From One Source
+id: rule-win-ad-kerberoasting-burst
+description: >-
+  One client requested RC4 service tickets for five or more different
+  service accounts within ten minutes: the enumeration-and-request pattern of
+  Kerberoasting, which harvests every crackable SPN in one go
+  (T1558.003 Kerberoasting)
+correlation:
+  type: value_count
+  rules:
+    - ad_tgs_rc4
+  group-by:
+    - IpAddress
+  timespan: 10m
+  condition:
+    field: ServiceName
+    gte: 5
+  generate: true
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1558.003
