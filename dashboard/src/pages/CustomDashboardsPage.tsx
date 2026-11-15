@@ -132,6 +132,23 @@ function WidgetBody({ w, r }: { readonly w: Widget; readonly r: RunResult }) {
   )
 }
 
+function NoSavedSearches() {
+  return (
+    <div className="space-y-2 text-sm">
+      <p className="font-medium">A widget shows a saved search. You have none yet.</p>
+      <ol className="list-decimal pl-5 text-xs text-muted-foreground space-y-1">
+        <li>Open Log search or Events and type a query (or use Advanced filters), then press Search.</li>
+        <li>Click <b>Save search</b>, give it a name, and Save.</li>
+        <li>Come back here: it is in the <b>Saved search</b> list of Add a widget.</li>
+      </ol>
+      <div className="control-cluster">
+        <Link className="ui-button ui-button--primary" to="/logs">Open Log search</Link>
+        <Link className="ui-button" to="/events">Open Events</Link>
+      </div>
+    </div>
+  )
+}
+
 function Editor({ initial, onDone }: { readonly initial: Dashboard | null; readonly onDone: (id?: string) => void }) {
   const qc = useQueryClient()
   const searches = useSavedSearches()
@@ -185,8 +202,8 @@ function Editor({ initial, onDone }: { readonly initial: Dashboard | null; reado
 
         <fieldset className="rounded border border-border p-3 space-y-2">
           <legend className="text-sm font-medium px-1">Add a widget</legend>
-          {searches.data && !searches.data.length ? (
-            <p className="text-xs text-muted-foreground">Save a search first on <Link className="underline" to="/logs">Log search</Link> or <Link className="underline" to="/events">Events</Link>.</p>
+          {searches.isLoading ? <Loader2 size={14} className="animate-spin" /> : searches.data && !searches.data.length ? (
+            <NoSavedSearches />
           ) : (
             <div className="control-cluster flex-wrap items-end">
               <label className="field"><span>Saved search</span>
@@ -221,6 +238,7 @@ function Editor({ initial, onDone }: { readonly initial: Dashboard | null; reado
         </fieldset>
 
         {save.isError && <p role="alert" className="text-xs text-destructive">{apiError(save.error, 'Could not save the dashboard.')}</p>}
+        {widgets.length > 0 && <p className="text-xs text-muted-foreground">Widgets appear on the dashboard once you save it.</p>}
         <div className="control-cluster">
           <button type="button" className="ui-button ui-button--primary" disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>
             {save.isPending ? 'Saving…' : 'Save dashboard'}</button>
@@ -271,11 +289,29 @@ export default function CustomDashboardsPage() {
           onDone={id => { setEditing(null); if (id) setSelected(id) }} />
       ) : list.isLoading ? <Loader2 size={16} className="animate-spin" />
         : list.isError ? <p className="text-sm text-destructive">Could not load dashboards.</p>
-        : !current ? <p className="text-sm text-muted-foreground">Create a dashboard from your saved searches.</p>
-        : !current.widgets.length ? <p className="text-sm text-muted-foreground">This dashboard has no widgets yet.</p>
-        : (
+        : !current ? (
+          <section className="panel"><div className="panel__body space-y-3">
+            <p className="font-medium">No dashboard yet</p>
+            <p className="text-sm text-muted-foreground">
+              A dashboard is a page of widgets. Each widget runs one saved search from Log search or Events as a count,
+              a timeline, top values or the latest rows.
+            </p>
+            <button className="ui-button ui-button--primary" onClick={() => setEditing('new')}><Plus size={14} /> Create dashboard</button>
+          </div></section>
+        ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {current.widgets.map((w, i) => <WidgetView key={w.id ?? i} w={w} />)}
+            {current.editable && (
+              <button type="button" onClick={() => setEditing('current')}
+                className="panel col-span-1 min-h-[140px] flex flex-col items-center justify-center gap-2 border-dashed text-muted-foreground hover:text-foreground">
+                <Plus size={20} aria-hidden="true" />
+                <span className="text-sm font-medium">Add widget</span>
+                {!current.widgets.length && <span className="text-xs">This dashboard is empty</span>}
+              </button>
+            )}
+            {!current.editable && !current.widgets.length && (
+              <p className="text-sm text-muted-foreground">This dashboard has no widgets yet.</p>
+            )}
           </div>
         )}
     </div>
