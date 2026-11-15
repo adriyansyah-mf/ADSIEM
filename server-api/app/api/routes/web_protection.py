@@ -17,7 +17,7 @@ from app.core.deps import get_agent, get_scoped_group, require_permission
 from app.core.llm_gateway import get_setting
 from app.core.redis_client import get_redis
 from app.models.models import Agent, User, WebAllowRule, WebBlockEntry, WebBlockPolicy
-from app.services import web_blocks, web_page
+from app.services import retro_hunts, web_blocks, web_page
 from app.services.audit import audit_log
 from worker.web_domains import DomainError, normalize
 
@@ -146,6 +146,7 @@ async def _block_one(db: AsyncSession, user: User, target: str, value: str, reas
                      expires_at: Optional[datetime]) -> WebBlockEntry:
     row = await web_blocks.block_domain(db, user, target, value, reason, expires_at)
     await audit_log(db, user.id, "web_block.add", "web_block", str(row.id), {"domain": row.domain, "group_id": target})
+    await retro_hunts.enqueue_safely(db, "domain", row.domain, target, "web_block", user.id)
     return row
 
 

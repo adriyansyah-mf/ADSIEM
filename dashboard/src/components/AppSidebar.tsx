@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { Activity, ArrowUpCircle, Ban, Bell, BookOpen, Brain, ClipboardList, Crosshair, FileBarChart, FileText,
-  FolderOpen, Fingerprint, Globe, Grid3x3, HeartPulse, LayoutDashboard, Lock, LogOut, PanelLeftClose,
+  FolderOpen, Fingerprint, Globe, Grid3x3, HeartPulse, History, LayoutDashboard, Lock, LogOut, PanelLeftClose,
   Network, PanelLeftOpen, Radar, Radio, ScanLine, Server, Settings, Shield, ShieldCheck, ShieldX, Terminal, Users, Webhook, Wrench, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
@@ -25,6 +25,7 @@ export const NAVIGATION: readonly { readonly label: string; readonly items: read
     { to: '/events', label: 'Events', icon: Activity },
     { to: '/live-events', label: 'Live events', icon: Radio },
     { to: '/hunts', label: 'Threat hunting', icon: Crosshair },
+    { to: '/retro-hunt', label: 'Retro-hunt', icon: History },
     { to: '/threat-iocs', label: 'Threat IoCs', icon: Fingerprint },
     { to: '/ueba', label: 'Behavior analytics', icon: Brain },
     { to: '/entity-risk', label: 'Entity risk', icon: Crosshair },

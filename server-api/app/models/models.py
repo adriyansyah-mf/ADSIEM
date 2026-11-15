@@ -602,6 +602,35 @@ class ThreatHunt(Base):
     created_at        = Column(DateTime(timezone=True), default=now_utc)
     completed_at      = Column(DateTime(timezone=True))
 
+class RetroHunt(Base):
+    """A search of the stored logs for an IOC or a rule (worker/retro_hunt.py):
+    started by an analyst, or automatically when an IP, domain or hash is
+    added to a blocklist, so a new indicator is checked against the past."""
+    __tablename__ = "retro_hunts"
+    id             = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kind           = Column(String(10), nullable=False)          # ioc | rule
+    ioc_type       = Column(String(20))                          # ip | domain | hash | url | text
+    ioc_value      = Column(Text)
+    rule_id        = Column(UUID(as_uuid=True))
+    rule_title     = Column(Text)
+    days           = Column(Integer, nullable=False, default=30)
+    group_id       = Column(String(100), nullable=False, default="default")  # "*": every group
+    trigger        = Column(String(20), nullable=False, default="manual")    # manual | ip_block | web_block | malware_hash
+    create_alerts  = Column(Boolean, nullable=False, default=True)
+    status         = Column(String(20), nullable=False, default="pending")   # pending | running | done | failed
+    scanned        = Column(Integer, nullable=False, default=0)   # rule hunts: events evaluated
+    matched        = Column(Integer, nullable=False, default=0)   # events that matched
+    hosts          = Column(Integer, nullable=False, default=0)
+    alerts_created = Column(Integer, nullable=False, default=0)
+    truncated      = Column(Boolean, nullable=False, default=False)
+    results        = Column(JSONB)                                # per host: first/last seen, count, samples
+    error          = Column(Text)
+    created_by     = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at     = Column(DateTime(timezone=True), default=now_utc, index=True)
+    started_at     = Column(DateTime(timezone=True))
+    finished_at    = Column(DateTime(timezone=True))
+
+
 class FimWatchPath(Base):
     __tablename__ = "fim_watch_paths"
     id         = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

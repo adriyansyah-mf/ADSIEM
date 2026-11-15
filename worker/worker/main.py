@@ -25,6 +25,7 @@ from worker.hunter import hunt_loop
 from worker.agent_monitor import agent_monitor_loop
 from worker.maintenance import maintenance_loop
 from worker.es_disk_guard import es_disk_guard_loop
+from worker.retro_hunt import retro_hunt_loop
 from worker.report_sender import report_loop
 from worker.hunt_scheduler import hunt_scheduler_loop
 from worker.rag_indexer import rag_index_loop, sop_index_loop
@@ -182,6 +183,7 @@ async def main():
         _supervise("agent_monitor", agent_monitor_loop),
         _supervise("maintenance", maintenance_loop),
         _supervise("es_disk_guard", es_disk_guard_loop),
+        _supervise("retro_hunt", retro_hunt_loop),
         _supervise("report", lambda: report_loop(redis)),
         _supervise("hunt_scheduler", hunt_scheduler_loop),
         _supervise("rag_index", rag_index_loop),
