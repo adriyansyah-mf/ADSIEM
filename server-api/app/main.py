@@ -115,6 +115,8 @@ _DEFAULT_SETTINGS = [
     ("retention_raw_logs_days",  "30",  False, "Delete raw_logs older than N days (0=disabled)"),
     ("retention_events_days",    "90",  False, "Delete events older than N days (0=disabled)"),
     ("retention_alerts_days",   "180",  False, "Delete closed alerts older than N days (0=disabled)"),
+    ("es_disk_guard_percent",   "85",   False, "When Elasticsearch disk usage reaches this percent, delete the oldest days of logs until it is below (0=off). Elasticsearch stops ingest at its 95% flood stage"),
+    ("es_disk_guard_keep_days", "3",    False, "The disk guard never deletes logs newer than this many days"),
 ]
 
 async def _seed_settings() -> None:
