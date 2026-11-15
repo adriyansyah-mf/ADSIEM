@@ -33,6 +33,8 @@ from worker.stream_maintenance import stream_maintenance_loop
 from worker.evidence_inbox import evidence_dispatch_loop, evidence_retention_loop
 from worker.knowledge import knowledge_loop
 from worker.malware_feed import malware_feed_loop
+from worker.vuln_intel import vuln_intel_loop
+from worker.vuln_scan import vuln_scan_loop
 from worker.webblock_feeds import webblock_feeds_loop
 from worker.soar.engine import soar_loop
 from worker.ti_lookup import ti_lookup_loop
@@ -190,6 +192,8 @@ async def main():
         _supervise("sop_index", sop_index_loop),
         _supervise("knowledge", knowledge_loop),
         _supervise("malware_feed", malware_feed_loop),
+        _supervise("vuln_intel", vuln_intel_loop),
+        _supervise("vuln_scan", vuln_scan_loop),
         _supervise("webblock_feeds", webblock_feeds_loop),
         _supervise("ti_lookup", ti_lookup_loop),
         _supervise("health_probe", health_probe_loop),

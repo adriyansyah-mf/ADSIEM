@@ -320,26 +320,56 @@ func collectPackages(r *Report) {
 		return
 	}
 	// RHEL, Rocky, Alma, Fedora, SUSE: the rpm database is not a text file
-	if out, err := runTimeout("rpm", "-qa", "--qf", `%{NAME}\t%{VERSION}-%{RELEASE}\n`); err == nil {
+	// the epoch (1:3.0.7-24.el9) matters: advisories compare against it
+	if out, err := runTimeout("rpm", "-qa", "--qf", `%{NAME}\t%|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}\t%{SOURCERPM}\n`); err == nil {
 		r.Packages = parseRpmQuery(out)
 	}
 }
 
-// parseRpmQuery reads `rpm -qa --qf '%{NAME}\t%{VERSION}-%{RELEASE}\n'`.
+// maxPackages bounds the report; a server with every desktop library is
+// ~3000 packages, and a cut list hides vulnerable ones late in the alphabet.
+const maxPackages = 3000
+
+// parseRpmQuery reads `rpm -qa --qf '%{NAME}\t[EPOCH:]%{VERSION}-%{RELEASE}\t%{SOURCERPM}\n'`
+// (the third column is optional).
 func parseRpmQuery(out string) []InstalledPackage {
 	var pkgs []InstalledPackage
 	for _, line := range strings.Split(out, "\n") {
-		name, version, ok := strings.Cut(strings.TrimSpace(line), "\t")
-		if !ok || name == "" || version == "" || name == "gpg-pubkey" {
+		f := strings.Split(strings.TrimSpace(line), "\t")
+		if len(f) < 2 || f[0] == "" || f[1] == "" || f[0] == "gpg-pubkey" {
 			continue
 		}
-		pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "rpm"})
+		p := InstalledPackage{Name: f[0], Version: f[1], Source: "rpm"}
+		if len(f) > 2 {
+			p.SourceName = srpmName(f[2])
+		}
+		pkgs = append(pkgs, p)
 	}
 	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].Name < pkgs[j].Name })
-	if len(pkgs) > 1000 {
-		pkgs = pkgs[:1000]
+	if len(pkgs) > maxPackages {
+		pkgs = pkgs[:maxPackages]
 	}
 	return pkgs
+}
+
+// srpmName: "openssl-3.0.7-27.el9.src.rpm" -> "openssl" (name-version-release).
+func srpmName(srpm string) string {
+	s := strings.TrimSuffix(strings.TrimSuffix(srpm, ".rpm"), ".src")
+	s = strings.TrimSuffix(s, ".nosrc")
+	for i := 0; i < 2; i++ {
+		j := strings.LastIndex(s, "-")
+		if j <= 0 {
+			return ""
+		}
+		s = s[:j]
+	}
+	return s
+}
+
+// dpkgSource: "openssl (3.0.2-0ubuntu1.10)" -> "openssl".
+func dpkgSource(v string) string {
+	name, _, _ := strings.Cut(strings.TrimSpace(v), " ")
+	return name
 }
 
 // runTimeout runs a system tool for the posture checks, bounded so a hung
@@ -358,18 +388,25 @@ func parseDpkg(path string) []InstalledPackage {
 	}
 	defer f.Close()
 
+	return parseDpkgStatus(f)
+}
+
+func parseDpkgStatus(r io.Reader) []InstalledPackage {
 	var pkgs []InstalledPackage
-	var name, version, status string
-	sc := bufio.NewScanner(f)
+	var name, version, status, source string
+	flush := func() {
+		// only include installed packages
+		if name != "" && version != "" && strings.HasSuffix(status, " installed") {
+			pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "dpkg", SourceName: source})
+		}
+		name, version, status, source = "", "", "", ""
+	}
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
-			// only include installed packages
-			if name != "" && version != "" && strings.Contains(status, "installed") {
-				pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "dpkg"})
-			}
-			name, version, status = "", "", ""
+			flush()
 			continue
 		}
 		if k, v, ok := strings.Cut(line, ": "); ok {
@@ -380,14 +417,14 @@ func parseDpkg(path string) []InstalledPackage {
 				version = v
 			case "Status":
 				status = v
+			case "Source":
+				source = dpkgSource(v)
 			}
 		}
 	}
-	if name != "" && version != "" && strings.Contains(status, "installed") {
-		pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "dpkg"})
-	}
-	if len(pkgs) > 1000 {
-		pkgs = pkgs[:1000]
+	flush()
+	if len(pkgs) > maxPackages {
+		pkgs = pkgs[:maxPackages]
 	}
 	return pkgs
 }
@@ -399,29 +436,35 @@ func parseApk(path string) []InstalledPackage {
 	}
 	defer f.Close()
 
+	return parseApkInstalled(f)
+}
+
+func parseApkInstalled(r io.Reader) []InstalledPackage {
 	var pkgs []InstalledPackage
-	var name, version string
-	sc := bufio.NewScanner(f)
+	var name, version, origin string
+	flush := func() {
+		if name != "" && version != "" {
+			pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "apk", SourceName: origin})
+		}
+		name, version, origin = "", "", ""
+	}
+	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		line := sc.Text()
-		if line == "" {
-			if name != "" && version != "" {
-				pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "apk"})
-			}
-			name, version = "", ""
-			continue
-		}
-		if strings.HasPrefix(line, "P:") {
+		switch {
+		case line == "":
+			flush()
+		case strings.HasPrefix(line, "P:"):
 			name = line[2:]
-		} else if strings.HasPrefix(line, "V:") {
+		case strings.HasPrefix(line, "V:"):
 			version = line[2:]
+		case strings.HasPrefix(line, "o:"):
+			origin = line[2:] // the aport the package was built from
 		}
 	}
-	if name != "" && version != "" {
-		pkgs = append(pkgs, InstalledPackage{Name: name, Version: version, Source: "apk"})
-	}
-	if len(pkgs) > 1000 {
-		pkgs = pkgs[:1000]
+	flush()
+	if len(pkgs) > maxPackages {
+		pkgs = pkgs[:maxPackages]
 	}
 	return pkgs
 }

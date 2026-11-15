@@ -44,7 +44,10 @@ type Issue struct {
 type InstalledPackage struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
-	Source  string `json:"source"` // dpkg, apk, rpm
+	Source  string `json:"source"` // dpkg, apk, rpm, windows
+	// SourceName is the source package the binary was built from (libssl3 ->
+	// openssl): distro advisories, and so OSV, are keyed by it.
+	SourceName string `json:"source_name,omitempty"`
 }
 
 type Report struct {

@@ -88,6 +88,44 @@ func TestParseRpmQuery(t *testing.T) {
 	if len(pkgs) != 2 || pkgs[0].Name != "bash" || pkgs[1].Version != "3.0.7-27.el9" || pkgs[0].Source != "rpm" {
 		t.Fatalf("%+v", pkgs)
 	}
+	// with %{SOURCERPM}: OSV is keyed by the source package
+	pkgs = parseRpmQuery("openssl-libs\t3.0.7-27.el9\topenssl-3.0.7-27.el9.src.rpm\n" +
+		"python3-libs\t3.9.18-3.el9\tpython3.9-3.9.18-3.el9.src.rpm\nweird\t1-1\t(none)\n")
+	if pkgs[0].SourceName != "openssl" || pkgs[1].SourceName != "python3.9" || pkgs[2].SourceName != "" {
+		t.Fatalf("%+v", pkgs)
+	}
+}
+
+func TestParseDpkgStatusKeepsSourceAndSkipsRemoved(t *testing.T) {
+	status := `Package: libssl3
+Status: install ok installed
+Source: openssl (3.0.2-0ubuntu1.10)
+Version: 3.0.2-0ubuntu1.10
+
+Package: bash
+Status: install ok installed
+Version: 5.1-6ubuntu1
+
+Package: old-kernel
+Status: deinstall ok config-files
+Version: 1.0
+
+Package: broken
+Status: install ok half-installed
+Version: 2.0
+`
+	pkgs := parseDpkgStatus(strings.NewReader(status))
+	if len(pkgs) != 2 || pkgs[0].Name != "libssl3" || pkgs[0].SourceName != "openssl" ||
+		pkgs[1].Name != "bash" || pkgs[1].SourceName != "" {
+		t.Fatalf("%+v", pkgs)
+	}
+}
+
+func TestParseApkInstalledKeepsOrigin(t *testing.T) {
+	pkgs := parseApkInstalled(strings.NewReader("P:libcrypto3\nV:3.1.4-r5\no:openssl\n\nP:musl\nV:1.2.4-r2\n"))
+	if len(pkgs) != 2 || pkgs[0].SourceName != "openssl" || pkgs[1].Name != "musl" || pkgs[1].SourceName != "" {
+		t.Fatalf("%+v", pkgs)
+	}
 }
 
 // The real collector on this machine: whatever it finds, it must not panic

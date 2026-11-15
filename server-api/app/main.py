@@ -96,6 +96,10 @@ _DEFAULT_SETTINGS = [
     ("abusech_auth_key",  "",                          True,  "abuse.ch Auth-Key (free, auth.abuse.ch) for the URLhaus feed in Web Protection; falls back to malwarebazaar_api_key when empty"),
     ("phishtank_app_key",  "",                          True,  "PhishTank application key (free, phishtank.org) for the PhishTank feed in Web Protection"),
     ("malware_feed_enabled", "true",                   False, "Download new malware hashes from MalwareBazaar every 30 minutes into the known-malware set agents check (needs malwarebazaar_api_key; only downloads, nothing is sent) (true/false)"),
+    ("vuln_intel_enabled", "true",                    False, "Download CISA KEV, FIRST EPSS and Microsoft's monthly security update data once a day to prioritise vulnerabilities (only downloads, nothing is sent) (true/false)"),
+    ("vuln_msrc_months",   "6",                       False, "How many monthly Microsoft security releases to keep for Windows patch checks (1-24); older fixes are covered by newer cumulative updates"),
+    ("vuln_scan_enabled",  "true",                    False, "Match hosts' installed packages (OSV.dev, sends package names and versions, no host names) and Windows builds (Microsoft data) to known vulnerabilities (true/false)"),
+    ("vuln_scan_hours",    "6",                       False, "Hours between vulnerability scans of every host"),
     ("malware_feed_retention_days", "180",             False, "Feed hashes not seen again for this many days stop being checked (0 = keep forever)"),
     ("malware_hash_learn_yara", "true",                False, "Add the SHA-256 of every file that matches a critical YARA rule to the known-malware set, so every agent knows it (true/false)"),
     ("malware_hash_action", "detect",                  False, "What agents do with a known-malware hash: off, detect (critical alert), or block (also kill the process at start and quarantine the file written in a watched directory)"),
@@ -629,3 +633,5 @@ for router in [
     prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, ip_blocks_agent_router, ip_blocks_router, entity_risk_router, lateral_router, policies_router, policies_agent_router, agent_updates_router,
 ]:
     app.include_router(router)
+from app.api.routes.vulnerabilities import router as vulnerabilities_router  # noqa: E402
+app.include_router(vulnerabilities_router)

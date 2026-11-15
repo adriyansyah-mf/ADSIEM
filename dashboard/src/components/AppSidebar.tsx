@@ -3,6 +3,7 @@ import { Activity, ArrowUpCircle, Ban, Bell, BookOpen, Brain, ClipboardList, Cro
   FolderOpen, Fingerprint, Globe, Grid3x3, HeartPulse, History, LayoutDashboard, Lock, LogOut, PanelLeftClose,
   Network, PanelLeftOpen, Radar, Radio, ScanLine, Server, Settings, Shield, ShieldCheck, ShieldX, Terminal, Users, Webhook, Wrench, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { ShieldAlert } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 
 interface NavigationItem {
@@ -44,6 +45,7 @@ export const NAVIGATION: readonly { readonly label: string; readonly items: read
     { to: '/syslog', label: 'Syslog devices', icon: Network },
     { to: '/agent-updates', label: 'Agent updates', icon: ArrowUpCircle },
     { to: '/hygiene', label: 'Security posture', icon: HeartPulse },
+    { to: '/vulnerabilities', label: 'Vulnerabilities', icon: ShieldAlert },
     { to: '/fim', label: 'File integrity', icon: Lock },
     { to: '/yara', label: 'YARA', icon: ScanLine },
     { to: '/prevention', label: 'Prevention', icon: Ban },

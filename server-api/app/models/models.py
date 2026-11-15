@@ -304,6 +304,59 @@ class HygieneSnapshot(Base):
     network         = Column(JSONB)
     collected_at    = Column(DateTime(timezone=True), default=now_utc)
 
+class CveIntel(Base):
+    """What the world knows about a CVE (worker/vuln_intel.py): CISA KEV
+    (exploited in the wild) and FIRST EPSS (chance of exploitation in 30 days)."""
+    __tablename__ = "cve_intel"
+    cve_id          = Column(String(32), primary_key=True)
+    epss            = Column(Float)
+    epss_percentile = Column(Float)
+    kev             = Column(Boolean, nullable=False, default=False, server_default="false")
+    kev_name        = Column(Text)
+    kev_date_added  = Column(String(10))   # YYYY-MM-DD
+    kev_due_date    = Column(String(10))
+    kev_ransomware  = Column(Boolean, nullable=False, default=False, server_default="false")
+    updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class MsrcFix(Base):
+    """A Windows build (10.0.26100) is vulnerable to cve_id below fixed_ubr:
+    from Microsoft's monthly CVRF documents (worker/vuln_intel.py). Client and
+    server editions can share a build with different UBRs (Windows 11 24H2
+    and Server 2025 are both 26100)."""
+    __tablename__ = "msrc_fixes"
+    cve_id    = Column(String(32), primary_key=True)
+    build     = Column(String(32), primary_key=True)
+    edition   = Column(String(10), primary_key=True)  # client | server
+    fixed_ubr = Column(Integer, nullable=False)
+    kb        = Column(String(20))
+    severity  = Column(String(20))   # critical/high/medium/low (MSRC Critical/Important/Moderate/Low)
+    cvss      = Column(Float)
+    impact    = Column(String(100))  # Remote Code Execution, Elevation of Privilege…
+    title     = Column(Text)
+    release   = Column(String(20), nullable=False)  # the CVRF document: 2026-Oct
+
+class HostVulnerability(Base):
+    """One CVE on one host (worker/vuln_scan.py): open while the last scan
+    still finds it, resolved_at once it does not."""
+    __tablename__ = "host_vulnerabilities"
+    __table_args__ = (UniqueConstraint("agent_id", "cve_id", "package", name="uq_host_vuln"),)
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id          = Column(UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    group_id          = Column(String(100), nullable=False, default="default", index=True)
+    hostname          = Column(String(255))
+    cve_id            = Column(String(64), nullable=False, index=True)
+    source            = Column(String(10), nullable=False)    # osv | msrc
+    package           = Column(String(255), nullable=False, default="")
+    installed_version = Column(String(255))
+    fixed_version     = Column(String(255))
+    kb                = Column(String(20))
+    severity          = Column(String(20))
+    cvss              = Column(Float)
+    title             = Column(Text)
+    first_seen        = Column(DateTime(timezone=True), default=now_utc)
+    last_seen         = Column(DateTime(timezone=True), default=now_utc)
+    resolved_at       = Column(DateTime(timezone=True))
+
 class AiSkill(Base):
     """A skill the AI investigator loads when a case matches it
     (services/ai_skills.py): the procedure for one kind of attack. The model

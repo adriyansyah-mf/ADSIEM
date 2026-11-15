@@ -28,6 +28,7 @@ const CasesPage = lazy(() => import('@/pages/CasesPage'))
 const CaseDetailPage = lazy(() => import('@/pages/CaseDetailPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const HygienePage = lazy(() => import('@/pages/HygienePage'))
+const VulnerabilitiesPage = lazy(() => import('@/pages/VulnerabilitiesPage'))
 const UEBAPage = lazy(() => import('@/pages/UEBAPage'))
 const EntityRiskPage = lazy(() => import('@/pages/EntityRiskPage'))
 const LateralMovementPage = lazy(() => import('@/pages/LateralMovementPage'))
@@ -87,6 +88,7 @@ export default function App() {
             <Route path="/webhooks" element={<ProtectedRoute minRole="admin"><WebhooksPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute minRole="admin"><SettingsPage /></ProtectedRoute>} />
             <Route path="/hygiene" element={<HygienePage />} />
+            <Route path="/vulnerabilities" element={<VulnerabilitiesPage />} />
             <Route path="/ueba" element={<UEBAPage />} />
             <Route path="/entity-risk" element={<EntityRiskPage />} />
             <Route path="/lateral" element={<LateralMovementPage />} />

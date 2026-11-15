@@ -13,6 +13,7 @@
 !worker/worker/malware_hashes.py
 !worker/worker/web_domains.py
 !worker/worker/ip_iocs.py
+!worker/worker/vuln_priority.py
 !worker/worker/soar/__init__.py
 !worker/worker/soar/graph.py
 !worker/worker/soar/template.py
