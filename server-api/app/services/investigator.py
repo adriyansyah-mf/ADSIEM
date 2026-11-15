@@ -201,6 +201,7 @@ class Ctx:
     hash_intel: HashEnrichment = field(default_factory=HashEnrichment)
     max_flows: int = MAX_FLOWS             # + an analyst's one-time raise (budget_overrides)
     current_action: uuid.UUID | None = None  # the ledger row of the tool call in progress
+    skills_loaded: list[str] = field(default_factory=list)  # load_skill (services/ai_skills.py)
     # review panel (investigation_debate): reviewers (0 = off), rounds, model ("" = the lead's)
     debate_agents: int = 0
     debate_rounds: int = 2
@@ -765,6 +766,11 @@ def build_tools(ctx: Ctx) -> list[StructuredTool]:
                  "contradicting_evidence_ids": {"type": "array", "items": {"type": "string"}},
                  "open_questions": {"type": "array", "items": {"type": "string"}},
                  "reason": {"type": "string"}}}),
+        tool(load_skill, "load_skill",
+             "Load the full instructions of a skill from the Skills list in your instructions (a procedure "
+             "for one kind of attack). Call it when the case matches the skill's description.",
+             {"type": "object", "required": ["name"], "properties": {
+                 "name": {"type": "string", "description": "the skill's name, as listed"}}}),
         tool(create_artifact, "create_artifact",
              "Save a new artifact (YAML, name starting with AI.) when no existing one collects what you need.",
              {"type": "object", "required": ["yaml_text"], "properties": {
@@ -1072,6 +1078,27 @@ def _observe(ctx: Ctx, name: str, result: Any) -> None:
     ctx.hash_intel.observe(json.dumps(evidence, default=str))
 
 
+MAX_SKILLS = 4  # skills one investigation may load
+
+
+async def load_skill(ctx: Ctx, name: str = "") -> dict:
+    """The full instructions of one enabled skill (services/ai_skills.py)."""
+    from app.services import ai_skills
+    name = (name or "").strip().lower()
+    if name in ctx.skills_loaded:
+        return {"name": name, "note": "already loaded earlier in this investigation; follow it from there"}
+    if len(ctx.skills_loaded) >= MAX_SKILLS:
+        return {"error": f"at most {MAX_SKILLS} skills per investigation; already loaded: {', '.join(ctx.skills_loaded)}"}
+    async with AsyncSessionLocal() as db:
+        skill = await ai_skills.get_enabled(db, name)
+        if skill is None:
+            names = [n for n, _ in await ai_skills.catalog(db)]
+            return {"error": f"no enabled skill named {name!r}", "available": names}
+    ctx.skills_loaded.append(skill.name)
+    await _step(ctx.inv_id, "skill_loaded", name=skill.name, description=_clip(skill.description, 300))
+    return {"name": skill.name, "instructions": skill.content}
+
+
 async def record_hypothesis(ctx: Ctx, statement: str = "", hypothesis_id: str = "", state: str | None = None,
                             confidence: int | None = None, supporting_evidence_ids: list | None = None,
                             contradicting_evidence_ids: list | None = None, open_questions: list | None = None,
@@ -1351,8 +1378,12 @@ async def _investigate(ctx: Ctx, api_key: str, model: str, effort: str | None, r
     if not resumed:
         await _step(ctx.inv_id, "context", hosts=[h["hostname"] for h in context["hosts"]],
                     alerts=[a["title"] for a in context["alerts"]])
+    from app.services import ai_skills
+    async with AsyncSessionLocal() as db:
+        skills = ai_skills.catalog_prompt(await ai_skills.catalog(db))
     messages: list[BaseMessage] = [
-        SystemMessage(content=SYSTEM_PROMPT + (COMMANDS_PROMPT if ctx.commands_enabled else NO_COMMANDS_PROMPT)),
+        SystemMessage(content=SYSTEM_PROMPT + (COMMANDS_PROMPT if ctx.commands_enabled else NO_COMMANDS_PROMPT)
+                      + skills),
         HumanMessage(content="Investigate this case. Context:\n" + _json(context, 20_000)),
     ]
     if resumed:

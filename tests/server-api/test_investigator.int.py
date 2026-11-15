@@ -1599,3 +1599,53 @@ def test_a_panel_nobody_answers_leaves_the_draft_as_the_report(env, monkeypatch)
     assert len(model.seen) == 1 and len(panel.calls) == 3  # one round, then the panel gives up
     assert inv.debate["brief"] is None
     assert any(s["kind"] == "warning" and "no reviewer" in s["text"] for s in inv.steps)
+
+
+# ─── Skills ──────────────────────────────────────────────────────
+
+def test_the_investigator_sees_the_skills_and_loads_the_one_that_fits(env, monkeypatch):
+    from sqlalchemy import update as sa_update
+
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import AiSkill
+    from app.services import ai_skills
+
+    _run(ai_skills.sync_builtin_skills())  # the repo's skills/*.md
+
+    async def disable(name):
+        async with AsyncSessionLocal() as db:
+            await db.execute(sa_update(AiSkill).where(AiSkill.name == name).values(is_enabled=False))
+            await db.commit()
+    _run(disable("ransomware-investigation"))
+    user_id, _, case_id = _seed(f"sk-{uuid.uuid4().hex[:8]}")
+
+    def script(turn, results, messages):
+        if turn == 1:
+            system = messages[0].content
+            assert "- webshell-investigation:" in system and "load_skill" in system
+            assert "ransomware-investigation" not in system  # turned off: not offered
+            return ("load_skill", {"name": "webshell-investigation"})
+        if turn == 2:
+            assert results[-1]["name"] == "webshell-investigation"
+            assert "Find the entry point" in results[-1]["instructions"]
+            return ("load_skill", {"name": "ransomware-investigation"})
+        if turn == 3:
+            assert "no enabled skill" in results[-1]["error"]
+            assert "webshell-investigation" in results[-1]["available"]
+            return ("load_skill", {"name": "webshell-investigation"})
+        if turn == 4:
+            assert "already loaded" in results[-1]["note"]
+            return "## Summary\nFollowed the webshell skill.\nVERDICT: true_positive"
+        raise AssertionError(f"unexpected turn {turn}")
+
+    try:
+        inv, _ = _investigate(script, monkeypatch, user_id, case_id)
+    finally:
+        async def enable():
+            async with AsyncSessionLocal() as db:
+                await db.execute(sa_update(AiSkill).values(is_enabled=True))
+                await db.commit()
+        _run(enable())
+    assert inv.status == "finished", inv.error
+    loaded = [s for s in inv.steps if s["kind"] == "skill_loaded"]
+    assert [s["name"] for s in loaded] == ["webshell-investigation"]

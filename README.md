@@ -266,6 +266,17 @@ model to keep inference on-prem.
   are scoped to the case's group. Steps are recorded in an investigation
   ledger with hypotheses, decisions and pinned evidence, and the investigation has its own
   chat.
+- **AI skills:** the investigator sees each skill's name and description, and loads
+  (`load_skill`) the procedures that fit the case. A skill covers what to collect with which
+  artifacts, how to tell a true positive from a false positive, and what the report must cover.
+  - 15 built-in skills: webshell, cryptominer, ransomware, brute force then login, lateral
+    movement, OT/ICS attacks, phishing, credential theft, C2 beaconing, exfiltration, Linux
+    privilege escalation, Windows persistence and LOLBins, defense evasion, web application
+    attacks, and malicious code projects.
+  - Each skill can be switched on or off.
+  - Write your own, or copy and adapt a built-in one, under **Response → AI skills**.
+
+  See [`docs/operations/ai-skills.md`](docs/operations/ai-skills.md).
 - **SOC assistant:** a chat widget on every page that looks up alerts, cases, agents, UEBA,
   FIM, rules, logs and MITRE coverage. It is read-only and cannot touch settings, users or
   webhooks.

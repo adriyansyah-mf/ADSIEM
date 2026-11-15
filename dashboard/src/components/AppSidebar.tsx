@@ -36,6 +36,7 @@ export const NAVIGATION: readonly { readonly label: string; readonly items: read
     { to: '/soar', label: 'SOAR workflows', icon: Shield, minRole: 'analyst' },
     { to: '/sop', label: 'Playbooks & SOPs', icon: BookOpen },
     { to: '/knowledge', label: 'Knowledge base', icon: BookOpen },
+    { to: '/ai-skills', label: 'AI skills', icon: Brain },
   ] },
   { label: 'Environment', items: [
     { to: '/agents', label: 'Agents', icon: Server },
