@@ -1,25 +1,22 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { format } from 'date-fns'
-import { ArrowDown, ArrowUp, LayoutGrid, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { GripVertical, LayoutGrid, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
+import { Responsive, WidthProvider } from 'react-grid-layout'
+import type { Layout } from 'react-grid-layout'
+import 'react-grid-layout/css/styles.css'
+import 'react-resizable/css/styles.css'
+import '@/components/dashboards/dashboards.css'
 import { api } from '@/api/client'
-import { useSavedSearches } from '@/components/SavedSearchBar'
+import {
+  DECODED_FIELDS, INDEX_FIELDS, TIME_WINDOWS, VIZ, VizBody, apiError, normalize, placeAll, useWidgetData, windowLabel,
+} from '@/components/dashboards/viz'
+import type { Pin, Scope, Widget } from '@/components/dashboards/viz'
+import VizEditor from '@/components/dashboards/VizEditor'
 
-// Dashboards built from saved searches (server-api/app/api/routes/dashboards.py).
-
-type Viz = 'count' | 'timeline' | 'top' | 'table'
-
-interface Widget {
-  id?: string
-  title: string
-  search_id: string
-  viz: Viz
-  hours: number
-  field: string
-  width: 1 | 2 | 3
-}
+// Custom dashboards, Wazuh / OpenSearch Dashboards style: a grid of
+// visualizations sharing one time range, query bar and filter pills
+// (server-api/app/api/routes/dashboards.py).
 
 interface Dashboard {
   id: string
@@ -31,289 +28,262 @@ interface Dashboard {
   editable: boolean
 }
 
-interface RunResult {
-  search: { id: string; name: string; kind: 'logs' | 'events' }
-  total: number
-  points?: { t: string; count: number }[]
-  values?: { value: string; count: number }[]
-  rows?: { id: string; created_at: string; log_type: string | null; hostname: string | null; message: string }[]
+interface Draft { id?: string; name: string; shared: boolean; widgets: Widget[] }
+
+const Grid = WidthProvider(Responsive)
+const REFRESH: [number | false, string][] = [[false, 'Off'], [30_000, '30 s'], [60_000, '1 min'], [300_000, '5 min']]
+const newId = () => Math.random().toString(36).slice(2, 14)
+
+function prepare(ws: Widget[]): Widget[] {
+  return placeAll(ws.map(w => ({ ...normalize(w), id: w.id || newId() })))
 }
 
-const VIZ: Record<Viz, string> = { count: 'Count', timeline: 'Timeline', top: 'Top values', table: 'Latest rows' }
-const TOP_FIELDS = ['log_type', 'event_action', 'event_category', 'source_ip', 'user_name', 'agent_id']
-const WINDOWS: [number, string][] = [[1, '1 hour'], [6, '6 hours'], [24, '24 hours'], [72, '3 days'], [168, '7 days'], [720, '30 days']]
-const SPAN: Record<1 | 2 | 3, string> = { 1: 'md:col-span-1', 2: 'md:col-span-2', 3: 'md:col-span-3' }
-
-function apiError(err: unknown, fallback: string): string {
-  const d = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  return typeof d === 'string' ? d : fallback
-}
-
-function WidgetView({ w }: { readonly w: Widget }) {
-  const q = useQuery<RunResult>({
-    queryKey: ['widget', w.search_id, w.viz, w.hours, w.field],
-    queryFn: () => api.get(`/api/saved-searches/${w.search_id}/run`,
-      { params: { viz: w.viz, hours: w.hours, field: w.field, limit: 10 } }).then(r => r.data),
-    refetchInterval: 60_000,
-  })
-  const label = WINDOWS.find(([h]) => h === w.hours)?.[1] ?? `${w.hours} h`
+function Panel({ w, scope, editing, onFilter, onEdit, onRemove }: {
+  readonly w: Widget
+  readonly scope: Scope
+  readonly editing: boolean
+  readonly onFilter: (field: string, value: string, negate?: boolean) => void
+  readonly onEdit: () => void
+  readonly onRemove: () => void
+}) {
+  const q = useWidgetData(w, scope)
+  const Icon = VIZ[w.viz]?.icon ?? LayoutGrid
+  const source = q.data?.search.name ?? (w.query ? w.query : `all ${w.kind}`)
   return (
-    <section className={`panel col-span-1 ${SPAN[w.width]} min-w-0`}>
-      <div className="panel__body space-y-2">
-        <div className="flex items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold truncate">{w.title || q.data?.search.name || 'Widget'}</h3>
-          <span className="text-xs text-muted-foreground whitespace-nowrap">last {label}</span>
-        </div>
-        {q.isLoading ? <Loader2 size={16} className="animate-spin" />
-          : q.isError ? <p className="text-xs text-destructive">{apiError(q.error, 'Could not run the saved search.')}</p>
-          : q.data && <WidgetBody w={w} r={q.data} />}
-        {q.data && (
-          <Link className="text-xs underline text-muted-foreground"
-            to={`/${q.data.search.kind}`} title="Open the search page (load it from Saved searches)">
-            {q.data.search.name} · {q.data.total.toLocaleString()} matching
-          </Link>
-        )}
+    <section className="panel viz-panel" aria-label={w.title}>
+      <header className="viz-panel__head">
+        {editing && <span className="viz-panel__drag" title="Drag to move"><GripVertical size={14} aria-hidden="true" /></span>}
+        <Icon size={13} className="text-muted-foreground shrink-0" aria-hidden="true" />
+        <h3 className="text-sm font-semibold truncate min-w-0 flex-1" title={w.title}>{w.title}</h3>
+        {q.isFetching && <Loader2 size={12} className="animate-spin text-muted-foreground" aria-label="Loading" />}
+        {editing && <>
+          <button type="button" className="ui-icon-button !w-7 !min-h-7" aria-label={`Edit ${w.title}`} onClick={onEdit}><Pencil size={13} /></button>
+          <button type="button" className="ui-icon-button !w-7 !min-h-7" aria-label={`Remove ${w.title}`} onClick={onRemove}><X size={13} /></button>
+        </>}
+      </header>
+      <div className="viz-panel__body">
+        {q.isError ? <p className="text-xs text-destructive">{apiError(q.error, 'This panel could not run.')}</p>
+          : q.data ? <VizBody w={w} r={q.data} onFilter={editing ? undefined : onFilter} />
+          : <Loader2 size={16} className="animate-spin" />}
       </div>
+      <footer className="viz-panel__foot" title={source}>
+        {q.data ? `${q.data.total.toLocaleString()} events · ` : ''}{scope.hours == null ? `${windowLabel(w.hours)} · ` : ''}{source}
+      </footer>
     </section>
   )
 }
 
-function WidgetBody({ w, r }: { readonly w: Widget; readonly r: RunResult }) {
-  if (w.viz === 'count') return <div className="text-4xl font-semibold tabular-nums">{r.total.toLocaleString()}</div>
-  if (w.viz === 'timeline') {
-    const data = (r.points ?? []).map(p => ({ time: new Date(p.t).getTime(), count: p.count }))
-    return (
-      <ResponsiveContainer width="100%" height={160}>
-        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <CartesianGrid stroke="var(--border-default)" strokeOpacity={0.5} vertical={false} />
-          <XAxis dataKey="time" type="number" scale="time" domain={['dataMin', 'dataMax']}
-            tickFormatter={(t: number) => format(new Date(t), w.hours > 48 ? 'dd MMM' : 'HH:mm')}
-            tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-          <YAxis allowDecimals={false} width={36} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-          <Tooltip labelFormatter={t => format(new Date(t as number), 'dd MMM HH:mm')}
-            contentStyle={{ background: 'var(--surface-raised, #111)', border: '1px solid var(--border-default)' }} />
-          <Area type="monotone" dataKey="count" stroke="var(--accent-cyan)" fill="var(--accent-cyan)" fillOpacity={0.2} />
-        </AreaChart>
-      </ResponsiveContainer>
-    )
-  }
-  if (w.viz === 'top') {
-    const values = r.values ?? []
-    const max = Math.max(1, ...values.map(v => v.count))
-    if (!values.length) return <p className="text-xs text-muted-foreground">Nothing in this window.</p>
-    return (
-      <ul className="space-y-1 text-xs">
-        {values.map(v => (
-          <li key={v.value} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-center">
-            <div className="relative h-5 rounded bg-muted overflow-hidden">
-              <div className="absolute inset-y-0 left-0 bg-primary/30" style={{ width: `${(v.count / max) * 100}%` }} />
-              <span className="relative px-1.5 font-mono truncate block leading-5">{v.value}</span>
-            </div>
-            <span className="tabular-nums">{v.count.toLocaleString()}</span>
-          </li>
-        ))}
-      </ul>
-    )
-  }
-  const rows = r.rows ?? []
-  if (!rows.length) return <p className="text-xs text-muted-foreground">Nothing in this window.</p>
+function FilterBar({ filters, setFilters }: { readonly filters: Pin[]; readonly setFilters: (f: Pin[]) => void }) {
+  const [adding, setAdding] = useState(false)
+  const [field, setField] = useState('host.name')
+  const [value, setValue] = useState('')
+  const [negate, setNegate] = useState(false)
   return (
-    <div className="overflow-x-auto">
-      <table className="text-xs w-full">
-        <tbody>{rows.map(row => (
-          <tr key={row.id} className="align-top border-b border-border last:border-0">
-            <td className="py-1 pr-2 whitespace-nowrap text-muted-foreground">{format(new Date(row.created_at), 'dd MMM HH:mm')}</td>
-            <td className="py-1 pr-2 whitespace-nowrap">{row.hostname ?? row.log_type ?? ''}</td>
-            <td className="py-1 font-mono break-all">{row.message}</td>
-          </tr>
-        ))}</tbody>
-      </table>
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      {filters.map((p, i) => (
+        <span key={`${p.field}=${p.value}`} className={`dash-pill ${p.negate ? 'dash-pill--not' : ''}`}>
+          <button type="button" title={p.negate ? 'Include these again' : 'Exclude these instead'}
+            onClick={() => setFilters(filters.map((x, j) => j === i ? { ...x, negate: !x.negate } : x))}>
+            {p.negate && <b className="mr-1">NOT</b>}<span className="text-muted-foreground">{p.field}:</span>
+            <span className="font-mono ml-1 truncate max-w-[24ch]">{p.value}</span>
+          </button>
+          <button type="button" aria-label={`Remove filter ${p.field}: ${p.value}`} onClick={() => setFilters(filters.filter((_, j) => j !== i))}><X size={12} /></button>
+        </span>
+      ))}
+      {adding ? (
+        <form className="flex flex-wrap items-center gap-1.5" onSubmit={e => {
+          e.preventDefault()
+          if (!value.trim()) return
+          setFilters([...filters.filter(p => !(p.field === field && p.value === value.trim())), { field, value: value.trim(), negate }])
+          setValue(''); setAdding(false)
+        }}>
+          <select className="ui-input w-auto !min-h-8 text-xs" aria-label="Filter field" value={field} onChange={e => setField(e.target.value)}>
+            <optgroup label="Index fields">{INDEX_FIELDS.map(f => <option key={f}>{f}</option>)}</optgroup>
+            <optgroup label="Decoded fields">{DECODED_FIELDS.map(f => <option key={f}>{f}</option>)}</optgroup>
+          </select>
+          <select className="ui-input w-auto !min-h-8 text-xs" aria-label="Operator" value={negate ? 'not' : 'is'} onChange={e => setNegate(e.target.value === 'not')}>
+            <option value="is">is</option><option value="not">is not</option>
+          </select>
+          <input className="ui-input w-44 !min-h-8 text-xs font-mono" aria-label="Filter value" autoFocus value={value} maxLength={512}
+            onChange={e => setValue(e.target.value)} placeholder="exact value" />
+          <button className="ui-button !min-h-8 text-xs" disabled={!value.trim()}>Add</button>
+          <button type="button" className="ui-button ui-button--quiet !min-h-8 text-xs" onClick={() => setAdding(false)}>Cancel</button>
+        </form>
+      ) : (
+        <button type="button" className="ui-button ui-button--quiet !min-h-8 text-xs" onClick={() => setAdding(true)}><Plus size={12} /> Add filter</button>
+      )}
+      {filters.length > 0 && !adding && (
+        <button type="button" className="text-xs underline text-muted-foreground" onClick={() => setFilters([])}>Clear all</button>
+      )}
+      {!filters.length && !adding && <span className="text-muted-foreground">Tip: click a value in a chart to filter every panel by it (Alt+click to exclude it).</span>}
     </div>
-  )
-}
-
-function NoSavedSearches() {
-  return (
-    <div className="space-y-2 text-sm">
-      <p className="font-medium">A widget shows a saved search. You have none yet.</p>
-      <ol className="list-decimal pl-5 text-xs text-muted-foreground space-y-1">
-        <li>Open Log search or Events and type a query (or use Advanced filters), then press Search.</li>
-        <li>Click <b>Save search</b>, give it a name, and Save.</li>
-        <li>Come back here: it is in the <b>Saved search</b> list of Add a widget.</li>
-      </ol>
-      <div className="control-cluster">
-        <Link className="ui-button ui-button--primary" to="/logs">Open Log search</Link>
-        <Link className="ui-button" to="/events">Open Events</Link>
-      </div>
-    </div>
-  )
-}
-
-function Editor({ initial, onDone }: { readonly initial: Dashboard | null; readonly onDone: (id?: string) => void }) {
-  const qc = useQueryClient()
-  const searches = useSavedSearches()
-  const [name, setName] = useState(initial?.name ?? '')
-  const [shared, setShared] = useState(initial?.shared ?? false)
-  const [widgets, setWidgets] = useState<Widget[]>(initial?.widgets ?? [])
-  const [draft, setDraft] = useState<Widget>({ title: '', search_id: '', viz: 'count', hours: 24, field: 'log_type', width: 1 })
-  const save = useMutation({
-    mutationFn: () => {
-      const body = { name: name.trim(), shared, widgets }
-      return (initial ? api.put(`/api/dashboards/${initial.id}`, body) : api.post('/api/dashboards', body))
-        .then(r => r.data as Dashboard)
-    },
-    onSuccess: d => { void qc.invalidateQueries({ queryKey: ['dashboards'] }); onDone(d.id) },
-  })
-  const move = (i: number, by: number) => setWidgets(ws => {
-    const next = [...ws]
-    const [w] = next.splice(i, 1)
-    next.splice(Math.max(0, Math.min(next.length, i + by)), 0, w)
-    return next
-  })
-  const nameOf = (id: string) => searches.data?.find(s => s.id === id)?.name ?? 'saved search'
-
-  return (
-    <section className="panel">
-      <div className="panel__body space-y-4">
-        <div className="control-cluster flex-wrap items-end">
-          <label className="field"><span>Name</span>
-            <input className="ui-input w-72 max-w-full" value={name} onChange={e => setName(e.target.value)} maxLength={120}
-              placeholder="SOC wall, Web servers, VIP accounts…" /></label>
-          <label className="flex items-center gap-1.5 text-sm cursor-pointer pb-2">
-            <input type="checkbox" checked={shared} onChange={e => setShared(e.target.checked)} /> Share with my team
-          </label>
-        </div>
-
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold">Widgets</h3>
-          {!widgets.length && <p className="text-xs text-muted-foreground">No widgets yet. Add one below.</p>}
-          <ul className="space-y-1">
-            {widgets.map((w, i) => (
-              <li key={w.id ?? i} className="flex flex-wrap items-center gap-2 text-sm rounded border border-border px-2 py-1">
-                <span className="font-medium min-w-0 flex-1 truncate">{w.title || nameOf(w.search_id)}</span>
-                <span className="text-xs text-muted-foreground">{VIZ[w.viz]}{w.viz === 'top' ? ` · ${w.field}` : ''} · {w.hours} h · width {w.width}</span>
-                <button type="button" className="ui-icon-button" aria-label="Move up" disabled={i === 0} onClick={() => move(i, -1)}><ArrowUp size={14} /></button>
-                <button type="button" className="ui-icon-button" aria-label="Move down" disabled={i === widgets.length - 1} onClick={() => move(i, 1)}><ArrowDown size={14} /></button>
-                <button type="button" className="ui-icon-button" aria-label="Remove widget" onClick={() => setWidgets(ws => ws.filter((_, j) => j !== i))}><X size={14} /></button>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <fieldset className="rounded border border-border p-3 space-y-2">
-          <legend className="text-sm font-medium px-1">Add a widget</legend>
-          {searches.isLoading ? <Loader2 size={14} className="animate-spin" /> : searches.data && !searches.data.length ? (
-            <NoSavedSearches />
-          ) : (
-            <div className="control-cluster flex-wrap items-end">
-              <label className="field"><span>Saved search</span>
-                <select className="ui-input" value={draft.search_id} onChange={e => setDraft({ ...draft, search_id: e.target.value })}>
-                  <option value="">Choose…</option>
-                  {(searches.data ?? []).map(s => <option key={s.id} value={s.id}>{s.name}{s.shared ? ' (team)' : ''}</option>)}
-                </select></label>
-              <label className="field"><span>Show as</span>
-                <select className="ui-input" value={draft.viz} onChange={e => setDraft({ ...draft, viz: e.target.value as Viz })}>
-                  {(Object.keys(VIZ) as Viz[]).map(v => <option key={v} value={v}>{VIZ[v]}</option>)}
-                </select></label>
-              {draft.viz === 'top' && (
-                <label className="field"><span>Field</span>
-                  <select className="ui-input" value={draft.field} onChange={e => setDraft({ ...draft, field: e.target.value })}>
-                    {TOP_FIELDS.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select></label>
-              )}
-              <label className="field"><span>Window</span>
-                <select className="ui-input" value={draft.hours} onChange={e => setDraft({ ...draft, hours: Number(e.target.value) })}>
-                  {WINDOWS.map(([h, l]) => <option key={h} value={h}>{l}</option>)}
-                </select></label>
-              <label className="field"><span>Width</span>
-                <select className="ui-input" value={draft.width} onChange={e => setDraft({ ...draft, width: Number(e.target.value) as 1 | 2 | 3 })}>
-                  <option value={1}>1/3</option><option value={2}>2/3</option><option value={3}>Full</option>
-                </select></label>
-              <label className="field"><span>Title (optional)</span>
-                <input className="ui-input w-48" value={draft.title} maxLength={120} onChange={e => setDraft({ ...draft, title: e.target.value })} /></label>
-              <button type="button" className="ui-button" disabled={!draft.search_id || widgets.length >= 24}
-                onClick={() => { setWidgets(ws => [...ws, draft]); setDraft({ ...draft, title: '' }) }}><Plus size={14} /> Add</button>
-            </div>
-          )}
-        </fieldset>
-
-        {save.isError && <p role="alert" className="text-xs text-destructive">{apiError(save.error, 'Could not save the dashboard.')}</p>}
-        {widgets.length > 0 && <p className="text-xs text-muted-foreground">Widgets appear on the dashboard once you save it.</p>}
-        <div className="control-cluster">
-          <button type="button" className="ui-button ui-button--primary" disabled={!name.trim() || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? 'Saving…' : 'Save dashboard'}</button>
-          <button type="button" className="ui-button ui-button--quiet" onClick={() => onDone(initial?.id)}>Cancel</button>
-        </div>
-      </div>
-    </section>
   )
 }
 
 export default function CustomDashboardsPage() {
   const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
   const list = useQuery<Dashboard[]>({ queryKey: ['dashboards'], queryFn: () => api.get('/api/dashboards').then(r => r.data) })
-  const [selected, setSelected] = useState<string>('')
-  const [editing, setEditing] = useState<'new' | 'current' | null>(null)
+  const selected = params.get('d') ?? ''
+  const select = (id: string) => setParams(p => { const n = new URLSearchParams(p); if (id) n.set('d', id); else n.delete('d'); return n }, { replace: true })
   useEffect(() => {
-    if (!selected && list.data?.length) setSelected(list.data[0].id)
+    if (!selected && list.data?.length) select(list.data[0].id)
   }, [list.data, selected])
   const current = list.data?.find(d => d.id === selected) ?? null
+
+  // toolbar, shared by every panel
+  const [hours, setHours] = useState<number | null>(24)
+  const [queryText, setQueryText] = useState('')
+  const [query, setQuery] = useState('')
+  const [filters, setFilters] = useState<Pin[]>([])
+  const [refreshMs, setRefreshMs] = useState<number | false>(60_000)
+  const scope: Scope = useMemo(() => ({ hours, query, filters, refreshMs }), [hours, query, filters, refreshMs])
+  const addFilter = (field: string, value: string, negate = false) =>
+    setFilters(fs => [...fs.filter(p => !(p.field === field && p.value === value)), { field, value, negate }])
+
+  // edit mode works on a copy, saved in one go like Wazuh's Save dashboard
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [editor, setEditor] = useState<{ index: number | null } | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const editing = draft !== null
+  const widgets = useMemo(() => prepare(editing ? draft.widgets : current?.widgets ?? []), [editing, draft, current])
+
+  const save = useMutation({
+    mutationFn: (d: Draft) => {
+      const body = { name: d.name.trim(), shared: d.shared, widgets: d.widgets }
+      return (d.id ? api.put(`/api/dashboards/${d.id}`, body) : api.post('/api/dashboards', body)).then(r => r.data as Dashboard)
+    },
+    onSuccess: d => { void qc.invalidateQueries({ queryKey: ['dashboards'] }); setDraft(null); select(d.id) },
+  })
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/dashboards/${id}`),
-    onSuccess: () => { setSelected(''); void qc.invalidateQueries({ queryKey: ['dashboards'] }) },
+    onSuccess: () => { setConfirmDelete(false); select(''); void qc.invalidateQueries({ queryKey: ['dashboards'] }) },
   })
+  const startEdit = (d: Dashboard | null) => {
+    save.reset()
+    setDraft(d ? { id: d.id, name: d.name, shared: d.shared, widgets: prepare(d.widgets) } : { name: '', shared: false, widgets: [] })
+  }
+  const setWidgets = (fn: (ws: Widget[]) => Widget[]) => setDraft(d => d && { ...d, widgets: fn(prepare(d.widgets)) })
+  const onLayout = (layout: Layout[]) => {
+    if (!editing) return
+    const at = new Map(layout.map(l => [l.i, l]))
+    setWidgets(ws => {
+      const next = ws.map(w => { const l = at.get(w.id!); return l ? { ...w, x: l.x, y: l.y, w: l.w, h: l.h } : w })
+      return next.every((w, i) => w.x === ws[i].x && w.y === ws[i].y && w.w === ws[i].w && w.h === ws[i].h) ? ws : next
+    })
+  }
+  const layout: Layout[] = widgets.map(w => ({ i: w.id!, x: w.x ?? 0, y: w.y ?? 0, w: w.w ?? 4, h: w.h ?? 4, minW: 2, minH: 2 }))
 
   return (
-    <div className="workspace space-y-4">
+    <div className="workspace space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <LayoutGrid size={18} aria-hidden="true" />
         <h1 className="text-xl font-bold">Dashboards</h1>
-        <select className="ui-input w-auto" aria-label="Dashboard" value={selected} onChange={e => { setSelected(e.target.value); setEditing(null) }}>
-          {!list.data?.length && <option value="">No dashboards yet</option>}
-          {(list.data ?? []).map(d => <option key={d.id} value={d.id}>{d.name}{d.shared ? ' (team)' : ''}</option>)}
-        </select>
-        <div className="flex-1" />
-        {current?.editable && !editing && <>
-          <button className="ui-button" onClick={() => setEditing('current')}><Pencil size={14} /> Edit</button>
-          <button className="ui-button ui-button--quiet" disabled={remove.isPending} onClick={() => remove.mutate(current.id)}>
-            <Trash2 size={14} /> Delete</button>
-        </>}
-        {!editing && <button className="ui-button ui-button--primary" onClick={() => setEditing('new')}><Plus size={14} /> New dashboard</button>}
+        {editing ? (
+          <>
+            <input className="ui-input w-64 max-w-full" aria-label="Dashboard name" placeholder="Dashboard name, e.g. SOC wall"
+              value={draft.name} maxLength={120} onChange={e => setDraft({ ...draft, name: e.target.value })} />
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <input type="checkbox" checked={draft.shared} onChange={e => setDraft({ ...draft, shared: e.target.checked })} /> Share with my team
+            </label>
+            <div className="flex-1" />
+            <button className="ui-button" onClick={() => setEditor({ index: null })} disabled={draft.widgets.length >= 24}>
+              <Plus size={14} /> Add visualization</button>
+            <button className="ui-button ui-button--quiet" onClick={() => setDraft(null)}>Cancel</button>
+            <button className="ui-button ui-button--primary" disabled={!draft.name.trim() || save.isPending} onClick={() => save.mutate(draft)}>
+              {save.isPending ? 'Saving…' : 'Save dashboard'}</button>
+          </>
+        ) : (
+          <>
+            <select className="ui-input w-auto" aria-label="Dashboard" value={selected} onChange={e => { select(e.target.value); setConfirmDelete(false) }}>
+              {!list.data?.length && <option value="">No dashboards yet</option>}
+              {(list.data ?? []).map(d => <option key={d.id} value={d.id}>{d.name}{d.shared ? ' (team)' : ''}</option>)}
+            </select>
+            <div className="flex-1" />
+            {current?.editable && (confirmDelete ? (
+              <span className="control-cluster text-sm">
+                Delete “{current.name}”?
+                <button className="ui-button" disabled={remove.isPending} onClick={() => remove.mutate(current.id)}><Trash2 size={14} /> Delete</button>
+                <button className="ui-button ui-button--quiet" onClick={() => setConfirmDelete(false)}>Keep</button>
+              </span>
+            ) : <>
+              <button className="ui-button" onClick={() => startEdit(current)}><Pencil size={14} /> Edit</button>
+              <button className="ui-button ui-button--quiet" onClick={() => setConfirmDelete(true)}><Trash2 size={14} /> Delete</button>
+            </>)}
+            <button className="ui-button ui-button--primary" onClick={() => startEdit(null)}><Plus size={14} /> New dashboard</button>
+          </>
+        )}
       </div>
-      <p className="text-xs text-muted-foreground max-w-3xl">
-        Each widget runs a saved search from Log search or Events in your group, as a count, a timeline, top values or the latest rows, and refreshes every minute.
-      </p>
 
-      {editing ? (
-        <Editor initial={editing === 'current' ? current : null}
-          onDone={id => { setEditing(null); if (id) setSelected(id) }} />
-      ) : list.isLoading ? <Loader2 size={16} className="animate-spin" />
+      <section className="panel"><div className="panel__body space-y-2 !py-3">
+        <form className="flex flex-wrap items-center gap-2" onSubmit={e => { e.preventDefault(); setQuery(queryText.trim()) }}>
+          <div className="relative flex-1 min-w-[220px]">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input className="ui-input w-full pl-8 font-mono text-xs" aria-label="Search every panel (Lucene)" value={queryText} maxLength={512}
+              onChange={e => setQueryText(e.target.value)} placeholder='Search every panel, e.g. host.name:web-01 AND NOT user.name:svc_*' />
+          </div>
+          <select className="ui-input w-auto" aria-label="Time range" value={hours ?? 'own'}
+            onChange={e => setHours(e.target.value === 'own' ? null : Number(e.target.value))}>
+            {TIME_WINDOWS.map(([h, l]) => <option key={h} value={h}>{l}</option>)}
+            <option value="own">Each panel's own</option>
+          </select>
+          <select className="ui-input w-auto" aria-label="Auto refresh" value={String(refreshMs)}
+            onChange={e => setRefreshMs(e.target.value === 'false' ? false : Number(e.target.value))}>
+            {REFRESH.map(([ms, l]) => <option key={l} value={String(ms)}>Refresh: {l}</option>)}
+          </select>
+          <button className="ui-button ui-button--primary" title="Apply the query and refresh every panel"
+            onClick={() => { void qc.invalidateQueries({ queryKey: ['widget-data'] }) }}><RefreshCw size={14} /> Update</button>
+        </form>
+        <FilterBar filters={filters} setFilters={setFilters} />
+      </div></section>
+
+      {save.isError && <p role="alert" className="text-xs text-destructive">{apiError(save.error, 'Could not save the dashboard.')}</p>}
+      {editing && widgets.length > 0 && (
+        <p className="text-xs text-muted-foreground">Drag a panel by its grip, resize it from the bottom-right corner, then Save dashboard.</p>
+      )}
+
+      {list.isLoading ? <Loader2 size={16} className="animate-spin" />
         : list.isError ? <p className="text-sm text-destructive">Could not load dashboards.</p>
-        : !current ? (
+        : !editing && !current ? (
           <section className="panel"><div className="panel__body space-y-3">
             <p className="font-medium">No dashboard yet</p>
-            <p className="text-sm text-muted-foreground">
-              A dashboard is a page of widgets. Each widget runs one saved search from Log search or Events as a count,
-              a timeline, top values or the latest rows.
+            <p className="text-sm text-muted-foreground max-w-2xl">
+              A dashboard is a grid of visualizations: metrics, charts over time, pies, tables, tag clouds and heat maps
+              over your logs and events. The time range, search bar and filters above narrow every panel at once.
             </p>
-            <button className="ui-button ui-button--primary" onClick={() => setEditing('new')}><Plus size={14} /> Create dashboard</button>
+            <button className="ui-button ui-button--primary" onClick={() => startEdit(null)}><Plus size={14} /> Create dashboard</button>
           </div></section>
+        ) : !widgets.length ? (
+          <button type="button" disabled={!editing && !current?.editable}
+            onClick={() => editing ? setEditor({ index: null }) : startEdit(current)}
+            className="panel w-full min-h-[180px] flex flex-col items-center justify-center gap-2 border-dashed text-muted-foreground hover:text-foreground">
+            <Plus size={22} aria-hidden="true" />
+            <span className="text-sm font-medium">{editing || current?.editable ? 'Add your first visualization' : 'This dashboard has no panels yet'}</span>
+          </button>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {current.widgets.map((w, i) => <WidgetView key={w.id ?? i} w={w} />)}
-            {current.editable && (
-              <button type="button" onClick={() => setEditing('current')}
-                className="panel col-span-1 min-h-[140px] flex flex-col items-center justify-center gap-2 border-dashed text-muted-foreground hover:text-foreground">
-                <Plus size={20} aria-hidden="true" />
-                <span className="text-sm font-medium">Add widget</span>
-                {!current.widgets.length && <span className="text-xs">This dashboard is empty</span>}
-              </button>
-            )}
-            {!current.editable && !current.widgets.length && (
-              <p className="text-sm text-muted-foreground">This dashboard has no widgets yet.</p>
-            )}
-          </div>
+          <Grid className={`dash-grid ${editing ? 'dash-grid--editing' : ''}`} layouts={{ lg: layout }}
+            breakpoints={{ lg: 768, xs: 0 }} cols={{ lg: 12, xs: 1 }} rowHeight={44} margin={[12, 12]} containerPadding={[0, 0]}
+            isDraggable={editing} isResizable={editing} draggableHandle=".viz-panel__drag" compactType="vertical"
+            onLayoutChange={(_, all) => { if (all.lg) onLayout(all.lg) }}>
+            {widgets.map((w, i) => (
+              <div key={w.id}>
+                <Panel w={w} scope={scope} editing={editing} onFilter={addFilter}
+                  onEdit={() => setEditor({ index: i })}
+                  onRemove={() => setWidgets(ws => ws.filter(x => x.id !== w.id))} />
+              </div>
+            ))}
+          </Grid>
         )}
+
+      {editor && editing && (
+        <VizEditor initial={editor.index == null ? null : widgets[editor.index]} scope={scope} onClose={() => setEditor(null)}
+          onSave={w => {
+            setWidgets(ws => editor.index == null
+              ? [...ws, { ...w, id: newId(), x: undefined, y: undefined }]
+              : ws.map((x, j) => j === editor.index ? { ...x, ...w } : x))
+            setEditor(null)
+          }} />
+      )}
     </div>
   )
 }

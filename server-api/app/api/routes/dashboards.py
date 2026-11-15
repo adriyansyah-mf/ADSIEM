@@ -1,10 +1,13 @@
-"""Custom dashboards: a page of widgets, each a saved search shown as a
-count, timeline, top values or latest rows. Personal, or shared with the
-group (its searches must be shared too, or the group could not run them)."""
+"""Custom dashboards, built like Wazuh / OpenSearch Dashboards: a grid of
+visualizations, each over a saved search or its own query, all narrowed by
+the dashboard's time range, query bar and filter pills. Personal, or shared
+with the group (its saved searches must be shared too, or the group could not
+run them)."""
 from __future__ import annotations
 
 import uuid as uuidlib
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Annotated, Literal, Optional
 from uuid import UUID
 
@@ -23,20 +26,53 @@ Read = require_permission("logs:read")
 MAX_WIDGETS = 24
 
 
-class Widget(BaseModel):
-    id: str = Field(default_factory=lambda: uuidlib.uuid4().hex[:12], max_length=40)
-    title: str = Field("", max_length=120)
-    search_id: UUID
+class WidgetSource(BaseModel):
+    """A saved search, or the widget's own query (kind + Lucene)."""
+    search_id: Optional[UUID] = None
+    kind: Literal["logs", "events"] = "logs"
+    query: str = Field("", max_length=512)
     viz: svc.Viz = "count"
-    hours: int = Field(24, ge=1, le=svc.MAX_HOURS)
     field: str = "log_type"
-    width: Literal[1, 2, 3] = 1  # columns of a 3-column grid
+    limit: int = Field(10, ge=1, le=50)
 
     @model_validator(mode="after")
     def _field(self):
-        if self.viz == "top" and self.field not in svc.TOP_FIELDS:
-            raise ValueError(f"field must be one of {', '.join(svc.TOP_FIELDS)}")
+        if self.viz in svc.FIELD_VIZ and self.field not in svc.GROUP_FIELDS:
+            raise ValueError(f"field must be one of {', '.join(svc.GROUP_FIELDS)}")
         return self
+
+
+class Widget(WidgetSource):
+    id: str = Field(default_factory=lambda: uuidlib.uuid4().hex[:12], max_length=40)
+    title: str = Field("", max_length=120)
+    hours: int = Field(24, ge=1, le=svc.MAX_HOURS)  # used when the dashboard's time picker says "widget default"
+    chart: Literal["area", "line", "bar"] = "area"  # timeline / split
+    # position on a 12-column grid; width (1-3 thirds) is the old layout
+    x: Optional[int] = Field(None, ge=0, le=11)
+    y: Optional[int] = Field(None, ge=0, le=10_000)
+    w: Optional[int] = Field(None, ge=1, le=12)
+    h: Optional[int] = Field(None, ge=2, le=24)
+    width: Optional[Literal[1, 2, 3]] = None
+
+
+class Pin(BaseModel):
+    field: str
+    value: str = Field(max_length=512)
+    negate: bool = False
+
+    @model_validator(mode="after")
+    def _field(self):
+        if self.field not in svc.GROUP_FIELDS:
+            raise ValueError(f"field must be one of {', '.join(svc.GROUP_FIELDS)}")
+        return self
+
+
+class WidgetRun(BaseModel):
+    widget: WidgetSource
+    hours: int = Field(24, ge=1, le=svc.MAX_HOURS)
+    tz: Optional[str] = Field(None, max_length=64)
+    query: str = Field("", max_length=512)  # the dashboard's query bar
+    filters: list[Pin] = Field(default_factory=list, max_length=svc.MAX_FILTERS)
 
 
 class DashboardIn(BaseModel):
@@ -69,7 +105,7 @@ def _out(d: CustomDashboard, user: User, group_filter: str | None) -> DashboardO
 
 
 async def _check_widgets(db: AsyncSession, body: DashboardIn, user: User, group_filter: str | None) -> None:
-    ids = {w.search_id for w in body.widgets}
+    ids = {w.search_id for w in body.widgets if w.search_id}
     if not ids:
         return
     found = {s.id: s for s in (await db.execute(select(SavedSearch).where(SavedSearch.id.in_(ids)))).scalars()}
@@ -88,6 +124,32 @@ async def _load(db, dashboard_id: UUID, user: User, group_filter: str | None) ->
     if d is None or not svc.visible(d, user, group_filter):
         raise HTTPException(404, "Dashboard not found")
     return d
+
+
+@router.post("/widget-data")
+async def widget_data(
+    body: WidgetRun,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(Read)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)] = None,
+):
+    """Run one visualization, in the caller's group, narrowed by the
+    dashboard's time range, query bar and filters."""
+    w = body.widget
+    if w.search_id:
+        s = await db.get(SavedSearch, w.search_id)
+        if s is None or not svc.visible(s, user, group_filter):
+            raise HTTPException(404, "Saved search not found")
+        source = {"id": str(s.id), "name": s.name, "kind": s.kind, "query": s.query}
+    else:
+        s = SimpleNamespace(kind=w.kind, query=w.query, filter_tree=None, log_type=None)
+        source = {"id": None, "name": None, "kind": w.kind, "query": w.query}
+    try:
+        out = await svc.run(s, group_filter, w.viz, body.hours, w.field, w.limit, body.tz,
+                            extra_query=body.query, pins=[p.model_dump() for p in body.filters])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"search": source, **out}
 
 
 @router.get("", response_model=list[DashboardOut])
