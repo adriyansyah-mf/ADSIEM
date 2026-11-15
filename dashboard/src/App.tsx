@@ -39,6 +39,7 @@ const KnowledgePage = lazy(() => import('@/pages/KnowledgePage'))
 const HandoverPage = lazy(() => import('@/pages/HandoverPage'))
 const LiveResponsePage = lazy(() => import('@/pages/LiveResponsePage'))
 const YaraPage = lazy(() => import('@/pages/YaraPage'))
+const AiSkillsPage = lazy(() => import('@/pages/AiSkillsPage'))
 const PreventionPage = lazy(() => import('@/pages/PreventionPage'))
 const MalwareHashesPage = lazy(() => import('@/pages/MalwareHashesPage'))
 const ThreatIocsPage = lazy(() => import('@/pages/ThreatIocsPage'))
@@ -98,6 +99,7 @@ export default function App() {
             <Route path="/live-response" element={<LiveResponsePage />} />
             <Route path="/artifacts" element={<Navigate to="/live-response" replace />} />
             <Route path="/yara" element={<YaraPage />} />
+            <Route path="/ai-skills" element={<AiSkillsPage />} />
             <Route path="/prevention" element={<PreventionPage />} />
             <Route path="/malware-hashes" element={<MalwareHashesPage />} />
             <Route path="/threat-iocs" element={<ThreatIocsPage />} />

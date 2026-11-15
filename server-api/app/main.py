@@ -50,6 +50,7 @@ from app.api.routes.soar import router as soar_router
 from app.api.routes.search import router as search_router
 from app.api.routes.reports import router as reports_router
 from app.api.routes.assistant import router as assistant_router
+from app.api.routes.ai_skills import router as ai_skills_router
 from app.api.routes.mitre import router as mitre_router
 from app.api.routes.ws import router as ws_router, manager as ws_manager
 from app.api.routes.stream import router as stream_router
@@ -573,6 +574,9 @@ async def lifespan(app: FastAPI):
         from app.api.routes.yara_rules import legacy_contents
         from app.services.yara_builtin import sync_builtin_rules
         await sync_builtin_rules(legacy_contents())
+        # The investigator's built-in skills (skills/*.md): same contract as the YARA pack
+        from app.services.ai_skills import sync_builtin_skills
+        await sync_builtin_skills()
         # feed hashes labelled "exe" etc. before the feed skipped format tags
         from app.core.database import AsyncSessionLocal
         from worker import malware_hashes as _mh
@@ -616,7 +620,7 @@ for router in [
     hunt_schedules_router, sop_router, soar_router, search_router,
     reports_router, assistant_router, mitre_router, ws_router, stream_router, elastic_router,
     investigations_router, investigation_chat_router, yara_drafts_router, knowledge_router, evidence_router,
-    iocs_router,
+    iocs_router, ai_skills_router,
     prevention_router, prevention_agent_router, malware_hashes_router, malware_hashes_agent_router, web_protection_agent_router, web_protection_router, ip_blocks_agent_router, ip_blocks_router, entity_risk_router, lateral_router, policies_router, policies_agent_router, agent_updates_router,
 ]:
     app.include_router(router)

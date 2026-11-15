@@ -38,7 +38,7 @@ SIEM_TOOLS = {
     "ueba_top_risky_entities", "search_sop", "search_knowledge", "process_tree", "known_malware_lookup",
 }
 TIER0_TOOLS = SIEM_TOOLS | {"list_hosts", "list_artifacts", "get_flow_rows", "lookup_malwarebazaar",
-                            "create_artifact", "record_hypothesis"}
+                            "create_artifact", "record_hypothesis", "load_skill"}
 ENDPOINT_TOOLS = {"run_artifact", "run_command"}
 # what an analyst may add to a running investigation's queue (commands keep their own approval flow)
 ANALYST_TOOLS = SIEM_TOOLS | {"run_artifact"}
@@ -67,7 +67,7 @@ def _clip(value: Any, n: int) -> str:
 
 def action_kind(tool: str) -> str:
     return {"run_artifact": "artifact", "run_command": "command", "create_artifact": "authoring",
-            "record_hypothesis": "analysis"}.get(tool, "siem_query")
+            "record_hypothesis": "analysis", "load_skill": "analysis"}.get(tool, "siem_query")
 
 
 def split_args(args: dict) -> tuple[str | None, dict, str]:

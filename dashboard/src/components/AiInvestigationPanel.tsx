@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceStrict } from 'date-fns'
 import {
-  AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleStop, Clock, FileCode2, FileText,
+  AlertTriangle, Ban, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleStop, Clock, FileCode2, FileText,
   Lightbulb, MessagesSquare, Play, Search, Server, ShieldQuestion, Terminal, XCircle,
 } from 'lucide-react'
 import DebateView, { type Debate } from '@/components/InvestigationDebate'
@@ -174,6 +174,9 @@ function describe(step: Step, open: boolean, toggle: () => void): Row | null {
     case 'reconciled':
       return { icon: <CheckCircle2 size={13} />, title: `Picked up action #${s.ordinal}`,
         detail: `${s.tool}: finished what the previous server started, without re-running it` }
+    case 'skill_loaded':
+      return { icon: <BookOpen size={13} />, tone: 'var(--accent-cyan)',
+        title: <>Loaded skill <b>{s.name}</b></>, detail: s.description }
     case 'hypothesis':
       return { icon: <Lightbulb size={13} />, tone: 'var(--accent-yellow)',
         title: <>Hypothesis <b>{s.state}</b> ({s.confidence}%)</>, detail: `${s.statement}${s.reason ? ` · ${s.reason}` : ''}` }

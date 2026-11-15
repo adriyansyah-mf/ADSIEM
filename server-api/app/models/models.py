@@ -304,6 +304,24 @@ class HygieneSnapshot(Base):
     network         = Column(JSONB)
     collected_at    = Column(DateTime(timezone=True), default=now_utc)
 
+class AiSkill(Base):
+    """A skill the AI investigator loads when a case matches it
+    (services/ai_skills.py): the procedure for one kind of attack. The model
+    sees every enabled skill's name and description and calls load_skill for
+    the full text. origin "builtin" rows come from skills/*.md and are synced
+    at every start; "custom" ones are the analysts' own."""
+    __tablename__ = "ai_skills"
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name        = Column(String(80), nullable=False, unique=True)   # lowercase-hyphenated, what load_skill takes
+    description = Column(Text, nullable=False)                      # when to use it: what the model chooses by
+    content     = Column(Text, nullable=False)                      # the instructions, Markdown
+    is_enabled  = Column(Boolean, nullable=False, default=True)
+    origin      = Column(String(20), nullable=False, default="custom")  # builtin | custom
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at  = Column(DateTime(timezone=True), default=now_utc)
+    updated_at  = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
 class CaseInvestigation(Base):
     """One AI-driven investigation of a case (services/investigator.py): the
     steps it took — tool calls, live-response flows, artifacts it wrote — and

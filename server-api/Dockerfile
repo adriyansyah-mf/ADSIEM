@@ -34,6 +34,8 @@ COPY worker/worker/soar/__init__.py worker/worker/soar/graph.py worker/worker/so
 COPY server-api/app/ ./app/
 # Built-in YARA rule pack, synced into yara_rules at every start (services/yara_builtin.py)
 COPY yara/builtin/ /app/yara_builtin/
+# The AI investigator's built-in skills, synced into ai_skills at every start (services/ai_skills.py)
+COPY skills/ /app/ai_skills/
 # Community YARA pack (YARA-Forge, permissive and DRL licences; agent/cmd/yarapack)
 COPY yara/community/ /app/yara_community/
 
