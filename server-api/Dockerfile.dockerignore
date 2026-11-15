@@ -22,6 +22,8 @@
 !yara/builtin
 # community YARA pack (YARA-Forge, licence-filtered; agent/cmd/yarapack)
 !yara/community
+# the AI investigator's built-in skills, synced into ai_skills at start (services/ai_skills.py)
+!skills
 # yaracheck build stage: the agent module's YARA engine and the CLI, not its test fixtures
 !agent/go.mod
 !agent/go.sum
