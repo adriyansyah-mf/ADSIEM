@@ -1,0 +1,17 @@
+title: USB Storage Device Connected
+id: rule-usb-storage-connected
+description: A USB stick or external disk that is not on the group policy's usb_allow list was plugged in (policy usb_storage is audit, so it was not blocked). Removable storage is a common way to take data out or bring malware in. Check who was at the host and whether the device is expected; add it to usb_allow, or set usb_storage to block.
+logsource:
+  product: usb
+detection:
+  selection:
+    event.action: usb_storage
+    usb.action: connected
+    usb.allowed: 'false'
+  condition: selection
+level: low
+tags:
+  - attack.exfiltration
+  - attack.t1052.001
+  - attack.initial_access
+  - attack.t1091

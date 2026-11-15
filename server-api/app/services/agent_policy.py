@@ -27,6 +27,8 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _HHMM = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 _SCHEDULE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun|daily) ([01][0-9]|2[0-3]):[0-5][0-9]$")
 _ABS = re.compile(r"^(/|[A-Za-z]:\\)")
+_USB_ID = re.compile(r"^([0-9A-F]{4}):([0-9A-F]{4})(?::([^\s:]{1,128}))?$")
+MAX_USB_ALLOW = 500
 
 
 class Exclusion(BaseModel):
@@ -77,6 +79,12 @@ class PolicySettings(BaseModel):
     # stop programs before they run (audit only logs what enforce would block); Linux
     # already blocks before execution with BPF LSM, so this is Windows only
     app_control: Literal["off", "audit", "enforce"] = "off"
+    # USB mass storage (agent/internal/usbguard): audit reports every stick or external disk
+    # plugged in; block cuts off those not on usb_allow (Linux: USB authorization, Windows:
+    # eject). Keyboards, mice and other USB classes are never touched.
+    usb_storage: Literal["off", "audit", "block"] = "audit"
+    # VID:PID (every unit of a model) or VID:PID:SERIAL (one unit), hex as lsusb / Device Manager show it
+    usb_allow: list[str] = Field(default_factory=list, max_length=MAX_USB_ALLOW)
     # scheduled file scans (agent local time): quick every day at HH:MM;
     # full on "<mon..sun> HH:MM" or "daily HH:MM". "" is off.
     quick_scan_time: str = Field(default="", max_length=32)
@@ -98,6 +106,22 @@ class PolicySettings(BaseModel):
         if v and not _SCHEDULE.match(v):
             raise ValueError("full_scan_schedule: '<mon..sun|daily> HH:MM' or empty")
         return v
+
+    @field_validator("usb_allow")
+    @classmethod
+    def _usb_allow(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for raw in v:
+            entry = raw.strip()
+            m = _USB_ID.match(entry.upper())
+            if not m:
+                raise ValueError(f"usb_allow: {raw!r} is not VID:PID or VID:PID:SERIAL (hex, e.g. 0781:5567)")
+            vid, pid = m.group(1), m.group(2)
+            serial = entry.split(":", 2)[2] if m.group(3) else None  # keep the serial as written
+            norm = f"{vid}:{pid}" + (f":{serial}" if serial else "")
+            if norm.upper() not in {x.upper() for x in out}:
+                out.append(norm)
+        return out
 
     @field_validator("exclusions")
     @classmethod

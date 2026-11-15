@@ -66,6 +66,12 @@ type Settings struct {
 	AppControl string `json:"app_control"`
 	// QuickScanTime "HH:MM" (every day) and FullScanSchedule "<day> HH:MM"
 	// or "daily HH:MM": scheduled file scans (internal/fullscan); "" is off.
+	// USBStorage: USB mass storage (internal/usbguard): off, audit (report
+	// every device) or block (cut off what USBAllow does not name); empty
+	// (a server from before it) is audit.
+	USBStorage string `json:"usb_storage"`
+	// USBAllow: VID:PID (a model) or VID:PID:SERIAL (one unit), hex.
+	USBAllow         []string    `json:"usb_allow"`
 	QuickScanTime    string      `json:"quick_scan_time"`
 	FullScanSchedule string      `json:"full_scan_schedule"`
 	Exclusions       []Exclusion `json:"exclusions"`

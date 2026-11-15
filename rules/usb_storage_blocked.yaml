@@ -1,0 +1,16 @@
+title: USB Storage Device Blocked
+id: rule-usb-storage-blocked
+description: The agent cut off a USB stick or external disk that is not on the group policy's usb_allow list (usb_storage is block). Nothing could be read or written, but someone tried to use removable storage on this host; repeated attempts, or attempts on a sensitive host, are worth a call.
+logsource:
+  product: usb
+detection:
+  selection:
+    event.action: usb_storage
+    usb.action: blocked
+  condition: selection
+level: medium
+tags:
+  - attack.exfiltration
+  - attack.t1052.001
+  - attack.initial_access
+  - attack.t1091

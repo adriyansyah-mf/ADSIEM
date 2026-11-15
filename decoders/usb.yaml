@@ -1,0 +1,28 @@
+# USB mass storage seen by the agent (agent/internal/usbguard) under the
+# group policy's usb_storage mode: connected (audit, or an allowed device in
+# block mode), blocked (cut off: Linux USB authorization, Windows eject),
+# block_failed (block mode could not cut it off) and removed.
+# rules/usb_storage_*.yaml turn these into alerts.
+name: usb
+log_type: usb
+type: json
+priority: 3
+enabled: true
+when:
+  event: usb_storage
+fields:
+  usb.action: action
+  usb.mode: mode
+  usb.blocked: blocked
+  usb.allowed: allowed
+  usb.device: device
+  usb.error: error
+  device.vendor_id: vendor_id
+  device.product_id: product_id
+  device.serial_number: serial
+  device.manufacturer: vendor
+  device.model.name: product
+static_fields:
+  event.category: host
+  event.kind: event
+  event.action: usb_storage

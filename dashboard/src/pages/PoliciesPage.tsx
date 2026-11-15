@@ -21,6 +21,8 @@ interface Settings {
   ioa: 'off' | 'detect'
   ip_ioc: 'off' | 'detect' | 'block'
   app_control: 'off' | 'audit' | 'enforce'
+  usb_storage: 'off' | 'audit' | 'block'
+  usb_allow: string[]
   quick_scan_time: string
   full_scan_schedule: string
   exclusions: Exclusion[]
@@ -222,6 +224,26 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
             Turns path and folder block rules (and files a hash rule stopped) into a Windows App Control policy. Everything else still runs. Try audit first and check the App Control alerts.
           </span>
         </label>
+        <div className="rounded border border-border p-3 space-y-1">
+          <label htmlFor="usb-storage" className="block text-sm font-medium">USB storage</label>
+          <select id="usb-storage" value={s.usb_storage ?? 'audit'} onChange={e => set({ usb_storage: e.target.value as Settings['usb_storage'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="audit">Audit: alert on sticks and external disks not on the allow list</option>
+            <option value="block">Block: cut off every device not on the allow list</option>
+            <option value="off">Off</option>
+          </select>
+          <label htmlFor="usb-allow" className="block text-xs text-muted-foreground pt-1">
+            Allowed devices, one per line: VID:PID for a model or VID:PID:SERIAL for one unit (lsusb, or Device Manager → Hardware Ids)
+          </label>
+          <textarea id="usb-allow" rows={3} value={(s.usb_allow ?? []).join('\n')}
+            placeholder={'0781:5567\n0951:1666:001A92053B6AF1A0B9A4012B'}
+            onChange={e => set({ usb_allow: e.target.value.split('\n') })}
+            onBlur={e => set({ usb_allow: e.target.value.split('\n').map(x => x.trim()).filter(Boolean) })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-xs font-mono" />
+          <span className="block text-xs text-muted-foreground">
+            Linux refuses the device at the USB layer (no driver binds); Windows ejects it, again on every re-plug. Keyboards, mice and other USB devices are never touched. Every plug-in is reported with vendor, product and serial.
+          </span>
+        </div>
         <label className="rounded border border-border p-3 space-y-1">
           <span className="block text-sm font-medium">Scheduled quick scan</span>
           <input value={s.quick_scan_time ?? ''} onChange={e => set({ quick_scan_time: e.target.value })} placeholder="12:30 (empty: off)"
