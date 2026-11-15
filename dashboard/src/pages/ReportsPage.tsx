@@ -5,11 +5,11 @@ import { Download, FileBarChart, FileCheck2, FileText, FileX2, Loader2, Lock } f
 import { format, subDays } from 'date-fns'
 import { api } from '@/api/client'
 import { apiError, type IncidentReportSummary } from '@/components/reports/types'
+import PeriodicSummary from '@/components/reports/PeriodicSummary'
 
 // Incident reports written from cases (archive), the periodic summary PDF,
 // and a check that a PDF copy is a real, unchanged final report.
 
-const LANGUAGES = ['English', 'Indonesian', 'Spanish', 'French', 'German', 'Japanese']
 type Tab = 'incidents' | 'periodic' | 'verify'
 
 function IncidentArchive() {
@@ -123,59 +123,9 @@ function VerifyReport() {
   )
 }
 
-function PeriodicReport() {
-  const [dateFrom, setDateFrom] = useState(format(subDays(new Date(), 7), 'yyyy-MM-dd'))
-  const [dateTo, setDateTo] = useState(format(new Date(), 'yyyy-MM-dd'))
-  const [language, setLanguage] = useState('English')
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [error, setError] = useState('')
-
-  const handleGenerate = async () => {
-    setError('')
-    if (!dateFrom || !dateTo) { setError('Select a date range'); return }
-    if (new Date(dateFrom) > new Date(dateTo)) { setError('Start date must be before end date'); return }
-    setIsGenerating(true)
-    let href: string | null = null
-    try {
-      const res = await api.post('/api/reports/generate', { date_from: dateFrom, date_to: dateTo, language }, { responseType: 'blob' })
-      href = URL.createObjectURL(res.data)
-      const a = document.createElement('a')
-      a.href = href
-      a.download = `security-report-${dateFrom}-to-${dateTo}.pdf`
-      a.click()
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? 'Failed to generate report')
-    } finally {
-      if (href) URL.revokeObjectURL(href)
-      setIsGenerating(false)
-    }
-  }
-
-  return (
-    <div className="rounded-lg border border-border bg-card p-5 space-y-4 max-w-xl">
-      <p className="text-xs text-muted-foreground">
-        A PDF of a period: alert volume, severity breakdown, top triggered rules, AI verdict distribution, MITRE ATT&amp;CK
-        techniques observed, and an AI-written executive summary. The organization name on reports is set on the Settings page.
-      </p>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="field"><span>From</span><input type="date" className="ui-input" value={dateFrom} onChange={e => setDateFrom(e.target.value)} /></label>
-        <label className="field"><span>To</span><input type="date" className="ui-input" value={dateTo} onChange={e => setDateTo(e.target.value)} /></label>
-      </div>
-      <label className="field"><span>Report language</span>
-        <input className="ui-input" value={language} onChange={e => setLanguage(e.target.value)} list="report-languages" placeholder="English" />
-        <datalist id="report-languages">{LANGUAGES.map(l => <option key={l} value={l} />)}</datalist></label>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      <button onClick={handleGenerate} disabled={isGenerating} className="ui-button ui-button--primary">
-        {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-        {isGenerating ? 'Generating…' : 'Generate PDF'}
-      </button>
-    </div>
-  )
-}
-
 export default function ReportsPage() {
-  const [tab, setTab] = useState<Tab>('incidents')
-  const TABS: [Tab, string][] = [['incidents', 'Incident reports'], ['periodic', 'Periodic summary'], ['verify', 'Verify a report']]
+  const [tab, setTab] = useState<Tab>('periodic')
+  const TABS: [Tab, string][] = [['periodic', 'Period summary'], ['incidents', 'Incident reports'], ['verify', 'Verify a report']]
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-2">
@@ -189,7 +139,7 @@ export default function ReportsPage() {
             {label}</button>
         ))}
       </div>
-      {tab === 'incidents' ? <IncidentArchive /> : tab === 'periodic' ? <PeriodicReport /> : <VerifyReport />}
+      {tab === 'incidents' ? <IncidentArchive /> : tab === 'periodic' ? <PeriodicSummary /> : <VerifyReport />}
     </div>
   )
 }

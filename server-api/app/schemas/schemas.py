@@ -1106,7 +1106,9 @@ class YaraScanRequest(BaseModel):
 class ReportGenerateRequest(BaseModel):
     date_from: date
     date_to: date
-    language: str = "English"
+    language: str = Field("English", max_length=40)  # "id"/"Indonesian" or anything else for English
+    tz: Optional[str] = Field(None, max_length=64)    # the viewer's time zone: days start at its midnight
+    use_ai: bool = True
 
 # ─── Enrollment Tokens ───────────────────────────────────────────
 

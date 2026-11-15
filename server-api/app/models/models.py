@@ -653,6 +653,23 @@ class IncidentReport(Base):
     created_at      = Column(DateTime(timezone=True), default=now_utc)
     updated_at      = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
+class ReportRun(Base):
+    """A period summary PDF someone generated (services/periodic_report.py):
+    kept, with the numbers it showed, so it can be downloaded again."""
+    __tablename__ = "report_runs"
+    id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id        = Column(String(100), index=True)           # None: a superadmin's all-groups report
+    period_from     = Column(DateTime(timezone=True), nullable=False)
+    period_to       = Column(DateTime(timezone=True), nullable=False)
+    language        = Column(String(40), nullable=False, default="id")
+    stats           = Column(JSONB, nullable=False, default=dict)
+    narrative       = Column(Text)
+    pdf             = Column(LargeBinary, nullable=False)
+    pdf_sha256      = Column(String(64), nullable=False)
+    created_by      = Column(UUID(as_uuid=True))
+    created_by_name = Column(String(255))
+    created_at      = Column(DateTime(timezone=True), default=now_utc, index=True)
+
 class CaseNote(Base):
     __tablename__ = "case_notes"
     id              = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
