@@ -151,7 +151,7 @@ acceptance tests. Full technical details follow below.
 - [Agent Installation](#agent-installation) · [RBAC](#rbac)
 - [Adding Rules](#adding-rules) · [Adding Decoders](#adding-decoders) · [Syslog, Suricata, Zeek and OT](#syslog-suricata-zeek-and-ot)
 - [Production Deployment](#production-deployment) · [Observability](#observability) · [Troubleshooting](#troubleshooting)
-- [Documentation](#documentation) · [Testing and CI](#testing-and-ci) · [Roadmap](#roadmap)
+- [Detection Benchmark](#detection-benchmark) · [Documentation](#documentation) · [Testing and CI](#testing-and-ci) · [Roadmap](#roadmap)
 
 ## Features
 
@@ -1198,6 +1198,30 @@ decoder produces an empty event dict, which no rule will match.
 **nginx container stuck restarting, log says `cannot load certificate ".../cert.pem"`:**
 `nginx/certs/cert.pem`/`key.pem` don't exist yet — generate them (Server Installation
 step 2) before bringing up `nginx` in the prod compose.
+
+## Detection Benchmark
+
+How much real malware the agent's file engines catch, measured with `agent/cmd/detbench` (nothing is executed; samples stay in password-protected zips and are decrypted in memory only). Known-malware hashes are left out, since the samples come from the same feeds: the question is what the other engines catch of a file no feed has seen. Method and every run: [`docs/operations/detection-benchmark.md`](docs/operations/detection-benchmark.md).
+
+**Latest run: 16 Nov 2026, agent 1.29.0, built-in + 14 community YARA packs, static ML (EMBER2024 LightGBM).** 1,505 MalShare samples received 15 Dec 2025 and 1 Jan 2026, about a year newer than the model's training data.
+
+| File type | Samples | Detected (high alert / block) | Flagged (any alert) | Where it comes from |
+|---|---|---|---|---|
+| Windows program (exe) | 56 | **69.6%** | **94.6%** | static ML; YARA 7.1% |
+| Linux program (ELF) | 57 | **63.2%** | **96.5%** | static ML; YARA 3.5% |
+| Windows library (dll) | 8 | 25.0% | 50.0% | too few to judge |
+| HTML pages | 1,353 | **0.1%** | 0.1% | no engine covers them yet |
+| Known-good files (`/usr/bin`, `/usr/sbin`, `/usr/lib/x86_64-linux-gnu`) | 8,271 | 0 | 2 (ophcrack, iodine: both real hacktools, flagged by YARA) | static ML: 0 |
+
+*Detected* is what raises a high alert or is blocked: a YARA rule of high or critical severity, or a static ML score in the `malicious` band (the score only 0.1% of known-good test files reach). *Flagged* adds the `suspicious` band (1%).
+
+What it shows:
+
+- **Programs:** the ML model catches about 95% of current Windows and Linux malware at the suspicious level and 63–70% at the level that blocks, with no false positive on 8,271 system programs. The gap between the two is the price of a 0.1% false-positive threshold. YARA adds little on top.
+- **HTML is the largest gap.** The pages are 79% redirects, 21% posting forms, 14% password forms, 17% large base64 blobs and 16% `eval`/`atob` obfuscation: phishing kits, redirectors and HTML smuggling. A static model and rules for them are next.
+- **Caveats:** MalShare has no family labels and does not verify its labels, so some of these files may not be malicious. The program sets are small (56 and 57 files). An earlier run on 83 URLhaus payloads (3 Nov) gave 44.6% detected; URLhaus serves many repackaged legitimate tools, so it is not a malware ground truth.
+
+To run it yourself: `ml/bench/fetch_malshare.py` (MalShare API key) or `ml/bench/fetch_malwarebazaar.py` (abuse.ch key), then `go run ./cmd/detbench` from `agent/`, on a machine with no shared or synced folders.
 
 ## Documentation
 

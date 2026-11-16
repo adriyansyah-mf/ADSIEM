@@ -150,7 +150,7 @@ self-update agen. Detail teknis lengkap ada di bawah.
 - [Instalasi Agen](#instalasi-agen) · [RBAC](#rbac)
 - [Menambah Rule](#menambah-rule) · [Menambah Decoder](#menambah-decoder) · [Syslog, Suricata, Zeek dan OT](#syslog-suricata-zeek-dan-ot)
 - [Deployment Produksi](#deployment-produksi) · [Observability](#observability) · [Troubleshooting](#troubleshooting)
-- [Dokumentasi](#dokumentasi) · [Testing dan CI](#testing-dan-ci) · [Roadmap](#roadmap)
+- [Benchmark Deteksi](#benchmark-deteksi) · [Dokumentasi](#dokumentasi) · [Testing dan CI](#testing-dan-ci) · [Roadmap](#roadmap)
 
 ## Fitur
 
@@ -1235,6 +1235,30 @@ pertama).
 **Container nginx terus restart, log-nya `cannot load certificate ".../cert.pem"`:**
 `nginx/certs/cert.pem`/`key.pem` belum ada. Buat dulu (Instalasi Server langkah 2) sebelum
 menjalankan `nginx` di compose prod.
+
+## Benchmark Deteksi
+
+Seberapa banyak malware sungguhan yang ditangkap engine file agen, diukur dengan `agent/cmd/detbench` (tidak ada yang dieksekusi; sampel tetap di zip berpassword dan hanya didekripsi di memori). Hash malware yang dikenal tidak dihitung, karena sampelnya berasal dari feed yang sama: yang diukur adalah apa yang ditangkap engine lain dari file yang belum pernah dilihat feed mana pun. Metode dan semua hasil: [`docs/operations/detection-benchmark.md`](docs/operations/detection-benchmark.md).
+
+**Hasil terbaru: 16 Nov 2026, agen 1.29.0, pack YARA bawaan + 14 pack komunitas, ML statis (LightGBM EMBER2024).** 1.505 sampel MalShare yang diterima 15 Des 2025 dan 1 Jan 2026, sekitar setahun lebih baru daripada data latih model.
+
+| Jenis file | Sampel | Terdeteksi (alert tinggi / blokir) | Memicu alert | Sumber deteksi |
+|---|---|---|---|---|
+| Program Windows (exe) | 56 | **69,6%** | **94,6%** | ML statis; YARA 7,1% |
+| Program Linux (ELF) | 57 | **63,2%** | **96,5%** | ML statis; YARA 3,5% |
+| Library Windows (dll) | 8 | 25,0% | 50,0% | terlalu sedikit untuk dinilai |
+| Halaman HTML | 1.353 | **0,1%** | 0,1% | belum ada engine yang mencakupnya |
+| File bersih (`/usr/bin`, `/usr/sbin`, `/usr/lib/x86_64-linux-gnu`) | 8.271 | 0 | 2 (ophcrack, iodine: keduanya memang hacktool, ditandai YARA) | ML statis: 0 |
+
+*Terdeteksi* berarti memicu alert tinggi atau diblokir: rule YARA berseverity high atau critical, atau skor ML statis di pita `malicious` (skor yang hanya dicapai 0,1% file bersih uji). *Memicu alert* menambahkan pita `suspicious` (1%).
+
+Yang terlihat:
+
+- **Program:** model ML menangkap sekitar 95% malware Windows dan Linux terkini di level suspicious, dan 63–70% di level yang memblokir, tanpa satu pun false positive pada 8.271 program sistem. Selisih keduanya adalah harga ambang false positive 0,1%. YARA hanya menambah sedikit.
+- **HTML adalah celah terbesar.** Halamannya 79% berisi redirect, 21% form yang mengirim data, 14% form password, 17% blob base64 besar, dan 16% obfuscation `eval`/`atob`: phishing kit, redirector, dan HTML smuggling. Model statis dan rule untuk jenis ini adalah langkah berikutnya.
+- **Catatan:** MalShare tidak punya label family dan tidak memverifikasi labelnya, jadi sebagian file mungkin tidak berbahaya. Set programnya kecil (56 dan 57 file). Run sebelumnya pada 83 payload URLhaus (3 Nov) memberi 44,6% terdeteksi; URLhaus banyak berisi tool legal yang dibungkus ulang, jadi bukan acuan kebenaran malware.
+
+Untuk menjalankannya sendiri: `ml/bench/fetch_malshare.py` (API key MalShare) atau `ml/bench/fetch_malwarebazaar.py` (key abuse.ch), lalu `go run ./cmd/detbench` dari `agent/`, di mesin tanpa folder bersama atau tersinkron.
 
 ## Dokumentasi
 
