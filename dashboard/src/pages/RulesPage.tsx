@@ -414,7 +414,13 @@ export default function RulesPage() {
     { key: 'logsource', header: 'Log source', render: (r: Rule) => (
       <span className="text-muted-foreground text-xs font-mono">{logsourceLabel(r)}</span>
     )},
-    { key: 'level', header: 'Level', render: (r: Rule) => <SeverityBadge severity={r.level} /> },
+    { key: 'level', header: 'Level', render: (r: Rule) => (
+      // alerts take the rule quality override when there is one
+      <div title={r.level_override ? 'Level overridden on Rule quality' : undefined}>
+        <SeverityBadge severity={r.level_override ?? r.level} />
+        {r.level_override && <div className="text-[11px] text-muted-foreground mt-0.5">rule says {r.level}</div>}
+      </div>
+    )},
     { key: 'enabled', header: 'Enabled', render: (r: Rule) => (
       <button onClick={(e) => { e.stopPropagation(); updateRule.mutate({ id: r.id, data: { is_enabled: !r.is_enabled } }) }}
         title="Toggle" className={r.is_enabled ? 'text-green-400' : 'text-muted-foreground'}>

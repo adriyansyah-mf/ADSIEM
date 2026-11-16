@@ -37,7 +37,8 @@ def _filtered(q: str | None, source: str | None, enabled: bool | None, level: st
     if enabled is not None:
         stmt = stmt.where(Rule.is_enabled == enabled)
     if level:
-        stmt = stmt.where(Rule.level == level)
+        # the level alerts get: a rule quality override wins over the YAML's
+        stmt = stmt.where(func.coalesce(Rule.level_override, Rule.level) == level)
     return stmt
 
 
@@ -188,6 +189,10 @@ async def update_rule(
         _validate_rule_yaml(updates["content"])
         updates = {**updates, **rule_metadata(updates["content"])}
         updates["version"] = rule.version + 1
+        # Editing the YAML's level is a deliberate choice of level: it replaces a
+        # rule quality override, which would otherwise keep alerts at the old one.
+        if updates["level"] != rule.level:
+            updates["level_override"] = None
     for field, value in updates.items():
         setattr(rule, field, value)
     await db.commit()

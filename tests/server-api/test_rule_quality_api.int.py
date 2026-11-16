@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from app.api.routes import rule_quality as routes
+from app.api.routes import rules as rule_routes
 from app.api.routes import suppressions
 from app.core.database import get_db
 from app.core.deps import get_current_user
@@ -33,10 +34,12 @@ async def env(evidence_api, monkeypatch):
         evidence_api.audits.append(args[2:])
 
     monkeypatch.setattr(routes, "audit_log", audit)
+    monkeypatch.setattr(rule_routes, "audit_log", audit)
     evidence_api.user = evidence_api.make_user(perms=("logs:read", "rules:update", "alerts:read", "alerts:manage"))
     app = FastAPI()
     app.include_router(routes.router)
     app.include_router(suppressions.router)
+    app.include_router(rule_routes.router)
     app.dependency_overrides[get_db] = database
     app.dependency_overrides[get_current_user] = lambda: evidence_api.user
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
@@ -98,6 +101,36 @@ async def test_the_level_override_is_validated_and_cleared(env):
     assert (await env.api.put(f"/api/rule-quality/{noisy}/level", json={"level_override": "urgent"})).status_code == 422
     env.user = env.make_user(perms=("logs:read",))
     assert (await env.api.put(f"/api/rule-quality/{noisy}/level", json={"level_override": "low"})).status_code == 403
+
+
+def _sigma(level: str, needle: str = "Failed password") -> str:
+    return (f"title: Noisy login\nlogsource:\n  product: linux\n  service: auth\n"
+            f"detection:\n  selection:\n    message|contains: '{needle}'\n  condition: selection\nlevel: {level}\n")
+
+
+async def test_detection_rules_list_and_filter_by_the_overridden_level(env):
+    noisy, _ = await _seed(env)
+    await env.api.put(f"/api/rule-quality/{noisy}/level", json={"level_override": "low"})
+    listed = {i["id"]: i for i in (await env.api.get("/api/rules")).json()["items"]}
+    assert (listed[str(noisy)]["level"], listed[str(noisy)]["level_override"]) == ("medium", "low")
+    low = [i["id"] for i in (await env.api.get("/api/rules", params={"level": "low"})).json()["items"]]
+    medium = [i["id"] for i in (await env.api.get("/api/rules", params={"level": "medium"})).json()["items"]]
+    assert str(noisy) in low and str(noisy) not in medium
+
+
+async def test_editing_the_yaml_level_replaces_the_override(env):
+    noisy, _ = await _seed(env)
+    await env.api.put(f"/api/rule-quality/{noisy}/level", json={"level_override": "low"})
+    # same level, other content: the analyst's override stays
+    r = await env.api.put(f"/api/rules/{noisy}", json={"content": _sigma("medium", "Invalid user")})
+    assert r.status_code == 200, r.text
+    assert (r.json()["level"], r.json()["level_override"]) == ("medium", "low")
+    # a new level in the editor is the level from now on
+    r = await env.api.put(f"/api/rules/{noisy}", json={"content": _sigma("critical")})
+    assert r.status_code == 200, r.text
+    assert (r.json()["level"], r.json()["level_override"]) == ("critical", None)
+    item = next(i for i in (await env.api.get("/api/rule-quality")).json()["items"] if i["rule_id"] == str(noisy))
+    assert (item["level"], item["level_override"]) == ("critical", None)
 
 
 async def test_another_groups_rule_cannot_be_overridden(env):
