@@ -326,7 +326,7 @@ def render_pdf(report, org_name: str, *, draft: bool) -> bytes:
     styles = getSampleStyleSheet()
     title = ParagraphStyle("t", parent=styles["Title"], fontSize=15, spaceAfter=2)
     sub = ParagraphStyle("s", parent=styles["Normal"], fontSize=9, alignment=1, textColor=colors.HexColor("#475569"))
-    h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontSize=11.5, spaceBefore=12, spaceAfter=5)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontSize=11.5, spaceBefore=12, spaceAfter=5, keepWithNext=1)
     body = ParagraphStyle("b", parent=styles["Normal"], fontSize=9.5, leading=14)
     small = ParagraphStyle("sm", parent=body, fontSize=8, leading=11)
 

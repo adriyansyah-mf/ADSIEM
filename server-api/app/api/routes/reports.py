@@ -1,22 +1,27 @@
 # server-api/app/api/routes/reports.py
-import json
-from collections import Counter
-from datetime import datetime, timedelta, timezone
-from typing import Annotated
+"""Period summary (services/periodic_report.py): preview the numbers on the
+page, generate the PDF with an AI executive summary, and keep every generated
+PDF so it can be downloaded again."""
+import hashlib
+from datetime import date
+from typing import Annotated, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response
-from sqlalchemy import select, text
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_scoped_group, require_permission
 from app.core.llm_client import generate_text
-from app.models.models import Alert, PlatformSetting
+from app.models.models import PlatformSetting, ReportRun, User
 from app.schemas.schemas import ReportGenerateRequest
-from app.services.report_pdf import build_report_pdf
+from app.services import periodic_report as svc
+from app.services.audit import audit_log
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 Perm = require_permission("alerts:read")
+MAX_DAYS = 400
 
 
 async def _get_setting(db: AsyncSession, key: str, default: str = "") -> str:
@@ -24,92 +29,92 @@ async def _get_setting(db: AsyncSession, key: str, default: str = "") -> str:
     return (row.value if row and row.value else default)
 
 
+def _check_range(date_from: date, date_to: date) -> None:
+    if date_from > date_to:
+        raise HTTPException(422, "The start date must be on or before the end date")
+    if (date_to - date_from).days > MAX_DAYS:
+        raise HTTPException(422, f"A report covers at most {MAX_DAYS} days")
+
+
+@router.get("/summary")
+async def report_summary(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(Perm),
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    tz: Optional[str] = Query(None, max_length=64),
+):
+    """The numbers of the period, for the page; no AI, nothing stored."""
+    _check_range(date_from, date_to)
+    zone = svc.zone(tz)
+    start, end = svc.window(date_from, date_to, zone)
+    return await svc.gather(db, group_filter, start, end, zone)
+
+
 @router.post("/generate")
 async def generate_report(
     body: ReportGenerateRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     group_filter: Annotated[str | None, Depends(get_scoped_group)],
-    _=Depends(Perm),
+    user: Annotated[User, Depends(Perm)],
 ):
-    range_from = datetime.combine(body.date_from, datetime.min.time(), tzinfo=timezone.utc)
-    range_to = datetime.combine(body.date_to, datetime.max.time(), tzinfo=timezone.utc)
+    _check_range(body.date_from, body.date_to)
+    zone = svc.zone(body.tz)
+    lang = svc.lang_code(body.language)
+    start, end = svc.window(body.date_from, body.date_to, zone)
+    stats = await svc.gather(db, group_filter, start, end, zone)
 
-    alert_q = select(Alert).where(Alert.created_at >= range_from, Alert.created_at <= range_to)
-    if group_filter:
-        alert_q = alert_q.where(Alert.group_id == group_filter)
-    alerts = (await db.execute(alert_q)).scalars().all()
+    narrative = ""
+    if body.use_ai:
+        api_key = await _get_setting(db, "ninerouter_api_key", "")
+        model = await _get_setting(db, "ninerouter_model", "combo")
+        narrative = (await generate_text(api_key, model, svc.narration_prompt(stats, lang), max_tokens=2000, db=db) or "").strip()
 
-    severity_counts = dict(Counter(a.severity for a in alerts))
-    top_rules = Counter(a.title for a in alerts).most_common(10)
-
-    case_filter_sql = "AND group_id = :group_id" if group_filter else ""
-    params = {"date_from": range_from, "date_to": range_to}
-    if group_filter:
-        params["group_id"] = group_filter
-
-    verdict_rows = (await db.execute(text(f"""
-        SELECT COALESCE(ioc_data->>'verdict', 'unknown') AS verdict, COUNT(*) AS cnt
-        FROM cases
-        WHERE created_at >= :date_from AND created_at <= :date_to
-          AND created_by_ai = TRUE {case_filter_sql}
-        GROUP BY COALESCE(ioc_data->>'verdict', 'unknown')
-    """), params)).mappings().all()
-    verdict_counts = {r["verdict"]: r["cnt"] for r in verdict_rows}
-
-    mitre_rows = (await db.execute(text(f"""
-        SELECT DISTINCT jsonb_array_elements_text(ioc_data->'mitre_techniques') AS technique
-        FROM cases
-        WHERE created_at >= :date_from AND created_at <= :date_to
-          AND created_by_ai = TRUE AND ioc_data ? 'mitre_techniques' {case_filter_sql}
-        LIMIT 15
-    """), params)).mappings().all()
-    top_mitre = [r["technique"] for r in mitre_rows]
-
-    total_cases_row = (await db.execute(text(f"""
-        SELECT COUNT(*) AS cnt FROM cases
-        WHERE created_at >= :date_from AND created_at <= :date_to {case_filter_sql}
-    """), params)).mappings().first()
-    total_cases = total_cases_row["cnt"] if total_cases_row else 0
-
-    org_name = await _get_setting(db, "org_name", "SIEM Security Report")
-    api_key = await _get_setting(db, "ninerouter_api_key", "")
-    model = await _get_setting(db, "ninerouter_model", "combo")
-
-    prompt = f"""You are an AI SOC analyst writing an executive security report.
-
-Data for the period {body.date_from.isoformat()} to {body.date_to.isoformat()}:
-- Total alerts: {len(alerts)}
-- Total cases: {total_cases}
-- Severity breakdown: {json.dumps(severity_counts)}
-- AI verdict distribution: {json.dumps(verdict_counts)}
-- MITRE ATT&CK techniques observed: {top_mitre}
-
-Write a 3-paragraph executive summary IN {body.language.upper()} (the entire response must be in {body.language}):
-1. Overview of the period's threat landscape
-2. Key findings (campaigns detected, top techniques, notable patterns)
-3. Recommended focus areas going forward
-
-Keep it concise — max 220 words total. No bullet points, pure paragraphs. Respond with plain text only, no markdown."""
-
-    narrative = await generate_text(api_key, model, prompt, max_tokens=2000, db=db)
-
-    pdf_bytes = build_report_pdf(
-        org_name=org_name,
-        date_from=body.date_from,
-        date_to=body.date_to,
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        narrative=narrative,
-        total_alerts=len(alerts),
-        severity_counts=severity_counts,
-        top_rules=top_rules,
-        verdict_counts=verdict_counts,
-        top_mitre=top_mitre,
-        total_cases=total_cases,
-    )
+    org_name = await _get_setting(db, "org_name", "")
+    pdf = svc.render_pdf(stats, narrative, org_name, lang, user.username, zone)
+    run = ReportRun(group_id=group_filter, period_from=start, period_to=end, language=lang, stats=stats,
+                    narrative=narrative or None, pdf=pdf, pdf_sha256=hashlib.sha256(pdf).hexdigest(),
+                    created_by=user.id, created_by_name=user.username)
+    db.add(run)
+    await db.commit()
+    await audit_log(db, user.id, "periodic_report_generated", "report_run", str(run.id),
+                    {"from": body.date_from.isoformat(), "to": body.date_to.isoformat(), "ai": bool(narrative)})
 
     filename = f"security-report-{body.date_from.isoformat()}-to-{body.date_to.isoformat()}.pdf"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return Response(content=pdf, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"', "X-Report-Id": str(run.id)})
+
+
+@router.get("/history")
+async def report_history(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(Perm),
+    limit: int = Query(50, ge=1, le=200),
+):
+    q = select(ReportRun.id, ReportRun.period_from, ReportRun.period_to, ReportRun.language, ReportRun.narrative,
+               ReportRun.created_by_name, ReportRun.created_at, ReportRun.pdf_sha256, ReportRun.stats)
+    if group_filter is not None:
+        q = q.where(ReportRun.group_id == group_filter)
+    rows = (await db.execute(q.order_by(ReportRun.created_at.desc()).limit(limit))).all()
+    return [{"id": str(r.id), "period_from": r.period_from.isoformat(), "period_to": r.period_to.isoformat(),
+             "language": r.language, "ai": bool(r.narrative), "created_by_name": r.created_by_name,
+             "created_at": r.created_at.isoformat(), "pdf_sha256": r.pdf_sha256,
+             "alerts": (r.stats or {}).get("alerts", {}).get("total"),
+             "cases": (r.stats or {}).get("cases", {}).get("opened")} for r in rows]
+
+
+@router.get("/history/{run_id}/pdf")
+async def report_history_pdf(
+    run_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(Perm),
+):
+    run = await db.get(ReportRun, run_id)
+    if run is None or (group_filter is not None and run.group_id != group_filter):
+        raise HTTPException(404, "Report not found")
+    name = f"security-report-{run.period_from:%Y-%m-%d}.pdf"
+    return Response(content=run.pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
