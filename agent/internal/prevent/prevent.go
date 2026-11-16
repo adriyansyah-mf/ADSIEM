@@ -108,6 +108,11 @@ type Options struct {
 	// (Windows: no veto before it runs) with the rule type that matched, so
 	// App Control can learn it and block the next start before it runs.
 	OnTerminated func(ruleType, path, sha256 string)
+	// ExecScan scans a program that is about to run with the agent's file
+	// engines (YARA, known-malware hashes, static ML) and reports whether it
+	// must not run (they quarantined it). path is its name, via where to read
+	// it (the fanotify descriptor). Linux only; nil: no pre-exec scan.
+	ExecScan func(path, via string) bool
 }
 
 // Manager keeps the server's rules applied to the engines.
@@ -123,6 +128,7 @@ type Manager struct {
 	// group policy (internal/policy): prevention off, exclusions
 	off        bool
 	exclusions []policy.Exclusion
+	scanExec   bool                 // group policy exec_scan (needs Options.ExecScan)
 	last       map[string]time.Time // decision dedupe
 	lastMu     sync.Mutex
 }
@@ -130,7 +136,7 @@ type Manager struct {
 // Start starts the platform engines; it fails where there are none.
 func Start(opts Options) (*Manager, error) {
 	m := &Manager{opts: opts, last: map[string]time.Time{}}
-	eng, err := startEngines(m.report)
+	eng, err := startEngines(m.report, opts.ExecScan)
 	if err != nil {
 		return nil, err
 	}
@@ -261,14 +267,37 @@ func (m *Manager) SetGate(off bool, exclusions []policy.Exclusion) {
 	slog.Info("prevent: group policy applied", "off", off, "exclusions", len(exclusions))
 }
 
+// SetExecScan turns the pre-exec scan on or off (group policy exec_scan).
+// It runs only where the platform can hold a program before it starts
+// (Linux fanotify) and Options.ExecScan is set.
+func (m *Manager) SetExecScan(on bool) {
+	m.mu.Lock()
+	if m.scanExec == on {
+		m.mu.Unlock()
+		return
+	}
+	m.scanExec = on
+	p := m.policy
+	if p == nil {
+		p, _ = Compile(nil)
+		p = p.withMalware(m.malware, m.malwareFile)
+		m.policy = p
+	}
+	enforced := m.gated(p)
+	m.mu.Unlock()
+	m.eng.apply(enforced)
+	slog.Info("prevent: pre-exec scan", "on", on && m.opts.ExecScan != nil)
+}
+
 // gated is what the engines enforce: nothing while the group policy turns
 // prevention off (so the BPF LSM rules are emptied too), else p with the
-// policy's exclusions. m.mu held.
+// policy's exclusions; the pre-exec scan follows its own switch. m.mu held.
 func (m *Manager) gated(p *Policy) *Policy {
+	scan := m.scanExec && m.opts.ExecScan != nil
 	if m.off {
-		return (&Policy{hashes: map[string]*compiled{}, paths: map[string]*compiled{}}).withGate(true, nil)
+		return (&Policy{hashes: map[string]*compiled{}, paths: map[string]*compiled{}}).withGate(true, nil).withScan(scan)
 	}
-	return p.withGate(false, m.exclusions)
+	return p.withGate(false, m.exclusions).withScan(scan)
 }
 
 // report pushes a decision line; the same rule, image and parent are

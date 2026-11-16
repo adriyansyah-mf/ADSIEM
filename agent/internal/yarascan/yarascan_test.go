@@ -147,13 +147,14 @@ func TestOnHashSeesFilesWithoutRules(t *testing.T) {
 
 func TestScanPathLimits(t *testing.T) {
 	var out lines
-	s := New(Options{MaxFileSize: 10, Push: out.push})
+	// over MaxFileSize: scanned in part; over MaxPartialSize: skipped with an error
+	s := New(Options{MaxFileSize: 10, MaxPartialSize: 20, Push: out.push})
 	s.SetRules("h", []Rule{{Name: "p", Content: evilRule}})
 	dir := t.TempDir()
 	big := filepath.Join(dir, "big")
-	os.WriteFile(big, []byte(strings.Repeat("x", 11)), 0o644)
+	os.WriteFile(big, []byte(strings.Repeat("x", 21)), 0o644)
 	if _, err := s.ScanPath(context.Background(), big, "t"); err == nil {
-		t.Fatal("a file over the size limit must be skipped with an error")
+		t.Fatal("a file over the partial-scan limit must be skipped with an error")
 	}
 	link := filepath.Join(dir, "link")
 	if os.Symlink(big, link) == nil {

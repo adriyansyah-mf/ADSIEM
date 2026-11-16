@@ -9,6 +9,8 @@ Dashboard → **Policies** (`/api/policies`, edit with `agents:manage`, inside y
 | Execution prevention | prevention rules and known-malware blocking; off also empties the BPF LSM rules and stops the fanotify helper (Linux) | on |
 | Known-malware hashes | off / detect / block for this group; empty uses the global setting (Malware hashes page) | global |
 | YARA on-access | scan new and changed files in the watched folders (files still go to the known-malware check) | on |
+| YARA match on a file (`yara_action`, `yara_quarantine_level`) | detect, or quarantine files matching a rule of at least critical (or high) severity; quarantine also stops a dropper running from temp or downloads (see yara.md) | detect, critical |
+| Scan programs before they run (`exec_scan`) | Linux: hold a program outside the system folders at exec until the file engines checked it (3 s at most, fail open); Windows: scan each new program as it starts | on |
 | Ransomware | stop (kill the encrypting process), report only, off | stop |
 | Isolate on ransomware | cut the host off the network when ransomware is confirmed | off |
 | Pop-ups | tell the signed-in Windows user when malware is found or stopped | on |

@@ -57,6 +57,16 @@ type Settings struct {
 	// off, detect or block (quarantine malicious files); empty (a server
 	// from before it) is detect.
 	MLAction string `json:"ml_action"`
+	// YaraAction: what a YARA match on a file does (internal/yarascan):
+	// detect, or quarantine when the rule is at least YaraQuarantineLevel
+	// (high or critical; empty is critical). Empty (a server from before it)
+	// is detect.
+	YaraAction          string `json:"yara_action"`
+	YaraQuarantineLevel string `json:"yara_quarantine_level"`
+	// ExecScan: on Linux, a program outside the OS's directories is held at
+	// exec until the file engines scanned it (fanotify, fail open); on or
+	// off. Empty (a server from before it) is on.
+	ExecScan string `json:"exec_scan"`
 	// IOA: behaviour chains (internal/ioa): off or detect; empty (a server
 	// from before it) is detect.
 	IOA string `json:"ioa"`
@@ -88,8 +98,24 @@ type Policy struct {
 // before policies existed.
 func Default() *Policy {
 	return &Policy{Group: "built-in", Settings: Settings{PreventionEnabled: true, YaraOnAccess: true,
-		RansomwareMode: "stop", NotifyUser: true, ScriptScan: "detect", MLAction: "detect", IOA: "detect"}}
+		RansomwareMode: "stop", NotifyUser: true, ScriptScan: "detect", MLAction: "detect", IOA: "detect",
+		YaraAction: "detect", YaraQuarantineLevel: "critical", ExecScan: "on"}}
 }
+
+// YaraOutcome is what a YARA match does: "quarantine" with the lowest
+// severity quarantined ("high" or "critical"), or "detect".
+func (s Settings) YaraOutcome() (action, minLevel string) {
+	if s.YaraAction != "quarantine" {
+		return "detect", ""
+	}
+	if s.YaraQuarantineLevel == "high" {
+		return "quarantine", "high"
+	}
+	return "quarantine", "critical"
+}
+
+// ExecScanOn reports whether programs are scanned before they run (Linux).
+func (s Settings) ExecScanOn() bool { return s.ExecScan != "off" }
 
 // fold: Windows paths compare case-insensitively.
 var fold = runtime.GOOS == "windows"

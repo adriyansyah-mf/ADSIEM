@@ -1,6 +1,6 @@
 title: YARA Rule Matched On Endpoint (Critical)
 id: rule-yara-match-critical
-description: A file the agent saw being created or changed in a temp, download or web directory matched a critical-severity YARA rule (yara.rule names it, file.path and file.hash.sha256 identify the file).
+description: A file the agent scanned (new in a watched folder, a program or script written anywhere, a program starting, or a rescan after new rules) matched a critical-severity YARA rule (yara.rule names it, file.path and file.hash.sha256 identify the file).
 logsource:
   product: yara
   service: match

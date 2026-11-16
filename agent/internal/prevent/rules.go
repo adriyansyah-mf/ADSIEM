@@ -78,6 +78,17 @@ type Policy struct {
 	off         bool
 	exclusions  []policy.Exclusion
 	guardHashes map[string]string
+	// scanExec: a program outside the OS's directories is scanned by the
+	// agent's file engines before it may run (Linux fanotify); a group
+	// policy switch of its own, so it holds while prevention is off
+	scanExec bool
+}
+
+// withScan returns a copy of p that has programs scanned before they run.
+func (p *Policy) withScan(on bool) *Policy {
+	q := *p
+	q.scanExec = on
+	return &q
 }
 
 // withMalware returns a copy of p that also checks the known-malware set.

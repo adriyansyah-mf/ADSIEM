@@ -84,6 +84,18 @@ def test_validation():
     assert p.ioa == "off" and p.exclusions[0].scopes == ["ioa"]
 
 
+def test_yara_action_and_exec_scan_validation():
+    # a YARA match is only reported unless a group quarantines; critical is the default threshold
+    d = agent_policy.PolicySettings.model_validate({})
+    assert (d.yara_action, d.yara_quarantine_level, d.exec_scan) == ("detect", "critical", "on")
+    p = agent_policy.PolicySettings.model_validate(
+        {"yara_action": "quarantine", "yara_quarantine_level": "high", "exec_scan": "off"})
+    assert (p.yara_action, p.yara_quarantine_level, p.exec_scan) == ("quarantine", "high", "off")
+    for bad in ({"yara_action": "block"}, {"yara_quarantine_level": "medium"}, {"exec_scan": "maybe"}):
+        with pytest.raises(ValidationError):
+            agent_policy.PolicySettings.model_validate(bad)
+
+
 async def test_policy_api_scope_and_fallback(api):
     c = api.api
     api.user = api.make_user(role="admin", group="blue", perms=("agents:manage",))
