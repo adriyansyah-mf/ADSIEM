@@ -22,6 +22,10 @@ Use an isolated machine or VM (no shared or synced folders); the zips are live m
 # 1. samples: your own abuse.ch Auth-Key (https://auth.abuse.ch/)
 MB_AUTH_KEY=... python3 ml/bench/fetch_malwarebazaar.py ~/detbench/samples --per-type exe=300,dll=100,elf=200
 
+# or MalShare (your own API key; daily lists of hashes, 2000 downloads a day; raw files are piped
+# into the same password-protected zip format and never written raw)
+MALSHARE_KEY=... python3 ml/bench/fetch_malshare.py ~/detbench/malshare --days 2026-01-01,2025-12-15 --max 1500
+
 # 2. benchmark (from agent/)
 go run ./cmd/detbench -rules ../yara/builtin \
   -samples ~/detbench/samples \
@@ -40,6 +44,8 @@ For a fair before/after comparison keep the same sample set and benign directori
 | 2026-11-03 | 83 URLhaus payloads (64 zip, 7 html, 5 exe, 3 js, 2 elf, lnk, msi) | 2.4% | 2.4% | 1 / 3,287 (ophcrack: Mimikatz rule) | built-in YARA 0%; ML: both ELF (Mozi), no PE: 3 SalatStealer (Go) scored 0.62–0.69 under the 0.76 suspicious threshold, RustyStealer 0.11, SnappyClient 0.16; zips are not opened. MalwareBazaar `get_file` answered 500 for every sample that day, so URLhaus only (`--source urlhaus`). |
 | 2026-11-03 | same 83, with container scanning (`agent/internal/unpack`) | 2.4% | 4.8% | 1 / 3,287 | ML now scores the programs inside the zips: 2 of 57 suspicious, none malicious. |
 | 2026-11-03 | same 83, with the EMBER2024 models (static ML v3) | 44.6% | 47.0% | - | every labelled stealer now `malicious` (SalatStealer 3/3, RustyStealer, SnappyClient, all > 0.99); 27 zips whose `zapret-discord.exe` (a 7 MB lure using zapret's name) scores malicious. Known-good survey: [static ML](static-ml.md#how-good-it-is). |
+| 2026-11-16 | same 83, agent 1.29.0, built-in + 14 community YARA packs | 44.6% | 47.0% | 2 / 8,271 (ophcrack: Mimikatz rule; iodine: Sekoia iodine rule; both real hacktools) | community packs add no detection on this set; ML 0 on the known-good files |
+| 2026-11-16 | 1,505 MalShare samples (15 Dec 2025, 1 Jan 2026; `ml/bench/fetch_malshare.py`): 1,353 html, 56 exe, 57 elf, 8 dll, 10 archives, 21 other | 5.6% | 8.1% | - | **programs** (a year newer than the EMBER2024 training data): exe 69.6% detected / 94.6% flagged, elf 63.2% / 96.5%, dll 25% / 50% (8 files); YARA adds little (exe 7.1%, elf 3.5%). **html: 0.1%** (1 of 1,353). The html are 79% redirects, 21% posting forms, 14% password forms, 17% large base64 blobs, 16% eval/atob obfuscation: phishing kits, redirectors and smuggling pages, which no engine covers. MalShare has no family labels and its labels are not verified. |
 
 **URLhaus labels are not a malware ground truth.** A URLhaus payload is a file a malware-distribution URL served. That day's 64 zips were mostly repackaged open-source tools (zapret DPI bypass with WinDivert, `winws.exe` and hundreds of `.bat` files), HWID spoofers and game-cheat lures, plus one `.scr`. Possibly trojanized, but mostly legitimate binaries, so a low rate on them does not mean missed malware. Use labelled MalwareBazaar samples for detection rates; use URLhaus to check what the engines say about what is actually being spread.
 
