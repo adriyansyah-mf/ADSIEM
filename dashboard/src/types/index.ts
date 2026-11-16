@@ -232,6 +232,7 @@ export interface Rule {
   description: string | null
   content: string
   level: string
+  level_override?: string | null  // set on Rule quality; alerts take it instead of level
   tags: string[]
   mitre_tags: string[]
   version: number

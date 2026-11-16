@@ -72,7 +72,10 @@ export default function RuleQualityPage() {
   const override = useMutation({
     mutationFn: ({ id, level }: { id: string; level: string | null }) =>
       api.put(`/api/rule-quality/${id}/level`, { level_override: level }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['rule-quality'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['rule-quality'] })
+      qc.invalidateQueries({ queryKey: ['rules'] })  // Detection rules shows the same level
+    },
   })
   const items = (quality.data?.items ?? []).filter(i => !onlyAdvice || i.advice.length > 0)
   const fpShare = quality.data && quality.data.alerts ? Math.round(quality.data.false_positives / quality.data.alerts * 100) : 0

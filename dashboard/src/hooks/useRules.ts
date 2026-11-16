@@ -52,6 +52,7 @@ export function useUpdateRule() {
       api.put(`/api/rules/${id}`, data).then(r => r.data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['rules'] })
+      qc.invalidateQueries({ queryKey: ['rule-quality'] })  // a level edit clears its override
       emitToast('Rule saved', 'success')
     },
     onError: (e) => emitToast(detail(e, 'Failed to save rule'), 'error'),
