@@ -39,7 +39,9 @@ type windowsEngine struct {
 	work   chan struct{} // bounds concurrent hashing (only hashing: see matchBounded)
 }
 
-func startEngines(report func(Decision)) (engines, error) {
+// startEngines: Windows has no veto before a program runs, so there is no
+// pre-exec scan (the agent scans each new program as ETW reports its start).
+func startEngines(report func(Decision), _ func(path, via string) bool) (engines, error) {
 	return &windowsEngine{report: report, self: uint32(os.Getpid()), hashes: newHashCache(4096),
 		work: make(chan struct{}, 4)}, nil
 }

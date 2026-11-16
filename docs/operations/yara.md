@@ -6,7 +6,7 @@ Roadmap item 3.1. The agent ships its own YARA engine (`agent/internal/yara`), w
 
 | Path | Trigger | Result |
 |---|---|---|
-| On access (`agent/internal/yarascan`) | a file is created or changed under a watched directory | `yara_match` log line → alert "YARA Rule Matched On Endpoint (<severity>)" |
+| On access (`agent/internal/yarascan`) | a file is created or changed under a watched directory; a program, script or container a file sensor saw written anywhere; a program starting; a rescan after new rules or hashes (see [Real-time coverage](#real-time-coverage)) | `yara_match` log line → alert "YARA Rule Matched On Endpoint (<severity>)"; with `yara_action: quarantine` the file is also locked |
 | `yara_scan` task (dashboard → YARA → Run Scan) | operator | task result with matches, `rule_errors`, `warnings` |
 | `yara` live-response plugin | flow artifact | one row per match; a rule that does not compile is a row with `Error` |
 
@@ -14,8 +14,10 @@ On-access scanning uses every **enabled** rule on the YARA page. Heartbeats carr
 
 Watched directories (recursive, 4 levels, at most 4096 directories):
 
-- Linux: `/tmp`, `/var/tmp`, `/dev/shm`, `/var/www`
-- Windows: `%SystemRoot%\Temp`, `C:\Users\*\Downloads`, `C:\Users\*\AppData\Local\Temp`, `C:\Users\Public`, `C:\inetpub\wwwroot` (globs are expanded again every 5 minutes, so new profiles are picked up)
+- Linux: `/tmp`, `/var/tmp`, `/dev/shm`, `/var/www`, `/srv/www`, `/home/*/Downloads`
+- Windows: `%SystemRoot%\Temp`, `C:\Users\*\Downloads`, `C:\Users\*\Desktop`, `C:\Users\*\AppData\Local\Temp`, `C:\Users\Public`, `C:\inetpub\wwwroot` (globs are expanded again every 5 minutes, so new profiles are picked up)
+
+Large trees (`C:\ProgramData`, `/root`, `/opt`) are not watched: they would use up the 4096 directories. The file sensors cover them, and every other folder, for programs and scripts.
 
 Agent config (`config.yaml`):
 
@@ -26,7 +28,35 @@ yara:
   max_file_size_mb: 32
 ```
 
-Limits: a file is scanned 2 s after its last write, once per (content, rule set); the queue holds 512 files and drops the rest (logged every 10 minutes); one scan stops after 30 s. Symlinks are not followed.
+Limits: a file is scanned 2 s after its last write (a file still growing is waited for, up to about 30 s), once per (content, rule set, known-malware set); one scan stops after 30 s. Symlinks are not followed. A file over `max_file_size_mb` is hashed whole and its first `max_file_size_mb` and last quarter of that are scanned (`part=head` / `part=tail` in the line); files over 512 MiB are skipped.
+
+## Real-time coverage
+
+Files reach the scanner four ways. Each goes through every engine: known-malware hashes, TLSH variants, static ML, YARA, and what is inside containers.
+
+| Way | Linux | Windows | `trigger` |
+|---|---|---|---|
+| Watched directories | inotify, the folders above | ReadDirectoryChangesW, the folders above | `on_access` |
+| File sensors, anywhere on disk | eBPF (`linsensor`): create, write, rename | ETW file events (`winsensor`) | `on_access` |
+| A program starting | before it runs: the fanotify helper holds the exec until the scan answers (`exec_check`); after, for what it did not see: the eBPF exec sensor, read through `/proc/<pid>/exe` (`exec`) | right after it starts: the ETW process start (`exec`) | `exec_check`, `exec` |
+| New rules or known-malware hashes | rescan of files changed in the last 7 days in the watched directories (at most 5000), and once at agent start | same | `rescan` |
+
+**What a sensor event scans.** Outside the watched directories only files that can run or carry what runs: programs, scripts, shortcuts, macro documents, archives and disk images, recognised by name or first bytes (`MZ`, `\x7fELF`, `#!`, `PK`, OLE, `<?php`, …). Logs, databases, journals and partial downloads (`.crdownload`, `.part`) are never read. Files the OS or a package manager writes in bursts are not taken from the sensors either: the system folders (`/usr`, `/bin`, `/lib*`, `%SystemRoot%`, Program Files), `node_modules`, `site-packages`, `.git`, Go/Cargo/Maven/Gradle caches, browser caches and profiles, and container storage (`/var/lib/docker`, `containerd`). A program from there is still scanned when it starts, and a project a developer installs is scanned by the project scanner. Each match line names the writer: `writer_pid`, `writer_image`.
+
+**Before a program runs (Linux, group policy `exec_scan`, default on).** The fanotify helper sends a program outside the system folders (`/usr`, `/bin`, `/sbin`, `/lib*`, `/snap`, `/nix/store`) to the agent and waits for the verdict, at most 3 s; then it runs and the scan finishes in the background (a quarantine then stops it). A program the scan quarantined (known-malware block, `ml_action: block`, `yara_action: quarantine`) gets "Operation not permitted". The verdict is kept per inode and change time, so the next start is instant. At most three programs wait for a scan at once; the fourth runs unchecked, so the host's other starts never queue behind scans. Windows has no veto before a program runs: each new program outside `%SystemRoot%` (except `Windows\Temp`) and Program Files is scanned right after it starts, and quarantining it stops it.
+
+**Queue.** Programs and scripts and programs starting go to a queue of 2048 that is always emptied first (from a watched folder a file without an extension counts as a program; from a sensor only the extension does, the first bytes decide later); other files to a queue of 512; rescans wait behind both and never take their place. A file that finds its queue full is left unscanned. From a watched folder or a program starting it is counted as lost: `sensor_health.file_scan.lost` in the heartbeat raises the "events lost" sensor alert, so flooding a watched folder to hide a payload is seen. A full queue from a sensor burst elsewhere (a large build) is only logged.
+
+## Quarantine on a match
+
+Group policy **YARA match on a file** (`yara_action`, see [policies](policies.md)):
+
+- `detect` (default): the alert only, `action=detected` in the line.
+- `quarantine`: a match whose rule severity is at least `yara_quarantine_level` (`critical` by default, or `high`) locks the file where it is and stops the programs running it, as `quarantine_file` does (restorable from the dashboard). A file inside an archive locks the archive. The line says `action=quarantined`, or `action=detected error="..."` when the file could not be locked (a protected system path, for example).
+
+When a file sensor saw who wrote the file and that program itself runs from a temp, downloads or shared-memory folder (`/tmp`, `/var/tmp`, `/dev/shm`, `/run/user`, `~/Downloads`, `%TEMP%`, `Windows\Temp`, `Users\Public`), it is stopped as the dropper: `writer_stopped=true`. A program installed elsewhere (a browser, an archiver, `explorer.exe`) is left running and only named. `kill_process`'s guards apply (never pid 1/4, the agent, its ancestors, or critical system processes).
+
+Exclusions with the YARA scope leave a path out of YARA and of the pre-exec scan.
 
 ### Inside containers
 

@@ -88,6 +88,14 @@ func quarantineAndStop(path string) (QuarantineOutcome, error) {
 	return out, err
 }
 
+// StopProcess kills one process with kill_process's guards (never pid 1/4,
+// the agent, its ancestors, or protected and critical system processes):
+// the file scanner stops the program that dropped a file it quarantined.
+func StopProcess(pid int) error {
+	_, err := killProcess(pid, true, 1)
+	return err
+}
+
 // StopRunning kills the processes whose executable is path, with
 // kill_process's guards (never pid 1/4, the agent, its ancestors, or protected
 // and critical system processes): SIGTERM then SIGKILL after a second on

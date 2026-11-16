@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/siem-platform/agent/internal/yarascan"
 	"golang.org/x/sys/unix"
 )
 
@@ -70,11 +71,19 @@ type fanEngine struct {
 	stop   chan struct{}
 	done   sync.WaitGroup
 
-	cacheMu sync.Mutex
-	cache   map[hashKey]string
-	marked  map[string]bool
+	cacheMu  sync.Mutex
+	cache    map[hashKey]string
+	verdicts map[hashKey]bool // the agent's scan of a program: true = refused
+	marked   map[string]bool
+
+	// scan asks the agent to scan a program (helper: scanAsks.ask); nil: none.
+	// scanSlots keeps one worker free of scans, so other execs (the agent's
+	// own quarantine commands among them) never wait for a scan to finish.
+	scan      func(path string, fd, pid int32) (block, answered bool)
+	scanSlots chan struct{}
 
 	failedOpen atomic.Int64
+	unscanned  atomic.Int64 // allowed without the agent's answer
 }
 
 func startFanotifyLocal(report func(Decision)) (*fanEngine, error) {
@@ -85,7 +94,8 @@ func startFanotifyLocal(report func(Decision)) (*fanEngine, error) {
 	e := &fanEngine{
 		fd: fd, file: os.NewFile(uintptr(fd), "fanotify"), self: int32(os.Getpid()), report: report,
 		work: make(chan fanEvent, fanQueue), stop: make(chan struct{}),
-		cache: map[hashKey]string{}, marked: map[string]bool{},
+		cache: map[hashKey]string{}, verdicts: map[hashKey]bool{}, marked: map[string]bool{},
+		scanSlots: make(chan struct{}, fanWorkers-1),
 	}
 	if n := e.markMounts(); n == 0 {
 		e.file.Close()
@@ -168,6 +178,9 @@ func (e *fanEngine) remark() {
 			e.markMounts()
 			if n := e.failedOpen.Swap(0); n > 0 {
 				slog.Warn("prevent: exec checks queue full, allowed unchecked", "allowed", n)
+			}
+			if n := e.unscanned.Swap(0); n > 0 {
+				slog.Warn("prevent: programs allowed before the agent's scan answered", "allowed", n)
 			}
 		}
 	}
@@ -292,30 +305,83 @@ func (e *fanEngine) hashFD(fd int32) (string, bool) {
 	return h, true
 }
 
-// decide returns whether the exec may go ahead.
+// decide returns whether the exec may go ahead: the server's rules first,
+// then the agent's scan of the program.
 func (e *fanEngine) decide(ev fanEvent) bool {
 	pol := e.policy.Load()
-	if pol == nil || !pol.p.active() {
+	if pol == nil {
+		return true
+	}
+	rules := pol.p.active()
+	scan := pol.p.scanExec && e.scan != nil
+	if !rules && !scan {
 		return true
 	}
 	path, err := os.Readlink(fmt.Sprintf("/proc/self/fd/%d", ev.fd))
 	if err != nil {
 		return true
 	}
-	parent, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", ev.pid))
-	var digest string
-	c := pol.p.Match(Exec{Path: path, Parent: parent, Hash: func() (string, bool) {
-		h, ok := e.hashFD(ev.fd)
-		digest = h
-		return h, ok
-	}}, pol.kernelDecides)
-	if c == nil {
-		return true
+	if rules {
+		parent, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", ev.pid))
+		var digest string
+		c := pol.p.Match(Exec{Path: path, Parent: parent, Hash: func() (string, bool) {
+			h, ok := e.hashFD(ev.fd)
+			digest = h
+			return h, ok
+		}}, pol.kernelDecides)
+		if c != nil {
+			ppid, uid, comm := procStatus(ev.pid)
+			e.report(Decision{
+				Rule: c, Blocked: c.block, Engine: "fanotify", Path: path, Parent: parent, SHA256: digest,
+				Comm: comm, PID: uint32(ev.pid), PPID: ppid, UID: uid,
+			})
+			if c.block {
+				return false
+			}
+		}
 	}
-	ppid, uid, comm := procStatus(ev.pid)
-	e.report(Decision{
-		Rule: c, Blocked: c.block, Engine: "fanotify", Path: path, Parent: parent, SHA256: digest,
-		Comm: comm, PID: uint32(ev.pid), PPID: ppid, UID: uid,
-	})
-	return !c.block
+	if scan {
+		return !e.scanRefuses(path, ev)
+	}
+	return true
+}
+
+// scanRefuses asks the agent to scan a program outside the OS's
+// directories before it runs, once per version of the file (inode and
+// times). No free slot or no answer in time: the program runs (fail open);
+// the agent's scan still finishes and a quarantine then stops it.
+func (e *fanEngine) scanRefuses(path string, ev fanEvent) bool {
+	if yarascan.SystemProgram(path) || strings.HasSuffix(path, " (deleted)") {
+		return false
+	}
+	var st unix.Stat_t
+	if err := unix.Fstat(int(ev.fd), &st); err != nil || st.Mode&unix.S_IFMT != unix.S_IFREG {
+		return false
+	}
+	key := hashKey{dev: st.Dev, ino: st.Ino, ctime: st.Ctim.Nano(), mtime: st.Mtim.Nano(), size: st.Size}
+	e.cacheMu.Lock()
+	refused, known := e.verdicts[key]
+	e.cacheMu.Unlock()
+	if known {
+		return refused
+	}
+	select {
+	case e.scanSlots <- struct{}{}:
+	default:
+		e.unscanned.Add(1)
+		return false
+	}
+	refused, answered := e.scan(path, ev.fd, ev.pid)
+	<-e.scanSlots
+	if !answered {
+		e.unscanned.Add(1)
+		return false
+	}
+	e.cacheMu.Lock()
+	if len(e.verdicts) >= hashCacheMax {
+		e.verdicts = map[hashKey]bool{}
+	}
+	e.verdicts[key] = refused
+	e.cacheMu.Unlock()
+	return refused
 }

@@ -56,6 +56,23 @@ def test_match_line_decodes(decoders):
     assert event["event.action"] == "yara_match"
 
 
+def test_quarantine_writer_and_part_decode(decoders):
+    # yarascan appends what it did and who wrote the file (outcome())
+    line = (match_line("critical", path="/tmp/stage2").replace("trigger=on_access", "trigger=exec_check")
+            + ' action=quarantined writer_pid=4242 writer_image="/tmp/dropper" writer_stopped=true part=head')
+    event, name = decoders.decode_named("yara_match", line)
+    assert name == "yara_match"
+    assert event["yara.action"] == "quarantined"
+    assert event["yara.trigger"] == "exec_check"
+    assert str(event["yara.writer.pid"]) == "4242"
+    assert event["yara.writer.executable"] == "/tmp/dropper"
+    assert str(event["yara.writer.stopped"]).lower() == "true"
+    assert event["yara.part"] == "head"
+    failed = match_line("high") + ' action=detected error="quarantine_file: path is protected"'
+    event, _ = decoders.decode_named("yara_match", failed)
+    assert event["yara.action"] == "detected" and event["yara.error"] == "quarantine_file: path is protected"
+
+
 def test_windows_path_survives(decoders):
     event, _ = decoders.decode_named("yara_match", match_line("high", path="C:\\\\Users\\\\bob\\\\Downloads\\\\x.exe"))
     assert event["file.path"] == "C:\\Users\\bob\\Downloads\\x.exe"

@@ -373,6 +373,11 @@ func run(configPath string, stop <-chan struct{}) {
 	}
 	go flows.Run(flowCtx)
 
+	// The file scanner (created below) also takes every file the sensors see
+	// written, every program that starts, and on Linux checks programs before
+	// they run: scanFiles is set once it exists (nil until then: allowed).
+	var scanFiles atomic.Pointer[yarascan.Scanner]
+
 	// Execution prevention: the server's rules, enforced on Linux by the BPF
 	// LSM and/or a fanotify helper (before the program runs), on Windows by
 	// terminating a matching process as soon as the ETW sensor reports its
@@ -392,6 +397,18 @@ func run(configPath string, stop <-chan struct{}) {
 			Push:         func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
 			CacheFile:    filepath.Join(task.StateDir(cfg), "prevention_rules.json"),
 			OnTerminated: appCtl.Learn,
+			// Linux: a program outside the OS's directories is scanned by the
+			// file engines before it may run (group policy exec_scan)
+			ExecScan: func(path, via string) bool {
+				sc := scanFiles.Load()
+				if sc == nil || polStore.Current().Settings.Excluded(policy.ScopeYara,
+					policy.Match{Path: path, Image: path}) {
+					return false
+				}
+				ctx, cancel := context.WithTimeout(flowCtx, 30*time.Second)
+				defer cancel()
+				return sc.CheckExec(ctx, path, via)
+			},
 		}); err != nil {
 			slog.Warn("execution prevention unavailable", "err", err)
 		} else {
@@ -420,8 +437,22 @@ func run(configPath string, stop <-chan struct{}) {
 	// heuristics fed by the file sensors below, and the precursors
 	// (shadow copies deleted, boot recovery off, BYOVD, security products
 	// stopped) fed by the process starts (procexec / ETW).
-	var onFile func(linsensor.FileEvent)
 	var guard *ransomguard.Guard
+	onFile := func(e linsensor.FileEvent) {
+		if guard != nil {
+			guard.Observe(e)
+		}
+		if sc := scanFiles.Load(); sc != nil {
+			switch e.Action {
+			case "create", "write", "rename":
+				path := e.Path
+				if e.HostPath != "" { // PrivateTmp, containers: the file as the host has it
+					path = e.HostPath
+				}
+				sc.ObserveFile(path, yarascan.Writer{PID: e.PID, Image: e.Image})
+			}
+		}
+	}
 	if !cfg.Ransomware.Disabled {
 		opts := ransomguard.Options{
 			Push:          func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
@@ -438,7 +469,6 @@ func run(configPath string, stop <-chan struct{}) {
 		opts.IsolateFunc = isolate
 		guard = ransomguard.New(opts)
 		go guard.Run(flowCtx)
-		onFile = guard.Observe
 		hardenSafeMode()
 	}
 
@@ -466,7 +496,7 @@ func run(configPath string, stop <-chan struct{}) {
 	// and a BTF-enabled kernel; logs a warning and continues without it otherwise)
 	// Producers are stopped explicitly at shutdown, before the durable journal closes.
 	var stopProducers []func()
-	if procMon, err := procexec.StartWith(buf, linuxExecFeed(scripts, guard, projects)); err != nil {
+	if procMon, err := procexec.StartWith(buf, linuxExecFeed(scripts, guard, projects, &scanFiles)); err != nil {
 		slog.Warn("procexec monitor unavailable, continuing without it", "err", err)
 		if runtime.GOOS == "linux" {
 			sensorstat.Default.SetRunning(sensorstat.ProcExec, false, err.Error())
@@ -530,7 +560,7 @@ func run(configPath string, stop <-chan struct{}) {
 			slog.Info("ETW sensor off: Sysmon is installed (set etw.mode: on to run both)")
 		} else if sensor, err := winsensor.StartWith(buf, winsensor.Options{
 			Disabled: cfg.ETW.DisabledEvents, OnFile: windowsFileFeed(onFile, projects),
-			OnProcess: windowsProcessFeed(preventer), OnCommandLine: windowsCommandFeed(guard),
+			OnProcess: windowsProcessFeed(preventer, &scanFiles), OnCommandLine: windowsCommandFeed(guard),
 			OnScript: func(a winsensor.AMSIScript) {
 				scripts.Offer(scriptscan.Script{PID: a.PID, Image: a.Image, App: a.App, Name: a.Name, Content: a.Content})
 				if guard != nil { // what the script really ran: the precursor PowerShell rules
@@ -573,6 +603,9 @@ func run(configPath string, stop <-chan struct{}) {
 	malStore.OnChange = func(set *malhash.Set) {
 		if preventer != nil {
 			preventer.SetKnownMalware(set, malStore.File())
+		}
+		if sc := scanFiles.Load(); sc != nil {
+			sc.Invalidate() // new hashes: recent files are checked again
 		}
 	}
 	if preventer != nil && malStore.Current().Active() {
@@ -690,7 +723,16 @@ func run(configPath string, stop <-chan struct{}) {
 			s := polStore.Current().Settings
 			return !s.YaraOnAccess || s.Excluded(policy.ScopeYara, policy.Match{Path: path, Image: path})
 		},
+		// group policy yara_action: quarantine at or above a severity
+		Action:        func(string) (string, string) { return polStore.Current().Settings.YaraOutcome() },
+		Quarantine:    quarantine,
+		IsQuarantined: func(path string) bool { return task.IsQuarantined(unpack.Outer(path)) },
+		OnQuarantined: stopDropper,
 	})
+	scanFiles.Store(yaraScanner)
+	if preventer != nil {
+		preventer.SetExecScan(polStore.Current().Settings.ExecScanOn())
+	}
 	go yaraScanner.SyncLoop(flowCtx, c)
 
 	// Quick / full / custom scans of the disk: on request (task file_scan)
@@ -726,9 +768,14 @@ func run(configPath string, stop <-chan struct{}) {
 		go projects.Run(flowCtx)
 	}
 	if !cfg.Yara.Disabled {
+		// files left unscanned (a full queue) count as lost in sensor_health:
+		// flooding a folder to hide a payload raises an alert
+		sensorstat.Default.SetLost(sensorstat.FileScan, yaraScanner.Lost)
+		sensorstat.Default.SetRunning(sensorstat.FileScan, true, "")
 		go func() {
 			if err := yaraScanner.Run(flowCtx); err != nil {
 				slog.Warn("yara on-access scanning unavailable", "err", err)
+				sensorstat.Default.SetRunning(sensorstat.FileScan, false, err.Error())
 			}
 		}()
 	}
@@ -1094,6 +1141,7 @@ func mustHostname() string {
 func applyPolicy(s policy.Settings, pm *prevent.Manager, n *notify.Notifier, g *ransomguard.Guard) {
 	if pm != nil {
 		pm.SetGate(!s.PreventionEnabled, append(s.For(policy.ScopePrevention), s.For(policy.ScopeMalware)...))
+		pm.SetExecScan(s.ExecScanOn())
 	}
 	n.SetEnabled(s.NotifyUser)
 	if g != nil {
@@ -1113,13 +1161,17 @@ func applyPolicy(s policy.Settings, pm *prevent.Manager, n *notify.Notifier, g *
 }
 
 // windowsProcessFeed hands the ETW sensor's process starts to execution
-// prevention; nil when prevention is off.
-func windowsProcessFeed(pm *prevent.Manager) func(winsensor.ProcessStart) {
-	if pm == nil {
-		return nil
-	}
+// prevention (nil: off) and to the file scanner, which scans each new
+// program ahead of every other file: Windows has no veto before a program
+// runs, so a program the scan quarantines is stopped right after it starts.
+func windowsProcessFeed(pm *prevent.Manager, scan *atomic.Pointer[yarascan.Scanner]) func(winsensor.ProcessStart) {
 	return func(p winsensor.ProcessStart) {
-		pm.ObserveExec(prevent.ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image, ParentImage: p.ParentImage})
+		if pm != nil {
+			pm.ObserveExec(prevent.ProcessStart{PID: p.PID, PPID: p.PPID, Image: p.Image, ParentImage: p.ParentImage})
+		}
+		if sc := scan.Load(); sc != nil {
+			sc.ScanExec(p.Image, "")
+		}
 	}
 }
 
@@ -1137,11 +1189,17 @@ func windowsCommandFeed(g *ransomguard.Guard) func(winsensor.ProcessStart) {
 }
 
 // linuxExecFeed hands the eBPF exec events to the script scanner, the
-// anti-ransomware precursor checks (nil guard: off) and the project scanner
-// (nil: off).
-func linuxExecFeed(scripts *scriptscan.Scanner, g *ransomguard.Guard, projects *projscan.Scanner) func(procexec.Exec) {
+// anti-ransomware precursor checks (nil guard: off), the project scanner
+// (nil: off) and the file scanner: a program the pre-exec check did not see
+// (fanotify unavailable, or it answered too late) is scanned right after it
+// starts, read through /proc/<pid>/exe; one it checked is not read again.
+func linuxExecFeed(scripts *scriptscan.Scanner, g *ransomguard.Guard, projects *projscan.Scanner,
+	scan *atomic.Pointer[yarascan.Scanner]) func(procexec.Exec) {
 	return func(ex procexec.Exec) {
 		scripts.OfferExec(ex.PID, ex.Image, ex.Args)
+		if sc := scan.Load(); sc != nil {
+			sc.ScanExec(ex.Image, fmt.Sprintf("/proc/%d/exe", ex.PID))
+		}
 		if projects != nil && projscan.Interesting(ex.Image) {
 			// git clone without a target and npm install act on the working directory
 			cwd, _ := os.Readlink(fmt.Sprintf("/proc/%d/cwd", ex.PID))
@@ -1175,6 +1233,30 @@ func windowsFileFeed(onFile func(linsensor.FileEvent), projects *projscan.Scanne
 			}
 		}
 	}
+}
+
+// stopDropper stops the program that wrote a file the scanner quarantined,
+// when that program itself runs from where dropped payloads land (temp,
+// downloads, shared memory): a stage-one dropper. A browser, archiver or
+// other program installed elsewhere is left running; the yara_match line
+// names it as the writer either way. kill_process's guards apply.
+func stopDropper(path string, w yarascan.Writer) bool {
+	if w.PID == 0 || !yarascan.DropperLocation(w.Image) {
+		return false
+	}
+	if runtime.GOOS == "linux" { // the pid still runs that program (no reuse)
+		if exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", w.PID)); err != nil ||
+			strings.TrimSuffix(exe, " (deleted)") != w.Image {
+			return false
+		}
+	}
+	if err := task.StopProcess(int(w.PID)); err != nil {
+		slog.Warn("yara: dropper not stopped", "file", path, "writer_pid", w.PID, "writer", w.Image, "err", err)
+		return false
+	}
+	slog.Warn("yara: stopped the program that dropped a quarantined file", "file", path, "writer_pid", w.PID,
+		"writer", w.Image)
+	return true
 }
 
 func hasString(list []string, s string) bool {

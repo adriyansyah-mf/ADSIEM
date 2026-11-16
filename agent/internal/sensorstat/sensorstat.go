@@ -21,6 +21,9 @@ const (
 	ProcExec  = "procexec"  // Linux: eBPF execve
 	Netwatch  = "netwatch"  // Linux: eBPF connect/accept/bind/DNS, or the ss snapshot fallback
 	LinSensor = "linsensor" // Linux: eBPF file, module, ptrace, privilege, memfd, exit
+	// FileScan: the on-access file scanner (internal/yarascan); its lost
+	// count is files it had to leave unscanned (a full queue)
+	FileScan = "file_scan"
 )
 
 // Stat is one sensor's state in the heartbeat.

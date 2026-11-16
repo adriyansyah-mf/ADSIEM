@@ -1,6 +1,11 @@
-# On-access YARA match from the agent (agent/internal/yarascan): a new or
-# changed file in a risky directory matched one of the server's YARA
-# rules. severity comes from the rule's meta (severity, or score 0-100).
+# YARA match from the agent (agent/internal/yarascan): a new or changed file
+# in a watched folder, a program or script a file sensor saw written
+# anywhere, a program starting (trigger exec / exec_check), or a rescan after
+# new rules matched one of the server's YARA rules. severity comes from the
+# rule's meta (severity, or score 0-100). action is detected or quarantined
+# (group policy yara_action); writer_* name the process that wrote the file
+# when a sensor saw it, writer_stopped that it was stopped as the dropper;
+# part is head or tail for a file too large to scan whole.
 name: yara_match
 log_type: yara_match
 type: kv
@@ -22,6 +27,13 @@ fields:
   yara.rule_id: rule_id
   yara.revision: revision
   yara.case: case
+  # what the agent did, who wrote the file, which part of a large file matched
+  yara.action: action
+  yara.error: error
+  yara.writer.pid: writer_pid
+  yara.writer.executable: writer_image
+  yara.writer.stopped: writer_stopped
+  yara.part: part
 static_fields:
   event.category: malware
   event.action: yara_match

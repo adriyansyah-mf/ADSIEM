@@ -69,6 +69,14 @@ class PolicySettings(BaseModel):
     # static ML on scanned files (EMBER model for PE, heuristic for ELF):
     # block quarantines files over the malicious threshold
     ml_action: Literal["off", "detect", "block"] = "detect"
+    # YARA match on a file (agent/internal/yarascan): detect reports it; quarantine also locks the
+    # file when the rule's severity is at least yara_quarantine_level, and stops the program that
+    # dropped it when that program itself runs from temp, downloads or shared memory
+    yara_action: Literal["detect", "quarantine"] = "detect"
+    yara_quarantine_level: Literal["high", "critical"] = "critical"
+    # Linux: a program outside the OS's directories is held at exec until the agent scanned it
+    # (fanotify, fail open after 3 s); Windows scans each new program as it starts
+    exec_scan: Literal["on", "off"] = "on"
     # indicators of attack: behaviour chains in a process tree (agent/internal/ioa),
     # reported as alerts; detect only for now (nothing is stopped)
     ioa: Literal["off", "detect"] = "detect"

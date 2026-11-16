@@ -18,6 +18,9 @@ interface Settings {
   notify_user: boolean
   script_scan: 'off' | 'detect' | 'block'
   ml_action: 'off' | 'detect' | 'block'
+  yara_action: 'detect' | 'quarantine'
+  yara_quarantine_level: 'high' | 'critical'
+  exec_scan: 'on' | 'off'
   ioa: 'off' | 'detect'
   ip_ioc: 'off' | 'detect' | 'block'
   app_control: 'off' | 'audit' | 'enforce'
@@ -186,7 +189,40 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
             <option value="off">Off</option>
           </select>
           <span className="block text-xs text-muted-foreground">
-            Scores Windows programs (PE) with a model trained on EMBER and Linux programs (ELF) with heuristics, in the YARA watched folders. Exclude false positives with the Static ML scope.
+            Scores Windows programs (PE) with a model trained on EMBER and Linux programs (ELF) with heuristics: new files in the watched folders, programs the file sensors see written anywhere, and programs as they start. Exclude false positives with the Static ML scope.
+          </span>
+        </label>
+        <div className="rounded border border-border p-3 space-y-1">
+          <label htmlFor="yara-action" className="block text-sm font-medium">YARA match on a file</label>
+          <select id="yara-action" value={s.yara_action ?? 'detect'} onChange={e => set({ yara_action: e.target.value as Settings['yara_action'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="detect">Detect: alert only</option>
+            <option value="quarantine">Quarantine: lock the file on the host</option>
+          </select>
+          {(s.yara_action ?? 'detect') === 'quarantine' && (
+            <select aria-label="Lowest rule severity quarantined" value={s.yara_quarantine_level ?? 'critical'}
+              onChange={e => set({ yara_quarantine_level: e.target.value as Settings['yara_quarantine_level'] })}
+              className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+              <option value="critical">Critical rules only</option>
+              <option value="high">High and critical rules</option>
+            </select>
+          )}
+          <span className="block text-xs text-muted-foreground">
+            Quarantine also stops the programs running the file, and the program that wrote it when that program
+            itself runs from a temp or downloads folder (a dropper). Exclude false positives with the YARA scope.
+          </span>
+        </div>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">Scan programs before they run</span>
+          <select value={s.exec_scan ?? 'on'} onChange={e => set({ exec_scan: e.target.value as Settings['exec_scan'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+          <span className="block text-xs text-muted-foreground">
+            Linux holds a program outside the system folders at start until YARA, known-malware hashes and static ML
+            have checked it (at most 3 seconds, then it runs and the check finishes in the background). Windows checks
+            each new program as it starts and stops it if the file is quarantined.
           </span>
         </label>
         <label className="rounded border border-border p-3 space-y-1">

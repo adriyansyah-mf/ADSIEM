@@ -47,22 +47,49 @@ type helperPolicy struct {
 	// the group policy: everything off, or these exclusions honoured
 	Off        bool               `json:"off,omitempty"`
 	Exclusions []policy.Exclusion `json:"exclusions,omitempty"`
+	// ScanExec: ask the agent to scan programs outside the OS's directories
+	// before they run
+	ScanExec bool `json:"scan_exec,omitempty"`
+	// ScanReply, when set, makes the line the agent's answer to a scan
+	// request rather than a policy
+	ScanReply *scanReply `json:"scan_reply,omitempty"`
 }
 
+// scanRequest asks the agent to scan a program about to run; Via is the
+// helper's descriptor for it under /proc, open until the answer comes.
+type scanRequest struct {
+	ID   uint64 `json:"id"`
+	Path string `json:"path"`
+	Via  string `json:"via"`
+	PID  int32  `json:"pid"`
+}
+
+// scanReply: Block when the agent's engines quarantined the program.
+type scanReply struct {
+	ID    uint64 `json:"id"`
+	Block bool   `json:"block"`
+}
+
+// execScanTimeout: how long a program waits for the agent's scan before it
+// is allowed unchecked (fail open; the scan still finishes, and a
+// quarantine then stops the program).
+const execScanTimeout = 3 * time.Second
+
 // helperDecision is a decision, or with Applied set the acknowledgement
-// that a policy is in force.
+// that a policy is in force, or with Scan set a scan request.
 type helperDecision struct {
-	Applied int    `json:"applied,omitempty"`
-	Index   int    `json:"index"` // -1: a known-malware hash, Label names it
-	Label   string `json:"label,omitempty"`
-	Blocked bool   `json:"blocked"`
-	Path    string `json:"path"`
-	Parent  string `json:"parent"`
-	SHA256  string `json:"sha256,omitempty"`
-	Comm    string `json:"comm"`
-	PID     uint32 `json:"pid"`
-	PPID    uint32 `json:"ppid"`
-	UID     uint32 `json:"uid"`
+	Scan    *scanRequest `json:"scan,omitempty"`
+	Applied int          `json:"applied,omitempty"`
+	Index   int          `json:"index"` // -1: a known-malware hash, Label names it
+	Label   string       `json:"label,omitempty"`
+	Blocked bool         `json:"blocked"`
+	Path    string       `json:"path"`
+	Parent  string       `json:"parent"`
+	SHA256  string       `json:"sha256,omitempty"`
+	Comm    string       `json:"comm"`
+	PID     uint32       `json:"pid"`
+	PPID    uint32       `json:"ppid"`
+	UID     uint32       `json:"uid"`
 }
 
 type helperHello struct {
@@ -94,6 +121,8 @@ func RunHelper() int {
 		write(helperHello{Error: err.Error()})
 		return 1
 	}
+	asks := newScanAsks(write)
+	eng.scan = asks.ask
 	write(helperHello{Ready: true, Mounts: len(eng.marked)})
 	in := bufio.NewScanner(os.Stdin)
 	in.Buffer(make([]byte, 1<<20), 64<<20)
@@ -102,6 +131,10 @@ func RunHelper() int {
 	for in.Scan() {
 		var msg helperPolicy
 		if err := json.Unmarshal(in.Bytes(), &msg); err != nil {
+			continue
+		}
+		if msg.ScanReply != nil {
+			asks.answer(*msg.ScanReply)
 			continue
 		}
 		p, _ := Compile(msg.Rules)
@@ -120,7 +153,7 @@ func RunHelper() int {
 		if malware != nil {
 			p = p.withMalware(malware, msg.MalwareFile)
 		}
-		p = p.withGate(msg.Off, msg.Exclusions)
+		p = p.withGate(msg.Off, msg.Exclusions).withScan(msg.ScanExec)
 		eng.setPolicy(p, msg.KernelDecides)
 		write(helperDecision{Applied: len(p.Rules) + 1})
 	}
@@ -128,11 +161,62 @@ func RunHelper() int {
 	return 0
 }
 
+// scanAsks are the helper's scan requests waiting for the agent.
+type scanAsks struct {
+	write func(any)
+	self  int
+	mu    sync.Mutex
+	next  uint64
+	wait  map[uint64]chan bool
+}
+
+func newScanAsks(write func(any)) *scanAsks {
+	return &scanAsks{write: write, self: os.Getpid(), wait: map[uint64]chan bool{}}
+}
+
+// ask sends a scan request for the program behind fd and waits for the
+// agent's verdict; answered is false when it did not come in time.
+func (a *scanAsks) ask(path string, fd, pid int32) (block, answered bool) {
+	ch := make(chan bool, 1)
+	a.mu.Lock()
+	a.next++
+	id := a.next
+	a.wait[id] = ch
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		delete(a.wait, id)
+		a.mu.Unlock()
+	}()
+	a.write(helperDecision{Scan: &scanRequest{ID: id, Path: path, Via: fmt.Sprintf("/proc/%d/fd/%d", a.self, fd),
+		PID: pid}})
+	select {
+	case b := <-ch:
+		return b, true
+	case <-time.After(execScanTimeout):
+		return false, false
+	}
+}
+
+func (a *scanAsks) answer(r scanReply) {
+	a.mu.Lock()
+	ch := a.wait[r.ID]
+	a.mu.Unlock()
+	if ch != nil {
+		select {
+		case ch <- r.Block:
+		default:
+		}
+	}
+}
+
 // fanClient drives the helper from the agent.
 type fanClient struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
+	wmu    sync.Mutex // policies and scan replies share stdin
 	report func(Decision)
+	scan   func(path, via string) bool
 
 	mu      sync.Mutex
 	policy  *Policy
@@ -140,7 +224,7 @@ type fanClient struct {
 	applied chan struct{}
 }
 
-func startFanotify(report func(Decision)) (*fanClient, error) {
+func startFanotify(report func(Decision), scan func(path, via string) bool) (*fanClient, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -160,7 +244,8 @@ func startFanotify(report func(Decision)) (*fanClient, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start fanotify helper: %w", err)
 	}
-	c := &fanClient{cmd: cmd, stdin: stdin, report: report, done: make(chan struct{}), applied: make(chan struct{}, 1)}
+	c := &fanClient{cmd: cmd, stdin: stdin, report: report, scan: scan, done: make(chan struct{}),
+		applied: make(chan struct{}, 1)}
 	dec := json.NewDecoder(stdout)
 	var hello helperHello
 	if err := dec.Decode(&hello); err != nil || !hello.Ready {
@@ -182,6 +267,10 @@ func (c *fanClient) read(dec *json.Decoder) {
 		var d helperDecision
 		if err := dec.Decode(&d); err != nil {
 			return
+		}
+		if d.Scan != nil {
+			go c.answer(*d.Scan)
+			continue
 		}
 		if d.Applied > 0 {
 			select {
@@ -209,6 +298,28 @@ func (c *fanClient) read(dec *json.Decoder) {
 	}
 }
 
+// answer runs the agent's scan for a program the helper holds and sends the
+// verdict back; no scanner (or a refused request) allows it.
+func (c *fanClient) answer(r scanRequest) {
+	block := false
+	if c.scan != nil {
+		block = c.scan(r.Path, r.Via)
+	}
+	if block {
+		slog.Warn("prevent: program refused before it ran: the file scan quarantined it", "path", r.Path, "pid", r.PID)
+	}
+	c.send(helperPolicy{ScanReply: &scanReply{ID: r.ID, Block: block}})
+}
+
+// send writes one line to the helper.
+func (c *fanClient) send(msg helperPolicy) error {
+	b, _ := json.Marshal(msg)
+	c.wmu.Lock()
+	defer c.wmu.Unlock()
+	_, err := c.stdin.Write(append(b, '\n'))
+	return err
+}
+
 // setPolicy sends the rules p was compiled from; the helper compiles the
 // same list to the same indexes.
 func (c *fanClient) setPolicy(p *Policy, kernelDecides bool) {
@@ -220,12 +331,12 @@ func (c *fanClient) setPolicy(p *Policy, kernelDecides bool) {
 		}
 		rules = append(rules, rr)
 	}
-	msg := helperPolicy{Rules: rules, KernelDecides: kernelDecides, Off: p.off, Exclusions: p.exclusions}
+	msg := helperPolicy{Rules: rules, KernelDecides: kernelDecides, Off: p.off, Exclusions: p.exclusions,
+		ScanExec: p.scanExec}
 	if p.checksMalware() && p.malwareFile != "" {
 		msg.MalwareFile = p.malwareFile
 		msg.MalwareVersion = fmt.Sprintf("%s|%s|%d|%d", p.malware.Version, p.malware.Action, p.malware.Seq, p.malware.Len())
 	}
-	b, _ := json.Marshal(msg)
 	c.mu.Lock()
 	c.policy = p
 	c.mu.Unlock()
@@ -233,7 +344,7 @@ func (c *fanClient) setPolicy(p *Policy, kernelDecides bool) {
 	case <-c.applied:
 	default:
 	}
-	if _, err := c.stdin.Write(append(b, '\n')); err != nil {
+	if err := c.send(msg); err != nil {
 		slog.Warn("prevent: fanotify helper gone", "err", err)
 		return
 	}
