@@ -20,7 +20,7 @@ Splunk/QRadar.
 | AI | Triase otomatis setiap alert, korelasi kasus dengan AI, investigator kasus otonom dengan panel review multi-agen, asisten SOC, RAG atas SOP Anda; guardrail prompt injection |
 | Respons | Editor SOAR visual (16 jenis node; keputusan AI wajib lewat approval), isolasi / kill / karantina / blok, blok USB, live response |
 | Pencarian | Log search dan event explorer, saved search yang dibagikan per tim, dashboard ala Wazuh (grid, query bar, filter, 12 jenis panel), analitik kualitas rule |
-| Audit dan pelaporan | Audit log append-only berantai hash dengan IP dan browser; incident report per kasus yang difinalisasi menjadi PDF bernomor, dan SHA-256-nya bisa diverifikasi siapa saja |
+| Audit dan pelaporan | Audit log append-only berantai hash dengan IP dan browser; incident report per kasus yang difinalisasi menjadi PDF bernomor, dan SHA-256-nya bisa diverifikasi siapa saja; laporan periode yang dibandingkan dengan periode sebelumnya, sebagai PDF bahasa Indonesia atau Inggris, beserta riwayatnya |
 | Penyimpanan | PostgreSQL 16 (pgvector) · Elasticsearch 8 · Redis 7 |
 
 ## Untuk Juri — Kartika Cyber Hackathon 2026
@@ -323,8 +323,16 @@ ke model Ollama lokal supaya inferensi tetap on-prem.
 - **Knowledge dan SOP:** unggah dokumen SOP dan tulis artikel knowledge. Keduanya di-embed
   untuk retrieval, dan PayloadsAllTheThings tersinkron setiap minggu. Model embedding sudah
   ada di dalam image, jadi retrieval berjalan offline.
-- **Laporan:** laporan eksekutif dan ekspor PDF dengan pilihan bahasa, termasuk Bahasa
-  Indonesia. Ringkasan email mingguan bisa menyertakan narasi AI.
+- **Laporan periode** (**Reports → Period summary**): pilih rentang waktu (7 atau 30 hari
+  terakhir, bulan ini atau bulan lalu, atau rentang sendiri hingga 400 hari) dan lihat
+  perbandingannya dengan periode sebelumnya: alert per severity dan per hari, rule, host, IP
+  sumber, dan teknik MITRE teratas, hasil triase AI, rata-rata waktu acknowledge dan
+  penyelesaian, kasus yang dibuka dan ditutup, kasus penting, agen yang online, kerentanan KEV
+  yang masih terbuka, dan incident report yang difinalisasi. **Generate PDF** menulisnya dalam
+  bahasa Indonesia atau Inggris dengan ringkasan eksekutif AI yang disusun dari angka-angka
+  tersebut, dan setiap hasilnya tersimpan di riwayat laporan. Ringkasan email mingguan bisa
+  menyertakan narasi AI. Lihat
+  [`docs/operations/periodic-reports.md`](docs/operations/periodic-reports.md).
 - **Incident report** (di halaman kasus, **Incident report → Write draft**): laporan untuk
   pihak di luar SOC, dalam bahasa Indonesia atau Inggris. Isinya dibangun dari kasus
   (ringkasan, cakupan, timeline, indikator, temuan investigasi terverifikasi yang mengutip
@@ -1240,7 +1248,7 @@ Runbook ada di [`docs/operations/`](docs/operations/) (berbahasa Inggris):
 | AI | `ai-guardrails`, `ai-skills`, `ai-triage-retry` |
 | Ingest dan agen | `agent-config-recommended`, `syslog-ingest`, `linux-sensor`, `windows-sensor`, `agent-self-update`, `agent-tamper` |
 | Evidence agen | `agent-evidence-recovery`, `agent-evidence-validation`, `agent-evidence-progress` |
-| Platform | `audit-log`, `incident-reports`, `backup-restore`, `token-lifecycle` |
+| Platform | `audit-log`, `incident-reports`, `periodic-reports`, `backup-restore`, `token-lifecycle` |
 
 Referensi desain: [`docs/CASE_CORRELATION.md`](docs/CASE_CORRELATION.md) (model kasus berbasis
 IOC), [`docs/llm-gateway-spec.md`](docs/llm-gateway-spec.md),

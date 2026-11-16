@@ -19,7 +19,7 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 | AI | Auto-triage of every alert, AI case correlation, autonomous case investigator with a multi-agent review panel, SOC assistant, RAG over your SOPs; prompt-injection guardrails |
 | Response | Visual SOAR editor (16 node types; AI decisions need an approval gate), isolate / kill / quarantine / block, USB block, live response |
 | Search | Log search and event explorer, saved searches shared per team, Wazuh-style dashboards (grid, query bar, filters, 12 panel types), rule quality analytics |
-| Audit and reporting | Append-only, hash-chained audit log with IP and browser; incident reports per case, finalized into a numbered PDF whose SHA-256 anyone can verify |
+| Audit and reporting | Append-only, hash-chained audit log with IP and browser; incident reports per case, finalized into a numbered PDF whose SHA-256 anyone can verify; period reports compared with the previous period, as a PDF in Indonesian or English, with history |
 | Storage | PostgreSQL 16 (pgvector) · Elasticsearch 8 · Redis 7 |
 
 ## For the Judges — Kartika Cyber Hackathon 2026
@@ -316,8 +316,14 @@ model to keep inference on-prem.
 - **Knowledge and SOPs:** upload SOP documents and write knowledge articles. Both are embedded
   for retrieval, and PayloadsAllTheThings syncs weekly. The embedding model ships in the
   image, so retrieval works offline.
-- **Reports:** executive reports and PDF export with a language selector, including Bahasa
-  Indonesia. A weekly email digest can include an AI narrative.
+- **Period reports** (**Reports → Period summary**): pick a range (last 7 or 30 days, this or
+  last month, or custom up to 400 days) and see it compared with the period just before:
+  alerts by severity and per day, top rules, hosts, source IPs and MITRE techniques, AI triage
+  outcomes, mean time to acknowledge and to resolve, cases opened and closed, notable cases,
+  agents online, open KEV vulnerabilities, and incident reports finalized. **Generate PDF**
+  writes it in Bahasa Indonesia or English with an AI executive summary built from the numbers,
+  and keeps every run in the report history. A weekly email digest can include an AI
+  narrative. See [`docs/operations/periodic-reports.md`](docs/operations/periodic-reports.md).
 - **Incident reports** (on a case, **Incident report → Write draft**): a report for people
   outside the SOC, in Bahasa Indonesia or English. It is built from the case (summary, scope,
   timeline, indicators, verified investigation findings citing `[E#]` evidence, actions taken,
@@ -1205,7 +1211,7 @@ Runbooks live in [`docs/operations/`](docs/operations/):
 | AI | `ai-guardrails`, `ai-skills`, `ai-triage-retry` |
 | Ingest and agents | `agent-config-recommended`, `syslog-ingest`, `linux-sensor`, `windows-sensor`, `agent-self-update`, `agent-tamper` |
 | Agent evidence | `agent-evidence-recovery`, `agent-evidence-validation`, `agent-evidence-progress` |
-| Platform | `audit-log`, `incident-reports`, `backup-restore`, `token-lifecycle` |
+| Platform | `audit-log`, `incident-reports`, `periodic-reports`, `backup-restore`, `token-lifecycle` |
 
 Design references: [`docs/CASE_CORRELATION.md`](docs/CASE_CORRELATION.md) (IOC-keyed case model),
 [`docs/llm-gateway-spec.md`](docs/llm-gateway-spec.md), [`docs/PROJECT_OVERVIEW.md`](docs/PROJECT_OVERVIEW.md),
