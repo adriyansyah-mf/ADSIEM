@@ -1,0 +1,21 @@
+# The agent's DNS sinkhole (agent/internal/dnssink): a name under a blocked
+# domain answered with the block page's address (event=dns_sinkhole, once a
+# minute per name), and the sinkhole's state when it changes
+# (event=dns_sinkhole_state: mode, domains routed, an error).
+name: dns_sinkhole
+log_type: dns_sinkhole
+type: kv
+priority: 10
+enabled: true
+match: 'event=dns_sinkhole'
+fields:
+  dns.question.name: name
+  dns.question.type: qtype
+  dns_sinkhole.blocked: blocked
+  dns_sinkhole.mode: mode
+  dns_sinkhole.domains: domains
+  dns_sinkhole.routed: routed
+  dns_sinkhole.error: error
+  event.action: event
+static_fields:
+  event.category: network

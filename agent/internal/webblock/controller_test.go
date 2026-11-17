@@ -565,3 +565,22 @@ func TestRecheckRewriteMeansTampered(t *testing.T) {
 		t.Fatal("non-forced change did not clear it")
 	}
 }
+
+func TestSubdomainsOfSinkholedDomainsReachThePage(t *testing.T) {
+	s := &snapshot{selected: map[string]bool{"evil.com": true, "other.org": true}}
+	c := &Controller{}
+	c.snap.Store(s)
+	if _, ok := c.base(s, "cdn.evil.com"); ok {
+		t.Fatal("without the sinkhole only exact names and www.")
+	}
+	c.SetSubdomains([]string{"evil.com"})
+	if d, ok := c.base(s, "a.b.cdn.EVIL.com."); !ok || d != "evil.com" {
+		t.Fatalf("subdomain: %q %v", d, ok)
+	}
+	if _, ok := c.base(s, "x.other.org"); ok {
+		t.Fatal("a domain the sinkhole does not route keeps exact matching")
+	}
+	if _, ok := c.base(s, "evil.com.attacker.net"); ok {
+		t.Fatal("a suffix in the middle is not a parent")
+	}
+}
