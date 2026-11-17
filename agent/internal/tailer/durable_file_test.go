@@ -167,7 +167,10 @@ func (r *running) stop(t *testing.T) {
 
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	// 15 s: the Windows runner tails slowly (each durable tail test there
+	// takes 2-3 s), and TestDurableTailBatchFailureResumesAtTheFailedLine
+	// timed out at 5 s with its 60 lines on the way (PR #222).
+	deadline := time.Now().Add(15 * time.Second)
 	for !cond() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
