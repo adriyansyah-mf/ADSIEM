@@ -91,6 +91,20 @@ def test_browser_policy_validation():
         agent_policy.PolicySettings.model_validate({"browser_policy": "block"})
 
 
+def test_ransomware_rollback_validation():
+    s = agent_policy.PolicySettings.model_validate({})
+    assert s.ransomware_rollback == "off" and s.rollback_paths == []
+    s = agent_policy.PolicySettings.model_validate({"ransomware_rollback": "auto",
+                                                    "rollback_paths": ["/srv/data", " D:\\Shares\\Finance ", "",
+                                                                       "/srv/data"]})
+    assert s.rollback_paths == ["/srv/data", "D:\\Shares\\Finance"]
+    for bad in (["relative/path"], ["/home/*/Documents"], ["/"], ["C:\\"]):
+        with pytest.raises(ValidationError):
+            agent_policy.PolicySettings.model_validate({"rollback_paths": bad})
+    with pytest.raises(ValidationError):
+        agent_policy.PolicySettings.model_validate({"ransomware_rollback": "on"})
+
+
 def test_yara_action_and_exec_scan_validation():
     # a YARA match is only reported unless a group quarantines; critical is the default threshold
     d = agent_policy.PolicySettings.model_validate({})

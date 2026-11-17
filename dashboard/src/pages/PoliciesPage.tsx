@@ -15,6 +15,8 @@ interface Settings {
   yara_on_access: boolean
   ransomware_mode: 'off' | 'report' | 'stop'
   ransomware_isolate: boolean
+  ransomware_rollback: 'off' | 'auto'
+  rollback_paths: string[]
   notify_user: boolean
   script_scan: 'off' | 'detect' | 'block'
   ml_action: 'off' | 'detect' | 'block'
@@ -181,6 +183,28 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
             <option value="off">Off</option>
           </select>
         </label>
+        <div className="rounded border border-border p-3 space-y-1">
+          <label htmlFor="ransomware-rollback" className="block text-sm font-medium">Ransomware rollback</label>
+          <select id="ransomware-rollback" value={s.ransomware_rollback ?? 'off'}
+            onChange={e => set({ ransomware_rollback: e.target.value as Settings['ransomware_rollback'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="off">Off</option>
+            <option value="auto">Auto: hourly snapshots, restore after a stopped attack</option>
+          </select>
+          <label htmlFor="rollback-paths" className="block text-xs text-muted-foreground pt-1">
+            Folders to keep, one per line (empty: each user's Documents, Desktop, Pictures and Downloads; on Linux
+            also /srv and /var/www)
+          </label>
+          <textarea id="rollback-paths" rows={2} value={(s.rollback_paths ?? []).join('\n')}
+            onChange={e => set({ rollback_paths: e.target.value.split('\n') })}
+            onBlur={e => set({ rollback_paths: e.target.value.split('\n').map(x => x.trim()).filter(Boolean) })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm font-mono" />
+          <span className="block text-xs text-muted-foreground">
+            Needs ransomware protection on Stop. When it kills a process, the files it changed in the folders it
+            wrote in come back from the last snapshot before the attack; the encrypted copies are moved aside, not
+            deleted. Uses up to 5 GB of disk on the endpoint.
+          </span>
+        </div>
         <label className="rounded border border-border p-3 space-y-1">
           <span className="block text-sm font-medium">Static ML (unknown files)</span>
           <select value={s.ml_action ?? 'detect'} onChange={e => set({ ml_action: e.target.value as Settings['ml_action'] })}

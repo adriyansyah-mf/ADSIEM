@@ -1,0 +1,29 @@
+# Ransomware rollback on the agent (agent/internal/rollback): what a restore
+# put back after RansomGuard stopped a process (event=ransomware_rollback),
+# and the hourly snapshots (event=rollback_snapshot: one success a day, every
+# failure).
+name: ransomware_rollback
+log_type: ransomware_rollback
+type: kv
+priority: 10
+enabled: true
+match: 'event='
+fields:
+  event.action: event
+  process.pid: pid
+  process.executable: image
+  rollback.since: since
+  rollback.snapshot: snapshot
+  rollback.restored: restored
+  rollback.displaced: displaced
+  rollback.failed: failed
+  file.path: sample
+  rollback.files: files
+  rollback.copied: copied
+  rollback.linked: linked
+  rollback.bytes: bytes
+  rollback.skipped: skipped
+  rollback.removed: removed
+  error.message: error
+static_fields:
+  event.category: malware

@@ -12,7 +12,7 @@ Splunk/QRadar.
 | | |
 |---|---|
 | Agen endpoint | Go, Linux (eBPF) + Windows (ETW), rilis terbaru **agent-v1.28.0**, self-update bertanda tangan, kontrol USB storage |
-| Konten deteksi | **256** rule Sigma dalam 247 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
+| Konten deteksi | **258** rule Sigma dalam 249 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
 | OT / ICS | Modbus/TCP dan DNP3 di-decode dari Suricata; rule MITRE ATT&CK for ICS untuk pemrograman PLC, stop/restart, listen-only, scan, eksposur ke internet |
 | Analitik perilaku | Baseline host (parent → child yang jarang, executable baru yang jarang, beaconing), UEBA untuk user, IP, host, dan proses, skor risiko entitas, graf lateral movement |
 | Kerentanan | CVE paket per host (OSV.dev per distro) dan build Windows terhadap perbaikan KB Microsoft, diurutkan menurut CISA KEV, FIRST EPSS, dan tingkat keparahan |
@@ -168,7 +168,7 @@ evidence yang durable menjaga deteksi tetap ada walaupun agen crash atau host re
 | Laporan kesehatan sensor (sensor berhenti, diam, dibutakan, event hilang) | ✓ termasuk kanari eBPF | ✓ termasuk event ETW yang hilang | `internal/sensorstat`, `linsensor` |
 | Pengumpulan log | Tailing file dan glob dengan dukungan rotasi | File + channel Event Log (`eventlog:<channel>`), Sysmon | `internal/tailer`, `winevent` |
 | Rantai perilaku IOA | ✓ | ✓ | `internal/ioa` (agen 1.23+) |
-| Anti-ransomware **RansomGuard** | ✓ file kanari, rule prekursor, heuristik entropi dan modifikasi massal, kill process tree atau isolasi | ✓ | `internal/ransomguard` |
+| Anti-ransomware **RansomGuard** | ✓ file kanari, rule prekursor, heuristik entropi dan modifikasi massal, kill process tree atau isolasi; **rollback**: snapshot folder pengguna tiap jam, file yang diubah proses yang dihentikan dikembalikan | ✓ | `internal/ransomguard`, `internal/rollback` |
 | ML statis (PE + ELF; ELF di `/tmp`, `/var/tmp`, atau `/dev/shm` dinilai dengan ambang lebih ketat) | ✓ | ✓ | `internal/mlscore`, `mlscan` |
 | YARA (pure Go, on-access, seluruh disk, memori) | ✓ | ✓ | `internal/yara`, `yarascan`, `fullscan`, `memscan` |
 | Scan script, arsip, dan dokumen | ✓ | ✓ | `internal/scriptscan`, `unpack` |
@@ -233,7 +233,7 @@ tidak bisa begitu saja menghentikannya.
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   perbandingan numerik), keyword, kondisi boolean, window threshold dan korelasi, sekuens
   `after:`, dan suppression per entitas.
-- **256 rule bawaan** (247 file): Linux, Windows, rantai IOA, serangan web (SQLi, XSS, SSRF,
+- **258 rule bawaan** (249 file): Linux, Windows, rantai IOA, serangan web (SQLi, XSS, SSRF,
   LFI, RCE, Log4Shell, XXE, GraphQL, WordPress), jaringan/firewall, Suricata/Zeek, OT/ICS,
   Active Directory, ransomware, ML, YARA, USB storage, credential access, penyamaran sebagai
   kernel thread (proses bernama `[kworker/…]` yang membuat koneksi keluar atau di-exec), App

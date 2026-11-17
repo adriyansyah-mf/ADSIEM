@@ -75,6 +75,14 @@ jobs:
         shell: pwsh
         run: go test ./agent/internal/hygiene -count=1 -v
 
+      # Ransomware rollback with the ETW sensor: snapshots, the guard kills a
+      # real encrypting process, the documents come back (NTFS hard links).
+      - name: Ransomware rollback end-to-end
+        shell: pwsh
+        env:
+          ROLLBACK_E2E: '1'
+        run: go test ./agent/internal/rollback -count=1 -v
+
       # App Control (WDAC) on the disposable runner: the agent's policy, built
       # from AllowAll plus a path deny rule and activated in enforce mode,
       # stops a copied whoami.exe before it runs; the policy is removed after.

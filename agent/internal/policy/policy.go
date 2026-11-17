@@ -51,8 +51,14 @@ type Settings struct {
 	YaraOnAccess      bool   `json:"yara_on_access"`
 	RansomwareMode    string `json:"ransomware_mode"` // off, report, stop
 	RansomwareIsolate bool   `json:"ransomware_isolate"`
-	NotifyUser        bool   `json:"notify_user"`
-	ScriptScan        string `json:"script_scan"` // off, detect, block
+	// RansomwareRollback: "auto" keeps hourly snapshots of RollbackPaths
+	// (empty: internal/rollback DefaultRoots) and restores what a process
+	// changed once RansomGuard stopped it; "off" (default, and empty from an
+	// older server) takes none.
+	RansomwareRollback string   `json:"ransomware_rollback"`
+	RollbackPaths      []string `json:"rollback_paths"`
+	NotifyUser         bool     `json:"notify_user"`
+	ScriptScan         string   `json:"script_scan"` // off, detect, block
 	// MLAction: the static ML check of scanned files (internal/mlscan):
 	// off, detect or block (quarantine malicious files); empty (a server
 	// from before it) is detect.

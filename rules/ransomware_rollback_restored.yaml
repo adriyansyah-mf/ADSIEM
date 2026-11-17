@@ -1,0 +1,17 @@
+title: Ransomware Changes Rolled Back
+id: rule-ransomware-rollback-restored
+description: >-
+  After ransomware protection stopped a process (see the Ransomware Activity alert for
+  process.executable), the agent put back the files it had changed from the last snapshot
+  taken before it started (rollback.snapshot): rollback.restored files restored,
+  rollback.displaced encrypted or renamed copies moved to the agent's displaced folder (kept,
+  not deleted), rollback.failed not restored. Check the failed ones and files outside the
+  protected folders; the attack itself still needs investigating.
+detection:
+  selection:
+    event.action: ransomware_rollback
+  condition: selection
+level: medium
+tags:
+  - attack.impact
+  - attack.t1486

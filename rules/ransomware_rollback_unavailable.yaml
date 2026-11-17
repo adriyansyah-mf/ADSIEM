@@ -1,0 +1,20 @@
+title: Ransomware Rollback Could Not Restore
+id: rule-ransomware-rollback-unavailable
+description: >-
+  Ransomware protection stopped a process but the rollback restored nothing (no snapshot from
+  before the attack; error.message says why), or an hourly snapshot failed (event.action
+  rollback_snapshot with an error). Files the process changed have to come from backups, and
+  until snapshots work again there is nothing to roll back to.
+detection:
+  restore_nothing:
+    event.action: ransomware_rollback
+    rollback.restored: '0'
+  snapshot:
+    event.action: rollback_snapshot
+  failed:
+    error.message|re: '.'
+  condition: restore_nothing or (snapshot and failed)
+level: high
+tags:
+  - attack.impact
+  - attack.t1486
