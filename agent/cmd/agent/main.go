@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/siem-platform/agent/internal/appcontrol"
+	"github.com/siem-platform/agent/internal/browserpolicy"
 	"github.com/siem-platform/agent/internal/buffer"
 	"github.com/siem-platform/agent/internal/client"
 	"github.com/siem-platform/agent/internal/config"
@@ -675,6 +676,13 @@ func run(configPath string, stop <-chan struct{}) {
 	} else {
 		polStore.OnChange(func(*policy.Policy) { usbGuard.Reapply() })
 	}
+	// Managed browser policies (group policy browser_policy): DNS over HTTPS
+	// off and proxy/VPN extensions blocked, so the web block holds in the
+	// browser too. Applied off the policy store's goroutine.
+	browsers := &browserpolicy.Controller{Impl: browserpolicy.New(task.StateDir(cfg)),
+		Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) }}
+	applyBrowsers := func(p *policy.Policy) { go browsers.Apply(p.Settings.BrowserPolicy == "on") }
+	polStore.OnChange(applyBrowsers) // also runs it now, with the current policy
 	go polStore.SyncLoop(flowCtx, c)
 
 	// Static ML on the files the on-access scanner reads: models trained on

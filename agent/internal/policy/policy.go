@@ -80,6 +80,11 @@ type Settings struct {
 	// every device) or block (cut off what USBAllow does not name); empty
 	// (a server from before it) is audit.
 	USBStorage string `json:"usb_storage"`
+	// BrowserPolicy: "on" puts managed browser policies in place
+	// (internal/browserpolicy: DNS over HTTPS off, proxy extensions blocked)
+	// so the web block cannot be bypassed from the browser; "off" (default,
+	// and empty from a server before it) removes the agent's ones.
+	BrowserPolicy string `json:"browser_policy"`
 	// USBAllow: VID:PID (a model) or VID:PID:SERIAL (one unit), hex.
 	USBAllow         []string    `json:"usb_allow"`
 	QuickScanTime    string      `json:"quick_scan_time"`

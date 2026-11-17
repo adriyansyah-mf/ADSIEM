@@ -93,6 +93,11 @@ class PolicySettings(BaseModel):
     usb_storage: Literal["off", "audit", "block"] = "audit"
     # VID:PID (every unit of a model) or VID:PID:SERIAL (one unit), hex as lsusb / Device Manager show it
     usb_allow: list[str] = Field(default_factory=list, max_length=MAX_USB_ALLOW)
+    # managed browser policies (agent/internal/browserpolicy): on turns DNS over HTTPS off
+    # (Chrome, Edge, Chromium, Brave, Firefox) and blocks extensions asking for the proxy
+    # permission (VPN/proxy extensions, Chromium browsers), so the web block holds in the
+    # browser; an administrator's own values are kept. off removes the agent's ones.
+    browser_policy: Literal["off", "on"] = "off"
     # scheduled file scans (agent local time): quick every day at HH:MM;
     # full on "<mon..sun> HH:MM" or "daily HH:MM". "" is off.
     quick_scan_time: str = Field(default="", max_length=32)
