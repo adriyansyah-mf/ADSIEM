@@ -70,3 +70,43 @@ def normalize(value: str, allow_private: bool = False) -> str:
     if not allow_private and (addr.is_private or not addr.is_global):
         raise IPError(f"{net} is private address space (only an analyst can block it)")
     return str(net)
+
+
+async def block_until(db, values, group: str, source: str, reason: str, expires, *,
+                      alert_id=None, allow_private: bool = False) -> tuple[list[str], list[str]]:
+    """Put each address on `group`'s blocklist until `expires` through UPSERT_SQL,
+    so a timed block never shortens a longer or permanent entry of the same source.
+    The per-host block paths (case remediation, SOAR response block_ip and
+    case_block_ips) call it so their blocks show on the IP Blocklist page.
+    Takes the seq lock; the caller commits. Returns (blocked CIDRs, refused values)."""
+    from sqlalchemy import text  # imported here: the module stays stdlib-only at import
+
+    cidrs, skipped = set(), []
+    for value in values:
+        try:
+            cidrs.add(normalize(value, allow_private=allow_private))
+        except IPError:
+            skipped.append(str(value))
+    if cidrs:
+        await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": IP_BLOCK_SEQ_LOCK})
+        for cidr in sorted(cidrs):
+            await db.execute(text(UPSERT_SQL), {"cidr": cidr, "group": group, "source": source,
+                                                "reason": reason[:500], "alert": alert_id, "expires": expires})
+    return sorted(cidrs), skipped
+
+
+async def unblock(db, value: str, group: str, source: str) -> bool:
+    """Remove `source`'s active entry for one address in `group`; entries of other
+    sources (a manual block) stay. Takes the seq lock; the caller commits."""
+    from sqlalchemy import text
+
+    try:
+        cidr = normalize(value, allow_private=True)
+    except IPError:
+        return False
+    await db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": IP_BLOCK_SEQ_LOCK})
+    res = await db.execute(text(
+        "UPDATE ip_block_entries SET status = 'removed', seq = nextval('ip_block_seq'), updated_at = now() "
+        "WHERE group_id = :group AND cidr = :cidr AND source = :source AND status = 'active'"),
+        {"group": group, "cidr": cidr, "source": source})
+    return bool(res.rowcount)

@@ -191,12 +191,34 @@ async def _queue_agent_task(ctx: dict, hostname: str, group_id: str, op: str, ta
         db.add(task)
         if op in ("isolate_host", "unisolate_host"):
             await db.execute(update(Agent).where(Agent.id == agent.id).values(is_isolated=op == "isolate_host"))
+        blocklist = await _sync_blocklist(db, ctx, group_id, op, task_params)
         await db.commit()
         task_id = str(task.id)
 
     await _note(ctx, f"**SOAR {op}** queued on `{hostname}` {json.dumps(task_params) if task_params else ''}".strip())
-    return NodeResult("main", {"task_id": task_id, "agent_id": str(agent.id), "hostname": hostname,
-                               "operation": op, "params": task_params})
+    data = {"task_id": task_id, "agent_id": str(agent.id), "hostname": hostname, "operation": op, "params": task_params}
+    if blocklist is not None:
+        data["blocklist"] = blocklist
+    return NodeResult("main", data)
+
+
+async def _sync_blocklist(db, ctx: dict, group_id: str, op: str, task_params: dict) -> dict | None:
+    """Mirror a per-host IP block on the IP Blocklist page (source "soar") until the
+    block's duration ends; an unblock removes that SOAR entry. Automation never
+    lists private address space, so such an address stays a per-host block only."""
+    from datetime import datetime, timedelta, timezone
+
+    from worker import ip_iocs
+
+    if op == "block_ip":
+        expires = datetime.now(timezone.utc) + timedelta(seconds=task_params["duration_seconds"])
+        listed, refused = await ip_iocs.block_until(
+            db, [task_params["ip"]], group_id, "soar", f"SOAR run {ctx['run']['id']}: response block_ip",
+            expires, alert_id=_alert_uuid(ctx))
+        return {"listed": listed, "not_listed": refused, "expires_at": expires.isoformat()}
+    if op == "unblock_ip":
+        return {"removed": await ip_iocs.unblock(db, task_params["ip"], group_id, "soar")}
+    return None
 
 
 # ─── Case & Alert ───────────────────────────────────────────────────────────

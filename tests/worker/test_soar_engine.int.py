@@ -42,6 +42,13 @@ def db(monkeypatch):
             await conn.run_sync(Base.metadata.create_all)
             # created by server-api in production
             await conn.execute(text("CREATE TABLE platform_settings (key VARCHAR(100) PRIMARY KEY, value TEXT)"))
+            await conn.execute(text("CREATE SEQUENCE ip_block_seq"))
+            await conn.execute(text(
+                "CREATE TABLE ip_block_entries (id UUID PRIMARY KEY, cidr VARCHAR(43) NOT NULL, "
+                "group_id VARCHAR(100) NOT NULL, source VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL, "
+                "reason TEXT NOT NULL, alert_id UUID, created_by UUID, created_at TIMESTAMPTZ NOT NULL, "
+                "updated_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ, seq BIGINT NOT NULL, "
+                "UNIQUE (group_id, cidr, source))"))
     _run(setup())
     settings_cache._cache, settings_cache._fetched_at = {}, 0.0
 
@@ -206,6 +213,15 @@ def test_branch_true_blocks_ip_and_redacts_secrets(db, monkeypatch):
     assert task.task_type == "block_ip" and task.params["ip"] == "203.0.113.7"
     assert task.params["duration_seconds"] == 600
     assert any("block_ip" in n.content for n in _get(AlertNote, alert_id=alert.id))
+
+    async def listed():
+        from sqlalchemy import text
+        from worker.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            return (await db.execute(text("SELECT cidr FROM ip_block_entries"))).all()
+    # 203.0.113.7 is documentation space: automation never puts non-global
+    # addresses on the IP Blocklist, so it stays a per-host block only
+    assert _run(listed()) == []
 
 
 def test_branch_false_and_error_edge(db, monkeypatch):
