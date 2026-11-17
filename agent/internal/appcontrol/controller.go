@@ -2,10 +2,13 @@ package appcontrol
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +62,69 @@ type Controller struct {
 	loaded  bool
 	lastTry string // the plan key last attempted, so a failing plan is not retried every minute
 	triedAt time.Time
+	// fragTried: when a publisher fragment was last attempted (a failed
+	// build is retried after retryFailed)
+	fragTried map[string]time.Time
+}
+
+// fragmentTimeout bounds one publisher fragment build: New-CIPolicyRule
+// -Level Publisher took from about a minute to over five on a GitHub runner.
+const fragmentTimeout = 15 * time.Minute
+
+// fragmentPath is where the publisher's deny fragment is kept (survives restarts).
+func (c *Controller) fragmentPath(publisher string) string {
+	sum := sha256.Sum256([]byte(publisher))
+	return filepath.Join(c.Dir, "appcontrol", "publishers", hex.EncodeToString(sum[:8])+".xml")
+}
+
+// fragments returns the publisher fragments ready for the signer block
+// rules, building at most one missing fragment per call (the slow part of a
+// publisher rule, done once and kept). Until a publisher's fragment exists
+// its programs are still stopped right after they start. c.mu held.
+func (c *Controller) fragments(ctx context.Context, rules [][2]string) map[string]string {
+	ready := map[string]string{}
+	var missing []string
+	for _, r := range rules {
+		if r[0] != "signer" {
+			continue
+		}
+		pub := strings.ToLower(strings.TrimSpace(r[1]))
+		if _, learned := c.st.Signers[pub]; !learned || strings.Contains(pub, "microsoft") {
+			continue
+		}
+		frag := c.fragmentPath(pub)
+		if _, err := os.Stat(frag); err == nil {
+			ready[pub] = frag
+			continue
+		}
+		if t, ok := c.fragTried[pub]; ok && time.Since(t) < retryFailed {
+			continue
+		}
+		missing = append(missing, pub)
+	}
+	if len(missing) == 0 {
+		return ready
+	}
+	sort.Strings(missing)
+	pub := missing[0]
+	if c.fragTried == nil {
+		c.fragTried = map[string]time.Time{}
+	}
+	c.fragTried[pub] = time.Now()
+	fctx, cancel := context.WithTimeout(ctx, fragmentTimeout)
+	defer cancel()
+	start := time.Now()
+	frag := c.fragmentPath(pub)
+	if _, err := c.Run(fctx, FragmentScript(c.st.Signers[pub], frag)); err != nil {
+		slog.Warn("appcontrol: publisher rule not built yet; its programs are still stopped at start",
+			"publisher", pub, "err", err)
+		return ready
+	}
+	if _, err := os.Stat(frag); err == nil {
+		ready[pub] = frag
+		slog.Info("appcontrol: publisher rule built", "publisher", pub, "took", time.Since(start).Round(time.Second))
+	}
+	return ready
 }
 
 const (
@@ -215,7 +281,11 @@ func (c *Controller) Reconcile(ctx context.Context) {
 	if c.In.Rules != nil {
 		rules = c.In.Rules()
 	}
-	plan := NewPlan(mode, rules, c.st.Learned, c.st.Signers)
+	var ready map[string]string
+	if mode != ModeOff {
+		ready = c.fragments(ctx, rules)
+	}
+	plan := NewPlan(mode, rules, c.st.Learned, ready)
 	key := ""
 	if mode != ModeOff {
 		key = plan.Key()

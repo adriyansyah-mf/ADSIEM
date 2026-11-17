@@ -59,7 +59,8 @@ func TestScriptsParse(t *testing.T) {
 	for name, script := range map[string]string{
 		"apply": ApplyScript(NewPlan(ModeEnforce, [][2]string{{"path", `C:\a b\x.exe`}, {"dir", `C:\d`}, {"signer", "Proton AG"}},
 			[]string{`C:\l.exe`}, map[string]string{"proton ag": `C:\s.exe`}), `C:\w`),
-		"remove": RemoveScript(),
+		"remove":   RemoveScript(),
+		"fragment": FragmentScript(`C:\Users\a\O'Brien\vpn.exe`, `C:\state\publishers\x.xml`),
 	} {
 		check := `$e = $null; $src = $input | Out-String; [System.Management.Automation.Language.Parser]::ParseInput($src, [ref]$null, [ref]$e) | Out-Null; if ($e) { $e | ForEach-Object { $_.Message }; exit 1 }`
 		cmd := exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-Command", check)

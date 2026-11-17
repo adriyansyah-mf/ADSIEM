@@ -45,19 +45,20 @@ type Plan struct {
 	Paths   []string `json:"paths"`   // executables denied by path
 	Dirs    []string `json:"dirs"`    // folders: anything below them is denied
 	Learned []string `json:"learned"` // files denied by their Authenticode hash
-	// Signers are sample files, one per publisher a signer block rule names:
-	// everything that publisher signed is denied (WDAC Publisher level).
+	// Signers are policy fragments, one per publisher a signer block rule
+	// names, each a deny at WDAC's Publisher level built once from a sample
+	// file (FragmentScript): everything that publisher signed is denied.
 	Signers []string `json:"signers,omitempty"`
 }
 
 var winAbs = regexp.MustCompile(`^[A-Za-z]:\\`)
 
 // NewPlan builds the plan from the block rules (rule type, value), the
-// learned files and the learned signer samples (lower-case publisher ->
-// a file it signed); values that are not absolute Windows paths are left
-// out (Linux paths from a fleet-wide rule set). A sample counts only while a
-// signer block rule still names its publisher: turning the rule off lifts
-// the publisher deny at the next reconcile.
+// learned files and the publisher fragments that are ready (lower-case
+// publisher -> fragment file); values that are not absolute Windows paths
+// are left out (Linux paths from a fleet-wide rule set). A fragment counts
+// only while a signer block rule still names its publisher: turning the rule
+// off lifts the publisher deny at the next reconcile.
 func NewPlan(mode string, rules [][2]string, learned []string, signers map[string]string) Plan {
 	p := Plan{Mode: mode}
 	seen := map[string]bool{}
@@ -87,9 +88,11 @@ func NewPlan(mode string, rules [][2]string, learned []string, signers map[strin
 	for _, f := range learned {
 		add(&p.Learned, f)
 	}
-	for publisher, sample := range signers {
-		if blocked[publisher] && !strings.Contains(publisher, "microsoft") {
-			add(&p.Signers, sample)
+	// fragments are files the agent wrote itself (not server values), taken as they are
+	for publisher, fragment := range signers {
+		if blocked[publisher] && !strings.Contains(publisher, "microsoft") && fragment != "" &&
+			!strings.ContainsAny(fragment, "\r\n\x00") {
+			p.Signers = append(p.Signers, fragment)
 		}
 	}
 	sort.Strings(p.Paths)
@@ -141,16 +144,18 @@ func ApplyScript(p Plan, workDir string) string {
 		w("if (Test-Path -LiteralPath %s) { $rules += New-CIPolicyRule -Deny -Level Hash -DriverFilePath %s }",
 			psQuote(f), psQuote(f))
 	}
+	// publisher denies: fragments FragmentScript built once (building one
+	// takes minutes; merging it takes a second)
+	w("$policies = @($xml)")
 	for _, f := range p.Signers {
-		w("'step: publisher rule from ' + %s", psQuote(f))
-		// ConfigCI reads the issuing CA and the publisher from the sample's
-		// signature: every file that publisher signed is denied, any version, any folder
-		w("if (Test-Path -LiteralPath %s) { $rules += New-CIPolicyRule -Deny -Level Publisher -DriverFilePath %s }",
-			psQuote(f), psQuote(f))
+		w("if (Test-Path -LiteralPath %s) { $policies += %s }", psQuote(f), psQuote(f))
 	}
 	w("'step: merge'")
 	w("if ($rules.Count -gt 0) {")
-	w("  Merge-CIPolicy -PolicyPaths $xml -OutputFilePath $merged -Rules $rules | Out-Null")
+	w("  Merge-CIPolicy -PolicyPaths $policies -OutputFilePath $merged -Rules $rules | Out-Null")
+	w("  Move-Item -LiteralPath $merged -Destination $xml -Force")
+	w("} elseif ($policies.Count -gt 1) {")
+	w("  Merge-CIPolicy -PolicyPaths $policies -OutputFilePath $merged | Out-Null")
 	w("  Move-Item -LiteralPath $merged -Destination $xml -Force")
 	w("}")
 	// one fixed id: an apply replaces the agent's policy instead of adding one
@@ -183,6 +188,31 @@ func ApplyScript(p Plan, workDir string) string {
 	w("  if ($r.ReturnValue -ne 0) { throw \"PS_UpdateAndCompareCIPolicy returned $($r.ReturnValue)\" }")
 	w("  'cim'")
 	w("}")
+	return b.String()
+}
+
+// FragmentScript builds, once, the policy fragment that denies everything
+// the sample's publisher signed: ConfigCI reads the issuing CA and the
+// publisher from the sample's signature (New-CIPolicyRule -Level Publisher,
+// which takes minutes on a busy host) and the rule is kept as a small policy
+// (New-CIPolicy -Rules -UserPEs) that ApplyScript merges in seconds. The
+// fragment appears atomically at out; it prints "fragment" on success.
+func FragmentScript(sample, out string) string {
+	var b strings.Builder
+	w := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
+	w("$ErrorActionPreference = 'Stop'")
+	w("$ProgressPreference = 'SilentlyContinue'")
+	w("Import-Module ConfigCI")
+	w("$out = %s", psQuote(out))
+	w("$tmp = $out + '.tmp'")
+	w("New-Item -ItemType Directory -Force -Path (Split-Path -Parent $out) | Out-Null")
+	w("'step: publisher rule from ' + %s", psQuote(sample))
+	w("$r = New-CIPolicyRule -Deny -Level Publisher -DriverFilePath %s", psQuote(sample))
+	w("if (@($r).Count -eq 0) { throw 'no publisher rule: the sample carries no usable signature' }")
+	w("'step: fragment'")
+	w("New-CIPolicy -Rules $r -FilePath $tmp -UserPEs | Out-Null")
+	w("Move-Item -LiteralPath $tmp -Destination $out -Force")
+	w("'fragment'")
 	return b.String()
 }
 
