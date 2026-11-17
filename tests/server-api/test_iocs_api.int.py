@@ -121,47 +121,4 @@ async def test_domain_rows_report_whether_the_group_blocks_them(iocs_api):
         {"key": k, "alerts": {"value": 1}, "hosts": {"value": 1}, "first_seen": {}, "last_seen": {}, "max_severity": {}}
         for k in ("domain:evil.example", "url:http://evil.example/a", "ip:45.33.32.156")]}}}}
     items = (await iocs_api.api.get("/api/iocs")).json()["items"]
-    # the IP is not on blue's IP Blocklist (its ip_ioc mode defaults to block)
-    assert [i["blocked"] for i in items] == [True, True, False]
-
-
-def _ip_buckets(*ips):
-    return {"aggregations": {"types": {"buckets": []}, "matched": {"count": {"value": len(ips)}, "iocs": {"buckets": [
-        {"key": f"ip:{ip}", "alerts": {"value": 1}, "hosts": {"value": 1}, "first_seen": {}, "last_seen": {},
-         "max_severity": {}} for ip in ips]}}}}
-
-
-async def test_ip_rows_report_active_ip_blocklist_entries(iocs_api):
-    from datetime import datetime, timedelta, timezone
-    from app.models.models import IPBlockEntry
-    from app.services import agent_policy
-    agent_policy.invalidate()
-    past = datetime.now(timezone.utc) - timedelta(hours=1)
-    async with iocs_api.sessions() as db:
-        db.add_all([
-            IPBlockEntry(cidr="45.33.32.156/32", group_id="blue", source="soar", reason="r",
-                         expires_at=datetime.now(timezone.utc) + timedelta(days=1)),
-            IPBlockEntry(cidr="45.33.32.157/32", group_id="*", source="feed", reason="r"),
-            IPBlockEntry(cidr="45.33.32.158/32", group_id="blue", source="manual", reason="r", expires_at=past),
-            IPBlockEntry(cidr="45.33.32.159/32", group_id="red", source="manual", reason="r"),
-        ])
-        await db.commit()
-    iocs_api.reply["value"] = _ip_buckets("45.33.32.156", "45.33.32.157", "45.33.32.158", "45.33.32.159")
-    items = (await iocs_api.api.get("/api/iocs")).json()["items"]
-    # active for blue, active for every group, expired, another group's
-    assert [i["blocked"] for i in items] == [True, True, False, False]
-
-
-async def test_ip_rows_are_not_applicable_when_the_group_only_detects(iocs_api):
-    from app.models.models import AgentPolicy
-    from app.services import agent_policy
-    async with iocs_api.sessions() as db:
-        db.add(AgentPolicy(group_id="blue", settings={"ip_ioc": "detect"}))
-        await db.commit()
-    agent_policy.invalidate()
-    iocs_api.reply["value"] = _ip_buckets("45.33.32.156")
-    try:
-        items = (await iocs_api.api.get("/api/iocs")).json()["items"]
-    finally:
-        agent_policy.invalidate()
-    assert [i["blocked"] for i in items] == [None]
+    assert [i["blocked"] for i in items] == [True, True, None]

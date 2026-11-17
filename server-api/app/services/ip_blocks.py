@@ -137,19 +137,6 @@ async def _active(db, groups: list[str], cidrs: list[str] | None) -> dict[str, I
     return best
 
 
-async def blocked_ips(db, group_id: str | None, cidrs) -> set[str]:
-    """Which of `cidrs` have an active, unexpired entry for `group_id` or "*"
-    (None = for any group). Exact CIDR match: an address inside a listed range is not reported."""
-    cidrs = list(dict.fromkeys(cidrs))
-    if not cidrs:
-        return set()
-    if group_id is None:
-        return set((await db.execute(select(IPBlockEntry.cidr).where(
-            IPBlockEntry.cidr.in_(cidrs), IPBlockEntry.status == "active",
-            or_(IPBlockEntry.expires_at.is_(None), IPBlockEntry.expires_at > func.now())))).scalars().all())
-    return set(await _active(db, _groups(group_id), cidrs))
-
-
 async def delta(db, group_id: str, since: int, continuing: bool = False, limit: int = SYNC_PAGE) -> dict:
     """Changes above `since` for one group. reset: the agent drops its set first
     (first sync, or a seq it cannot have); with more, it continues from seq."""
