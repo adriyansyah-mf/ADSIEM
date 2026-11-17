@@ -1216,7 +1216,7 @@ How much real malware the agent's file engines catch, measured with `agent/cmd/d
 | Windows program (exe) | 56 | **69.6%** | **94.6%** | static ML; YARA 7.1% |
 | Linux program (ELF) | 57 | **63.2%** | **96.5%** | static ML; YARA 3.5% |
 | Windows library (dll) | 8 | 25.0% | 50.0% | too few to judge |
-| HTML pages | 1,353 | **0.1%** | 0.1% | no engine covers them yet |
+| HTML pages | 1,353 | 0.1% → **71.8%** | 0.1% → **81.1%** | HTML model (agent 1.33.0), held-out cross-validation; 92% of password-form phishing pages |
 | Known-good files (`/usr/bin`, `/usr/sbin`, `/usr/lib/x86_64-linux-gnu`) | 8,271 | 0 | 2 (ophcrack, iodine: both real hacktools, flagged by YARA) | static ML: 0 |
 
 *Detected* is what raises a high alert or is blocked: a YARA rule of high or critical severity, or a static ML score in the `malicious` band (the score only 0.1% of known-good test files reach). *Flagged* adds the `suspicious` band (1%).
@@ -1224,7 +1224,7 @@ How much real malware the agent's file engines catch, measured with `agent/cmd/d
 What it shows:
 
 - **Programs:** the ML model catches about 95% of current Windows and Linux malware at the suspicious level and 63–70% at the level that blocks, with no false positive on 8,271 system programs. The gap between the two is the price of a 0.1% false-positive threshold. YARA adds little on top.
-- **HTML is the largest gap.** The pages are 79% redirects, 21% posting forms, 14% password forms, 17% large base64 blobs and 16% `eval`/`atob` obfuscation: phishing kits, redirectors and HTML smuggling. A static model and rules for them are next.
+- **HTML was the largest gap, now covered by an HTML model.** The pages are 79% redirects, 21% posting forms, 14% password forms, 17% large base64 blobs and 16% `eval`/`atob` obfuscation: phishing kits, redirectors and HTML smuggling. The HTML model (agent 1.33.0, trained against 42,771 Common Crawl pages) catches 71.8% at the blocking level and 81.1% at any level on held-out folds, 92% of password-form phishing pages; on 3,525 HTML files of a Kali host it put 3 at the blocking level. Details: [`docs/operations/static-ml.md`](docs/operations/static-ml.md#html-pages).
 - **Caveats:** MalShare has no family labels and does not verify its labels, so some of these files may not be malicious. The program sets are small (56 and 57 files). An earlier run on 83 URLhaus payloads (3 Nov) gave 44.6% detected; URLhaus serves many repackaged legitimate tools, so it is not a malware ground truth.
 
 To run it yourself: `ml/bench/fetch_malshare.py` (MalShare API key) or `ml/bench/fetch_malwarebazaar.py` (abuse.ch key), then `go run ./cmd/detbench` from `agent/`, on a machine with no shared or synced folders.

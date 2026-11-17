@@ -6,6 +6,7 @@ Hashes and YARA only catch what someone has seen before. The static ML check sco
 |---|---|---|
 | Windows program (PE: exe, dll, sys, .NET) | `ember2024_lgbm` | gradient-boosted trees (LightGBM) trained on EMBER2024 (files from Sep 2023 to Dec 2024), evaluated in Go (`agent/internal/mlscore`) |
 | Linux program (ELF) | `ember2024_elf_lgbm`, `elf_heuristic` | a model trained on EMBER2024's ELF files, and weighted traits (mining pool URLs, miner names, UPX packing, missing section headers, packed sections, reverse-shell and persistence strings); the higher of the two levels counts, `ml.reasons` lists the traits found |
+| HTML page (`.html`, `.htm`, `.hta`, `.svg`, or content starting with markup) | `html_lgbm` | LightGBM on 58 static page features (forms and password fields, where forms post, redirects, hidden iframes, `eval`/`atob`/escapes, base64 blobs, Blob/download smuggling, brand names in the title, Telegram exfiltration, text-to-markup ratio...), read in one pass in Go (`agent/internal/mlscore/html.go`); no script runs. See [HTML pages](#html-pages) |
 
 Both kinds are checked on both systems: a Windows dropper on a Linux file server or a Linux miner in a Windows share are worth knowing about. A file starting with `MZ` is always scored, also when its headers are broken (the byte and string features still count).
 
@@ -27,6 +28,23 @@ Group policy (**Policies** page) `ml_action`:
 - `off`.
 
 Exclusions with the **Static ML** scope (path, program, SHA-256) turn it off for matching files: use them for in-house builds, installers or packers that score high. Windows users get a pop-up for `malicious` files when the policy's pop-ups are on.
+
+## HTML pages
+
+Phishing kits, redirectors and HTML smuggling arrive as `.html` attachments and downloads; YARA and the program models catch almost none of them (0.1% of 1,353 MalShare pages in the [benchmark](detection-benchmark.md)). The HTML model scores every page the scanner reads, with the same levels and `ml_action` as programs.
+
+Training (`ml/html/train.py`, vectors from the agent's own extractor `agent/cmd/htmlfeat`): 1,353 MalShare HTML samples (Dec 2025, Jan 2026) against 42,771 HTML pages from two Common Crawl files (CC-MAIN-2026-39). Grouped five-fold cross-validation: crawled pages grouped by site, samples by their tag skeleton, so no site and no kit template is on both sides of a split.
+
+| | Detected at 0.1% false positives (`malicious`) | at 1% (`suspicious` or more) |
+|---|---|---|
+| all 1,353 pages | 71.8% | 81.1% |
+| with a password form (174) | 92.0% | 93.1% |
+| redirectors (932) | 89.8% | 93.7% |
+| obfuscated script (296) | 77.0% | 84.5% |
+
+ROC AUC 0.966 to 0.984 over the five folds. On 3,525 HTML files of a Kali host (`/usr/share/doc`, `/usr/share/javascript`, Python packages), which the model never saw: 3 reach `malicious` (0.09%: an exiftool page titled "Apple", a tape example, the AWS CLI SSO page) and 13 reach `suspicious` or more (0.37%), mostly small example pages with a form or a redirect.
+
+Limits: the malicious side is one source (MalShare), mostly redirectors; real phishing kits with password forms are 174 pages and HTML smuggling only 1, so the smuggling features are untested by real samples. Small legitimate login, OAuth redirect and example pages are where false positives come from: exclude them with a Static ML exclusion. A page that loads its whole form from the attacker's server at run time shows little to a static model.
 
 ## How good it is
 
