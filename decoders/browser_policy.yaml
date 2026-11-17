@@ -1,0 +1,19 @@
+# Managed browser policies on the agent (agent/internal/browserpolicy), sent
+# when the group policy's browser_policy changes what is in place: mode on or
+# off, and per browser:policy what the agent set, kept (an administrator's
+# own value, never overwritten), removed, or failed to apply.
+name: browser_policy
+log_type: browser_policy
+type: kv
+priority: 10
+enabled: true
+match: 'event=browser_policy '
+fields:
+  browser_policy.mode: mode
+  browser_policy.set: set
+  browser_policy.kept: kept
+  browser_policy.removed: removed
+  browser_policy.errors: errors
+static_fields:
+  event.category: configuration
+  event.action: browser_policy

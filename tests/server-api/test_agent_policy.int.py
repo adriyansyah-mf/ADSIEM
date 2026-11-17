@@ -84,6 +84,13 @@ def test_validation():
     assert p.ioa == "off" and p.exclusions[0].scopes == ["ioa"]
 
 
+def test_browser_policy_validation():
+    assert agent_policy.PolicySettings.model_validate({}).browser_policy == "off"
+    assert agent_policy.PolicySettings.model_validate({"browser_policy": "on"}).browser_policy == "on"
+    with pytest.raises(ValidationError):
+        agent_policy.PolicySettings.model_validate({"browser_policy": "block"})
+
+
 def test_yara_action_and_exec_scan_validation():
     # a YARA match is only reported unless a group quarantines; critical is the default threshold
     d = agent_policy.PolicySettings.model_validate({})

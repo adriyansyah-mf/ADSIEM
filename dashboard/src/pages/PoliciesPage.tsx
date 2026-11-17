@@ -25,6 +25,7 @@ interface Settings {
   ip_ioc: 'off' | 'detect' | 'block'
   app_control: 'off' | 'audit' | 'enforce'
   usb_storage: 'off' | 'audit' | 'block'
+  browser_policy: 'off' | 'on'
   usb_allow: string[]
   quick_scan_time: string
   full_scan_schedule: string
@@ -258,6 +259,19 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
           </select>
           <span className="block text-xs text-muted-foreground">
             Turns path and folder block rules (and files a hash rule stopped) into a Windows App Control policy. Everything else still runs. Try audit first and check the App Control alerts.
+          </span>
+        </label>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">Browser policies (web block bypass)</span>
+          <select value={s.browser_policy ?? 'off'} onChange={e => set({ browser_policy: e.target.value as Settings['browser_policy'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="off">Off</option>
+            <option value="on">On: DNS over HTTPS off, VPN and proxy extensions blocked</option>
+          </select>
+          <span className="block text-xs text-muted-foreground">
+            Sets the browsers' own managed policies so the web block holds inside the browser: DNS over HTTPS off in
+            Chrome, Edge, Chromium, Brave and Firefox, and extensions that ask for the proxy permission (VPN and proxy
+            extensions) blocked in the Chromium browsers. Values your own GPO or policy files already set are kept.
           </span>
         </label>
         <div className="rounded border border-border p-3 space-y-1">

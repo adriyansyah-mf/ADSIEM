@@ -137,9 +137,10 @@ instead of dropping the report.
 | Way around it | Still blocked? | Why |
 |---|---|---|
 | System VPN (OpenVPN, WireGuard, commercial clients, Cloudflare WARP) | yes, as a rule | names are still resolved by the OS, which reads the hosts file first; the answer is 127.84.0.1, which never enters the tunnel |
-| Browser VPN extension, HTTP/SOCKS proxy resolving names at the far end, `ssh -D` | no | the name is resolved by the proxy, never by this host |
+| Browser VPN extension | no; **yes with `browser_policy: on`** in Chrome, Edge, Chromium, Brave (the extension cannot install or run: it needs the proxy permission) | the name is resolved by the proxy, never by this host |
+| HTTP/SOCKS proxy program resolving names at the far end, `ssh -D` | no | the name is resolved by the proxy, never by this host |
 | Tor Browser | no (the name), yes (the traffic) | names resolve at the exit node; the Tor exit feed on the IP Blocklist drops the traffic itself ([IP IoC blocking](ip-ioc-blocking.md)) |
-| DNS over HTTPS in the browser | no | see above |
+| DNS over HTTPS in the browser | no; **yes with `browser_policy: on`** (DoH turned off and, in Firefox, locked) | see above |
 
 What the platform does about the rest is make it visible:
 
@@ -147,7 +148,7 @@ What the platform does about the rest is make it visible:
 - **SSH proxies:** "SSH Started As A SOCKS Proxy (Or Tunnel)" (medium) for `ssh -D` and `ssh -w` (`plink -D` on Windows).
 - **Tunnel drivers:** "VPN Tunnel Kernel Module Loaded On Linux" (low: TUN is also used by VMs) and "VPN Tunnel Driver Or Service Installed On Windows" (medium: Wintun, TAP, WireGuard, OpenVPN DCO, VPN client services).
 
-An approved company VPN alerts too: add a suppression for its program (or an exclusion), so only other clients raise alerts. To stop a client rather than report it, add an execution prevention rule for its path or hash, or use App Control on Windows. The remaining gaps (subdomains, DNS over HTTPS, a resolver inside a proxy) need a DNS-level block, planned as the next layer.
+An approved company VPN alerts too: add a suppression for its program (or an exclusion), so only other clients raise alerts. To stop a client rather than report it, add an execution prevention rule for its path or hash, or use App Control on Windows. **Browser policies** (group policy `browser_policy`, default off; `agent/internal/browserpolicy`): the agent sets the browsers' own managed policies. Chrome, Edge, Chromium and Brave get `DnsOverHttpsMode: off` and `ExtensionSettings: {"*": {"blocked_permissions": ["proxy"]}}`, which blocks every extension that asks for the proxy permission: VPN and proxy extensions need it, so no list of extension ids is kept. Firefox gets DNS over HTTPS disabled and locked; it has no permission-based block, so Firefox VPN extensions are still only seen. Windows: values under `HKLM\SOFTWARE\Policies` (`Google\Chrome`, `Microsoft\Edge`, `Chromium`, `BraveSoftware\Brave`, `Mozilla\Firefox\DNSOverHTTPS`). Linux: `adsiem.json` in each installed browser's managed policy folder (`/etc/opt/chrome/policies/managed`, `/etc/chromium[-browser]/policies/managed`, `/etc/opt/edge/policies/managed`, `/etc/brave/policies/managed`) and `/etc/firefox/policies/policies.json` when none exists; snap and flatpak builds read their own folders and are not covered. A value an administrator already set (GPO, another policy file, an existing `policies.json`) is kept and reported as `kept`, never overwritten; `off` removes only what the agent wrote, and only while it still holds the agent's value. Each change is a `browser_policy` line (`decoders/browser_policy.yaml`). A legitimate extension that needs the proxy permission is blocked too: allow it by its id in your own ExtensionSettings policy, which the agent then keeps. The remaining gaps (subdomains, a resolver inside a proxy program) need a DNS-level block, planned as the next layer.
 
 ## Troubleshooting
 
