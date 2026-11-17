@@ -27,6 +27,7 @@ import (
 	"github.com/siem-platform/agent/internal/config"
 	"github.com/siem-platform/agent/internal/credwatch"
 	"github.com/siem-platform/agent/internal/detect"
+	"github.com/siem-platform/agent/internal/dnssink"
 	"github.com/siem-platform/agent/internal/enrollment"
 	"github.com/siem-platform/agent/internal/fim"
 	"github.com/siem-platform/agent/internal/firewall"
@@ -618,6 +619,14 @@ func run(configPath string, stop <-chan struct{}) {
 	// a local block page (see internal/webblock).
 	webStateDir := task.StateDir(cfg)
 	webStore := webblock.Open(webblock.ListPath(webStateDir))
+	// a blocklist or policy change asks the DNS sinkhole (below) to follow
+	sinkKick := make(chan struct{}, 1)
+	kickSink := func() {
+		select {
+		case sinkKick <- struct{}{}:
+		default:
+		}
+	}
 	webHost := mustHostname()
 	webCtl := &webblock.Controller{
 		Hosts:     webblock.NewHostsFile(),
@@ -630,7 +639,7 @@ func run(configPath string, stop <-chan struct{}) {
 	heartbeat.SensorHealth = func() any { return sensorstat.Default.Snapshot() }
 	// OnChange applies the store's newest list, never an older one that lost
 	// a race with it.
-	webStore.OnChange = func(*webblock.List) { webCtl.ApplyCurrent(webStore.Current) }
+	webStore.OnChange = func(*webblock.List) { webCtl.ApplyCurrent(webStore.Current); kickSink() }
 	// The first Apply may run trust tools for minutes: never hold up startup
 	// (Health reports the last finished Apply meanwhile).
 	go webCtl.ApplyCurrent(webStore.Current)
@@ -683,6 +692,28 @@ func run(configPath string, stop <-chan struct{}) {
 		Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) }}
 	applyBrowsers := func(p *policy.Policy) { go browsers.Apply(p.Settings.BrowserPolicy == "on") }
 	polStore.OnChange(applyBrowsers) // also runs it now, with the current policy
+	// DNS sinkhole (group policy dns_sinkhole): every subdomain of the web
+	// block's manual and alert domains goes to the agent's resolver and on to
+	// the block page. Follows both the policy and the blocklist.
+	sinkCtl := &dnssink.Controller{Router: dnssink.NewRouter(dnssink.PSRunner(appcontrol.PowerShell())), Push: push}
+	polStore.OnChange(func(*policy.Policy) { kickSink() })
+	go func() {
+		for {
+			select {
+			case <-flowCtx.Done():
+				return
+			case <-sinkKick:
+			}
+			on := polStore.Current().Settings.DNSSinkhole == "on"
+			var domains []string
+			if on {
+				domains = webStore.Current().SubtreeDomains()
+			}
+			webCtl.SetSubdomains(domains)
+			sinkCtl.Apply(on, domains)
+		}
+	}()
+	go sinkCtl.Run(flowCtx)
 	go polStore.SyncLoop(flowCtx, c)
 
 	// Static ML on the files the on-access scanner reads: models trained on
