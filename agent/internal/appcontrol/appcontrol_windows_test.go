@@ -148,22 +148,30 @@ func TestAppControlEnforcesAPublisherRule(t *testing.T) {
 	if c.st.Signers == nil || c.st.Signers[strings.ToLower(publisher)] != sample {
 		t.Fatalf("publisher %q not learned: %v", publisher, c.st.Signers)
 	}
-	// the one ConfigCI call this rule adds, on its own and timed
-	probe, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	out, err := PowerShell()(probe, "$ErrorActionPreference = 'Stop'\nImport-Module ConfigCI\n"+
-		"$sw = [Diagnostics.Stopwatch]::StartNew()\n"+
-		"$r = New-CIPolicyRule -Deny -Level Publisher -DriverFilePath "+psQuote(sample)+"\n"+
-		"'rules=' + @($r).Count + ' ms=' + $sw.ElapsedMilliseconds + ' first=' + (@($r)[0] | Out-String).Trim()")
-	cancel()
-	t.Logf("New-CIPolicyRule -Level Publisher alone: err=%v\n%s", err, out)
 	t.Cleanup(func() {
 		c.In.Mode = func() string { return ModeOff }
 		c.Reconcile(context.Background())
 		t.Logf("removal: %+v", c.Health())
 	})
+	// the first reconcile builds the publisher fragment (minutes) and applies it
+	start := time.Now()
 	c.Reconcile(context.Background())
-	if h := c.Health(); h.Error != "" {
-		t.Fatalf("apply: %s", h.Error)
+	t.Logf("first reconcile (fragment + apply) took %s", time.Since(start).Round(time.Second))
+	if _, err := os.Stat(c.fragmentPath(strings.ToLower(publisher))); err != nil {
+		t.Fatalf("publisher fragment not built: %v", err)
+	}
+	if h := c.Health(); h.Error != "" || h.Rules != 1 {
+		t.Fatalf("apply: %+v", c.Health())
+	}
+	// a rebuild merges the kept fragment: no minutes-long ConfigCI call again
+	start = time.Now()
+	c.In.Rules = func() [][2]string {
+		return [][2]string{{"signer", publisher}, {"path", filepath.Join(dir, "none.exe")}}
+	}
+	c.Reconcile(context.Background())
+	t.Logf("rebuild with the kept fragment took %s", time.Since(start).Round(time.Second))
+	if h := c.Health(); h.Error != "" || h.Rules != 2 {
+		t.Fatalf("rebuild: %+v", h)
 	}
 	cmd := exec.Command(other, "--version")
 	if err := cmd.Start(); err == nil {
