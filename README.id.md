@@ -12,7 +12,7 @@ Splunk/QRadar.
 | | |
 |---|---|
 | Agen endpoint | Go, Linux (eBPF) + Windows (ETW), rilis terbaru **agent-v1.28.0**, self-update bertanda tangan, kontrol USB storage |
-| Konten deteksi | **254** rule Sigma dalam 245 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
+| Konten deteksi | **256** rule Sigma dalam 247 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
 | OT / ICS | Modbus/TCP dan DNP3 di-decode dari Suricata; rule MITRE ATT&CK for ICS untuk pemrograman PLC, stop/restart, listen-only, scan, eksposur ke internet |
 | Analitik perilaku | Baseline host (parent → child yang jarang, executable baru yang jarang, beaconing), UEBA untuk user, IP, host, dan proses, skor risiko entitas, graf lateral movement |
 | Kerentanan | CVE paket per host (OSV.dev per distro) dan build Windows terhadap perbaikan KB Microsoft, diurutkan menurut CISA KEV, FIRST EPSS, dan tingkat keparahan |
@@ -233,7 +233,7 @@ tidak bisa begitu saja menghentikannya.
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   perbandingan numerik), keyword, kondisi boolean, window threshold dan korelasi, sekuens
   `after:`, dan suppression per entitas.
-- **254 rule bawaan** (245 file): Linux, Windows, rantai IOA, serangan web (SQLi, XSS, SSRF,
+- **256 rule bawaan** (247 file): Linux, Windows, rantai IOA, serangan web (SQLi, XSS, SSRF,
   LFI, RCE, Log4Shell, XXE, GraphQL, WordPress), jaringan/firewall, Suricata/Zeek, OT/ICS,
   Active Directory, ransomware, ML, YARA, USB storage, credential access, penyamaran sebagai
   kernel thread (proses bernama `[kworker/…]` yang membuat koneksi keluar atau di-exec), App
@@ -1265,6 +1265,17 @@ Yang terlihat:
 - **Catatan:** MalShare tidak punya label family dan tidak memverifikasi labelnya, jadi sebagian file mungkin tidak berbahaya. Set programnya kecil (56 dan 57 file). Run sebelumnya pada 83 payload URLhaus (3 Nov) memberi 44,6% terdeteksi; URLhaus banyak berisi tool legal yang dibungkus ulang, jadi bukan acuan kebenaran malware.
 
 Untuk menjalankannya sendiri: `ml/bench/fetch_malshare.py` (API key MalShare) atau `ml/bench/fetch_malwarebazaar.py` (key abuse.ch), lalu `go run ./cmd/detbench` dari `agent/`, di mesin tanpa folder bersama atau tersinkron.
+
+### Domain phishing (ML)
+
+Worker menilai nama host setiap query DNS dan event web dengan model LightGBM leksikal (`worker/worker/phishing`, dilatih oleh `ml/phish/train.py`): nama brand di luar domain milik brand itu (termasuk bank, e-wallet, dan marketplace Indonesia), kata login/verifikasi/hadiah, TLD, subdomain hosting gratis, dan ejaan mirip brand. Di atas ambang, worker membuat alert (`rules/phishing_domain_ml_*.yaml`). Uji pada data yang tidak dilatih, dibagi per domain terdaftar: 70.541 nama phishing (Phishing.Database, OpenPhish) dan 224.931 nama bersih (daftar teratas Cisco Umbrella dan Tranco), 17 Nov 2026:
+
+| Level alert | False positive pada nama bersih | Phishing tertangkap (semua) | Meniru brand | Kata login/hadiah | Subdomain hosting gratis |
+|---|---|---|---|---|---|
+| medium | 1 per 10.000 | 21,0% | 43,6% | 42,8% | 48,9% |
+| high | 1 per 100.000 | 9,9% | 23,1% | 26,7% | 22,3% |
+
+AUC 0,936. Nama saja tidak bisa mengungkap phishing di situs yang diretas dengan nama biasa (hanya 5–8% yang tertangkap), jadi model ini melengkapi feed dan web block, bukan menggantikannya. Domain terdaftar yang populer (Tranco top 20.000) tidak pernah diberi verdict. Detail: [`docs/operations/phishing-model.md`](docs/operations/phishing-model.md).
 
 ## Dokumentasi
 
