@@ -1356,7 +1356,8 @@ class ExecPreventionRule(Base):
     """Execution rule enforced by Linux agents (agent/internal/prevent).
     rule_type: hash (value = SHA-256), path (value = executable), dir
     (value = directory), parent (parent = parent basenames, value = child
-    basenames, comma separated). action: detect or block."""
+    basenames, comma separated), signer (value = Authenticode publisher,
+    Windows only). action: detect or block."""
     __tablename__ = "exec_prevention_rules"
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name        = Column(String(255), unique=True, nullable=False)

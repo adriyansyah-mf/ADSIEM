@@ -429,6 +429,12 @@ async def _seed_web_allowlist() -> None:
     async with AsyncSessionLocal() as db:
         await seed_builtin_allowlist(db)
 
+async def _seed_prevention_pack() -> None:
+    from app.core.database import AsyncSessionLocal
+    from app.services.prevention_pack import seed_pack
+    async with AsyncSessionLocal() as db:
+        await seed_pack(db)
+
 async def _migrate_agent_update_columns() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -579,6 +585,7 @@ async def lifespan(app: FastAPI):
         await _migrate_malware_hashes_tlsh()
         await _migrate_web_block_indexes()
         await _seed_web_allowlist()
+        await _seed_prevention_pack()
         await _migrate_audit_log_group()
         await _migrate_agent_enrollment_columns()
         await _migrate_agent_token_rotation()

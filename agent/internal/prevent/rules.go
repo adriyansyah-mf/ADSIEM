@@ -27,6 +27,11 @@ const (
 	TypePath   = "path"   // Value: absolute path of the executable
 	TypeDir    = "dir"    // Value: directory; anything below it
 	TypeParent = "parent" // Parent: parent basenames, Value: child basenames (comma separated)
+	// TypeSigner: Value is the Authenticode publisher (the signing
+	// certificate's common name, internal/authenticode), matched without case.
+	// Windows only: every version of a vendor's programs, wherever they run
+	// from; App Control turns a matched file into a WDAC publisher rule.
+	TypeSigner = "signer"
 	// TypeKnownMalware is not a server rule: a hash in the known-malware set
 	// (internal/malhash) matched; Name is its label.
 	TypeKnownMalware = "known_malware"
@@ -65,6 +70,7 @@ type compiled struct {
 type Policy struct {
 	Rules   []*compiled
 	hashes  map[string]*compiled
+	signers map[string]*compiled // lower-case publisher
 	paths   map[string]*compiled
 	dirs    []*compiled
 	parents []*compiled
@@ -212,8 +218,19 @@ func under(path, dir string) bool {
 	return path == dir || strings.HasPrefix(path, dir+sep) || dir == ""
 }
 
+// protectedSigner: a block rule on Microsoft's own publishers would stop
+// Windows itself (every signed system binary, and with App Control enforce,
+// the next boot).
+func protectedSigner(publisher string) bool {
+	return strings.Contains(strings.ToLower(publisher), "microsoft")
+}
+
 func (g *guard) refuse(c *compiled) string {
 	switch c.RuleType {
+	case TypeSigner:
+		if protectedSigner(c.Value) {
+			return "Microsoft signs Windows itself"
+		}
 	case TypeHash:
 		if p, ok := g.hashes[c.Value]; ok {
 			return "the hash is " + p
@@ -239,7 +256,8 @@ func Compile(rules []Rule) (*Policy, []error) {
 }
 
 func compileWith(rules []Rule, g *guard) (*Policy, []error) {
-	p := &Policy{hashes: map[string]*compiled{}, paths: map[string]*compiled{}, guardHashes: g.hashes}
+	p := &Policy{hashes: map[string]*compiled{}, signers: map[string]*compiled{}, paths: map[string]*compiled{},
+		guardHashes: g.hashes}
 	var errs []error
 	for _, r := range rules {
 		c := &compiled{Rule: r, block: r.Action == ActionBlock}
@@ -271,6 +289,13 @@ func compileWith(rules []Rule, g *guard) (*Policy, []error) {
 				errs = append(errs, fmt.Errorf("rule %q: more than %d parent rules", r.Name, maxParentRules))
 				continue
 			}
+		case TypeSigner:
+			v := strings.TrimSpace(r.Value)
+			if v == "" || len(v) > 200 || strings.ContainsAny(v, "\r\n\x00") {
+				errs = append(errs, fmt.Errorf("rule %q: signer rules need a publisher name", r.Name))
+				continue
+			}
+			c.Value = strings.ToLower(v)
 		default:
 			errs = append(errs, fmt.Errorf("rule %q: unknown type %q", r.Name, r.RuleType))
 			continue
@@ -297,6 +322,8 @@ func compileWith(rules []Rule, g *guard) (*Policy, []error) {
 			p.dirs = append(p.dirs, c)
 		case TypeParent:
 			p.parents = append(p.parents, c)
+		case TypeSigner:
+			p.signers[c.Value] = c
 		}
 	}
 	return p, errs
@@ -310,10 +337,13 @@ type Exec struct {
 	Path   string                // executable (or script) being run
 	Parent string                // image of the process calling exec
 	Hash   func() (string, bool) // SHA-256 of the file, computed on demand
+	// Signer is the Authenticode publisher, read on demand (Windows; nil
+	// where programs carry none, so signer rules never match there)
+	Signer func() (string, bool)
 }
 
 // Match returns the first rule matching e: path, then directory, then
-// parent, then hash (the only one that reads the file). kernelDecides
+// parent, then hash, then signer (the last two read the file). kernelDecides
 // leaves out the rule types the BPF LSM engine already enforces.
 func (p *Policy) Match(e Exec, kernelDecides bool) *compiled {
 	if p.off {
@@ -385,6 +415,13 @@ func (p *Policy) match(e Exec, kernelDecides bool) *compiled {
 			}
 			if label, known := p.malware.Lookup(h); known {
 				return p.malwareRule(label, h)
+			}
+		}
+	}
+	if len(p.signers) > 0 && e.Signer != nil {
+		if s, ok := e.Signer(); ok {
+			if c := p.signers[strings.ToLower(strings.TrimSpace(s))]; c != nil {
+				return c
 			}
 		}
 	}

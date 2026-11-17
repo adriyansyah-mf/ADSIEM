@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/siem-platform/agent/internal/authenticode"
 )
 
 // LogType of the lines the controller emits (decoders/app_control.yaml).
@@ -35,7 +37,13 @@ type Health struct {
 type state struct {
 	Applied string   `json:"applied"` // Plan.Key of the policy in force ("" = none)
 	Learned []string `json:"learned"`
+	// Signers: per lower-case publisher, a file it signed that a signer
+	// rule stopped (the sample ConfigCI builds the publisher rule from)
+	Signers map[string]string `json:"signers,omitempty"`
 }
+
+// MaxSigners bounds the learned publisher samples.
+const MaxSigners = 200
 
 // Controller keeps the WDAC policy in step with the rules and the mode.
 type Controller struct {
@@ -88,11 +96,15 @@ func (c *Controller) save() {
 // Authenticode hash from the next reconcile on. Only Windows executables are
 // learned (the path must be absolute) and at most MaxLearned, oldest first out.
 func (c *Controller) Learn(ruleType, path, _ string) {
-	if ruleType != "hash" && ruleType != "known_malware" {
-		return // path and dir rules are already in the policy
-	}
 	if !winAbs.MatchString(path) {
 		return
+	}
+	if ruleType == "signer" {
+		c.learnSigner(path)
+		return
+	}
+	if ruleType != "hash" && ruleType != "known_malware" {
+		return // path and dir rules are already in the policy
 	}
 	c.mu.Lock()
 	c.load()
@@ -113,6 +125,45 @@ func (c *Controller) Learn(ruleType, path, _ string) {
 	case wake <- struct{}{}:
 	default:
 	}
+}
+
+// learnSigner records a file a signer rule stopped as its publisher's
+// sample: from the next reconcile on, App Control denies everything that
+// publisher signed, before it runs. Read here, from the file itself, so the
+// sample is keyed by the publisher it really carries.
+func (c *Controller) learnSigner(path string) {
+	sig, err := readSigner(path)
+	if err != nil || sig == "" {
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(sig))
+	c.mu.Lock()
+	c.load()
+	if c.st.Signers == nil {
+		c.st.Signers = map[string]string{}
+	}
+	if strings.EqualFold(c.st.Signers[key], path) {
+		c.mu.Unlock()
+		return
+	}
+	if _, known := c.st.Signers[key]; !known && len(c.st.Signers) >= MaxSigners {
+		c.mu.Unlock()
+		return
+	}
+	c.st.Signers[key] = path
+	c.save()
+	wake := c.wake
+	c.mu.Unlock()
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+}
+
+// readSigner is replaced in tests.
+var readSigner = func(path string) (string, error) {
+	s, err := authenticode.ReadFile(path)
+	return s.Publisher, err
 }
 
 // Health is the last outcome.
@@ -164,7 +215,7 @@ func (c *Controller) Reconcile(ctx context.Context) {
 	if c.In.Rules != nil {
 		rules = c.In.Rules()
 	}
-	plan := NewPlan(mode, rules, c.st.Learned)
+	plan := NewPlan(mode, rules, c.st.Learned, c.st.Signers)
 	key := ""
 	if mode != ModeOff {
 		key = plan.Key()

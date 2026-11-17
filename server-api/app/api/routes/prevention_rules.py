@@ -39,7 +39,7 @@ def _names(s: str) -> list[str]:
 class PreventionRuleIn(BaseModel):
     name: str
     description: str | None = None
-    rule_type: Literal["hash", "path", "dir", "parent"]
+    rule_type: Literal["hash", "path", "dir", "parent", "signer"]
     value: str
     parent: str = ""
     action: Literal["detect", "block"] = "detect"
@@ -58,6 +58,12 @@ class PreventionRuleIn(BaseModel):
             bad = [n for n in parents + children if not _NAME.match(n)]
             if bad:
                 raise ValueError(f"names are executable basenames up to 31 characters: {bad}")
+        if self.rule_type == "signer":
+            # the Authenticode publisher (signing certificate common name), Windows agents only
+            if not 2 <= len(v) <= 200 or any(ch in v for ch in "\r\n\x00"):
+                raise ValueError("signer rules need the publisher name as the signature shows it (2-200 characters)")
+            if self.action == "block" and "microsoft" in v.lower():
+                raise ValueError("a signer block rule cannot name Microsoft: it signs Windows itself")
         self.value = v.lower() if self.rule_type == "hash" else v
         return self
 

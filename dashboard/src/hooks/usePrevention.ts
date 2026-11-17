@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
-export type PreventionRuleType = 'hash' | 'path' | 'dir' | 'parent'
+export type PreventionRuleType = 'hash' | 'path' | 'dir' | 'parent' | 'signer'
 export type PreventionAction = 'detect' | 'block'
 
 export interface PreventionRule {

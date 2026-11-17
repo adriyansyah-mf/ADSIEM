@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/siem-platform/agent/internal/authenticode"
 	"golang.org/x/sys/windows"
 )
 
@@ -35,15 +36,16 @@ type windowsEngine struct {
 	mu     sync.RWMutex
 	policy *Policy
 
-	hashes *hashCache
-	work   chan struct{} // bounds concurrent hashing (only hashing: see matchBounded)
+	hashes  *hashCache
+	signers *signerCache
+	work    chan struct{} // bounds concurrent file reads (hash, signer: see matchBounded)
 }
 
 // startEngines: Windows has no veto before a program runs, so there is no
 // pre-exec scan (the agent scans each new program as ETW reports its start).
 func startEngines(report func(Decision), _ func(path, via string) bool) (engines, error) {
 	return &windowsEngine{report: report, self: uint32(os.Getpid()), hashes: newHashCache(4096),
-		work: make(chan struct{}, 4)}, nil
+		signers: newSignerCache(4096), work: make(chan struct{}, 4)}, nil
 }
 
 func (e *windowsEngine) apply(p *Policy) {
@@ -66,12 +68,15 @@ func (e *windowsEngine) observe(ps ProcessStart) {
 }
 
 func (e *windowsEngine) decide(p *Policy, ps ProcessStart) {
-	c, sum := matchBounded(p, ps.Image, ps.ParentImage, e.work, e.hashes.get)
+	c, sum, publisher := matchBounded(p, ps.Image, ps.ParentImage, e.work, e.hashes.get, e.signers.get)
 	if c == nil {
 		return
 	}
 	d := Decision{Rule: c, Engine: "etw", Path: ps.Image, Parent: ps.ParentImage, SHA256: sum,
 		Comm: filepath.Base(ps.Image), PID: ps.PID, PPID: ps.PPID}
+	if c.RuleType == TypeSigner {
+		d.Signer = publisher
+	}
 	if c.block {
 		if why := refuseKill(ps); why != "" {
 			d.Error = why
@@ -112,6 +117,22 @@ func terminate(pid uint32) error {
 	return nil
 }
 
+// signerCache keeps executables' Authenticode publisher by path, size and
+// modification time ("" with an error for unsigned files, cached too).
+type signerCache struct{ c *hashCache }
+
+func newSignerCache(max int) *signerCache { return &signerCache{c: newHashCache(max)} }
+
+func (s *signerCache) get(path string) (string, error) {
+	return s.c.getWith(path, func(p string) (string, error) {
+		sig, err := authenticode.ReadFile(p)
+		if err != nil {
+			return "", nil // remembered as unsigned
+		}
+		return sig.Publisher, nil
+	})
+}
+
 // hashCache keeps executables' SHA-256 by path, size and modification time:
 // the same program starts over and over.
 type hashCache struct {
@@ -129,6 +150,11 @@ type hashEntry struct {
 func newHashCache(max int) *hashCache { return &hashCache{max: max, m: map[string]hashEntry{}} }
 
 func (h *hashCache) get(path string) (string, error) {
+	return h.getWith(path, func(p string) (string, error) { return hashFile(p, 256<<20) })
+}
+
+// getWith is get with compute in place of the SHA-256.
+func (h *hashCache) getWith(path string, compute func(string) (string, error)) (string, error) {
 	st, err := os.Stat(path)
 	if err != nil {
 		return "", err
@@ -140,7 +166,7 @@ func (h *hashCache) get(path string) (string, error) {
 		return e.sum, nil
 	}
 	h.mu.Unlock()
-	sum, err := hashFile(path, 256<<20)
+	sum, err := compute(path)
 	if err != nil {
 		return "", err
 	}

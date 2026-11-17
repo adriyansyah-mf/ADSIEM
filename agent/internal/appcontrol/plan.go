@@ -45,14 +45,20 @@ type Plan struct {
 	Paths   []string `json:"paths"`   // executables denied by path
 	Dirs    []string `json:"dirs"`    // folders: anything below them is denied
 	Learned []string `json:"learned"` // files denied by their Authenticode hash
+	// Signers are sample files, one per publisher a signer block rule names:
+	// everything that publisher signed is denied (WDAC Publisher level).
+	Signers []string `json:"signers,omitempty"`
 }
 
 var winAbs = regexp.MustCompile(`^[A-Za-z]:\\`)
 
-// NewPlan builds the plan from the block rules (rule type, value) and the
-// learned files; values that are not absolute Windows paths are left out
-// (Linux paths from a fleet-wide rule set).
-func NewPlan(mode string, rules [][2]string, learned []string) Plan {
+// NewPlan builds the plan from the block rules (rule type, value), the
+// learned files and the learned signer samples (lower-case publisher ->
+// a file it signed); values that are not absolute Windows paths are left
+// out (Linux paths from a fleet-wide rule set). A sample counts only while a
+// signer block rule still names its publisher: turning the rule off lifts
+// the publisher deny at the next reconcile.
+func NewPlan(mode string, rules [][2]string, learned []string, signers map[string]string) Plan {
 	p := Plan{Mode: mode}
 	seen := map[string]bool{}
 	add := func(dst *[]string, v string) {
@@ -67,25 +73,34 @@ func NewPlan(mode string, rules [][2]string, learned []string) Plan {
 		seen[key] = true
 		*dst = append(*dst, v)
 	}
+	blocked := map[string]bool{}
 	for _, r := range rules {
 		switch r[0] {
 		case "path":
 			add(&p.Paths, r[1])
 		case "dir":
 			add(&p.Dirs, r[1])
+		case "signer":
+			blocked[strings.ToLower(strings.TrimSpace(r[1]))] = true
 		}
 	}
 	for _, f := range learned {
 		add(&p.Learned, f)
 	}
+	for publisher, sample := range signers {
+		if blocked[publisher] && !strings.Contains(publisher, "microsoft") {
+			add(&p.Signers, sample)
+		}
+	}
 	sort.Strings(p.Paths)
 	sort.Strings(p.Dirs)
 	sort.Strings(p.Learned)
+	sort.Strings(p.Signers)
 	return p
 }
 
 // Rules is how many deny rules the plan holds.
-func (p Plan) Rules() int { return len(p.Paths) + len(p.Dirs) + len(p.Learned) }
+func (p Plan) Rules() int { return len(p.Paths) + len(p.Dirs) + len(p.Learned) + len(p.Signers) }
 
 // Key identifies the plan: the policy is rebuilt only when it changes.
 func (p Plan) Key() string {
@@ -122,6 +137,12 @@ func ApplyScript(p Plan, workDir string) string {
 	for _, f := range p.Learned {
 		// a learned file may be gone (deleted, quarantined): its hash cannot be read then
 		w("if (Test-Path -LiteralPath %s) { $rules += New-CIPolicyRule -Deny -Level Hash -DriverFilePath %s }",
+			psQuote(f), psQuote(f))
+	}
+	for _, f := range p.Signers {
+		// ConfigCI reads the issuing CA and the publisher from the sample's
+		// signature: every file that publisher signed is denied, any version, any folder
+		w("if (Test-Path -LiteralPath %s) { $rules += New-CIPolicyRule -Deny -Level Publisher -DriverFilePath %s }",
 			psQuote(f), psQuote(f))
 	}
 	w("if ($rules.Count -gt 0) {")
