@@ -105,6 +105,13 @@ def test_ransomware_rollback_validation():
         agent_policy.PolicySettings.model_validate({"ransomware_rollback": "on"})
 
 
+def test_dns_sinkhole_validation():
+    assert agent_policy.PolicySettings.model_validate({}).dns_sinkhole == "off"
+    assert agent_policy.PolicySettings.model_validate({"dns_sinkhole": "on"}).dns_sinkhole == "on"
+    with pytest.raises(ValidationError):
+        agent_policy.PolicySettings.model_validate({"dns_sinkhole": "all"})
+
+
 def test_yara_action_and_exec_scan_validation():
     # a YARA match is only reported unless a group quarantines; critical is the default threshold
     d = agent_policy.PolicySettings.model_validate({})
