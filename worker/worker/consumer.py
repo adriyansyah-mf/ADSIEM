@@ -222,6 +222,7 @@ async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, h
             group_id=group_id,
             source_ip=decoded.get("source.ip"),
             hostname=hostname,
+            event_fields=decoded,
         )
         if alert_id is not None:
             log.info("alert_handled", title=match["title"], severity=match["level"],

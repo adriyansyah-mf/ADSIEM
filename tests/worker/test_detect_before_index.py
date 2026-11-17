@@ -84,6 +84,18 @@ async def test_an_elasticsearch_outage_does_not_stop_alerts(env, monkeypatch):
     assert redis.kv == {consumer.DETECTED_KEY.format(failed.value.event_id): "1"}
 
 
+async def test_the_alert_gets_the_decoded_event_for_its_indicators(env, monkeypatch):
+    seen = []
+
+    async def create_alert(**kw):
+        seen.append(kw.get("event_fields"))
+        return uuid.uuid4()
+
+    monkeypatch.setattr(consumer, "create_alert", create_alert)
+    await consumer.process_message(dict(LINE), Decoder(), Sigma())
+    assert len(seen) == 1 and seen[0]["source.ip"] == "203.0.113.9"
+
+
 async def test_a_retry_indexes_the_same_event_without_alerting_again(env):
     redis, alerts, indexed = env
     event_id = uuid.uuid4()

@@ -96,3 +96,23 @@ async def test_create_alert_survives_indexing_failure(faked, monkeypatch):
 
     monkeypatch.setattr(alert_iocs, "index_docs", boom)
     assert await alert_manager.create_alert(MATCH, None, None, "blue", "45.33.32.156", "h1") is not None
+
+
+async def test_create_alert_indexes_indicators_from_the_event(faked, monkeypatch):
+    # Sigma matches carry no matched_fields: the event's own fields hold the
+    # domain, URL and hash indicators the Threat IoCs page lists
+    got = []
+
+    async def index_docs(docs):
+        got.extend(docs)
+        return 0
+
+    monkeypatch.setattr(alert_iocs, "index_docs", index_docs)
+    sha = "a" * 64
+    event = {"dns.question.name": "c2.evil.example", "url.full": "http://dl.evil.example/x.sh",
+             "file.hash.sha256": sha, "destination.ip": "45.33.32.157"}
+    await alert_manager.create_alert({"title": "Beacon", "level": "high"}, None, None, "blue", "45.33.32.156", "h1",
+                                     event_fields=event)
+    assert sorted((d["type"], d["value"]) for _, d in got) == [
+        ("domain", "c2.evil.example"), ("ip", "45.33.32.156"), ("ip", "45.33.32.157"),
+        ("sha256", sha), ("url", "http://dl.evil.example/x.sh")]
