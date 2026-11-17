@@ -1,0 +1,71 @@
+title: VPN, Tor Or Proxy Client Started On Linux
+id: rule-linux-vpn-anonymizer-client
+description: >-
+  A VPN, Tor or circumvention proxy client started (Image names it). Such a
+  client carries the host's traffic past the network's own controls, and a
+  proxy that resolves names at the far end also past the agent's web block
+  (T1090, T1572). Expected for an approved company VPN: add a suppression
+  for its Image (or an exclusion) so only other clients alert.
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  vpn:
+    Image|endswith:
+      - /openvpn
+      - /wg-quick
+      - /wireguard-go
+      - /nordvpn
+      - /nordvpnd
+      - /expressvpn
+      - /expressvpnd
+      - /protonvpn
+      - /protonvpn-app
+      - /windscribe
+      - /windscribe-cli
+      - /mullvad-daemon
+      - /mullvad
+      - /surfshark
+      - /hotspotshield
+      - /warp-svc
+      - /warp-cli
+      - /psiphon-tunnel-core
+      - /lantern
+      - /vpnclient
+  tor:
+    Image|endswith:
+      - /tor
+      - /obfs4proxy
+      - /lyrebird
+      - /snowflake-client
+      - /meek-client
+  tor_browser:
+    Image|contains:
+      - /tor-browser/
+      - /tor-browser_
+  proxy:
+    Image|endswith:
+      - /sing-box
+      - /v2ray
+      - /xray
+      - /clash
+      - /clash-meta
+      - /mihomo
+      - /sslocal
+      - /ss-local
+      - /ss-redir
+      - /trojan
+      - /trojan-go
+      - /hysteria
+      - /hysteria2
+      - /naive
+      - /tuic-client
+      - /gost
+      - /chisel
+  condition: vpn or tor or tor_browser or proxy
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1090
+  - attack.t1090.003
+  - attack.t1572

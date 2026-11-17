@@ -132,6 +132,23 @@ instead of dropping the report.
   example Firefox `DNSOverHTTPS` locked off, Chrome/Edge `DnsOverHttpsMode`
   `off`) or the block will not apply.
 
+### VPNs and proxies
+
+| Way around it | Still blocked? | Why |
+|---|---|---|
+| System VPN (OpenVPN, WireGuard, commercial clients, Cloudflare WARP) | yes, as a rule | names are still resolved by the OS, which reads the hosts file first; the answer is 127.84.0.1, which never enters the tunnel |
+| Browser VPN extension, HTTP/SOCKS proxy resolving names at the far end, `ssh -D` | no | the name is resolved by the proxy, never by this host |
+| Tor Browser | no (the name), yes (the traffic) | names resolve at the exit node; the Tor exit feed on the IP Blocklist drops the traffic itself ([IP IoC blocking](ip-ioc-blocking.md)) |
+| DNS over HTTPS in the browser | no | see above |
+
+What the platform does about the rest is make it visible:
+
+- **Clients:** "VPN, Tor Or Proxy Client Started On Linux / Windows" (medium) fires when OpenVPN, WireGuard, NordVPN, ExpressVPN, ProtonVPN, Mullvad, Windscribe, Surfshark, Hotspot Shield, WARP, Psiphon, Lantern, SoftEther, Tor or its bridges (obfs4, Snowflake), Tor Browser, or a circumvention proxy (sing-box, v2ray/xray, Clash/mihomo, Shadowsocks, Trojan, Hysteria, NaïveProxy, gost, chisel) starts.
+- **SSH proxies:** "SSH Started As A SOCKS Proxy (Or Tunnel)" (medium) for `ssh -D` and `ssh -w` (`plink -D` on Windows).
+- **Tunnel drivers:** "VPN Tunnel Kernel Module Loaded On Linux" (low: TUN is also used by VMs) and "VPN Tunnel Driver Or Service Installed On Windows" (medium: Wintun, TAP, WireGuard, OpenVPN DCO, VPN client services).
+
+An approved company VPN alerts too: add a suppression for its program (or an exclusion), so only other clients raise alerts. To stop a client rather than report it, add an execution prevention rule for its path or hash, or use App Control on Windows. The remaining gaps (subdomains, DNS over HTTPS, a resolver inside a proxy) need a DNS-level block, planned as the next layer.
+
 ## Troubleshooting
 
 | Symptom | Meaning and fix |

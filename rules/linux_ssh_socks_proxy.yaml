@@ -1,0 +1,21 @@
+title: SSH Started As A SOCKS Proxy Or Tunnel On Linux
+id: rule-linux-ssh-socks-proxy
+description: >-
+  ssh was started with -D (a local SOCKS proxy: a browser pointed at it
+  resolves names and connects from the far end, past the agent's web block)
+  or -w (a layer-3 tunnel device). A one-line way around network controls,
+  and a C2 channel (T1090, T1572).
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  ssh:
+    Image|endswith: /ssh
+  socks_or_tunnel:
+    CommandLine|re: '(^|\s)-[A-Za-z]*D\s*\S|(^|\s)-[A-Za-z]*w\s*(\d+|any)\b'
+  condition: ssh and socks_or_tunnel
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1090
+  - attack.t1572

@@ -1,0 +1,23 @@
+title: VPN Tunnel Kernel Module Loaded On Linux
+id: rule-linux-vpn-tunnel-module
+description: >-
+  The WireGuard or OpenVPN data-channel module, or the TUN driver, was loaded
+  (module.name). Loaded when a VPN tunnel comes up; TUN is also used by
+  virtual machines and some container networks, hence the low level (T1572).
+logsource:
+  product: linux
+  service: kernel_module
+detection:
+  selection:
+    event.action: kernel_module
+    module.action: load
+    module.name|contains:
+      - wireguard
+      - ovpn-dco
+      - ovpn_dco
+      - /tun.ko
+  condition: selection
+level: low
+tags:
+  - attack.command_and_control
+  - attack.t1572

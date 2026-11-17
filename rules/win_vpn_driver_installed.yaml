@@ -1,0 +1,39 @@
+title: VPN Tunnel Driver Or Service Installed On Windows
+id: rule-win-vpn-driver-installed
+description: >-
+  A service for a VPN tunnel driver (Wintun, TAP, WireGuard, OpenVPN DCO) or
+  a VPN client's service was installed (System 7045; service.name and
+  service.path name it). The first sign of a VPN client on the host, before
+  it runs (T1572). Expected for an approved company VPN: suppress its service.
+logsource:
+  product: windows
+  service: system
+detection:
+  installed:
+    event.action: service_installed
+  driver:
+    ImagePath|contains:
+      - wintun
+      - tap0901
+      - tapwindows
+      - wireguard
+      - ovpn-dco
+      - nordlynx
+  service:
+    service.name|contains:
+      - WireGuardTunnel
+      - OpenVPN
+      - NordVPN
+      - ExpressVPN
+      - ProtonVPN
+      - Windscribe
+      - Mullvad
+      - Surfshark
+      - CloudflareWARP
+      - Psiphon
+      - hshld
+  condition: installed and (driver or service)
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1572

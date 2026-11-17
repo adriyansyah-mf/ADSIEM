@@ -8,6 +8,7 @@ Agents drop or report traffic to and from IP indicators of compromise in real ti
 
 - **Dashboard → IP Blocklist** (`/api/ip-blocks`): an address or CIDR, a reason, an optional expiry. Analysts may block internal (private) hosts.
 - **SOAR → Block IOC → `ip_block`** (`worker/worker/soar/nodes.py`): the alert's group, for `days` (default 30). Automation refuses private and special space.
+- **Tor exit nodes** (`worker/worker/tor_feed.py`, setting `ip_feed_tor_enabled`, default on): every 6 hours the Tor Project's list (`check.torproject.org/torbulkexitlist`, about 1,300 addresses) is added for every group (`*`), source `feed`, reason "Tor exit node (check.torproject.org)", each entry expiring after 48 hours unless the next list still has it. A list with fewer than 100 or more than 20,000 addresses (an error page, a captive portal) is refused and the previous entries stay until they expire. Turning the setting off removes them within a minute. Agents then drop traffic to and from Tor exits where `ip_ioc` is block, which stops Tor Browser and malware using Tor for C2 even through a system VPN (the firewall rules apply on every interface, the tunnel's too).
 - Always refused: loopback, link-local, multicast, reserved, unspecified, and networks broader than /16 (IPv4) or /48 (IPv6).
 
 SOAR `web_block` puts a domain on the Web Protection blocklist of the alert's group the same way (the group's allowlist still wins).

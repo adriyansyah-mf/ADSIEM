@@ -1,0 +1,74 @@
+title: VPN, Tor Or Proxy Client Started On Windows
+id: rule-win-proc-vpn-anonymizer-client
+description: >-
+  A VPN, Tor or circumvention proxy client started (Image names it). Such a
+  client carries the host's traffic past the network's own controls, and a
+  proxy that resolves names at the far end also past the agent's web block
+  (T1090, T1572). Expected for an approved company VPN: add a suppression
+  for its Image (or an exclusion) so only other clients alert.
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  vpn:
+    Image|endswith:
+      - '\openvpn.exe'
+      - '\openvpn-gui.exe'
+      - '\openvpnconnect.exe'
+      - '\wireguard.exe'
+      - '\nordvpn.exe'
+      - '\nordvpn-service.exe'
+      - '\expressvpn.exe'
+      - '\expressvpnservice.exe'
+      - '\protonvpn.exe'
+      - '\protonvpnservice.exe'
+      - '\protonvpn.client.exe'
+      - '\windscribe.exe'
+      - '\windscribeservice.exe'
+      - '\mullvad-daemon.exe'
+      - '\mullvad vpn.exe'
+      - '\surfshark.exe'
+      - '\surfshark.service.exe'
+      - '\hsscp.exe'
+      - '\hotspotshield.exe'
+      - '\warp-svc.exe'
+      - '\cloudflare warp.exe'
+      - '\psiphon3.exe'
+      - '\psiphon.exe'
+      - '\lantern.exe'
+      - '\vpnclient.exe'
+      - '\vpncmgr.exe'
+      - '\urban vpn.exe'
+  tor:
+    Image|endswith:
+      - '\tor.exe'
+      - '\obfs4proxy.exe'
+      - '\lyrebird.exe'
+      - '\snowflake-client.exe'
+  tor_browser:
+    Image|contains: '\Tor Browser\'
+  proxy:
+    Image|endswith:
+      - '\sing-box.exe'
+      - '\v2ray.exe'
+      - '\v2rayn.exe'
+      - '\xray.exe'
+      - '\clash.exe'
+      - '\clash-verge.exe'
+      - '\clash for windows.exe'
+      - '\mihomo.exe'
+      - '\shadowsocks.exe'
+      - '\sslocal.exe'
+      - '\trojan.exe'
+      - '\hysteria.exe'
+      - '\nekoray.exe'
+      - '\naive.exe'
+      - '\gost.exe'
+      - '\chisel.exe'
+  condition: vpn or tor or tor_browser or proxy
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1090
+  - attack.t1090.003
+  - attack.t1572

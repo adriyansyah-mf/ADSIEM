@@ -11,7 +11,7 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 | | |
 |---|---|
 | Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.28.0**, signed self-update, USB storage control |
-| Detection content | **248** Sigma rules in 239 files (13 for OT/ICS, 10 for Active Directory attacks), **138** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
+| Detection content | **254** Sigma rules in 245 files (13 for OT/ICS, 10 for Active Directory attacks), **138** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
 | OT / ICS | Modbus/TCP and DNP3 decoded from Suricata; MITRE ATT&CK for ICS rules for PLC programming, stop/restart, listen-only, scans, internet exposure |
 | Behaviour analytics | Host baselines (rare parent → child, rare new executables, beaconing), UEBA for users, IPs, hosts and processes, entity risk scoring, lateral movement graph |
 | Vulnerabilities | Package CVEs per host (OSV.dev per distro) and Windows builds against Microsoft's KB fixes, ranked by CISA KEV, FIRST EPSS and severity |
@@ -233,11 +233,12 @@ cannot simply stop it.
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   numeric compare), keywords, boolean conditions, threshold and correlation windows,
   `after:` sequences, and per-entity suppression.
-- **248 bundled rules** (239 files): Linux, Windows, IOA chains, web attacks (SQLi, XSS,
+- **254 bundled rules** (245 files): Linux, Windows, IOA chains, web attacks (SQLi, XSS,
   SSRF, LFI, RCE, Log4Shell, XXE, GraphQL, WordPress), network/firewall, Suricata/Zeek,
   OT/ICS, Active Directory, ransomware, ML, YARA, USB storage, credential access,
   kernel-thread masquerading (a `[kworker/…]`-named process that connects out or is
-  exec'd), App Control, and agent tampering.
+  exec'd), App Control, VPN/Tor/proxy clients and tunnels (ways around the web block), and
+  agent tampering.
 - **Active Directory attacks** (`win_ad_*`): Kerberoasting (RC4 service tickets), AS-REP
   roasting and accounts made AS-REP roastable, DCSync from a non-DC account, password spray
   across many accounts, and persistence: an SPN added to a user, SID History added, or the
@@ -376,7 +377,8 @@ model to keep inference on-prem.
   allow lists per group, URLhaus and PhishTank feeds, auto-block from TI verdicts, a custom block
   page with preview, and per-agent status.
 - **IP Blocklist** (`/ip-blocklist`, `/api/ip-blocks`): addresses or CIDRs per group with a
-  reason and an optional expiry, also fed by `/api/ingest/ip-blocklist`. The group policy's
+  reason and an optional expiry, also fed by `/api/ingest/ip-blocklist` and by the Tor Project's
+  exit node list every 6 hours (`ip_feed_tor_enabled`, every group). The group policy's
   `ip_ioc` mode decides whether agents drop the traffic (`block`) or only report it (`detect`).
   SOAR's **Block IOC** node can add an IP (`ip_block`) or a domain (`web_block`). Automation
   refuses private ranges and anything broader than /16.

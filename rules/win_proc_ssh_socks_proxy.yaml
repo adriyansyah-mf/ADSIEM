@@ -1,0 +1,23 @@
+title: SSH Started As A SOCKS Proxy On Windows
+id: rule-win-proc-ssh-socks-proxy
+description: >-
+  ssh.exe or plink.exe was started with -D (a local SOCKS proxy: a browser
+  pointed at it resolves names and connects from the far end, past the
+  agent's web block). A one-line way around network controls, and a C2
+  channel (T1090, T1572).
+logsource:
+  product: windows
+  category: process_creation
+detection:
+  ssh:
+    Image|endswith:
+      - '\ssh.exe'
+      - '\plink.exe'
+  socks:
+    CommandLine|re: '(^|\s)-[A-Za-z]*D\s*\S'
+  condition: ssh and socks
+level: medium
+tags:
+  - attack.command_and_control
+  - attack.t1090
+  - attack.t1572
