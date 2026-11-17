@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -142,10 +143,19 @@ func TestAppControlEnforcesAPublisherRule(t *testing.T) {
 		Mode:  func() string { return ModeEnforce },
 		Rules: func() [][2]string { return [][2]string{{"signer", publisher}} },
 	}}
+	t.Logf("sample %s (from %s), publisher %q", sample, src, publisher)
 	c.Learn("signer", sample, "") // as the prevention engine does after stopping it
 	if c.st.Signers == nil || c.st.Signers[strings.ToLower(publisher)] != sample {
 		t.Fatalf("publisher %q not learned: %v", publisher, c.st.Signers)
 	}
+	// the one ConfigCI call this rule adds, on its own and timed
+	probe, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	out, err := PowerShell()(probe, "$ErrorActionPreference = 'Stop'\nImport-Module ConfigCI\n"+
+		"$sw = [Diagnostics.Stopwatch]::StartNew()\n"+
+		"$r = New-CIPolicyRule -Deny -Level Publisher -DriverFilePath "+psQuote(sample)+"\n"+
+		"'rules=' + @($r).Count + ' ms=' + $sw.ElapsedMilliseconds + ' first=' + (@($r)[0] | Out-String).Trim()")
+	cancel()
+	t.Logf("New-CIPolicyRule -Level Publisher alone: err=%v\n%s", err, out)
 	t.Cleanup(func() {
 		c.In.Mode = func() string { return ModeOff }
 		c.Reconcile(context.Background())

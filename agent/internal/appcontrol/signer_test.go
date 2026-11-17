@@ -30,6 +30,23 @@ func TestSignerSamplesFollowTheirRules(t *testing.T) {
 	}
 }
 
+func TestTimeoutNamesTheLastStep(t *testing.T) {
+	s := ApplyScript(NewPlan(ModeEnforce, [][2]string{{"signer", "Proton AG"}}, nil,
+		map[string]string{"proton ag": `C:\s.exe`}), `C:\w`)
+	for _, want := range []string{"'step: path and folder rules'", `'step: publisher rule from ' + 'C:\s.exe'`,
+		"'step: merge'", "'step: convert'", "'step: activate'"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("script lacks %q", want)
+		}
+	}
+	if got := lastStep("step: merge\nstep: publisher rule from C:\\s.exe\n"); got != `publisher rule from C:\s.exe` {
+		t.Fatalf("lastStep = %q", got)
+	}
+	if got := lastStep(""); got != "the start" {
+		t.Fatalf("no marker: %q", got)
+	}
+}
+
 func TestLearnKeepsOneSamplePerPublisher(t *testing.T) {
 	orig := readSigner
 	defer func() { readSigner = orig }()

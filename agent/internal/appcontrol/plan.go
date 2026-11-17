@@ -128,23 +128,27 @@ func ApplyScript(p Plan, workDir string) string {
 	w("$id = %s", psQuote(PolicyID))
 	w("Copy-Item -LiteralPath (Join-Path $env:windir 'schemas\\CodeIntegrity\\ExamplePolicies\\AllowAll.xml') -Destination $xml -Force")
 	w("$rules = @()")
+	w("'step: path and folder rules'")
 	for _, path := range p.Paths {
 		w("$rules += New-CIPolicyRule -Deny -FilePathRule %s", psQuote(path))
 	}
 	for _, d := range p.Dirs {
 		w("$rules += New-CIPolicyRule -Deny -FilePathRule %s", psQuote(d+`\*`))
 	}
+	w("'step: learned hashes'")
 	for _, f := range p.Learned {
 		// a learned file may be gone (deleted, quarantined): its hash cannot be read then
 		w("if (Test-Path -LiteralPath %s) { $rules += New-CIPolicyRule -Deny -Level Hash -DriverFilePath %s }",
 			psQuote(f), psQuote(f))
 	}
 	for _, f := range p.Signers {
+		w("'step: publisher rule from ' + %s", psQuote(f))
 		// ConfigCI reads the issuing CA and the publisher from the sample's
 		// signature: every file that publisher signed is denied, any version, any folder
 		w("if (Test-Path -LiteralPath %s) { $rules += New-CIPolicyRule -Deny -Level Publisher -DriverFilePath %s }",
 			psQuote(f), psQuote(f))
 	}
+	w("'step: merge'")
 	w("if ($rules.Count -gt 0) {")
 	w("  Merge-CIPolicy -PolicyPaths $xml -OutputFilePath $merged -Rules $rules | Out-Null")
 	w("  Move-Item -LiteralPath $merged -Destination $xml -Force")
@@ -164,7 +168,9 @@ func ApplyScript(p Plan, workDir string) string {
 	} else {
 		w("Set-RuleOption -FilePath $xml -Option 3")
 	}
+	w("'step: convert'")
 	w("ConvertFrom-CIPolicy -XmlFilePath $xml -BinaryFilePath $bin | Out-Null")
+	w("'step: activate'")
 	w("$ci = Get-Command CiTool.exe -ErrorAction SilentlyContinue")
 	w("if ($ci) {")
 	w("  & $ci.Source --update-policy $bin -json | Out-Null")
