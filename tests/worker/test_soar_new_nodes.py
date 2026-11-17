@@ -328,6 +328,40 @@ def test_block_ioc_ip_block(monkeypatch, notes):
             asyncio.run(nodes.run_block_ioc({}, {"operation": "ip_block", "value": bad}, CTX))
 
 
+def test_response_block_ip_lists_ip_until_block_ends(monkeypatch, notes):
+    session = Session([Result(SimpleNamespace(id=uuid.uuid4()))])
+    use_session(monkeypatch, session)
+    out = asyncio.run(nodes.run_response({}, {"operation": "block_ip", "ip": "45.33.32.156",
+                                              "duration_seconds": 600}, CTX))
+    _, lock, upsert = session.executed
+    assert "pg_advisory_xact_lock" in str(lock[0])
+    params = upsert[1]
+    assert (params["cidr"], params["group"], params["source"]) == ("45.33.32.156/32", "blue", "soar")
+    assert params["alert"] == uuid.UUID(CTX["trigger"]["alert_id"])
+    assert 590 <= (params["expires"] - datetime.now(timezone.utc)).total_seconds() <= 600
+    assert out.data["blocklist"]["listed"] == ["45.33.32.156/32"] and session.commits == 1
+    [task] = session.added
+    assert task.task_type == "block_ip" and task.params["duration_seconds"] == 600
+
+
+def test_response_block_ip_private_stays_per_host(monkeypatch, notes):
+    session = Session([Result(SimpleNamespace(id=uuid.uuid4()))])
+    use_session(monkeypatch, session)
+    out = asyncio.run(nodes.run_response({}, {"operation": "block_ip", "ip": "10.0.0.5"}, CTX))
+    assert len(session.executed) == 1  # only the agent lookup: nothing listed
+    assert out.data["blocklist"]["not_listed"] == ["10.0.0.5"] and len(session.added) == 1
+
+
+def test_response_unblock_ip_removes_only_the_soar_entry(monkeypatch, notes):
+    session = Session([Result(SimpleNamespace(id=uuid.uuid4())), Result(), SimpleNamespace(rowcount=1)])
+    use_session(monkeypatch, session)
+    out = asyncio.run(nodes.run_response({}, {"operation": "unblock_ip", "ip": "45.33.32.156"}, CTX))
+    stmt, params = session.executed[-1]
+    assert "status = 'removed'" in str(stmt)
+    assert params == {"group": "blue", "cidr": "45.33.32.156/32", "source": "soar"}
+    assert out.data["blocklist"] == {"removed": True}
+
+
 def test_block_ioc_web_block_respects_allowlist(monkeypatch, notes):
     entry = uuid.uuid4()
     session = Session([Rows(rows=[]), Result(), Result(entry)])

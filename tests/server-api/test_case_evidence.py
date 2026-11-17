@@ -47,6 +47,34 @@ async def test_multi_host_remediation_retry_is_idempotent(case_env):
         assert len((await db.execute(select(AgentTask))).scalars().all()) == 4
 
 
+async def test_case_block_lists_ips_until_duration_ends(case_env):
+    from app.models.models import IPBlockEntry
+    env = case_env
+    body = {"request_id": str(uuid4()), "agent_ids": [str(env.agents[0].id)],
+            "ips": ["8.8.8.1", "8.8.8.2"], "duration_seconds": 86400}
+    assert (await env.client.post(f"/api/cases/{env.case.id}/remediations", json=body)).status_code == 201
+    async with env.sessions() as db:
+        rows = (await db.execute(select(IPBlockEntry).order_by(IPBlockEntry.cidr))).scalars().all()
+    assert [(r.cidr, r.group_id, r.source, r.status) for r in rows] == [
+        ("8.8.8.1/32", "blue", "manual", "active"), ("8.8.8.2/32", "blue", "manual", "active")]
+    for r in rows:
+        assert 86390 <= (r.expires_at - r.created_at).total_seconds() <= 86410
+
+
+async def test_case_block_never_shortens_a_permanent_blocklist_entry(case_env):
+    from app.models.models import IPBlockEntry
+    env = case_env
+    async with env.sessions() as db:
+        db.add(IPBlockEntry(cidr="8.8.8.1/32", group_id="blue", source="manual", status="active", reason="analyst"))
+        await db.commit()
+    body = {"request_id": str(uuid4()), "agent_ids": [str(env.agents[0].id)], "ips": ["8.8.8.1"],
+            "duration_seconds": 3600}
+    assert (await env.client.post(f"/api/cases/{env.case.id}/remediations", json=body)).status_code == 201
+    async with env.sessions() as db:
+        [row] = (await db.execute(select(IPBlockEntry))).scalars().all()
+    assert row.status == "active" and row.expires_at is None
+
+
 @pytest.mark.parametrize("invalid", ["foreign_agent", "unknown_ip", "invalid_ip", "invalid_duration"])
 async def test_invalid_remediation_enqueues_nothing(case_env, invalid):
     env = case_env

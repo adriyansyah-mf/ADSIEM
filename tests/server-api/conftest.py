@@ -171,7 +171,7 @@ async def case_env(monkeypatch):
     tables.add(Base.metadata.tables["alert_notes"])
     tables.update(Base.metadata.tables[name] for name in (
         "soar_case_events", "soar_playbooks", "soar_actions", "soar_playbook_runs", "soar_playbook_run_steps",
-        "platform_settings", "audit_logs",
+        "platform_settings", "audit_logs", "ip_block_entries",
     ))
     monkeypatch.setattr(api_database, "AsyncSessionLocal", sessions)
     while True:

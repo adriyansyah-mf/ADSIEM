@@ -1,5 +1,5 @@
 """Case membership review and explicitly requested multi-IP remediation."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from ipaddress import ip_address
 from typing import Annotated, Literal
 from uuid import UUID
@@ -13,6 +13,8 @@ from app.core.database import get_db
 from app.core.deps import fetch_scoped, get_current_user, get_scoped_group, require_permission
 from app.models.models import Agent, AgentTask, Alert, Case, CaseAlert, CaseNote, User
 from app.schemas.schemas import AgentTaskOut
+from app.services import ip_blocks
+from worker import ip_iocs
 from worker.soar.case_outbox import CaseEvent, enqueue_case_event
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
@@ -161,11 +163,20 @@ async def block_case_ips(case_id: UUID, body: BlockSelection, db: Database, grou
                                "case_id": str(case.id), "request_id": str(body.request_id)})
              for agent in sorted(agent_ids) for ip in sorted(ips)]
     db.add_all(tasks)
+    # also list them on the IP Blocklist page for the same duration (an analyst's
+    # choice, so private addresses are allowed as on that page)
+    listed, refused = await ip_iocs.block_until(
+        db, sorted(ips), case.group_id, "manual", f"Case {case.id} remediation by {user.username}",
+        datetime.now(timezone.utc) + timedelta(seconds=body.duration_seconds), allow_private=True)
     db.add(CaseNote(case_id=case.id, author_id=user.id,
                     content=f"Remediation requested by {user.username}: block {', '.join(sorted(ips))} "
                             f"on {len(agents)} selected hosts for {body.duration_seconds}s. "
-                            f"Request {body.request_id}; {len(tasks)} tasks queued, execution pending."))
+                            f"Request {body.request_id}; {len(tasks)} tasks queued, execution pending. "
+                            f"IP Blocklist: {len(listed)} listed until expiry"
+                            + (f", not listed: {', '.join(refused)}." if refused else ".")))
     await db.commit()
+    if listed:
+        ip_blocks.invalidate()
     return tasks
 
 

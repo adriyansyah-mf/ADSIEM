@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from sqlalchemy import select
 
+from worker import ip_iocs
 from worker.database import AsyncSessionLocal
 from worker.models import Agent, AgentTask, Case, CaseNote
 from worker.soar.case_data import read_case_evidence
@@ -143,11 +144,20 @@ async def run_case_node(node: dict[str, JsonValue], params: dict[str, JsonValue]
             db.add(task)
             await db.flush()
             task_ids.append(str(task.id))
+        # also on the IP Blocklist page until the block ends (never private space: automation)
+        expires = now + timedelta(seconds=options.duration_seconds)
+        listed, refused = await ip_iocs.block_until(
+            db, sorted({ip for _, ip in pairs}), case.group_id, "soar",
+            f"SOAR case {case.id}, run {context.run.id}", expires)
         if task_ids:
             db.add(CaseNote(case_id=case.id, is_ai_generated=True,
                             content=f"SOAR run {context.run.id}: queued {len(task_ids)} IP block tasks; "
-                                    f"reused {len(reused_ids)} existing tasks. Await agent execution results."))
+                                    f"reused {len(reused_ids)} existing tasks. Await agent execution results. "
+                                    f"IP Blocklist: {len(listed)} listed until expiry"
+                                    + (f", not listed: {', '.join(refused)}." if refused else ".")))
         await db.commit()
         return NodeResult("queued", {"case_id": str(case.id), "task_ids": task_ids + reused_ids,
                                      "queued_count": len(task_ids), "reused_count": len(reused_ids),
-                                     "execution_status": "check_agent_tasks"})
+                                     "execution_status": "check_agent_tasks",
+                                     "blocklist": {"listed": listed, "not_listed": refused,
+                                                   "expires_at": expires.isoformat()}})

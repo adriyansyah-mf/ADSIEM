@@ -133,6 +133,14 @@ async def test_repeated_blocks_preserve_ip_to_host_pairs(soar_env):
     async with env.sessions() as db:
         tasks = (await db.execute(select(AgentTask))).scalars().all()
     assert {(t.agent_id, t.params["ip"]) for t in tasks} == {(env.agents[0].id, "8.8.8.1"), (env.agents[1].id, "8.8.8.2")}
+    # listed once per IP on the IP Blocklist page, expiring with the block (default 3600s)
+    from app.models.models import IPBlockEntry
+    async with env.sessions() as db:
+        rows = (await db.execute(select(IPBlockEntry).order_by(IPBlockEntry.cidr))).scalars().all()
+    assert [(r.cidr, r.group_id, r.source, r.status) for r in rows] == [
+        ("8.8.8.1/32", "blue", "soar", "active"), ("8.8.8.2/32", "blue", "soar", "active")]
+    assert all(r.expires_at is not None and r.expires_at > datetime.now(timezone.utc) for r in rows)
+    assert second.data["blocklist"]["listed"] == ["8.8.8.1/32", "8.8.8.2/32"]
 
 
 @pytest.mark.parametrize("backend,dry_run,reused", [("nft", False, 1), ("noop", False, 0), ("nft", True, 0)])
