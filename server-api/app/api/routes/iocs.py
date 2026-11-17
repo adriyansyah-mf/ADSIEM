@@ -16,7 +16,8 @@ from app.core import es_client
 from app.core.database import get_db
 from app.core.deps import get_scoped_group, require_permission
 from app.models.models import Alert
-from app.services import web_blocks
+from app.services import ip_blocks, web_blocks
+from worker import ip_iocs
 from worker.web_domains import DomainError, normalize
 
 router = APIRouter(prefix="/api/iocs", tags=["iocs"])
@@ -112,6 +113,21 @@ async def list_iocs(
     for item in items:
         if enforced and id(item) in hosts:
             item["blocked"] = hosts[id(item)] in blocked if hosts[id(item)] else False
+
+    def _cidr(item: dict) -> Optional[str]:
+        try:
+            return ip_iocs.normalize(item["value"], allow_private=True)
+        except ip_iocs.IPError:
+            return None
+
+    cidrs = {id(i): _cidr(i) for i in items if i["type"] == "ip"}
+    if cidrs:
+        # agents only drop listed IPs when the group's ip_ioc mode is "block"
+        ip_enforced = group is None or await ip_blocks.mode_for(db, group) == "block"
+        listed = await ip_blocks.blocked_ips(db, group, [c for c in cidrs.values() if c])
+        for item in items:
+            if ip_enforced and id(item) in cidrs:
+                item["blocked"] = cidrs[id(item)] in listed if cidrs[id(item)] else False
     return {
         "total": min(int((matched.get("count") or {}).get("value", 0)), MAX_BUCKETS),
         "type_counts": {b["key"]: int(b["distinct"]["value"]) for b in (aggs.get("types") or {}).get("buckets", [])},

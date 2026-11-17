@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 
 export type IocType = 'ip' | 'domain' | 'url' | 'sha256' | 'sha1' | 'md5' | 'email'
@@ -55,6 +55,16 @@ export function useIocs(f: IocFilter) {
       },
     }).then(r => r.data),
     placeholderData: keepPreviousData,
+  })
+}
+
+// Put an IP IoC on the IP Blocklist (until expires_at) for the caller's group
+export function useBlockIp() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { value: string; reason?: string; expires_at: string }) =>
+      api.post('/api/ip-blocks', body).then(r => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['iocs'] }); qc.invalidateQueries({ queryKey: ['ip-blocks'] }) },
   })
 }
 

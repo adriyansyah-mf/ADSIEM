@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Ban, Check, Copy, Crosshair, Loader2, Search, ShieldX, X } from 'lucide-react'
-import { IOC_PAGE, IOC_TYPES, type Ioc, type IocFilter, type IocType, useIocAlerts, useIocs } from '@/hooks/useIocs'
+import { IOC_PAGE, IOC_TYPES, type Ioc, type IocFilter, type IocType, useBlockIp, useIocAlerts, useIocs } from '@/hooks/useIocs'
 import { useAddMalwareHashes } from '@/hooks/useMalwareHashes'
 import { useStartHunt } from '@/hooks/useHunts'
 import { apiError, useBlockWeb } from '@/hooks/useWebProtection'
@@ -9,6 +9,9 @@ import { apiError, useBlockWeb } from '@/hooks/useWebProtection'
 const TYPE_LABEL: Record<IocType, string> = {
   ip: 'IP', domain: 'Domain', url: 'URL', sha256: 'SHA-256', sha1: 'SHA-1', md5: 'MD5', email: 'Email',
 }
+// IP blocks from this page always expire (like case and SOAR blocks)
+const IP_BLOCK_DURATIONS = [{ hours: 1, label: '1 hour' }, { hours: 24, label: '1 day' },
+  { hours: 168, label: '7 days' }, { hours: 720, label: '30 days' }]
 const WINDOWS = [{ days: 1, label: '24 h' }, { days: 7, label: '7 days' }, { days: 30, label: '30 days' },
   { days: 90, label: '90 days' }, { days: 0, label: 'All time' }]
 const SEVERITY_CLASS: Record<string, string> = {
@@ -34,6 +37,8 @@ function Detail({ ioc, onClose }: { ioc: Ioc; onClose: () => void }) {
   const hunt = useStartHunt()
   const addHash = useAddMalwareHashes()
   const block = useBlockWeb()
+  const blockIp = useBlockIp()
+  const [ipHours, setIpHours] = useState(168)
   const navigate = useNavigate()
   const kind = huntType(ioc.type)
   return (
@@ -75,10 +80,30 @@ function Detail({ ioc, onClose }: { ioc: Ioc; onClose: () => void }) {
             </button>
           )
         )}
+        {ioc.type === 'ip' && (
+          ioc.blocked ? <Link to="/ip-blocklist" className="text-xs px-2 py-1 rounded border border-border text-muted-foreground hover:bg-muted">On IP Blocklist</Link> : (
+            <span className="inline-flex items-center gap-1">
+              <select value={ipHours} onChange={e => setIpHours(Number(e.target.value))} aria-label="Block duration"
+                disabled={blockIp.isPending || blockIp.isSuccess}
+                className="bg-muted border border-border rounded px-1 py-1 text-xs">
+                {IP_BLOCK_DURATIONS.map(d => <option key={d.hours} value={d.hours}>{d.label}</option>)}
+              </select>
+              <button disabled={blockIp.isPending || blockIp.isSuccess}
+                onClick={() => blockIp.mutate({
+                  value: ioc.value, reason: `Threat IoC seen in ${ioc.alerts} alert(s)`,
+                  expires_at: new Date(Date.now() + ipHours * 3600_000).toISOString(),
+                })}
+                className="text-xs px-2 py-1 rounded border border-border hover:bg-muted inline-flex items-center gap-1 disabled:opacity-40">
+                <Ban size={12} /> {blockIp.isSuccess ? 'Added to IP Blocklist' : 'Block IP'}
+              </button>
+            </span>
+          )
+        )}
       </div>
       {hunt.isError && <p className="text-xs text-destructive">Hunt could not be started.</p>}
       {addHash.isError && <p className="text-xs text-destructive">Could not add the hash.</p>}
       {block.isError && <p className="text-xs text-destructive">{apiError(block.error, 'Could not block.')}</p>}
+      {blockIp.isError && <p className="text-xs text-destructive">{apiError(blockIp.error, 'Could not add to the IP Blocklist.')}</p>}
       <div className="text-xs font-semibold">Alerts with this indicator</div>
       {isError ? <p className="text-xs text-destructive">Could not load alerts.</p> :
         isLoading ? <Loader2 size={14} className="animate-spin" /> : !data?.items.length ? (
