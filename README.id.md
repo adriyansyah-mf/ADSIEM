@@ -1253,7 +1253,7 @@ Seberapa banyak malware sungguhan yang ditangkap engine file agen, diukur dengan
 | Program Windows (exe) | 56 | **69,6%** | **94,6%** | ML statis; YARA 7,1% |
 | Program Linux (ELF) | 57 | **63,2%** | **96,5%** | ML statis; YARA 3,5% |
 | Library Windows (dll) | 8 | 25,0% | 50,0% | terlalu sedikit untuk dinilai |
-| Halaman HTML | 1.353 | **0,1%** | 0,1% | belum ada engine yang mencakupnya |
+| Halaman HTML | 1.353 | 0,1% → **71,8%** | 0,1% → **81,1%** | model HTML (agen 1.33.0), validasi silang data uji; 92% halaman phishing dengan form password |
 | File bersih (`/usr/bin`, `/usr/sbin`, `/usr/lib/x86_64-linux-gnu`) | 8.271 | 0 | 2 (ophcrack, iodine: keduanya memang hacktool, ditandai YARA) | ML statis: 0 |
 
 *Terdeteksi* berarti memicu alert tinggi atau diblokir: rule YARA berseverity high atau critical, atau skor ML statis di pita `malicious` (skor yang hanya dicapai 0,1% file bersih uji). *Memicu alert* menambahkan pita `suspicious` (1%).
@@ -1261,7 +1261,7 @@ Seberapa banyak malware sungguhan yang ditangkap engine file agen, diukur dengan
 Yang terlihat:
 
 - **Program:** model ML menangkap sekitar 95% malware Windows dan Linux terkini di level suspicious, dan 63–70% di level yang memblokir, tanpa satu pun false positive pada 8.271 program sistem. Selisih keduanya adalah harga ambang false positive 0,1%. YARA hanya menambah sedikit.
-- **HTML adalah celah terbesar.** Halamannya 79% berisi redirect, 21% form yang mengirim data, 14% form password, 17% blob base64 besar, dan 16% obfuscation `eval`/`atob`: phishing kit, redirector, dan HTML smuggling. Model statis dan rule untuk jenis ini adalah langkah berikutnya.
+- **HTML tadinya celah terbesar, sekarang ditutup model HTML.** Halamannya 79% berisi redirect, 21% form yang mengirim data, 14% form password, 17% blob base64 besar, dan 16% obfuscation `eval`/`atob`: phishing kit, redirector, dan HTML smuggling. Model HTML (agen 1.33.0, dilatih melawan 42.771 halaman Common Crawl) menangkap 71,8% di level blokir dan 81,1% di level apa pun pada data uji validasi silang, termasuk 92% halaman phishing dengan form password; pada 3.525 file HTML di host Kali hanya 3 yang sampai level blokir. Detail: [`docs/operations/static-ml.md`](docs/operations/static-ml.md#html-pages).
 - **Catatan:** MalShare tidak punya label family dan tidak memverifikasi labelnya, jadi sebagian file mungkin tidak berbahaya. Set programnya kecil (56 dan 57 file). Run sebelumnya pada 83 payload URLhaus (3 Nov) memberi 44,6% terdeteksi; URLhaus banyak berisi tool legal yang dibungkus ulang, jadi bukan acuan kebenaran malware.
 
 Untuk menjalankannya sendiri: `ml/bench/fetch_malshare.py` (API key MalShare) atau `ml/bench/fetch_malwarebazaar.py` (key abuse.ch), lalu `go run ./cmd/detbench` dari `agent/`, di mesin tanpa folder bersama atau tersinkron.

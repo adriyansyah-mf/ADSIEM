@@ -49,6 +49,17 @@ func TestModelMatchesLightGBM(t *testing.T) {
 	checkParity(t, m, "model.parity.json.gz")
 }
 
+func TestHTMLModelMatchesLightGBM(t *testing.T) {
+	m, err := DefaultHTML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Kind != "html" || m.Features != FeaturesHTML || m.Dim != DimHTML {
+		t.Fatalf("HTML model kind %q features %q dim %d", m.Kind, m.Features, m.Dim)
+	}
+	checkParity(t, m, "model_html.parity.json.gz")
+}
+
 func TestELFModelMatchesLightGBM(t *testing.T) {
 	m, err := DefaultELF()
 	if err != nil {

@@ -16,6 +16,9 @@ var embeddedModel []byte
 //go:embed model_elf.json.gz
 var embeddedELFModel []byte
 
+//go:embed model_html.json.gz
+var embeddedHTMLModel []byte
+
 // Model is a LightGBM binary model exported by ml/train.py (format 1, the
 // EMBER 2018 vector) or ml/v3/train.py (format 2, features v3: EMBER2024).
 type Model struct {
@@ -92,6 +95,7 @@ func LoadModel(gz []byte) (*Model, error) {
 	switch {
 	case m.Format == 1 && m.Dim == Dim:
 	case m.Format == 2 && m.Features == "v3" && m.Dim == DimV3:
+	case m.Format == 2 && m.Features == FeaturesHTML && m.Dim == DimHTML:
 	default:
 		return nil, fmt.Errorf("model format %d features %q dim %d not supported", m.Format, m.Features, m.Dim)
 	}
@@ -102,6 +106,9 @@ func LoadModel(gz []byte) (*Model, error) {
 // on; ok is false when the file cannot be scored (format 1: not a PE the
 // extractor reads).
 func (m *Model) ScoreFile(b []byte) (float64, bool) {
+	if m.Features == FeaturesHTML {
+		return m.Score(ExtractHTML(b)), true
+	}
 	if m.Format == 2 {
 		return m.Score(VectorV3(ExtractV3(b))), true
 	}
@@ -134,4 +141,17 @@ var (
 func DefaultELF() (*Model, error) {
 	elfOnce.Do(func() { elfModel, elfErr = LoadModel(embeddedELFModel) })
 	return elfModel, elfErr
+}
+
+var (
+	htmlOnce  sync.Once
+	htmlModel *Model
+	htmlErr   error
+)
+
+// DefaultHTML is the embedded HTML page model (ml/html/train.py: MalShare
+// HTML samples against Common Crawl pages).
+func DefaultHTML() (*Model, error) {
+	htmlOnce.Do(func() { htmlModel, htmlErr = LoadModel(embeddedHTMLModel) })
+	return htmlModel, htmlErr
 }
