@@ -130,3 +130,80 @@ async def test_backfill_not_marked_done_when_indexing_fails(sessions, monkeypatc
     assert await alert_iocs.backfill(batch=2) == 3
     assert len(docs) == 3
     assert flags == {alert_iocs.BACKFILL_FLAG: "1"}
+
+
+def _fake_redis(flags):
+    async def get(key):
+        return flags.get(key)
+
+    async def set_(key, value):
+        flags[key] = value
+
+    async def get_redis():
+        return SimpleNamespace(get=get, set=set_)
+    return get_redis
+
+
+async def test_backfill_reads_indicators_from_the_alerts_event(sessions, monkeypatch):
+    import uuid
+    from worker import alert_iocs, database, es_client, redis_client, settings_cache
+    kept, gone = uuid.uuid4(), uuid.uuid4()
+    async with sessions() as db:
+        alerts = [Alert(title="a0", severity="high", group_id="blue", source_ip="45.33.32.1", event_id=kept),
+                  Alert(title="a1", severity="high", group_id="blue", source_ip="45.33.32.2", event_id=gone)]
+        db.add_all(alerts)
+        await db.commit()
+    flags, docs, queries = {}, [], []
+
+    async def search(query, size=100, sort=None):
+        queries.append(query)
+        return [{"id": str(kept), "decoded_fields": {"dns.question.name": "c2.evil.example",
+                                                     "file.hash.sha256": "b" * 64}}]
+
+    async def index_docs(batch):
+        docs.extend(batch)
+        return 0
+
+    async def get_setting(key, default=""):
+        return default
+
+    monkeypatch.setattr(database, "AsyncSessionLocal", sessions)
+    monkeypatch.setattr(redis_client, "get_redis", _fake_redis(flags))
+    monkeypatch.setattr(settings_cache, "get_setting", get_setting)
+    monkeypatch.setattr(es_client, "search", search)
+    monkeypatch.setattr(alert_iocs, "index_docs", index_docs)
+
+    assert await alert_iocs.backfill() == 4
+    assert sorted(queries[0]["ids"]["values"]) == sorted([str(kept), str(gone)])
+    # an event already gone from the logs index still leaves the alert's source_ip
+    assert {(d["alert_id"], d["type"], d["value"]) for _, d in docs} == {
+        (str(alerts[0].id), "ip", "45.33.32.1"), (str(alerts[0].id), "domain", "c2.evil.example"),
+        (str(alerts[0].id), "sha256", "b" * 64), (str(alerts[1].id), "ip", "45.33.32.2")}
+    assert flags == {alert_iocs.BACKFILL_FLAG: "1"}
+
+
+async def test_backfill_retries_when_events_cannot_be_read(sessions, monkeypatch):
+    import uuid
+    from worker import alert_iocs, database, es_client, redis_client, settings_cache
+    async with sessions() as db:
+        db.add(Alert(title="a0", severity="high", group_id="blue", source_ip="45.33.32.1", event_id=uuid.uuid4()))
+        await db.commit()
+    flags = {}
+
+    async def down(query, size=100, sort=None):
+        raise RuntimeError("es down")
+
+    async def index_docs(batch):
+        return 0
+
+    async def get_setting(key, default=""):
+        return default
+
+    monkeypatch.setattr(database, "AsyncSessionLocal", sessions)
+    monkeypatch.setattr(redis_client, "get_redis", _fake_redis(flags))
+    monkeypatch.setattr(settings_cache, "get_setting", get_setting)
+    monkeypatch.setattr(es_client, "search", down)
+    monkeypatch.setattr(alert_iocs, "index_docs", index_docs)
+
+    await alert_iocs.backfill()
+    assert flags == {}  # not done: the next start reads the events again

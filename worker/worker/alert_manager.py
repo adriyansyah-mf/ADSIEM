@@ -144,10 +144,11 @@ async def create_alert(
     user: str | None = None,
     event_fields: dict | None = None,
 ) -> uuid.UUID | None:
-    """event_fields: the decoded event that fired the rule. Its domains, URLs,
-    hashes and destination IPs go to the Threat IoCs index (a Sigma match has
-    no matched_fields, so without it only source_ip would be indexed)."""
+    """event_fields: the decoded event that fired the rule. The Threat IoCs index
+    and AI triage read its domains, URLs, hashes and destination IPs (a Sigma
+    match has no matched_fields, so without it they saw only source_ip)."""
     from worker.models import Alert, WebhookConfig, WebhookDelivery
+    fields = {**(event_fields or {}), **(rule_match.get("matched_fields") or {})}
 
     if await _is_suppressed(group_id, source_ip, hostname, user, rule_match["title"]):
         return None
@@ -232,7 +233,7 @@ async def create_alert(
         alert_iocs.AlertMeta(alert_id=str(alert_id), group_id=group_id, severity=rule_match["level"],
                              hostname=hostname, agent_id=str(agent_id) if agent_id else None,
                              rule_title=rule_match["title"], created_at=created_at),
-        source_ip, {**(event_fields or {}), **(rule_match.get("matched_fields") or {})},
+        source_ip, fields,
     )
 
     # Unified host/user risk (worker/worker/entity_risk.py) — best-effort
@@ -271,9 +272,9 @@ async def create_alert(
                 "severity": rule_match["level"],
                 "source_ip": source_ip,
                 "hostname": hostname,
-                "decoded_fields": rule_match.get("matched_fields", {}),
+                "decoded_fields": fields,
                 "group_id": group_id,
-            }))
+            }, default=str))
             log.info("ai_queued", alert_id=str(alert_id),
                      severity=rule_match["level"], entity_risk=round(risk, 2))
         else:

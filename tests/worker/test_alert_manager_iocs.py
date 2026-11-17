@@ -116,3 +116,33 @@ async def test_create_alert_indexes_indicators_from_the_event(faked, monkeypatch
     assert sorted((d["type"], d["value"]) for _, d in got) == [
         ("domain", "c2.evil.example"), ("ip", "45.33.32.156"), ("ip", "45.33.32.157"),
         ("sha256", sha), ("url", "http://dl.evil.example/x.sh")]
+
+
+async def test_ai_triage_gets_the_event_fields(faked, monkeypatch):
+    import json
+    from datetime import datetime, timezone
+    pushed = []
+
+    async def true(*a, **k):
+        return True
+
+    async def rpush(key, payload):
+        pushed.append(json.loads(payload))
+
+    async def noop(*a, **k):
+        return None
+
+    async def get_redis():
+        return SimpleNamespace(publish=noop, rpush=rpush)
+
+    monkeypatch.setattr(alert_manager, "_should_ai_investigate", true)
+    monkeypatch.setattr(alert_manager, "get_redis", get_redis)
+    monkeypatch.setattr(alert_manager, "mark_queued", noop)
+    monkeypatch.setattr(alert_iocs, "index_docs", noop)
+    event = {"dns.question.name": "c2.evil.example", "@timestamp": datetime(2026, 11, 17, tzinfo=timezone.utc)}
+    await alert_manager.create_alert({"title": "Beacon", "level": "high", "matched_fields": {"rule": "x"}},
+                                     None, None, "blue", "45.33.32.156", "h1", event_fields=event)
+    [payload] = pushed
+    # the event plus the rule's own matched_fields; non-JSON values (a datetime) never lose the alert
+    assert payload["decoded_fields"]["dns.question.name"] == "c2.evil.example"
+    assert payload["decoded_fields"]["rule"] == "x" and payload["decoded_fields"]["@timestamp"].startswith("2026-11-17")
