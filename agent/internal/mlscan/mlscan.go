@@ -52,6 +52,8 @@ const (
 // (/var/tmp/systemd-private-.../tmp).
 var stagingDirs = []string{"/tmp/", "/var/tmp/", "/dev/shm/"}
 
+func isELF(b []byte) bool { return len(b) >= 4 && string(b[:4]) == "\x7fELF" }
+
 func inStaging(path string) bool {
 	for _, d := range stagingDirs {
 		if strings.HasPrefix(path, d) {
@@ -63,8 +65,8 @@ func inStaging(path string) bool {
 
 // Verdict is the score of one file.
 type Verdict struct {
-	Kind      string // pe or elf
-	Engine    string // ember2024_lgbm / ember_lgbm (PE), ember2024_elf_lgbm or elf_heuristic (ELF)
+	Kind      string // pe, elf or html
+	Engine    string // ember2024_lgbm / ember_lgbm (PE), ember2024_elf_lgbm or elf_heuristic (ELF), html_lgbm
 	Level     string // malicious, suspicious or clean
 	Score     float64
 	Threshold float64 // the one Level crossed (malicious or suspicious)
@@ -85,10 +87,11 @@ func byThresholds(m *mlscore.Model, score float64) (level string, threshold floa
 	return "clean", 0
 }
 
-// Classify scores data with the PE model (files starting "MZ") or, for ELF
-// files, the ELF model and the heuristics (the higher level wins; the
-// heuristic reasons are kept). ok is false for anything else, or a PE a
-// format-1 model cannot read. elf may be nil.
+// Classify scores data with the PE model (files starting "MZ"), the HTML
+// model (pages, mlscore.LooksHTML) or, for ELF files, the ELF model and the
+// heuristics (the higher level wins; the heuristic reasons are kept). ok is
+// false for anything else, or a PE a format-1 model cannot read. elf may be
+// nil.
 func Classify(m, elf *mlscore.Model, data []byte) (v Verdict, ok bool) {
 	return ClassifyAt(m, elf, data, "")
 }
@@ -114,6 +117,18 @@ func ClassifyAt(m, elf *mlscore.Model, data []byte, path string) (v Verdict, ok 
 			v.Engine = "ember2024_lgbm"
 		}
 		v.Level, v.Threshold = byThresholds(m, score)
+		return v, true
+	}
+	// HTML pages (phishing kits, redirectors, HTML smuggling): the HTML
+	// model, by content or by name (.html, .htm, .hta, .svg)
+	if !isELF(data) && mlscore.LooksHTML(data, path) {
+		h, err := mlscore.DefaultHTML()
+		if err != nil {
+			return Verdict{}, false
+		}
+		score, _ := h.ScoreFile(data)
+		v := Verdict{Kind: "html", Engine: "html_lgbm", Score: score}
+		v.Level, v.Threshold = byThresholds(h, score)
 		return v, true
 	}
 	score, reasons, ok := mlscore.ScoreELF(data)

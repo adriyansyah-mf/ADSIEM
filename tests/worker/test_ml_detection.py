@@ -74,3 +74,12 @@ def _titles(decoders, rules, raw):
 ])
 def test_alerts(decoders, rules, action, level, title, severity):
     assert _titles(decoders, rules, line(action=action, level=level)) == {(title, severity)}
+
+
+def test_html_page_line_decodes_and_alerts(decoders, rules):
+    # an HTML page scored by the HTML model (mlscore html.go, engine html_lgbm)
+    raw = line(kind="html", engine="html_lgbm", path="C:\\\\Users\\\\bob\\\\Downloads\\\\invoice.html")
+    event, _ = decoders.decode_named("ml_detection", raw)
+    assert event["ml.kind"] == "html" and event["ml.engine"] == "html_lgbm"
+    assert event["file.path"] == "C:\\Users\\bob\\Downloads\\invoice.html"
+    assert _titles(decoders, rules, raw) == {("Static ML Malicious File", "high")}

