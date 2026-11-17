@@ -10,6 +10,7 @@ const TYPES: { value: PreventionRuleType; label: string; valueLabel: string; pla
   { value: 'path', label: 'Executable path', valueLabel: 'Absolute path', placeholder: '/opt/legacy/bin/tool' },
   { value: 'hash', label: 'SHA-256', valueLabel: 'SHA-256 of the file', placeholder: '64 hex characters' },
   { value: 'parent', label: 'Parent → child', valueLabel: 'Child executables (comma separated)', placeholder: 'sh, dash, bash, python3' },
+  { value: 'signer', label: 'Signer (Windows)', valueLabel: 'Publisher as the signature names it (agent/cmd/authsig shows it)', placeholder: 'Psiphon Inc.' },
 ]
 
 const typeLabel = (t: PreventionRuleType) => TYPES.find(x => x.value === t)?.label ?? t

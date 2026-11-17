@@ -45,14 +45,20 @@ type Plan struct {
 	Paths   []string `json:"paths"`   // executables denied by path
 	Dirs    []string `json:"dirs"`    // folders: anything below them is denied
 	Learned []string `json:"learned"` // files denied by their Authenticode hash
+	// Signers are sample files, one per publisher a signer block rule names:
+	// everything that publisher signed is denied (WDAC Publisher level).
+	Signers []string `json:"signers,omitempty"`
 }
 
 var winAbs = regexp.MustCompile(`^[A-Za-z]:\\`)
 
-// NewPlan builds the plan from the block rules (rule type, value) and the
-// learned files; values that are not absolute Windows paths are left out
-// (Linux paths from a fleet-wide rule set).
-func NewPlan(mode string, rules [][2]string, learned []string) Plan {
+// NewPlan builds the plan from the block rules (rule type, value), the
+// learned files and the learned signer samples (lower-case publisher ->
+// a file it signed); values that are not absolute Windows paths are left
+// out (Linux paths from a fleet-wide rule set). A sample counts only while a
+// signer block rule still names its publisher: turning the rule off lifts
+// the publisher deny at the next reconcile.
+func NewPlan(mode string, rules [][2]string, learned []string, signers map[string]string) Plan {
 	p := Plan{Mode: mode}
 	seen := map[string]bool{}
 	add := func(dst *[]string, v string) {
@@ -67,25 +73,34 @@ func NewPlan(mode string, rules [][2]string, learned []string) Plan {
 		seen[key] = true
 		*dst = append(*dst, v)
 	}
+	blocked := map[string]bool{}
 	for _, r := range rules {
 		switch r[0] {
 		case "path":
 			add(&p.Paths, r[1])
 		case "dir":
 			add(&p.Dirs, r[1])
+		case "signer":
+			blocked[strings.ToLower(strings.TrimSpace(r[1]))] = true
 		}
 	}
 	for _, f := range learned {
 		add(&p.Learned, f)
 	}
+	for publisher, sample := range signers {
+		if blocked[publisher] && !strings.Contains(publisher, "microsoft") {
+			add(&p.Signers, sample)
+		}
+	}
 	sort.Strings(p.Paths)
 	sort.Strings(p.Dirs)
 	sort.Strings(p.Learned)
+	sort.Strings(p.Signers)
 	return p
 }
 
 // Rules is how many deny rules the plan holds.
-func (p Plan) Rules() int { return len(p.Paths) + len(p.Dirs) + len(p.Learned) }
+func (p Plan) Rules() int { return len(p.Paths) + len(p.Dirs) + len(p.Learned) + len(p.Signers) }
 
 // Key identifies the plan: the policy is rebuilt only when it changes.
 func (p Plan) Key() string {
@@ -113,17 +128,27 @@ func ApplyScript(p Plan, workDir string) string {
 	w("$id = %s", psQuote(PolicyID))
 	w("Copy-Item -LiteralPath (Join-Path $env:windir 'schemas\\CodeIntegrity\\ExamplePolicies\\AllowAll.xml') -Destination $xml -Force")
 	w("$rules = @()")
+	w("'step: path and folder rules'")
 	for _, path := range p.Paths {
 		w("$rules += New-CIPolicyRule -Deny -FilePathRule %s", psQuote(path))
 	}
 	for _, d := range p.Dirs {
 		w("$rules += New-CIPolicyRule -Deny -FilePathRule %s", psQuote(d+`\*`))
 	}
+	w("'step: learned hashes'")
 	for _, f := range p.Learned {
 		// a learned file may be gone (deleted, quarantined): its hash cannot be read then
 		w("if (Test-Path -LiteralPath %s) { $rules += New-CIPolicyRule -Deny -Level Hash -DriverFilePath %s }",
 			psQuote(f), psQuote(f))
 	}
+	for _, f := range p.Signers {
+		w("'step: publisher rule from ' + %s", psQuote(f))
+		// ConfigCI reads the issuing CA and the publisher from the sample's
+		// signature: every file that publisher signed is denied, any version, any folder
+		w("if (Test-Path -LiteralPath %s) { $rules += New-CIPolicyRule -Deny -Level Publisher -DriverFilePath %s }",
+			psQuote(f), psQuote(f))
+	}
+	w("'step: merge'")
 	w("if ($rules.Count -gt 0) {")
 	w("  Merge-CIPolicy -PolicyPaths $xml -OutputFilePath $merged -Rules $rules | Out-Null")
 	w("  Move-Item -LiteralPath $merged -Destination $xml -Force")
@@ -143,7 +168,9 @@ func ApplyScript(p Plan, workDir string) string {
 	} else {
 		w("Set-RuleOption -FilePath $xml -Option 3")
 	}
+	w("'step: convert'")
 	w("ConvertFrom-CIPolicy -XmlFilePath $xml -BinaryFilePath $bin | Out-Null")
+	w("'step: activate'")
 	w("$ci = Get-Command CiTool.exe -ErrorAction SilentlyContinue")
 	w("if ($ci) {")
 	w("  & $ci.Source --update-policy $bin -json | Out-Null")

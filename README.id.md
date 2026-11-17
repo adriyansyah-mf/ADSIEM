@@ -394,8 +394,13 @@ ke model Ollama lokal supaya inferensi tetap on-prem.
   policy grup menentukan apakah agen membuang trafiknya (`block`) atau hanya melaporkannya
   (`detect`). Node **Block IOC** di SOAR bisa menambahkan IP (`ip_block`) atau domain
   (`web_block`). Otomasi menolak range privat dan apa pun yang lebih luas dari /16.
-- **Prevention rule:** pencegahan eksekusi dalam mode detect atau block. Di Windows, **App
-  Control** (Policies: `off` / `audit` / `enforce`) mengubah block rule menjadi policy WDAC.
+- **Prevention rule:** pencegahan eksekusi dalam mode detect atau block, berdasarkan path,
+  folder, parent → child, SHA-256, atau (Windows) **signer**: penerbit Authenticode, sehingga
+  satu rule mencakup semua versi program vendor di folder mana pun. Di Windows, **App Control**
+  (Policies: `off` / `audit` / `enforce`) mengubah block rule menjadi policy WDAC; rule signer
+  menjadi deny berdasarkan penerbit di WDAC. **Paket VPN** bawaan (NordVPN, Surfshark, ProtonVPN,
+  Mullvad, WireGuard, Psiphon, Tor Browser; nama penerbit dibaca dari installer resmi) dikirim
+  dalam keadaan nonaktif.
 - **Karantina** (otomatis atau dari dashboard) juga menghentikan program yang menjalankan file
   tersebut. Path yang dilaporkan dari dalam PrivateTmp atau container diterjemahkan ke file di
   host.

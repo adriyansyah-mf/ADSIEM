@@ -12,6 +12,7 @@ Roadmap item 3.3. Linux agents check every program before it starts against the 
 | Executable path | `/opt/x/bin/tool` | exactly that file |
 | Parent → child | parent `nginx, apache2, php-fpm8.2`, child `sh, dash, bash` | a process whose executable is one of the parents starting one of the children (web shell, document → shell) |
 | SHA-256 | 64 hex characters | a file with that content, wherever it is |
+| Signer (Windows) | `Psiphon Inc.` | any program whose embedded Authenticode signature names that publisher (the signing certificate's common name, any case): every version, any folder, renamed or not |
 
 Names in parent rules are executable basenames as the kernel sees them, after symlinks are resolved: list `dash` next to `sh` on Debian and Ubuntu. Scripts are checked as themselves and then as their interpreter.
 
@@ -37,6 +38,9 @@ Windows agents enforce the same rules (`engines_windows.go`, `engine=etw`), with
 - Paths and names compare case-insensitively; `dir` rules split on `\`. Path rules use Windows paths (`C:\Tools\nc.exe`; the server accepts drive-letter paths); a Linux agent skips them and a Windows agent skips `/...` paths, each with a log line.
 - Never terminated: critical processes from System32 (smss, csrss, wininit, winlogon, services, lsass, svchost, dwm, ...), `cmd.exe`, `powershell.exe`, `explorer.exe` and the agent. A block rule on one of them stays detect-only; a hash or parent rule that matches one reports `action=detected` with `Error`.
 - Hash rules read the executable once per path, size and modification time (cached), off the sensor's goroutine.
+- Signer rules read the publisher from the signature embedded in the program (`agent/internal/authenticode`, pure Go, same cache). The signature is not verified: a signer rule only ever blocks, so a file that merely claims a blocked publisher is blocked too, and one with its signature stripped is unsigned (left to path and hash rules). Catalog-signed files (Windows' own) carry no embedded signature and never match. A block rule naming Microsoft is refused by the server and kept detect-only by the agent: it would stop Windows itself. The line carries `Signer` (`code_signature.subject_name`). With App Control on, the first stopped program teaches App Control the publisher: from then on WDAC refuses every program it signed before it runs ([app-control](app-control.md)). Linux agents skip signer rules (ELF programs carry no Authenticode).
+- Find a publisher's exact name with `go run ./cmd/authsig program.exe` (from `agent/`), on any OS.
+- **Built-in VPN pack**: Prevention lists `VPN pack: NordVPN`, `Surfshark`, `ProtonVPN`, `Mullvad VPN`, `WireGuard`, `Psiphon` and `Tor Browser` as signer block rules, **off**. Each publisher was read from the vendor's official Windows installer (`server-api/app/services/prevention_pack.py` says which). Turn on the ones the organisation does not allow; leave the company VPN off. `Proton AG` also signs Proton Mail, Drive and Pass. The server adds missing pack rules at start and never changes or re-enables existing ones.
 - Needs the ETW sensor: with `etw.mode: auto` and Sysmon installed the sensor is off, and so is prevention on that host.
 - Lines: `windows_exec_prevention` (`decoders/windows_exec_prevention.yaml`); rule *Execution Terminated By Prevention Rule On Windows* (high).
 - Test: `TestWindowsKillOnExecEndToEnd` (native-evidence job): a copy of `ping.exe` under a block rule is terminated within seconds, a copy under a detect rule runs to the end.

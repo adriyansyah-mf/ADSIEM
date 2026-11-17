@@ -44,6 +44,7 @@ type Decision struct {
 	Path       string
 	Parent     string
 	SHA256     string
+	Signer     string // the Authenticode publisher, when a signer rule matched
 	Comm       string
 	PID        uint32
 	PPID       uint32
@@ -70,6 +71,9 @@ func (d Decision) line() string {
 		action, kv(d.Rule.Name), kv(d.Rule.ID), d.Rule.RuleType, d.Engine, kv(d.Path), kv(d.Parent))
 	if d.SHA256 != "" {
 		fmt.Fprintf(&sb, ` SHA256=%s`, d.SHA256)
+	}
+	if d.Signer != "" {
+		fmt.Fprintf(&sb, ` Signer=%s`, kv(d.Signer))
 	}
 	fmt.Fprintf(&sb, ` Comm=%s PID=%d PPID=%d User=%d`, kv(d.Comm), d.PID, d.PPID, d.UID)
 	if d.Error != "" {

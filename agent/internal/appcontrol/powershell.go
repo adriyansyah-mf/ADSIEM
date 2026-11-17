@@ -27,6 +27,10 @@ func PowerShell() Runner {
 		err := cmd.Run()
 		out := strings.TrimSpace(stdout.String())
 		if err != nil {
+			if ctx.Err() != nil {
+				// killed: say so, and how far the script got
+				return out, fmt.Errorf("powershell: timed out (%v) after %s", ctx.Err(), lastStep(out))
+			}
 			why := lastLine(cleanStderr(stderr.String()))
 			if why == "" {
 				why = lastLine(out)
@@ -35,6 +39,17 @@ func PowerShell() Runner {
 		}
 		return out, nil
 	}
+}
+
+// lastStep is the last "step: ..." marker a script printed ("the start" when none).
+func lastStep(out string) string {
+	lines := strings.Split(out, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if t := strings.TrimSpace(lines[i]); strings.HasPrefix(t, "step: ") {
+			return strings.TrimPrefix(t, "step: ")
+		}
+	}
+	return "the start"
 }
 
 // cleanStderr drops CLIXML progress records, keeping the error text.

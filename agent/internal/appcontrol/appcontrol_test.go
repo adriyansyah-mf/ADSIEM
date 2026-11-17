@@ -16,7 +16,7 @@ func TestNewPlanKeepsWindowsPathsOnly(t *testing.T) {
 		{"path", `C:\Users\Public\evil.exe`}, {"path", `c:\users\public\EVIL.exe`}, // duplicate, any case
 		{"dir", `C:\Temp\drop\`}, {"path", "/tmp/miner"}, {"hash", strings.Repeat("a", 64)},
 		{"path", "C:\\bad\npath.exe"},
-	}, []string{`C:\Users\a\Downloads\mal.exe`, "relative.exe"})
+	}, []string{`C:\Users\a\Downloads\mal.exe`, "relative.exe"}, nil)
 	if len(p.Paths) != 1 || p.Paths[0] != `C:\Users\Public\evil.exe` {
 		t.Fatalf("paths: %v", p.Paths)
 	}
@@ -24,14 +24,14 @@ func TestNewPlanKeepsWindowsPathsOnly(t *testing.T) {
 		t.Fatalf("plan: %+v", p)
 	}
 	if p.Key() == NewPlan(ModeAudit, [][2]string{{"path", `C:\Users\Public\evil.exe`}, {"dir", `C:\Temp\drop`}},
-		[]string{`C:\Users\a\Downloads\mal.exe`}).Key() {
+		[]string{`C:\Users\a\Downloads\mal.exe`}, nil).Key() {
 		t.Fatal("a mode change must change the key")
 	}
 }
 
 func TestApplyScriptContent(t *testing.T) {
 	p := NewPlan(ModeEnforce, [][2]string{{"path", `C:\O'Brien\x.exe`}, {"dir", `C:\Temp\drop`}},
-		[]string{`C:\Users\a\mal.exe`})
+		[]string{`C:\Users\a\mal.exe`}, nil)
 	s := ApplyScript(p, `C:\ProgramData\SIEMAgent\appcontrol`)
 	for _, want := range []string{
 		`New-CIPolicyRule -Deny -FilePathRule 'C:\O''Brien\x.exe'`,
@@ -44,7 +44,7 @@ func TestApplyScriptContent(t *testing.T) {
 			t.Fatalf("script lacks %q:\n%s", want, s)
 		}
 	}
-	audit := ApplyScript(NewPlan(ModeAudit, nil, nil), `C:\x`)
+	audit := ApplyScript(NewPlan(ModeAudit, nil, nil, nil), `C:\x`)
 	if strings.Contains(audit, "-Option 3 -Delete") || !strings.Contains(audit, "Set-RuleOption -FilePath $xml -Option 3\n") {
 		t.Fatal("audit keeps option 3 (Enabled:Audit Mode)")
 	}
@@ -57,8 +57,8 @@ func TestScriptsParse(t *testing.T) {
 		t.Skip("pwsh not installed")
 	}
 	for name, script := range map[string]string{
-		"apply": ApplyScript(NewPlan(ModeEnforce, [][2]string{{"path", `C:\a b\x.exe`}, {"dir", `C:\d`}},
-			[]string{`C:\l.exe`}), `C:\w`),
+		"apply": ApplyScript(NewPlan(ModeEnforce, [][2]string{{"path", `C:\a b\x.exe`}, {"dir", `C:\d`}, {"signer", "Proton AG"}},
+			[]string{`C:\l.exe`}, map[string]string{"proton ag": `C:\s.exe`}), `C:\w`),
 		"remove": RemoveScript(),
 	} {
 		check := `$e = $null; $src = $input | Out-String; [System.Management.Automation.Language.Parser]::ParseInput($src, [ref]$null, [ref]$e) | Out-Null; if ($e) { $e | ForEach-Object { $_.Message }; exit 1 }`

@@ -25,7 +25,7 @@ func TestPathRulesDoNotWaitForHashingSlots(t *testing.T) {
 
 	done := make(chan string, 1)
 	go func() {
-		c, _ := matchBounded(p, "/dev/shm/payload", "/bin/bash", slots, hash)
+		c, _, _ := matchBounded(p, "/dev/shm/payload", "/bin/bash", slots, hash, nil)
 		if c == nil {
 			done <- ""
 			return
@@ -44,7 +44,7 @@ func TestPathRulesDoNotWaitForHashingSlots(t *testing.T) {
 	// a hash rule waits for a slot, then decides
 	hashDone := make(chan string, 1)
 	go func() {
-		c, sum := matchBounded(p, "/tmp/z", "/bin/bash", slots, hash)
+		c, sum, _ := matchBounded(p, "/tmp/z", "/bin/bash", slots, hash, nil)
 		if c == nil || sum == "" {
 			hashDone <- ""
 			return

@@ -382,8 +382,12 @@ model to keep inference on-prem.
   `ip_ioc` mode decides whether agents drop the traffic (`block`) or only report it (`detect`).
   SOAR's **Block IOC** node can add an IP (`ip_block`) or a domain (`web_block`). Automation
   refuses private ranges and anything broader than /16.
-- **Prevention rules:** execution prevention in detect or block mode. On Windows, **App
-  Control** (Policies: `off` / `audit` / `enforce`) turns the block rules into a WDAC policy.
+- **Prevention rules:** execution prevention in detect or block mode, by path, folder, parent →
+  child, SHA-256, or (Windows) **signer**: the Authenticode publisher, so one rule covers every
+  version of a vendor's program in any folder. On Windows, **App Control** (Policies: `off` /
+  `audit` / `enforce`) turns the block rules into a WDAC policy; a signer rule becomes a WDAC
+  publisher deny. A built-in **VPN pack** (NordVPN, Surfshark, ProtonVPN, Mullvad, WireGuard,
+  Psiphon, Tor Browser; publishers read from the official installers) ships off.
 - **Quarantine** (automatic or from the dashboard) also stops the programs running the file.
   A path reported from inside a PrivateTmp or container is resolved to the file on the host.
 - **Known malware hashes:** the agent action is `off`, `detect` (critical alert) or `block`
