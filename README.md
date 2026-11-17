@@ -11,7 +11,7 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 | | |
 |---|---|
 | Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.28.0**, signed self-update, USB storage control |
-| Detection content | **256** Sigma rules in 247 files (13 for OT/ICS, 10 for Active Directory attacks), **138** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
+| Detection content | **258** Sigma rules in 249 files (13 for OT/ICS, 10 for Active Directory attacks), **138** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
 | OT / ICS | Modbus/TCP and DNP3 decoded from Suricata; MITRE ATT&CK for ICS rules for PLC programming, stop/restart, listen-only, scans, internet exposure |
 | Behaviour analytics | Host baselines (rare parent → child, rare new executables, beaconing), UEBA for users, IPs, hosts and processes, entity risk scoring, lateral movement graph |
 | Vulnerabilities | Package CVEs per host (OSV.dev per distro) and Windows builds against Microsoft's KB fixes, ranked by CISA KEV, FIRST EPSS and severity |
@@ -168,7 +168,7 @@ across crashes and reboots (`-evidence-list`, `-evidence-salvage`, …).
 | Sensor health self-report (sensor stopped, silent, blinded, events lost) | ✓ incl. eBPF canary | ✓ incl. ETW lost events | `internal/sensorstat`, `linsensor` |
 | Log collection | File and glob tailing with rotation | Files + Event Log channels (`eventlog:<channel>`), Sysmon | `internal/tailer`, `winevent` |
 | IOA behaviour chains | ✓ | ✓ | `internal/ioa` (agent 1.23+) |
-| **RansomGuard** anti-ransomware | ✓ canary files, precursor rules, entropy and mass-modify heuristics, kill process tree or isolate | ✓ | `internal/ransomguard` |
+| **RansomGuard** anti-ransomware | ✓ canary files, precursor rules, entropy and mass-modify heuristics, kill process tree or isolate; **rollback**: hourly snapshots of user folders, files a stopped process changed come back | ✓ | `internal/ransomguard`, `internal/rollback` |
 | Static ML (PE + ELF; an ELF in `/tmp`, `/var/tmp` or `/dev/shm` is held to stricter thresholds) | ✓ | ✓ | `internal/mlscore`, `mlscan` |
 | YARA (pure Go, on-access, full-disk, memory) | ✓ | ✓ | `internal/yara`, `yarascan`, `fullscan`, `memscan` |
 | Script, archive and document scanning | ✓ | ✓ | `internal/scriptscan`, `unpack` |
@@ -233,7 +233,7 @@ cannot simply stop it.
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   numeric compare), keywords, boolean conditions, threshold and correlation windows,
   `after:` sequences, and per-entity suppression.
-- **256 bundled rules** (247 files): Linux, Windows, IOA chains, web attacks (SQLi, XSS,
+- **258 bundled rules** (249 files): Linux, Windows, IOA chains, web attacks (SQLi, XSS,
   SSRF, LFI, RCE, Log4Shell, XXE, GraphQL, WordPress), network/firewall, Suricata/Zeek,
   OT/ICS, Active Directory, ransomware, ML, YARA, USB storage, credential access,
   kernel-thread masquerading (a `[kworker/…]`-named process that connects out or is

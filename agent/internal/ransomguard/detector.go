@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -143,10 +144,57 @@ type detector struct {
 	// trusted images (by path and signature, trust.go) are skipped.
 	trusted func(image string) bool
 	procs   map[uint32]*procWindow
+	// touched: per process, when it first wrote, renamed or created a file
+	// and every folder it did that in, across windows (rollback restores
+	// those folders from before then).
+	touched map[uint32]*touch
+}
+
+// touch is what rollback needs of one process.
+type touch struct {
+	first time.Time
+	dirs  map[string]bool
+}
+
+// maxTouchDirs bounds the folders kept per process.
+const maxTouchDirs = 1000
+
+func (d *detector) touch(ev linsensor.FileEvent) {
+	if ev.Action != "write" && ev.Action != "create" && ev.Action != "rename" {
+		return
+	}
+	t := d.touched[ev.PID]
+	if t == nil {
+		if len(d.touched) >= maxTracked {
+			d.touched = map[uint32]*touch{}
+		}
+		t = &touch{first: ev.Time, dirs: map[string]bool{}}
+		d.touched[ev.PID] = t
+	}
+	for _, p := range []string{ev.Path, ev.From} {
+		if p != "" && len(t.dirs) < maxTouchDirs {
+			t.dirs[dir(p)] = true
+		}
+	}
+}
+
+// touchedBy is when pid first wrote and the folders it wrote in.
+func (d *detector) touchedBy(pid uint32) (time.Time, []string) {
+	t := d.touched[pid]
+	if t == nil {
+		return time.Time{}, nil
+	}
+	dirs := make([]string, 0, len(t.dirs))
+	for k := range t.dirs {
+		dirs = append(dirs, k)
+	}
+	sort.Strings(dirs)
+	return t.first, dirs
 }
 
 func newDetector(allow []string) *detector {
 	d := &detector{allow: map[string]bool{}, ignore: skipInplace, procs: map[uint32]*procWindow{},
+		touched: map[uint32]*touch{},
 		trusted: func(image string) bool { return trustedSync(image, microsoftSigned) }}
 	for _, a := range append(append([]string{}, DefaultAllowImages...), allow...) {
 		d.allow[strings.ToLower(a)] = true

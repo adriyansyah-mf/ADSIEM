@@ -48,6 +48,7 @@ import (
 	"github.com/siem-platform/agent/internal/procexec"
 	"github.com/siem-platform/agent/internal/projscan"
 	"github.com/siem-platform/agent/internal/ransomguard"
+	"github.com/siem-platform/agent/internal/rollback"
 	"github.com/siem-platform/agent/internal/scriptscan"
 	"github.com/siem-platform/agent/internal/sensorstat"
 	"github.com/siem-platform/agent/internal/tailer"
@@ -469,6 +470,16 @@ func run(configPath string, stop <-chan struct{}) {
 			opts.Isolate = isolate
 		}
 		opts.IsolateFunc = isolate
+		// Rollback (group policy ransomware_rollback): hourly snapshots of the
+		// user data folders; a stopped process's changes are put back.
+		rb := &rollback.Controller{
+			Store: &rollback.Store{Dir: filepath.Join(task.StateDir(cfg), "rollback"), Skip: rollback.DefaultSkip},
+			Push:  func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+			Mode:  func() string { return polStore.Current().Settings.RansomwareRollback },
+			Paths: func() []string { return polStore.Current().Settings.RollbackPaths },
+		}
+		opts.OnStopped = func(s ransomguard.Stopped) { rb.Restore(s.PID, s.Image, s.Since, s.Dirs) }
+		go rb.Run(flowCtx)
 		guard = ransomguard.New(opts)
 		go guard.Run(flowCtx)
 		hardenSafeMode()

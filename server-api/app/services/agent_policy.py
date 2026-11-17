@@ -29,6 +29,7 @@ _SCHEDULE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun|daily) ([01][0-9]|2[0-3])
 _ABS = re.compile(r"^(/|[A-Za-z]:\\)")
 _USB_ID = re.compile(r"^([0-9A-F]{4}):([0-9A-F]{4})(?::([^\s:]{1,128}))?$")
 MAX_USB_ALLOW = 500
+MAX_ROLLBACK_PATHS = 50
 
 
 class Exclusion(BaseModel):
@@ -62,6 +63,12 @@ class PolicySettings(BaseModel):
     yara_on_access: bool = True
     ransomware_mode: Literal["off", "report", "stop"] = "stop"
     ransomware_isolate: bool = False
+    # ransomware rollback (agent/internal/rollback): auto keeps hourly snapshots of the user data
+    # folders (rollback_paths; empty = each user's Documents, Desktop, Pictures, Downloads, and
+    # /srv, /var/www on Linux) and puts back what a process changed once ransomware protection
+    # stopped it. Costs disk (5 GB at most by default), so off by default.
+    ransomware_rollback: Literal["off", "auto"] = "off"
+    rollback_paths: list[str] = Field(default_factory=list, max_length=MAX_ROLLBACK_PATHS)
     notify_user: bool = True                 # pop-ups for the signed-in user (Windows)
     # scripts scanned with the YARA rules as they run (Windows: AMSI content; Linux: interpreters'
     # code); block stops the process on a high or critical match
@@ -123,6 +130,23 @@ class PolicySettings(BaseModel):
         if v and not _SCHEDULE.match(v):
             raise ValueError("full_scan_schedule: '<mon..sun|daily> HH:MM' or empty")
         return v
+
+    @field_validator("rollback_paths")
+    @classmethod
+    def _rollback_paths(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for raw in v:
+            p = raw.strip()
+            if not p:
+                continue
+            absolute = p.startswith("/") or (len(p) >= 3 and p[1] == ":" and p[2] in "\\/") or p.startswith("\\\\")
+            if not absolute or len(p) > 400 or any(c in p for c in "\0\n\r*?"):
+                raise ValueError(f"rollback_paths: {raw!r} is not an absolute folder path (no wildcards)")
+            if p in ("/", "\\") or (len(p) <= 3 and p[1:2] == ":"):
+                raise ValueError(f"rollback_paths: {raw!r} is a whole drive; name the folders to keep")
+            if p not in out:
+                out.append(p)
+        return out
 
     @field_validator("usb_allow")
     @classmethod

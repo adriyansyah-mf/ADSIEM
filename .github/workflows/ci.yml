@@ -134,6 +134,12 @@ jobs:
         working-directory: agent
         run: sudo -E env "PATH=$PATH" RANSOM_E2E=1 go test -count=1 -run TestRansomwareEndToEnd -v ./internal/ransomguard/
 
+      # Rollback after a real stopped attack: 300 documents snapshotted, a
+      # child process encrypts them, the guard kills it, they come back.
+      - name: ransomware rollback end-to-end (root)
+        working-directory: agent
+        run: sudo -E env "PATH=$PATH" ROLLBACK_E2E=1 go test -count=1 -run TestRollbackEndToEnd -v ./internal/rollback/
+
       # Reading another process's memory needs ptrace access (root).
       - name: process memory scan end-to-end (root)
         working-directory: agent

@@ -44,6 +44,18 @@ type Options struct {
 	// IsolateFunc cuts the host off when the group policy asks for it
 	// (Runtime.Isolate) though the local config does not.
 	IsolateFunc func() error
+	// OnStopped, when set, is called (on its own goroutine) after a process
+	// was killed: rollback restores the folders it wrote in.
+	OnStopped func(Stopped)
+}
+
+// Stopped is a process the guard killed: when it first wrote, renamed or
+// created a file, and the folders it did that in.
+type Stopped struct {
+	PID   uint32
+	Image string
+	Since time.Time
+	Dirs  []string
 }
 
 // Runtime is what the group policy sets while the agent runs (internal/policy).
@@ -171,6 +183,10 @@ func (g *Guard) Observe(ev linsensor.FileEvent) {
 		return
 	}
 	g.observeDrop(ev.PID, ev.Image, ev.Action, ev.Path, ev.From, ev.Time)
+	// where each process wrote, for rollback (canary hits included)
+	g.mu.Lock()
+	g.det.touch(ev)
+	g.mu.Unlock()
 	for _, name := range []string{ev.Path, ev.From} {
 		if name == "" {
 			continue
@@ -371,6 +387,14 @@ func (g *Guard) act(d detection) {
 		g.respond(&d, d.pid, d.image)
 	}
 	g.report(d)
+	if d.response == "killed" && g.opts.OnStopped != nil {
+		g.mu.Lock()
+		since, dirs := g.det.touchedBy(d.pid)
+		g.mu.Unlock()
+		if !since.IsZero() && len(dirs) > 0 {
+			go g.opts.OnStopped(Stopped{PID: d.pid, Image: d.image, Since: since, Dirs: dirs})
+		}
+	}
 }
 
 // respond stops process pid (image) with its tree and isolates the host
