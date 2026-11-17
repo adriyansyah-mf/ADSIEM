@@ -26,6 +26,7 @@ interface Settings {
   app_control: 'off' | 'audit' | 'enforce'
   usb_storage: 'off' | 'audit' | 'block'
   browser_policy: 'off' | 'on'
+  dns_sinkhole: 'off' | 'on'
   usb_allow: string[]
   quick_scan_time: string
   full_scan_schedule: string
@@ -272,6 +273,19 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
             Sets the browsers' own managed policies so the web block holds inside the browser: DNS over HTTPS off in
             Chrome, Edge, Chromium, Brave and Firefox, and extensions that ask for the proxy permission (VPN and proxy
             extensions) blocked in the Chromium browsers. Values your own GPO or policy files already set are kept.
+          </span>
+        </label>
+        <label className="rounded border border-border p-3 space-y-1">
+          <span className="block text-sm font-medium">DNS sinkhole (block subdomains too)</span>
+          <select value={s.dns_sinkhole ?? 'off'} onChange={e => set({ dns_sinkhole: e.target.value as Settings['dns_sinkhole'] })}
+            className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
+            <option value="off">Off: the web block covers each listed name and its www.</option>
+            <option value="on">On: every subdomain of manually blocked domains is blocked</option>
+          </select>
+          <span className="block text-xs text-muted-foreground">
+            For domains blocked by hand or from an alert (up to 500), any subdomain such as cdn.example.com is
+            blocked too. Only those names go to a small resolver on the agent: Windows uses an NRPT rule, Linux
+            systemd-resolved; other DNS is untouched. Feed domains stay exact.
           </span>
         </label>
         <div className="rounded border border-border p-3 space-y-1">

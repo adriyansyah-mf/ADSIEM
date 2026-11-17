@@ -52,7 +52,11 @@ type snapshot struct {
 	entries  map[string]Entry
 }
 
-func (s *snapshot) base(host string) (string, bool) {
+func (s *snapshot) base(host string) (string, bool) { return s.baseIn(host, nil) }
+
+// baseIn also takes a subdomain of a domain in subtree (the DNS sinkhole
+// sends every subdomain of those here, internal/dnssink).
+func (s *snapshot) baseIn(host string, subtree map[string]bool) (string, bool) {
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	if s.selected[host] {
 		return host, true
@@ -60,7 +64,36 @@ func (s *snapshot) base(host string) (string, bool) {
 	if a := strings.TrimPrefix(host, "www."); a != host && s.selected[a] {
 		return a, true
 	}
+	for p := host; len(subtree) > 0; {
+		i := strings.IndexByte(p, '.')
+		if i < 0 {
+			break
+		}
+		p = p[i+1:]
+		if subtree[p] && s.selected[p] {
+			return p, true
+		}
+	}
 	return "", false
+}
+
+// SetSubdomains names the blocked domains whose every subdomain reaches the
+// block page (the DNS sinkhole's domains): the page and its certificates
+// answer for those subdomains too. Empty: exact names (and www.) only.
+func (c *Controller) SetSubdomains(domains []string) {
+	m := make(map[string]bool, len(domains))
+	for _, d := range domains {
+		m[strings.TrimSuffix(strings.ToLower(d), ".")] = true
+	}
+	c.subtree.Store(&m)
+}
+
+func (c *Controller) base(s *snapshot, host string) (string, bool) {
+	var sub map[string]bool
+	if p := c.subtree.Load(); p != nil {
+		sub = *p
+	}
+	return s.baseIn(host, sub)
 }
 
 // Controller turns the blocklist into enforcement: hosts block, CA and block
@@ -90,7 +123,8 @@ type Controller struct {
 	hostsOK    bool   // Hosts.Apply succeeded for hostsKey
 	hostsKey   string // selected domains and ipv6 last written
 	snap       atomic.Pointer[snapshot]
-	health     Health // working copy, under mu
+	subtree    atomic.Pointer[map[string]bool] // SetSubdomains
+	health     Health                          // working copy, under mu
 	// published is what Health returns; stored at the end of every apply so
 	// the heartbeat never waits for an Apply running trust tools.
 	published atomic.Pointer[Health]
@@ -241,7 +275,7 @@ func (c *Controller) activate(l *List, force bool) {
 			if s == nil {
 				return false
 			}
-			_, ok := s.base(host)
+			_, ok := c.base(s, host)
 			return ok
 		})
 	}
@@ -295,7 +329,7 @@ func (c *Controller) lookup(host string) (Entry, bool) {
 	if s == nil {
 		return Entry{}, false
 	}
-	d, ok := s.base(host)
+	d, ok := c.base(s, host)
 	if !ok {
 		return Entry{}, false
 	}

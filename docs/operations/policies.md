@@ -10,6 +10,7 @@ Dashboard → **Policies** (`/api/policies`, edit with `agents:manage`, inside y
 | Known-malware hashes | off / detect / block for this group; empty uses the global setting (Malware hashes page) | global |
 | YARA on-access | scan new and changed files in the watched folders (files still go to the known-malware check) | on |
 | YARA match on a file (`yara_action`, `yara_quarantine_level`) | detect, or quarantine files matching a rule of at least critical (or high) severity; quarantine also stops a dropper running from temp or downloads (see yara.md) | detect, critical |
+| DNS sinkhole (`dns_sinkhole`) | on: every subdomain of the web block's manual and alert domains (up to 500) is blocked through a resolver on the agent; only those names are routed to it (NRPT on Windows, systemd-resolved on Linux); see web-protection.md | off |
 | Browser policies (`browser_policy`) | on: DNS over HTTPS off (Chrome, Edge, Chromium, Brave, Firefox) and extensions asking for the proxy permission blocked (Chromium browsers), through the browsers' managed policies; an administrator's own values are kept (see web-protection.md) | off |
 | Scan programs before they run (`exec_scan`) | Linux: hold a program outside the system folders at exec until the file engines checked it (3 s at most, fail open); Windows: scan each new program as it starts | on |
 | Ransomware | stop (kill the encrypting process), report only, off | stop |
