@@ -98,6 +98,7 @@ _DEFAULT_SETTINGS = [
     ("abusech_auth_key",  "",                          True,  "abuse.ch Auth-Key (free, auth.abuse.ch) for the URLhaus feed in Web Protection; falls back to malwarebazaar_api_key when empty"),
     ("phishtank_app_key",  "",                          True,  "PhishTank application key (free, phishtank.org) for the PhishTank feed in Web Protection"),
     ("malware_feed_enabled", "true",                   False, "Download new malware hashes from MalwareBazaar every 30 minutes into the known-malware set agents check (needs malwarebazaar_api_key; only downloads, nothing is sent) (true/false)"),
+    ("ip_feed_tor_enabled", "true",                    False, "Add the Tor Project's exit node list to the IP Blocklist for every group every 6 hours (agents drop or report Tor traffic as the group's ip_ioc policy says; only downloads, nothing is sent). false removes the entries (true/false)"),
     ("vuln_intel_enabled", "true",                    False, "Download CISA KEV, FIRST EPSS and Microsoft's monthly security update data once a day to prioritise vulnerabilities (only downloads, nothing is sent) (true/false)"),
     ("vuln_msrc_months",   "6",                       False, "How many monthly Microsoft security releases to keep for Windows patch checks (1-24); older fixes are covered by newer cumulative updates"),
     ("vuln_scan_enabled",  "true",                    False, "Match hosts' installed packages (OSV.dev, sends package names and versions, no host names) and Windows builds (Microsoft data) to known vulnerabilities (true/false)"),

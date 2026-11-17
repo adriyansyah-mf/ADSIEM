@@ -12,7 +12,7 @@ Splunk/QRadar.
 | | |
 |---|---|
 | Agen endpoint | Go, Linux (eBPF) + Windows (ETW), rilis terbaru **agent-v1.28.0**, self-update bertanda tangan, kontrol USB storage |
-| Konten deteksi | **248** rule Sigma dalam 239 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
+| Konten deteksi | **254** rule Sigma dalam 245 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
 | OT / ICS | Modbus/TCP dan DNP3 di-decode dari Suricata; rule MITRE ATT&CK for ICS untuk pemrograman PLC, stop/restart, listen-only, scan, eksposur ke internet |
 | Analitik perilaku | Baseline host (parent → child yang jarang, executable baru yang jarang, beaconing), UEBA untuk user, IP, host, dan proses, skor risiko entitas, graf lateral movement |
 | Kerentanan | CVE paket per host (OSV.dev per distro) dan build Windows terhadap perbaikan KB Microsoft, diurutkan menurut CISA KEV, FIRST EPSS, dan tingkat keparahan |
@@ -233,11 +233,11 @@ tidak bisa begitu saja menghentikannya.
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   perbandingan numerik), keyword, kondisi boolean, window threshold dan korelasi, sekuens
   `after:`, dan suppression per entitas.
-- **248 rule bawaan** (239 file): Linux, Windows, rantai IOA, serangan web (SQLi, XSS, SSRF,
+- **254 rule bawaan** (245 file): Linux, Windows, rantai IOA, serangan web (SQLi, XSS, SSRF,
   LFI, RCE, Log4Shell, XXE, GraphQL, WordPress), jaringan/firewall, Suricata/Zeek, OT/ICS,
   Active Directory, ransomware, ML, YARA, USB storage, credential access, penyamaran sebagai
   kernel thread (proses bernama `[kworker/…]` yang membuat koneksi keluar atau di-exec), App
-  Control, dan tamper agen.
+  Control, klien dan tunnel VPN/Tor/proxy (cara melewati web block), dan tamper agen.
 - **Serangan Active Directory** (`win_ad_*`): Kerberoasting (service ticket RC4), AS-REP
   roasting dan akun yang dibuat bisa di-AS-REP-roast, DCSync dari akun non-DC, password spray
   ke banyak akun, dan persistence: SPN ditambahkan ke user, SID History ditambahkan, atau
@@ -389,7 +389,8 @@ ke model Ollama lokal supaya inferensi tetap on-prem.
   izin domain per grup, feed URLhaus dan PhishTank, auto-block dari verdict TI, halaman blokir
   kustom dengan preview, dan status per agen.
 - **IP Blocklist** (`/ip-blocklist`, `/api/ip-blocks`): alamat atau CIDR per grup dengan alasan
-  dan masa berlaku opsional, juga diisi lewat `/api/ingest/ip-blocklist`. Mode `ip_ioc` di
+  dan masa berlaku opsional, juga diisi lewat `/api/ingest/ip-blocklist` dan daftar exit node
+  Tor dari Tor Project setiap 6 jam (`ip_feed_tor_enabled`, semua grup). Mode `ip_ioc` di
   policy grup menentukan apakah agen membuang trafiknya (`block`) atau hanya melaporkannya
   (`detect`). Node **Block IOC** di SOAR bisa menambahkan IP (`ip_block`) atau domain
   (`web_block`). Otomasi menolak range privat dan apa pun yang lebih luas dari /16.
