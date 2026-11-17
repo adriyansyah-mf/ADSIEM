@@ -283,7 +283,9 @@ async def index_triaged_alert(alert_id: str, fields: dict | None, extracted: lis
     await index_docs(docs)
 
 
-BACKFILL_FLAG = "siem:alert_iocs:backfilled"
+# v2: alerts indexed before the event's fields reached alert_iocs (only source_ip was
+# kept) are indexed again from their event in the logs index
+BACKFILL_FLAG = "siem:alert_iocs:backfilled:v2"
 _KEY_TYPES = {"ip": "ipv4", "domain": "domain", "url": "url"}
 _KEY_HASHES = {64: "hash_sha256", 40: "hash_sha1", 32: "hash_md5"}
 
@@ -301,8 +303,23 @@ def indicators_to_extracted(keys: list[str]) -> list[dict]:
     return out
 
 
+async def _event_fields(event_ids: list) -> dict[str, dict] | None:
+    """decoded_fields of each event still in the logs index, by event id; None if the search failed."""
+    ids = [str(e) for e in event_ids if e]
+    if not ids:
+        return {}
+    try:
+        hits = await es_client.search({"ids": {"values": ids}}, size=len(ids))
+    except Exception as exc:
+        log.warning("alert_iocs_backfill_events_failed", events=len(ids), error=str(exc))
+        return None
+    return {h["id"]: h.get("decoded_fields") or {} for h in hits}
+
+
 async def backfill(batch: int = 500) -> int:
-    """Index alerts that predate alert_iocs, once (Redis flag). Returns documents written."""
+    """Index every alert from its event (when the logs index still has it), its
+    source_ip and its case indicators, once (Redis flag). Document ids are stable,
+    so this overwrites earlier documents. Returns documents written."""
     from collections import defaultdict
     from sqlalchemy import select, tuple_
     from worker import database, redis_client
@@ -328,9 +345,15 @@ async def backfill(batch: int = 500) -> int:
         indicators: dict = defaultdict(list)
         for alert_id, keys in links:
             indicators[alert_id].extend(keys or [])
+        events = await _event_fields([a.event_id for a in alerts])
+        if events is None:  # retried on the next start: the flag stays unset
+            failed += 1
+            events = {}
         docs = []
         for alert in alerts:
-            docs += collect(meta_of(alert), alert.source_ip, None, indicators_to_extracted(indicators[alert.id]),
+            # the same fields create_alert indexes: the event, then the rule's matched_fields
+            fields = {**events.get(str(alert.event_id), {}), **((alert.context or {}).get("matched_fields") or {})}
+            docs += collect(meta_of(alert), alert.source_ip, fields, indicators_to_extracted(indicators[alert.id]),
                             exclusions, extracted_origin="alert")
         lost = await index_docs(docs)
         failed += lost
