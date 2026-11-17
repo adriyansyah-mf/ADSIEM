@@ -106,6 +106,22 @@ func (l *List) Selected() []string {
 	return names
 }
 
+// SubtreeDomains is the selected domains an analyst chose (manual and
+// alert entries) when the list is enforced: the DNS sinkhole blocks every
+// subdomain of these. Feed entries stay exact hosts in the hosts file.
+func (l *List) SubtreeDomains() []string {
+	if l == nil || !l.Active() {
+		return nil
+	}
+	var out []string
+	for _, d := range l.Selected() {
+		if wwwSource(l.Entries[d].Source) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // wwwSource reports whether a domain from this source also blocks its www.
 // name: only operator-chosen entries do, feed entries are exact hosts.
 func wwwSource(s string) bool { return s == "manual" || s == "alert" }

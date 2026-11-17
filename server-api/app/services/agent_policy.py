@@ -98,6 +98,10 @@ class PolicySettings(BaseModel):
     # permission (VPN/proxy extensions, Chromium browsers), so the web block holds in the
     # browser; an administrator's own values are kept. off removes the agent's ones.
     browser_policy: Literal["off", "on"] = "off"
+    # DNS sinkhole (agent/internal/dnssink): on blocks every subdomain of the web block's manual
+    # and alert domains (at most 500) through a resolver on the agent that the OS sends only
+    # those names to: an NRPT rule on Windows, routing domains in systemd-resolved on Linux.
+    dns_sinkhole: Literal["off", "on"] = "off"
     # scheduled file scans (agent local time): quick every day at HH:MM;
     # full on "<mon..sun> HH:MM" or "daily HH:MM". "" is off.
     quick_scan_time: str = Field(default="", max_length=32)

@@ -85,6 +85,11 @@ type Settings struct {
 	// so the web block cannot be bypassed from the browser; "off" (default,
 	// and empty from a server before it) removes the agent's ones.
 	BrowserPolicy string `json:"browser_policy"`
+	// DNSSinkhole: "on" blocks every subdomain of the web block's manual and
+	// alert domains with a resolver of the agent's own that the OS sends only
+	// those names to (internal/dnssink: NRPT on Windows, systemd-resolved on
+	// Linux); "off" (default, and empty from an older server) removes it.
+	DNSSinkhole string `json:"dns_sinkhole"`
 	// USBAllow: VID:PID (a model) or VID:PID:SERIAL (one unit), hex.
 	USBAllow         []string    `json:"usb_allow"`
 	QuickScanTime    string      `json:"quick_scan_time"`
