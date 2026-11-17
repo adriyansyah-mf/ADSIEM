@@ -49,11 +49,18 @@ func waitPublisherSignal(t *testing.T, signal <-chan struct{}) {
 // Stop again, up to a generous bound.
 func stopPublisher(t *testing.T, p *Publisher) error {
 	t.Helper()
-	for attempt := 0; ; attempt++ {
+	// Stop answers ErrPublisherRunning until the worker has drained what
+	// was admitted. A test that fills the bridge (4096 events) leaves a
+	// lot to drain, and a Windows runner's fsync is slow: the old budget of
+	// ten 3 s attempts ran out at 40 s there (TestTrySubmitBoundsQueue...,
+	// PR #221). Retry until a 2 minute deadline instead; a publisher that
+	// never stops still fails.
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		err := p.Stop(ctx)
 		cancel()
-		if !errors.Is(err, ErrPublisherRunning) || attempt == 9 {
+		if !errors.Is(err, ErrPublisherRunning) || time.Now().After(deadline) {
 			return err
 		}
 	}
