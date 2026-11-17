@@ -24,7 +24,7 @@ from worker.es_client import bulk_index_items, index_log, ping as es_ping
 from worker import evidence_inbox
 from worker.policy_exclusions import excluded as excluded_by_policy
 from worker.malware_feed import learn_from_event
-from worker import behavior, lateral
+from worker import behavior, lateral, phishing
 
 log = structlog.get_logger()
 CONSUMER_NAME = f"worker-{socket.gethostname()}"
@@ -196,6 +196,12 @@ async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, h
                   raw_message: str, log_type: str, sig_engine: SigmaEngine) -> None:
     # raw_message gives Sigma `keywords` selections the original log line to search;
     # log_type selects which rules apply (their logsource)
+    # phishing domain model: phishing.score / phishing.verdict on DNS and web events, before
+    # the rules run (rules/phishing_domain_ml_*.yaml) and indexed with the event
+    try:
+        phishing.enrich(decoded)
+    except Exception as _phish_exc:  # noqa: BLE001 — never block the pipeline
+        log.warning("phishing_enrich_failed", error=str(_phish_exc))
     flat_event = {**decoded, "group_id": group_id, "hostname": hostname, "raw_message": raw_message,
                   "log_type": log_type}
     rule_matches = await sig_engine.evaluate(flat_event)

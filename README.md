@@ -11,7 +11,7 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 | | |
 |---|---|
 | Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.28.0**, signed self-update, USB storage control |
-| Detection content | **254** Sigma rules in 245 files (13 for OT/ICS, 10 for Active Directory attacks), **138** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
+| Detection content | **256** Sigma rules in 247 files (13 for OT/ICS, 10 for Active Directory attacks), **138** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
 | OT / ICS | Modbus/TCP and DNP3 decoded from Suricata; MITRE ATT&CK for ICS rules for PLC programming, stop/restart, listen-only, scans, internet exposure |
 | Behaviour analytics | Host baselines (rare parent → child, rare new executables, beaconing), UEBA for users, IPs, hosts and processes, entity risk scoring, lateral movement graph |
 | Vulnerabilities | Package CVEs per host (OSV.dev per distro) and Windows builds against Microsoft's KB fixes, ranked by CISA KEV, FIRST EPSS and severity |
@@ -233,7 +233,7 @@ cannot simply stop it.
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   numeric compare), keywords, boolean conditions, threshold and correlation windows,
   `after:` sequences, and per-entity suppression.
-- **254 bundled rules** (245 files): Linux, Windows, IOA chains, web attacks (SQLi, XSS,
+- **256 bundled rules** (247 files): Linux, Windows, IOA chains, web attacks (SQLi, XSS,
   SSRF, LFI, RCE, Log4Shell, XXE, GraphQL, WordPress), network/firewall, Suricata/Zeek,
   OT/ICS, Active Directory, ransomware, ML, YARA, USB storage, credential access,
   kernel-thread masquerading (a `[kworker/…]`-named process that connects out or is
@@ -1228,6 +1228,17 @@ What it shows:
 - **Caveats:** MalShare has no family labels and does not verify its labels, so some of these files may not be malicious. The program sets are small (56 and 57 files). An earlier run on 83 URLhaus payloads (3 Nov) gave 44.6% detected; URLhaus serves many repackaged legitimate tools, so it is not a malware ground truth.
 
 To run it yourself: `ml/bench/fetch_malshare.py` (MalShare API key) or `ml/bench/fetch_malwarebazaar.py` (abuse.ch key), then `go run ./cmd/detbench` from `agent/`, on a machine with no shared or synced folders.
+
+### Phishing domains (ML)
+
+The worker scores the host name of every DNS query and web event with a lexical LightGBM model (`worker/worker/phishing`, trained by `ml/phish/train.py`): brand names outside the brand's own domain (Indonesian banks, e-wallets and marketplaces included), login/verify/prize words, TLD, free hosting subdomains, lookalike spellings. Above a threshold it alerts (`rules/phishing_domain_ml_*.yaml`). Held-out test, split by registered domain: 70,541 phishing names (Phishing.Database, OpenPhish) and 224,931 benign ones (Cisco Umbrella and Tranco top lists), 17 Nov 2026:
+
+| Alert level | False positives on benign names | Phishing caught (all) | Brand impersonation | Login/prize words | Free hosting subdomains |
+|---|---|---|---|---|---|
+| medium | 1 in 10,000 | 21.0% | 43.6% | 42.8% | 48.9% |
+| high | 1 in 100,000 | 9.9% | 23.1% | 26.7% | 22.3% |
+
+AUC 0.936. A name alone cannot reveal phishing on a hacked site with an ordinary name (5–8% of those are caught), so this complements the feeds and the web block; it does not replace them. Popular registered domains (Tranco top 20,000) never get a verdict. Details: [`docs/operations/phishing-model.md`](docs/operations/phishing-model.md).
 
 ## Documentation
 

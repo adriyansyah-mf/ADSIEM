@@ -1,0 +1,18 @@
+title: Likely Phishing Domain (ML, high confidence)
+id: rule-phishing-domain-ml-high
+description: >-
+  A host looked up or visited (phishing.domain, from dns.question.name, url.domain or
+  destination.domain) scored as a phishing host by the lexical domain model
+  (worker/worker/phishing, phishing.score; 1 in 100,000 benign names on held-out data score this high). The model sees only the name:
+  brand names outside the brand's own domain, login/verify/bonus words, cheap TLDs, free
+  hosting subdomains and lookalike spellings. Check the domain and which process asked for it
+  (process.* on agent DNS events); block it in Web Protection if it is phishing.
+  Popular registered domains (Tranco top 20,000) never get a verdict.
+detection:
+  selection:
+    phishing.verdict: high
+  condition: selection
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1566.002
