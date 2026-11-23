@@ -22,6 +22,7 @@ log = structlog.get_logger()
 _CONTEXT_KEYS = (
     "tags", "correlation_hit_count", "correlation_group", "correlation_window",
     "correlation_group_by", "correlation_type", "correlation_rules", "matched_fields",
+    "http_outcome", "http_status",
 )
 
 

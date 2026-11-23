@@ -63,6 +63,7 @@ static_fields:
 - **Modifiers:** `contains` `startswith` `endswith` `all` `re` (+ `i` `m` `s`) `cidr` `lt` `lte` `gt` `gte` `exists` `cased` `fieldref` `base64` `base64offset` `wide`/`utf16le` `utf16be` `utf16` `windash`. `field: null` matches a missing field.
 - **Condition:** `and`/`or`/`not`, parentheses, `1 of sel_*`, `all of them`, `N of x` (selections starting with `_` are excluded from `them`). `| count()` aggregations are not supported — use a correlation rule or `threshold`.
 - **Correlation rules (Sigma v2):** `type: event_count | value_count | temporal`, referencing rules by `name`, `id` or `title`; `group-by`, `timespan`, `condition` (`gt`/`gte`/`eq`). `generate` defaults to `false`, which silences the referenced rules' own alerts. A file may hold several rules separated by `---`.
+- **Web request outcome:** a single-request rule on a web logsource (`webserver`/`nginx`/`apache`/`iis`, no `threshold`/`after`, no `status` field in its detection) alerts **one level lower** with `http_outcome: rejected` when the response status shows the server turned the request away (400, 401, 403, 404, 405, 429, ...; `REJECTED_STATUS` in `sigma_engine.py`); 2xx, 3xx and 5xx keep the rule's level. Add `http_outcome: any` to a rule whose payload works whatever the status (Log4Shell: the vulnerable logger runs it on a 404).
 - Anything the engine can't evaluate is **rejected at load** and logged as `sigma_rule_rejected` — check worker logs after adding a rule.
 
 ## CONVENTIONS

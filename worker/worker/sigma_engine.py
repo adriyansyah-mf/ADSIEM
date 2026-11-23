@@ -596,6 +596,9 @@ class RuleDef:
     after_count: int = 0
     after_window: int = 0
     after_group_by: list[str] = field(default_factory=list)
+    # web payload rule whose alert is one level lower when the server turned the
+    # request away (see _http_outcome_adjusts)
+    http_outcome_adjust: bool = False
 
     @property
     def refs(self) -> set[str]:
@@ -678,7 +681,48 @@ def _compile_rule(d: dict) -> RuleDef:
         rule.after_count = count
         rule.after_window = _parse_timespan(after.get("timewindow", "1h"))
         rule.after_group_by = [group_by] if isinstance(group_by, str) else [str(g) for g in group_by]
+    rule.http_outcome_adjust = _http_outcome_adjusts(d, logsource)
     return rule
+
+
+# ─── Web request outcome ─────────────────────────────────────────
+# A web attack the server turned away (404 for a path that isn't there, 403 from
+# a WAF, 400 for a malformed request) did not reach the code it was aimed at.
+# Single-request payload rules (SQLi, LFI, RCE probes...) still alert, one level
+# lower, with http_outcome=rejected, so internet background noise stops paging
+# while the same payload answered 200 or 5xx keeps its level. Rules about
+# volume (threshold, after) or about the status itself are left alone, and a
+# rule can opt out with `http_outcome: any` (Log4Shell: the vulnerable logger
+# runs whatever the status).
+_WEB_PRODUCTS = {"webserver", "nginx", "apache", "iis"}
+REJECTED_STATUS = frozenset({400, 401, 403, 404, 405, 406, 410, 411, 413, 414, 415, 421, 429, 431,
+                             444, 494, 495, 496, 497})
+_ONE_LEVEL_LOWER = {"critical": "high", "high": "medium", "medium": "low"}
+
+
+def _mentions_status(obj: Any) -> bool:
+    if isinstance(obj, dict):
+        return any("status" in str(k).lower() or _mentions_status(v) for k, v in obj.items())
+    if isinstance(obj, list):
+        return any(_mentions_status(v) for v in obj)
+    return False
+
+
+def _http_outcome_adjusts(d: dict, logsource: dict) -> bool:
+    if str(d.get("http_outcome", "")).lower() == "any":
+        return False
+    web = logsource.get("category") == "webserver" or logsource.get("product") in _WEB_PRODUCTS
+    if not web or d.get("threshold") or d.get("after"):
+        return False
+    return not _mentions_status(d.get("detection"))
+
+
+def _http_status(event: dict) -> int | None:
+    raw = _lookup(event, "http.response.status_code")
+    try:
+        return int(str(raw).strip()) if raw not in (_MISSING, None, "") else None
+    except ValueError:
+        return None
 
 
 def _compile_correlation(d: dict) -> CorrelationDef:
@@ -946,6 +990,12 @@ class SigmaEngine:
                 match["correlation_group"] = group_val
                 match["correlation_window"] = rule.after_window
                 match["correlation_group_by"] = ", ".join(rule.after_group_by) or None
+            if rule.http_outcome_adjust:
+                status = _http_status(event)
+                if status in REJECTED_STATUS:
+                    match["level"] = _ONE_LEVEL_LOWER.get(rule.level, rule.level)
+                    match["http_outcome"] = "rejected"
+                    match["http_status"] = status
             matches.append(match)
 
         if self._correlations and fired:
