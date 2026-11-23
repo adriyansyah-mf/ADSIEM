@@ -13,12 +13,24 @@ fallback and Windows ETW alike), per host, in Redis:
 
 A host learns for `behavior_learning_hours` (platform setting, default 72)
 from its first telemetry before first-seen detections report anything.
+Programs are remembered by where they run from with the parts of the folder
+that change every run or update folded (exe_key), so an installer unpacked to a
+new GUID folder under %TEMP% each run is one program, not a new one each time.
+
+Beaconing is still reported while a host learns (an implant may predate the
+agent), but a program that kept a rhythm on a port during learning is the
+host's own timer: after learning it is not reported again, whatever address
+it calls (cloud services rotate them). That covers small deployments, where
+the fleet check (BEACON_FLEET_MAX hosts) never applies. Programs and
+addresses in `behavior_beacon_ignore` (platform setting: names, IPs or CIDRs,
+comma separated) are never beaconing.
 Findings go back into the log stream as siem_behavior lines, so decoders,
 Sigma rules (rules/behavior_*.yaml), dedup and AI triage handle them like
 any detection. Never raises into the pipeline (the caller also guards)."""
 from __future__ import annotations
 
 import ipaddress
+import re
 import statistics
 import time
 from datetime import datetime, timezone
@@ -72,6 +84,28 @@ def line(event: str, **fields) -> str:
     return " ".join([f"event={event}"] + [f"{k}={_quote(v)}" for k, v in fields.items() if v not in (None, "")])
 
 
+_GUID = re.compile(r"\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?")
+_HEX_ID = re.compile(r"(?=[a-f]*\d)[0-9a-f]{8,}")
+# unpack folders installers and runtimes name at random: NSIS nsXXXX.tmp, Inno
+# is-XXXXX.tmp, 7-Zip SFX 7zSXXXX, Python tempfile tmpXXXXXX, PyInstaller _MEIxxxx
+_RANDOM_DIR = re.compile(r"(?<=[\\/])(?:ns|is-|7zs|tmp|_mei)[0-9a-z]{3,}(?:\.tmp)?(?=[\\/])")
+_DIGITS = re.compile(r"\d+")
+
+
+def exe_key(image: str) -> str:
+    """The program for first-seen baselines: its path lowercased, with GUIDs,
+    hex ids, random unpack folders and numbers in the folder part folded, so
+    %TEMP%\\{GUID}\\setup.exe, /tmp/go-build123/b001/exe/main or
+    app-1.0.9001\\app.exe stays one program across runs and updates. The file
+    name is kept as is: a dropper that names itself at random is still new."""
+    p = image.lower()
+    cut = max(p.rfind("/"), p.rfind("\\")) + 1
+    folder = _GUID.sub("{guid}", p[:cut])
+    folder = _RANDOM_DIR.sub("<tmp>", folder)
+    folder = _HEX_ID.sub("#", folder)
+    return _DIGITS.sub("#", folder) + p[cut:]
+
+
 def user_writable(path: str) -> bool:
     p = path.lower().replace("/", "\\") if ":" in path[:3] else path.lower()
     return any(m in p for m in _USER_WRITABLE)
@@ -106,6 +140,20 @@ def _external(ip: str) -> bool:
     except ValueError:
         return False
     return a.is_global
+
+
+async def _beacon_ignore() -> tuple[set[str], list]:
+    """(program names, networks) from the behavior_beacon_ignore setting."""
+    names, nets = set(), []
+    for item in re.split(r"[,\s]+", str(await get_setting("behavior_beacon_ignore", "") or "")):
+        item = item.strip().lower()
+        if not item:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            names.add(_base(item))
+    return names, nets
 
 
 async def _setting_int(key: str, default: int) -> int:
@@ -163,7 +211,7 @@ class Behavior:
                     "parent": parent, "image": image, "pair": pair, "fleet_hosts": fleet,
                     "command_line": decoded.get("CommandLine") or decoded.get("process.command_line") or ""}))
         if user_writable(image):
-            new, fleet = await self._first_seen(agent, group, "exe", image.lower())
+            new, fleet = await self._first_seen(agent, group, "exe", exe_key(image))
             if new and fleet <= 1 and not await self.learning(agent):
                 out.append(("behavior_new_rare_executable", {
                     "image": image, "parent": parent, "fleet_hosts": fleet}))
@@ -177,6 +225,10 @@ class Behavior:
         dst, port_n, proc = conn
         if port_n in NOISY_PORTS or not _external(dst):
             return []
+        await self.mark_seen(agent)
+        names, nets = await _beacon_ignore()
+        if _base(proc) in names or any(ipaddress.ip_address(dst) in n for n in nets):
+            return []
         key = _k("bc", agent, f"{proc.lower()}|{dst}|{port_n}")
         await self.r.lpush(key, str(_event_time(decoded, received)))
         await self.r.ltrim(key, 0, BEACON_KEEP - 1)
@@ -184,6 +236,13 @@ class Behavior:
         times = [float(t) for t in await self.r.lrange(key, 0, -1)]
         stats = beacon_stats(times)
         if stats is None:
+            return []
+        # the host's own timers: what kept a rhythm on this port while it learned
+        base_key, timer = _k("bcbase", agent), f"{_base(proc)}|{port_n}"
+        if await self.learning(agent):
+            await self.r.sadd(base_key, timer)
+            await self.r.expire(base_key, BASELINE_TTL)
+        elif await self.r.sismember(base_key, timer):
             return []
         if not await self.r.set(_k("bcflag", agent, f"{proc.lower()}|{dst}|{port_n}"), "1",
                                 nx=True, ex=BEACON_REPORT_EVERY):

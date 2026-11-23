@@ -213,6 +213,71 @@ def test_observe_pushes_stream_lines_and_ignores_other_types():
     assert entry["raw_message"].startswith("event=behavior_beaconing image=update destination=45.33.32.156 port=443")
 
 
+
+@pytest.mark.parametrize("a,b", [
+    # one installer, unpacked to a new GUID / random folder each run
+    ("C:\\Users\\a\\AppData\\Local\\Temp\\{3F2504E0-4F89-11D3-9A0C-0305E82C3301}\\setup.exe",
+     "C:\\Users\\a\\AppData\\Local\\Temp\\{9B1DEB4D-3B7D-4BAD-9BDD-2B0D7B3DCB6D}\\setup.exe"),
+    ("C:\\Users\\a\\AppData\\Local\\Temp\\nsa1B2C.tmp\\installer.exe",
+     "C:\\Users\\a\\AppData\\Local\\Temp\\nsq9Z8Y.tmp\\installer.exe"),
+    ("/tmp/tmpk2j3h4/run.sh", "/tmp/tmpz9y8x7/run.sh"),
+    ("/tmp/go-build123/b001/exe/main", "/tmp/go-build98765/b042/exe/main"),
+    # an app that updates into a versioned folder
+    ("C:\\Users\\a\\AppData\\Local\\Discord\\app-1.0.9001\\Discord.exe",
+     "C:\\Users\\a\\AppData\\Local\\Discord\\app-1.0.9002\\Discord.exe"),
+])
+def test_exe_key_folds_folders_that_change_every_run(a, b):
+    assert behavior.exe_key(a) == behavior.exe_key(b)
+
+
+@pytest.mark.parametrize("a,b", [
+    ("/tmp/.x/kworkerd", "/tmp/.x/kworker"),                                  # the file name is kept
+    ("C:\\Users\\a\\Downloads\\invoice.exe", "C:\\Users\\a\\Downloads\\invoice2.exe"),
+    ("/tmp/a/x", "/dev/shm/a/x"),
+])
+def test_exe_key_keeps_different_programs_apart(a, b):
+    assert behavior.exe_key(a) != behavior.exe_key(b)
+
+
+def test_an_installer_in_a_new_temp_folder_is_not_new_every_run():
+    r, clock = FakeRedis(), Clock()
+    b = behavior.Behavior(r, now=clock)
+    tmp = "C:\\Users\\a\\AppData\\Local\\Temp\\{%s}\\setup.exe"
+    run(b.process("h1", "blue", proc("C:\\Windows\\explorer.exe", tmp % "3F2504E0-4F89-11D3-9A0C-0305E82C3301")))
+    clock.t += 73 * HOUR
+    again = run(b.process("h1", "blue", proc("C:\\Windows\\explorer.exe", tmp % "9B1DEB4D-3B7D-4BAD-9BDD-2B0D7B3DCB6D")))
+    assert not any(e == "behavior_new_rare_executable" for e, _ in again)
+    other = run(b.process("h1", "blue", proc("C:\\Windows\\explorer.exe",
+                                             (tmp % "9B1DEB4D-3B7D-4BAD-9BDD-2B0D7B3DCB6D").replace("setup", "x"))))
+    assert any(e == "behavior_new_rare_executable" for e, _ in other)
+
+
+def test_a_timer_the_host_kept_while_learning_is_not_beaconing_later():
+    r, clock = FakeRedis(), Clock()
+    b = behavior.Behavior(r, now=clock)
+    # learning: the backup job's rhythm is still reported (an implant may predate the agent) and remembered
+    assert len(beacon(b, "h1", "52.84.1.1", [300] * 9, start=clock.t, comm="restic")) == 1
+    clock.t += 4 * 24 * HOUR
+    # days later the same job calls another address of its cloud service: quiet
+    assert beacon(b, "h1", "52.84.9.9", [300] * 9, start=clock.t, comm="restic") == []
+    # a program that never kept a rhythm while learning is still reported
+    assert len(beacon(b, "h1", "45.33.32.156", [60] * 9, start=clock.t, comm="implant")) == 1
+    # on another port the timer is a different thing
+    assert len(beacon(b, "h1", "52.84.1.1", [300] * 9, start=clock.t, comm="restic", port="8443")) == 1
+
+
+def test_beacon_ignore_setting(monkeypatch):
+    async def get_setting(key, default=""):
+        return "telegraf, 52.84.0.0/16\n45.33.40.7" if key == "behavior_beacon_ignore" else default
+    monkeypatch.setattr(behavior, "get_setting", get_setting)
+    # (documentation ranges like 203.0.113.0/24 are not external, so real ones here)
+    b = behavior.Behavior(FakeRedis())
+    assert beacon(b, "h1", "45.33.32.156", [60] * 9, comm="/usr/bin/telegraf") == []
+    assert beacon(b, "h1", "52.84.1.1", [60] * 9, comm="implant") == []
+    assert beacon(b, "h1", "45.33.40.7", [60] * 9, comm="implant") == []
+    assert len(beacon(b, "h1", "45.33.40.8", [60] * 9, comm="implant")) == 1
+
+
 @pytest.fixture(scope="module")
 def engines():
     load = lambda p: [open(f).read() for f in sorted(glob.glob(os.path.join(ROOT, p)))]  # noqa: E731
