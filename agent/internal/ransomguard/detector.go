@@ -58,13 +58,30 @@ var DefaultAllowImages = []string{
 // inplaceSkip are path fragments (lower case, forward slashes) where
 // programs rewrite many files in place all day: caches, temp, browser and
 // mail profiles, the OS and installed programs. In-place writes there do
-// not count; ransomware goes for documents and shares.
+// not count; ransomware goes for documents and shares. Nor do the writes,
+// creates, deletes and renames there count toward mass_modify (skipMass): a
+// browser churns hundreds of cache entries a minute across many folders,
+// evicting old ones, and brotli/gzip bodies have no header, so they read as
+// encrypted (Firefox's cache2 killed the browser and tried to isolate a host).
 var inplaceSkip = []string{
 	"/appdata/", "/temp/", "/tmp/", "/inetcache/",
 	"/windows/", "/program files/", "/program files (x86)/", "/programdata/", "/$recycle.bin/",
 	"/var/tmp/", "/var/cache/", "/var/log/", "/.cache/", "/proc/", "/sys/", "/dev/", "/run/",
 	"/.mozilla/", "/.thunderbird/", "/.config/google-chrome/", "/.config/chromium/",
 	"/.config/microsoft-edge/", "/.config/brave", "/snap/",
+}
+
+// skipMass reports whether file events on p are left out of mass_modify:
+// the inplaceSkip locations. Unlike skipInplace it does not require user
+// data, so a locker walking /var/lib or /opt on a server is still counted.
+func skipMass(p string) bool {
+	l := strings.ToLower(strings.ReplaceAll(p, `\`, "/"))
+	for _, s := range inplaceSkip {
+		if strings.Contains(l, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // userDataRoots (Linux, lower case) are where user and server data lives.
@@ -141,6 +158,8 @@ type procWindow struct {
 type detector struct {
 	allow  map[string]bool
 	ignore func(string) bool // in-place writes not counted (skipInplace)
+	// skipMass: file events not counted toward mass_modify (skipMass)
+	skipMass func(string) bool
 	// trusted images (by path and signature, trust.go) are skipped.
 	trusted func(image string) bool
 	procs   map[uint32]*procWindow
@@ -193,7 +212,7 @@ func (d *detector) touchedBy(pid uint32) (time.Time, []string) {
 }
 
 func newDetector(allow []string) *detector {
-	d := &detector{allow: map[string]bool{}, ignore: skipInplace, procs: map[uint32]*procWindow{},
+	d := &detector{allow: map[string]bool{}, ignore: skipInplace, skipMass: skipMass, procs: map[uint32]*procWindow{},
 		touched: map[uint32]*touch{},
 		trusted: func(image string) bool { return trustedSync(image, microsoftSigned) }}
 	for _, a := range append(append([]string{}, DefaultAllowImages...), allow...) {
@@ -259,17 +278,21 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 	switch ev.Action {
 	case "rename":
 		w.renames++
-		w.destroyed++
+		if !d.skipMass(ev.Path) {
+			w.destroyed++
+		}
 		if ne := ext(ev.Path); ne != ext(ev.From) && ne != "" {
 			w.extRenames[ne]++
 		}
 		w.target(ev.Path)
 	case "create", "write":
-		if !w.written[ev.Path] && len(w.written) < 4*minWrites {
+		if !w.written[ev.Path] && len(w.written) < 4*minWrites && !d.skipMass(ev.Path) {
 			w.written[ev.Path] = true
 			w.dirs[dir(ev.Path)] = true
 		}
-		w.target(ev.Path)
+		if !d.skipMass(ev.Path) {
+			w.target(ev.Path) // a cache entry must not be what confirms a hit
+		}
 		if ev.Action == "create" {
 			// Windows: a new file (Kernel-File CreateNewFile). Linux: an
 			// open with O_CREAT, which may also truncate an existing file;
@@ -293,7 +316,9 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 			}
 		}
 	case "delete":
-		w.destroyed++
+		if !d.skipMass(ev.Path) {
+			w.destroyed++
+		}
 	}
 
 	total, best, bestExt := 0, 0, ""

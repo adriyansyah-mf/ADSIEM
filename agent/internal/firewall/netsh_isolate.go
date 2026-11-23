@@ -55,11 +55,14 @@ func (b *NetshBackend) deleteIsolationRules() {
 }
 
 // netshRemoteIPs joins addresses for remoteip=, IPv4 and IPv6, dropping
-// anything that isn't one.
+// anything that isn't one, and loopback: Windows Firewall never filters
+// loopback traffic, and netsh rejects ::1 in remoteip ("A specified IP
+// address or address keyword is not valid"), which failed the whole isolation
+// since the guard's always-protected list carries ::1/128.
 func netshRemoteIPs(allow []string) string {
 	var out []string
 	for _, c := range allow {
-		if _, n, err := parseTarget(strings.TrimSpace(c)); err == nil {
+		if _, n, err := parseTarget(strings.TrimSpace(c)); err == nil && !n.IP.IsLoopback() {
 			out = append(out, n.String())
 		}
 	}
