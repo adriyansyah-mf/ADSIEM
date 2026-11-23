@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.redis_client import get_redis
 from app.services import investigation_ledger as ledger
 from app.services.investigation_chat_actions import ChatCtx
+from worker.web_domains import plausible_domain
 
 log = structlog.get_logger()
 
@@ -60,6 +61,8 @@ def _public_domain(host: str) -> str:
         raise ValueError("internal or single-label host names are not looked up")
     if not _DOMAIN.match(host):
         raise ValueError("not an ip, domain, url or md5/sha1/sha256 hash")
+    if not plausible_domain(host):
+        raise ValueError("not a domain: no such top-level domain, or an event field name like event.action")
     return host
 
 
