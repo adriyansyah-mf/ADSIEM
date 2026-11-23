@@ -241,9 +241,9 @@ async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, h
     except Exception as _ueba_exc:
         log.warning("ueba_score_error", error=str(_ueba_exc))
 
-    # host behaviour baselines (rare parent → child, new rare executable, beaconing) —
-    # best-effort, never block the main pipeline
-    if log_type in behavior.PROCESS_TYPES or log_type in behavior.NETWORK_TYPES:
+    # host behaviour baselines (rare parent → child, new rare executable, beaconing,
+    # new listener) — best-effort, never block the main pipeline
+    if log_type in behavior.PROCESS_TYPES or log_type in behavior.NETWORK_TYPES or log_type in behavior.LISTEN_TYPES:
         try:
             await behavior.observe(await get_redis(), log_type=log_type, decoded=decoded, agent_id=agent_id,
                                    group_id=group_id, hostname=hostname, received=time.time(),

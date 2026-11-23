@@ -1,12 +1,13 @@
 # Host behaviour baselines
 
-`worker/worker/behavior.py` learns per host, from the telemetry agents already send (Linux eBPF and the `ss` fallback, Windows ETW), what is normal, and reports what is not. Server side only: no agent release needed, Linux and Windows alike.
+`worker/worker/behavior.py` learns per host, from the telemetry agents already send (Linux eBPF and the `ss` fallback, Windows ETW; new listeners from Linux eBPF bind events), what is normal, and reports what is not. Server side only: no agent release needed, Linux and Windows alike.
 
 | Finding | When | Rule (level) |
 |---|---|---|
 | `behavior_rare_parent_child` | a parent → child pair (by file name) this host never ran, that at most 2 hosts of the group ever ran | Rare Parent-Child Process On Host (medium) |
 | `behavior_new_rare_executable` | a program from a user-writable folder (`/tmp`, `/var/tmp`, `/dev/shm`, `/home`, `/root`, `\Users\`, `\ProgramData\`, `\Windows\Temp\`) first seen on this host and run by no other host of the group. Programs compare by path with the folder parts that change every run folded: GUIDs, hex ids, numbers and random unpack folders (`nsXXXX.tmp`, `is-XXXXX.tmp`, `tmpXXXXXX`, `_MEIxxxx`), so `%TEMP%\{GUID}\setup.exe` or `app-1.0.9001\app.exe` is one program across runs and updates; the file name itself is kept | New Rare Executable From User-Writable Folder (medium) |
 | `behavior_beaconing` | one program connecting to the same external address and port at least 8 times, median gap 10 s - 1 h, jitter (median absolute deviation / median) at most 0.2; once a day per program, address and port | Periodic Beaconing To External Host (high) |
+| `behavior_new_listener` | a program bound a port (not loopback, not port 0; ports 32768 and up count as one) this host never saw it bind, after learning, that at most 2 hosts of the group bind: bind shells, backdoor listeners. Replaces the static "Non-Service Process Binding a Listening Port" rule, which never ran and would have flagged every UDP client | New Listening Port On Host (medium) |
 
 - **Learning**: first-seen findings start `behavior_learning_hours` (platform setting, default 72) after a host's first process or network event. Beaconing is reported while a host learns too (an implant may predate the agent), but a program that kept a rhythm on a port during learning is the host's own timer (a backup job, a monitoring agent): after learning it is not reported again on that port, whatever address it calls. This is what keeps deployments of 1-3 hosts quiet, where the fleet check below never applies.
 - **Fleet prevalence** keeps the noise down: what several hosts of the group do is normal. A beacon destination more than 3 hosts call on a timer (updaters, monitoring) is not reported.

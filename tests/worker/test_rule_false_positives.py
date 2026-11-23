@@ -211,3 +211,57 @@ def test_only_single_request_payload_web_rules_follow_the_status():
                   "WAF Blocking Repeated Attacks From One Source",             # about volume
                   WEB_SHELL):                                                  # not a web log rule
         assert not adjusts(title), title
+
+
+# ─── network rules that never ran (logsource "product: linux_network") ───────
+
+HIGH_PORT = "Outbound Connection To A Metasploit-Style Port (4444-4450)"
+SHELL_NET = "Shell Opened A Network Connection To A Public Address"
+TLD = "DNS Query For A Suspicious TLD"
+
+
+def agent_alerts(engines, log_type, line, host="web-1"):
+    """A Linux agent netwatch line (or a Windows ETW one), through the shipped decoder."""
+    dec, sig = engines
+    event, name = dec.decode_named(log_type, line)
+    assert name, line
+    return _eval(sig, dict(event, raw_message=line, log_type=log_type, hostname=host))
+
+
+def connect_line(comm, dst, dport, private="false"):
+    return (f"ts=2026-11-23T10:00:00Z pid=10 tgid=10 uid=33 gid=33 comm={comm} action=network_connect proto=tcp "
+            f"direction=outbound src=10.0.0.5 dport={dport} dst={dst} lport=50000 host= private_dst={private}")
+
+
+def dns_line(name):
+    return (f"ts=2026-11-23T10:00:00Z pid=11 tgid=11 uid=1000 gid=1000 comm=firefox action=dns_query proto=udp "
+            f"direction=outbound src=10.0.0.5 dport=53 dst=1.1.1.1 lport=0 host={name} private_dst=false")
+
+
+def test_outbound_metasploit_port(engines):
+    assert agent_alerts(engines, "linux_network_connect", connect_line("x", "45.33.32.10", 4444)).get(HIGH_PORT) == "high"
+    # the same host, address and port again today: one alert
+    assert HIGH_PORT not in agent_alerts(engines, "linux_network_connect", connect_line("x", "45.33.32.10", 4444))
+    assert HIGH_PORT not in agent_alerts(engines, "linux_network_connect", connect_line("x", "45.33.32.11", 443))
+    assert HIGH_PORT not in agent_alerts(engines, "linux_network_connect",
+                                         connect_line("x", "10.0.0.9", 4444, private="true"))
+
+
+def test_a_shell_connecting_out_itself(engines):
+    assert agent_alerts(engines, "linux_network_connect", connect_line("bash", "45.33.32.20", 4444)).get(SHELL_NET) == "high"
+    for comm in ("curl", "python3", "perl", "apt"):  # programs connect under their own name
+        assert SHELL_NET not in agent_alerts(engines, "linux_network_connect", connect_line(comm, "45.33.32.21", 443))
+    assert SHELL_NET not in agent_alerts(engines, "linux_network_connect",
+                                         connect_line("bash", "10.0.0.9", 22, private="true"))
+
+
+def test_suspicious_tld_linux_and_windows_low_once_a_day(engines):
+    assert agent_alerts(engines, "linux_dns_query", dns_line("abc.xyz"), host="ws-1").get(TLD) == "low"
+    assert TLD not in agent_alerts(engines, "linux_dns_query", dns_line("abc.xyz"), host="ws-1")
+    assert agent_alerts(engines, "linux_dns_query", dns_line("cdn.shop.top"), host="ws-1").get(TLD) == "low"
+    assert agent_alerts(engines, "linux_dns_query", dns_line("abc.xyz"), host="ws-2").get(TLD) == "low"
+    assert TLD not in agent_alerts(engines, "linux_dns_query", dns_line("www.example.com"), host="ws-1")
+    win = ('EventID=22 Channel="ETW" Provider="Microsoft-Windows-DNS-Client" ProcessId="1200" '
+           'Image="C:\\Windows\\System32\\svchost.exe" User="WIN01\\alice" '
+           'QueryName="update.badcdn.top" QueryType="1" QueryStatus="0" QueryResults="203.0.113.9;"')
+    assert agent_alerts(engines, "windows_etw_dns", win, host="pc-1").get(TLD) == "low"

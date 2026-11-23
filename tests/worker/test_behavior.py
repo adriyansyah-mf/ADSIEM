@@ -6,6 +6,7 @@ import asyncio
 import glob
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../worker"))
 
@@ -276,6 +277,62 @@ def test_beacon_ignore_setting(monkeypatch):
     assert beacon(b, "h1", "52.84.1.1", [60] * 9, comm="implant") == []
     assert beacon(b, "h1", "45.33.40.7", [60] * 9, comm="implant") == []
     assert len(beacon(b, "h1", "45.33.40.8", [60] * 9, comm="implant")) == 1
+
+
+def bind(comm, port, addr="0.0.0.0"):
+    return {"process.name": comm, "destination.port": str(port), "destination.address": addr}
+
+
+def test_new_listener_after_learning_only():
+    r, clock = FakeRedis(), Clock()
+    b = behavior.Behavior(r, now=clock)
+    # learning: the host's own services and UDP clients are remembered
+    for comm, port in (("sshd", 22), ("nginx", 443), ("chronyd", 123), ("dhclient", 68), ("node", 41000)):
+        assert run(b.listen("h1", "blue", bind(comm, port))) == []
+    clock.t += 73 * HOUR
+    found = run(b.listen("h1", "blue", bind("nc", 4444)))
+    assert found == [("behavior_new_listener", {"image": "nc", "port": 4444, "address": "0.0.0.0", "fleet_hosts": 1})]
+    assert run(b.listen("h1", "blue", bind("nc", 4444))) == []                  # once
+    assert run(b.listen("h1", "blue", bind("nginx", 443))) == []                 # its own service
+    assert run(b.listen("h1", "blue", bind("node", 53122))) == []                # ephemeral range is one slot
+    assert run(b.listen("h1", "blue", bind("nginx", 8443)))                      # a new port is new
+    assert run(b.listen("h1", "blue", bind("python3", 8000, "127.0.0.1"))) == []  # loopback only
+    assert run(b.listen("h1", "blue", bind("python3", 0))) == []                 # the kernel picks the port
+    assert run(b.listen("h1", "blue", bind("siem-agent", 9999))) == []
+
+
+def test_a_listener_many_hosts_of_the_group_run_is_normal():
+    r, clock = FakeRedis(), Clock()
+    b = behavior.Behavior(r, now=clock)
+    for h in ("h1", "h2", "h3"):
+        run(b.listen(h, "blue", bind("sshd", 2222)))
+    clock.t += 73 * HOUR
+    assert run(b.listen("h4", "blue", bind("x", 1))) == []  # starts h4's clock
+    clock.t += 73 * HOUR
+    assert run(b.listen("h4", "blue", bind("sshd", 2222))) == []
+    assert run(b.listen("h4", "blue", bind("backdoor", 31337)))
+
+
+def test_agent_bind_line_becomes_a_new_listener_alert(engines):
+    dec, sig = engines
+    r = FakeRedis()
+    t = 1_800_000_000.0
+    line = ("ts=2026-11-23T10:00:00Z pid=50 tgid=50 uid=33 gid=33 comm={comm} action=network_bind proto=other "
+            "direction=inbound src=0.0.0.0 dport=0 dst=0.0.0.0 lport={port} host= private_dst=true")
+    decoded, _ = dec.decode_named("linux_network_bind", line.format(comm="sshd", port=22))
+    run(behavior.observe(r, log_type="linux_network_bind", decoded=decoded, agent_id="a", group_id="blue",
+                         hostname="web-01", received=t))
+    decoded, _ = dec.decode_named("linux_network_bind", line.format(comm="nc", port=4444))
+    r.kv[behavior._k("host", "a", "first")] = str(time.time() - 100 * HOUR)  # learning is over (observe uses the clock)
+    run(behavior.observe(r, log_type="linux_network_bind", decoded=decoded, agent_id="a", group_id="blue",
+                         hostname="web-01", received=t))
+    assert len(r.stream) == 1
+    raw = r.stream[0]["raw_message"]
+    finding, name = dec.decode_named("siem_behavior", raw)
+    assert name == "siem_behavior" and finding["destination.port"] == "4444"
+    fired = {m["title"]: m["level"] for m in asyncio.run(sig.evaluate(dict(finding, raw_message=raw,
+                                                                            log_type="siem_behavior")))}
+    assert fired.get("New Listening Port On Host") == "medium"
 
 
 @pytest.fixture(scope="module")

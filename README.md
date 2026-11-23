@@ -252,8 +252,8 @@ cannot simply stop it.
   baselines per group, per-feature explanations and a cold-entity guard. Placeholder users
   such as auditd's `(invalid user)` are ignored.
 - **Host behaviour baselines** (`worker/worker/behavior.py`, server side): a rare parent →
-  child process, a new rare executable from a user-writable folder, and periodic beaconing to
-  an external host. First-seen findings start after `behavior_learning_hours` (default 72),
+  child process, a new rare executable from a user-writable folder, periodic beaconing to
+  an external host, and a new listening port. First-seen findings start after `behavior_learning_hours` (default 72),
   and what several hosts of the group do counts as normal.
 - **Entity risk** (`/entity-risk`): every alert adds risk to its host and user (by severity,
   plus a bonus per new MITRE tactic, halving every 24 h). An entity over

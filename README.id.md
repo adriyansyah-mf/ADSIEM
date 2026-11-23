@@ -252,8 +252,8 @@ tidak bisa begitu saja menghentikannya.
   dengan baseline per grup, penjelasan per fitur, dan pengaman untuk entitas yang belum punya
   riwayat. User placeholder seperti `(invalid user)` dari auditd diabaikan.
 - **Baseline perilaku host** (`worker/worker/behavior.py`, di sisi server): parent → child
-  yang jarang, executable baru yang jarang dari folder yang bisa ditulis user, dan beaconing
-  berkala ke host eksternal. Temuan "pertama kali terlihat" baru muncul setelah
+  yang jarang, executable baru yang jarang dari folder yang bisa ditulis user, beaconing
+  berkala ke host eksternal, dan port listening baru. Temuan "pertama kali terlihat" baru muncul setelah
   `behavior_learning_hours` (default 72), dan perilaku yang dilakukan beberapa host di grup
   yang sama dianggap normal.
 - **Risiko entitas** (`/entity-risk`): setiap alert menambah risiko ke host dan user-nya

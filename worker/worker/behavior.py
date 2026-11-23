@@ -10,6 +10,12 @@ fallback and Windows ETW alike), per host, in Redis:
 - beaconing: one program connecting to the same external address and port
   at a steady rhythm (at least BEACON_MIN_CONNECTIONS, median gap
   10 s - 1 h, jitter at most BEACON_MAX_JITTER): what C2 implants do.
+- new listener: a program bound a port this host never saw it bind (ports
+  from EPHEMERAL_FROM up count as one), that at most RARE_FLEET hosts of the
+  group bind: a bind shell or backdoor listener. Loopback and port 0 (the
+  kernel picks) are left out. Agent bind events carry no protocol and also
+  fire for UDP clients, so a fixed list of daemons cannot tell a listener
+  apart; the host's own history can.
 
 A host learns for `behavior_learning_hours` (platform setting, default 72)
 from its first telemetry before first-seen detections report anything.
@@ -24,6 +30,7 @@ it calls (cloud services rotate them). That covers small deployments, where
 the fleet check (BEACON_FLEET_MAX hosts) never applies. Programs and
 addresses in `behavior_beacon_ignore` (platform setting: names, IPs or CIDRs,
 comma separated) are never beaconing.
+
 Findings go back into the log stream as siem_behavior lines, so decoders,
 Sigma rules (rules/behavior_*.yaml), dedup and AI triage handle them like
 any detection. Never raises into the pipeline (the caller also guards)."""
@@ -60,6 +67,8 @@ PROCESS_TYPES = {"linux_process_exec", "windows_etw_process"}
 # the server (a feedback loop); they are never beaconing, UEBA or lateral input
 AGENT_PROGRAMS = {"siem-agent", "siem-agent.exe", "agent"}
 NETWORK_TYPES = {"linux_network_connect", "linux_network_snapshot", "windows_etw_network"}
+LISTEN_TYPES = {"linux_network_bind"}
+EPHEMERAL_FROM = 32768
 
 _USER_WRITABLE = ("/tmp/", "/var/tmp/", "/dev/shm/", "/home/", "/run/user/", "/root/",
                   "\\users\\", "\\programdata\\", "\\windows\\temp\\", "\\$recycle.bin\\", "\\perflogs\\")
@@ -217,6 +226,27 @@ class Behavior:
                     "image": image, "parent": parent, "fleet_hosts": fleet}))
         return out
 
+    async def listen(self, agent: str, group: str, decoded: dict) -> list[tuple[str, dict]]:
+        proc = str(decoded.get("process.name") or "").strip()
+        addr = str(decoded.get("destination.address") or "")
+        try:
+            port = int(decoded.get("destination.port") or 0)
+        except (TypeError, ValueError):
+            return []
+        if port <= 0 or not proc or _base(proc) in AGENT_PROGRAMS:
+            return []
+        try:
+            if ipaddress.ip_address(addr).is_loopback:
+                return []  # reachable from this host only
+        except ValueError:
+            pass
+        await self.mark_seen(agent)
+        slot = str(port) if port < EPHEMERAL_FROM else f"{EPHEMERAL_FROM}+"
+        new, fleet = await self._first_seen(agent, group, "ls", f"{_base(proc)}|{slot}")
+        if new and fleet <= RARE_FLEET and not await self.learning(agent):
+            return [("behavior_new_listener", {"image": proc, "port": port, "address": addr, "fleet_hosts": fleet})]
+        return []
+
     async def network(self, agent: str, group: str, log_type: str, decoded: dict,
                       received: float, raw: str = "") -> list[tuple[str, dict]]:
         conn = outbound_connection(log_type, decoded, raw)
@@ -303,12 +333,14 @@ def _ss_peer(raw: str) -> tuple[str, str, str]:
 async def observe(redis, *, log_type: str, decoded: dict, agent_id, group_id: str, hostname: str,
                   received: float, raw: str = "") -> list[str]:
     """Run the detectors for one event and push their findings; returns the events pushed."""
-    if not agent_id or log_type not in PROCESS_TYPES | NETWORK_TYPES:
+    if not agent_id or log_type not in PROCESS_TYPES | NETWORK_TYPES | LISTEN_TYPES:
         return []
     b = Behavior(redis)
     agent, group = str(agent_id), group_id or "default"
     if log_type in PROCESS_TYPES:
         found = await b.process(agent, group, decoded)
+    elif log_type in LISTEN_TYPES:
+        found = await b.listen(agent, group, decoded)
     else:
         found = await b.network(agent, group, log_type, decoded, received, raw)
     for event, fields in found:

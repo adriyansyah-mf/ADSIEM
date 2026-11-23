@@ -1,8 +1,15 @@
-title: DNS Query for Suspicious TLD
+title: DNS Query For A Suspicious TLD
 id: rule-net-dns-suspicious-tld
-description: A process resolved a name under a TLD commonly abused for malware distribution and C2
-logsource:
-  product: linux_network
+supersedes: DNS Query for Suspicious TLD
+description: >-
+  A process resolved a name under a TLD commonly abused for malware
+  distribution and C2. These TLDs also host ordinary sites (abc.xyz, plenty
+  of .top/.click shops), so on its own this is a weak signal: low, raised
+  once a day per host and name, adding context and entity risk to the alerts
+  around it. Popular-domain lists are not used to leave names out: they rank
+  by traffic, and busy malware and ad domains under these TLDs are on them.
+  Linux agent and Windows (ETW, Sysmon 22) DNS events alike; it used to name
+  "product: linux_network", which matches no log type, so it never ran.
 detection:
   selection:
     event.action: dns_query
@@ -18,7 +25,12 @@ detection:
       - ".work"
       - ".click"
   condition: selection and tld
-level: medium
+suppression:
+  timewindow: 86400
+  group_by:
+    - hostname
+    - dns.question.name
+level: low
 tags:
   - attack.command_and_control
   - attack.t1071.004

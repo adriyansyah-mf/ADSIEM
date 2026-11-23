@@ -1,22 +1,38 @@
-title: Outbound Connection to Raw Public IP from Shell
+title: Shell Opened A Network Connection To A Public Address
 id: rule-net-shell-raw-ip
-description: A shell interpreter opened an outbound connection directly to a public IP address (staging / callback pattern)
+supersedes: Outbound Connection to Raw Public IP from Shell
+description: >-
+  A shell (bash, sh, dash, zsh, ksh) itself connected to a public address. A
+  shell does no networking of its own: this is bash's /dev/tcp or /dev/udp,
+  the core of most one-line reverse shells and download cradles that avoid
+  curl and wget. Programs a shell starts (curl, ssh, apt) connect under their
+  own name and do not match. Python and Perl are left out: they connect for
+  ordinary scripts all day; their reverse shells are caught from the command
+  line ("Python Or Perl Reverse Shell"). Raised once a day per host and
+  address. Its logsource used to be "product: linux_network", which matches
+  no log type: the rule never ran.
 logsource:
-  product: linux_network
+  product: linux
+  service: network_connect
 detection:
   selection:
     event.action: network_connect
     destination.private: "false"
-  shell:
     process.name:
       - bash
       - sh
       - dash
       - zsh
-      - perl
-      - python3
-  condition: selection and shell
-level: medium
+      - ksh
+      - ash
+  condition: selection
+suppression:
+  timewindow: 86400
+  group_by:
+    - hostname
+    - destination.address
+level: high
 tags:
   - attack.execution
-  - attack.t1059
+  - attack.t1059.004
+  - attack.command_and_control
