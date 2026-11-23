@@ -7,6 +7,9 @@
 //   - block: a device not on usb_allow is cut off (Linux: the kernel's USB
 //     authorization, so no driver binds; Windows: ejected, again on every
 //     re-plug) and reported; allowed ones are reported as connected.
+//     Windows refuses an eject while a program holds the drive open (Explorer
+//     or AutoPlay right after plug-in, an antivirus scan, a copy): the block
+//     is then retried on every poll, backing off to RetryMax, until it takes.
 //
 // Keyboards, mice and other USB classes are never touched: a wrong policy
 // must not lock anyone out of the host.
@@ -49,6 +52,18 @@ type platform interface {
 	unblock(Device) error
 }
 
+// A failed block is tried again RetryMin after the failure, then backing off
+// (doubling) to RetryMax between tries, for as long as the device stays.
+var (
+	RetryMin = 2 * time.Second
+	RetryMax = 30 * time.Second
+)
+
+type retry struct {
+	at  time.Time
+	gap time.Duration
+}
+
 // Guard decides and reports; the platform watchers feed it.
 type Guard struct {
 	opts Options
@@ -58,10 +73,12 @@ type Guard struct {
 	mu      sync.Mutex
 	present map[string]Device // devices here now
 	state   map[string]string // ID -> connected | blocked | block_failed
+	retries map[string]retry  // ID -> next try of a failed block
 }
 
 func newGuard(opts Options, p platform) *Guard {
-	return &Guard{opts: opts, plat: p, now: time.Now, present: map[string]Device{}, state: map[string]string{}}
+	return &Guard{opts: opts, plat: p, now: time.Now, present: map[string]Device{}, state: map[string]string{},
+		retries: map[string]retry{}}
 }
 
 func (g *Guard) mode() string {
@@ -117,6 +134,7 @@ func (g *Guard) Left(id string) {
 	last := g.state[id]
 	delete(g.present, id)
 	delete(g.state, id)
+	delete(g.retries, id)
 	g.mu.Unlock()
 	if ok && last == "connected" && g.mode() != "off" {
 		g.report(d, "removed", "")
@@ -174,12 +192,73 @@ func (g *Guard) evaluate(d Device) {
 			return
 		}
 		g.setState(d.ID, "block_failed")
+		g.mu.Lock()
+		g.retries[d.ID] = retry{at: g.now().Add(RetryMin), gap: RetryMin}
+		g.mu.Unlock()
 		slog.Warn("usb storage block failed", "device", d.ID, "err", err)
 		g.report(d, "block_failed", err.Error())
 		return
 	}
+	g.mu.Lock()
+	delete(g.retries, d.ID)
+	g.mu.Unlock()
 	g.setState(d.ID, "blocked")
 	g.report(d, "blocked", "")
+}
+
+// RetryFailed tries again the blocks that failed and are due (the platform
+// watcher calls it on every poll). A block that takes is reported as blocked;
+// one that fails again waits twice as long, up to RetryMax, and is not
+// reported again (its block_failed line already went out).
+func (g *Guard) RetryFailed() {
+	if g.mode() != "block" {
+		return
+	}
+	now := g.now()
+	var due []Device
+	g.mu.Lock()
+	for id, r := range g.retries {
+		d, ok := g.present[id]
+		if !ok || g.state[id] != "block_failed" {
+			delete(g.retries, id)
+			continue
+		}
+		if !now.Before(r.at) {
+			due = append(due, d)
+		}
+	}
+	g.mu.Unlock()
+	allow := g.allow()
+	for _, d := range due {
+		if Allowed(allow, d) {
+			g.mu.Lock()
+			delete(g.retries, d.ID)
+			g.mu.Unlock()
+			g.evaluate(d) // allowed meanwhile: reported as connected
+			continue
+		}
+		if err := g.plat.block(d); err != nil {
+			g.mu.Lock()
+			r := g.retries[d.ID]
+			r.gap *= 2
+			if r.gap > RetryMax {
+				r.gap = RetryMax
+			}
+			if r.gap <= 0 {
+				r.gap = RetryMin
+			}
+			r.at = now.Add(r.gap)
+			g.retries[d.ID] = r
+			g.mu.Unlock()
+			slog.Debug("usb storage block retry failed", "device", d.ID, "err", err)
+			continue
+		}
+		g.mu.Lock()
+		delete(g.retries, d.ID)
+		g.mu.Unlock()
+		g.setState(d.ID, "blocked")
+		g.report(d, "blocked", "")
+	}
 }
 
 func (g *Guard) release(d Device) {
