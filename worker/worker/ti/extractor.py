@@ -4,6 +4,7 @@ import ipaddress
 import re
 from urllib.parse import urlparse
 from worker.ti.iocs import IOC, IOCType
+from worker.web_domains import plausible_domain
 
 _IPV4_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b")
 _IPV6_RE = re.compile(r"\b(?:[A-Fa-f0-9]{1,4}:){2,}[A-Fa-f0-9:]+\b|\b(?:[A-Fa-f0-9]{1,4}:)+::[A-Fa-f0-9:]*\b")
@@ -21,6 +22,15 @@ def _bogus(d: str) -> bool:
     if ".exe." in d or ".dll." in d or ".bat." in d:
         return True
     return d.endswith(".db")
+
+
+def _in_path(text: str, start: int) -> bool:
+    """The token right after one / or \\ is a path component (/tmp/x.py,
+    C:\\a\\b.sh). After two it is a host: //cdn.example.com (a protocol-relative
+    URL) or \\\\host.example.com\\share (UNC, a common NTLM leak)."""
+    if not start or text[start - 1] not in "/\\":
+        return False
+    return not (start >= 2 and text[start - 2] == text[start - 1])
 
 
 def extract_iocs(text: str) -> list[IOC]:
@@ -63,10 +73,14 @@ def extract_iocs(text: str) -> list[IOC]:
         except ValueError:
             pass
 
-    for dom in _DOMAIN_RE.findall(text):
-        dlow = dom.lower()
+    for m in _DOMAIN_RE.finditer(text):
+        dom, dlow = m.group(0), m.group(0).lower()
         if _bogus(dlow) or dlow in url_hosts or dlow.endswith(_BOGUS_SUFFIXES):
             continue
+        if _in_path(text, m.start()):
+            continue  # /tmp/x.py, C:\\a\\b.sh; URLs are handled above
+        if not plausible_domain(dlow, free_text=True):
+            continue  # an event field name (event.action, user.name), a file name, a bad TLD
         add(IOCType.domain, dom)
 
     for m in _POWERSHELL_RE.findall(text):

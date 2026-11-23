@@ -19,6 +19,7 @@ from datetime import datetime
 import structlog
 
 from worker import es_client
+from worker.web_domains import plausible_domain
 from worker.case_grouping import (
     _DEST_IP_FIELDS, _DOMAIN_FIELDS, _HASH_FIELDS, _HASH_RE, _URL_FIELDS, parse_exclusions,
 )
@@ -76,9 +77,14 @@ def _ip(value, nets) -> str | None:
     return str(ip)
 
 
-def _domain(value, domains) -> str | None:
+def _domain(value, domains, *, checked: bool = False) -> str | None:
+    """checked: the value came out of text (TI extraction, AI notes, case indicators),
+    not a domain field, so it must look like a domain (not event.action or user.name).
+    Domain fields keep any name (an internal .lan host, a .bazar C2) as the event had it."""
     d = str(value or "").strip().lower().rstrip(".")
     if not d or "." not in d or _excluded_host(d, domains):
+        return None
+    if checked and not plausible_domain(d):
         return None
     try:
         ipaddress.ip_address(d)
@@ -168,7 +174,7 @@ def collect(meta: AlertMeta, source_ip: str | None, fields: dict | None, extract
         if mapped == "ip":
             add("ip", _ip(value, nets), extracted_origin)
         elif mapped == "domain":
-            add("domain", _domain(value, domains), extracted_origin)
+            add("domain", _domain(value, domains, checked=True), extracted_origin)
         elif mapped == "url":
             add("url", _url(value, nets, domains), extracted_origin)
         elif mapped and value and len(value) == {"sha256": 64, "sha1": 40, "md5": 32}[mapped]:
@@ -372,3 +378,61 @@ async def backfill_once() -> None:
         await backfill()
     except Exception:
         log.exception("alert_iocs_backfill_failed")
+    try:
+        await purge_implausible_domains()
+    except Exception:
+        log.exception("alert_iocs_purge_failed")
+
+
+# Before IoC extraction checked that a "domain" is one, event field names
+# (event.action, user.name), file names (install.sh) and the like were indexed as
+# domains from triage text. Removed once; documents read from an event's domain
+# fields (origin "event") are left alone.
+PURGE_FLAG = "siem:alert_iocs:implausible_domains_purged:v1"
+_PURGE_BATCH = 500  # (value, origin) clauses per delete, under Elasticsearch's default clause limit
+
+
+def implausible(value: str, origin: str) -> bool:
+    """A stored domain document that extraction would no longer produce."""
+    return origin != "event" and not plausible_domain(value, free_text=origin == "ti")
+
+
+async def purge_implausible_domains(page: int = 1000) -> int:
+    """Delete the domain documents extraction would no longer produce, once (Redis flag).
+    Returns how many distinct (value, origin) pairs were removed."""
+    from worker import redis_client
+    redis = await redis_client.get_redis()
+    if await redis.get(PURGE_FLAG):
+        return 0
+    client = es_client._get_client()
+    query = {"bool": {"filter": [{"term": {"type": "domain"}}], "must_not": [{"term": {"origin": "event"}}]}}
+    bad: list[tuple[str, str]] = []
+    after = None
+    while True:
+        composite = {"size": page, "sources": [{"value": {"terms": {"field": "value"}}},
+                                                {"origin": {"terms": {"field": "origin"}}}]}
+        if after:
+            composite["after"] = after
+        resp = await client.post(f"/{INDEX}/_search", json={"size": 0, "query": query,
+                                                            "aggs": {"v": {"composite": composite}}}, timeout=60)
+        if resp.status_code == 404:
+            break  # no index yet: nothing stored
+        resp.raise_for_status()
+        agg = resp.json().get("aggregations", {}).get("v", {})
+        for b in agg.get("buckets", []):
+            value, origin = b["key"]["value"], b["key"]["origin"]
+            if implausible(value, origin):
+                bad.append((value, origin))
+        after = agg.get("after_key")
+        if not after or not agg.get("buckets"):
+            break
+    for start in range(0, len(bad), _PURGE_BATCH):
+        batch = bad[start:start + _PURGE_BATCH]
+        resp = await client.post(f"/{INDEX}/_delete_by_query", params={"conflicts": "proceed"}, timeout=120, json={
+            "query": {"bool": {"filter": [{"term": {"type": "domain"}}], "should": [
+                {"bool": {"filter": [{"term": {"value": v}}, {"term": {"origin": o}}]}} for v, o in batch
+            ], "minimum_should_match": 1}}})
+        resp.raise_for_status()
+    await redis.set(PURGE_FLAG, "1")
+    log.info("alert_iocs_implausible_domains_purged", values=len(bad))
+    return len(bad)
