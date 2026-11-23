@@ -85,6 +85,13 @@ BELOW_THRESHOLD = "below_threshold"
 OPEN_STATUSES = ("new", "in_progress", BELOW_THRESHOLD)
 
 
+def dedup_severities(level: str) -> list[str]:
+    """Severities an alert of `level` may be counted into as a duplicate: its own and higher."""
+    if level not in _SEVERITY_ORDER:
+        return [level]
+    return _SEVERITY_ORDER[_SEVERITY_ORDER.index(level):]
+
+
 async def _ai_min_severity() -> str:
     value = (await get_setting("ai_min_severity", "high") or "").strip().lower()
     return value if value in _SEVERITY_ORDER else "high"  # a typo must not hide every alert
@@ -170,6 +177,10 @@ async def create_alert(
             dedup_q = dedup_q.where(Alert.source_ip == source_ip)
         elif hostname:
             dedup_q = dedup_q.where(Alert.hostname == hostname)
+        # only into an alert at least as severe: one rule can alert at two levels
+        # (a web payload answered 404 is one lower than the same payload answered
+        # 200), and the stronger one must not vanish into the weaker one's count
+        dedup_q = dedup_q.where(Alert.severity.in_(dedup_severities(rule_match["level"])))
         existing = (await db.execute(dedup_q.limit(1))).scalar_one_or_none()
         if existing:
             existing.duplicate_count = (existing.duplicate_count or 0) + 1

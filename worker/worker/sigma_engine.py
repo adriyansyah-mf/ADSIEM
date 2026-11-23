@@ -958,8 +958,17 @@ class SigmaEngine:
                 if corr_result is None:
                     continue
 
+            # a web payload the server turned away alerts one level lower, and is
+            # suppressed apart: a 404 probe must not mute the 200 that follows it
+            rejected = None
+            if rule.http_outcome_adjust:
+                status = _http_status(event)
+                rejected = status if status in REJECTED_STATUS else None
+
             if rule.suppression:
                 sup_key = f"siem:suppress:{rule.id}:{_suppression_group(rule.suppression, event)}"
+                if rejected is not None:
+                    sup_key += ":rejected"
                 sup_window = rule.suppression.get("timewindow", 3600)
                 if not await self._acquire_suppression(sup_key, sup_window):
                     continue
@@ -990,12 +999,10 @@ class SigmaEngine:
                 match["correlation_group"] = group_val
                 match["correlation_window"] = rule.after_window
                 match["correlation_group_by"] = ", ".join(rule.after_group_by) or None
-            if rule.http_outcome_adjust:
-                status = _http_status(event)
-                if status in REJECTED_STATUS:
-                    match["level"] = _ONE_LEVEL_LOWER.get(rule.level, rule.level)
-                    match["http_outcome"] = "rejected"
-                    match["http_status"] = status
+            if rejected is not None:
+                match["level"] = _ONE_LEVEL_LOWER.get(rule.level, rule.level)
+                match["http_outcome"] = "rejected"
+                match["http_status"] = rejected
             matches.append(match)
 
         if self._correlations and fired:

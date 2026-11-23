@@ -10,9 +10,9 @@ logsource:
   product: linux
 detection:
   curl_pipe:
-    process.command_line|re: '(?i)\bcurl\s+.+\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|da|z|k)?sh|python[0-9.]*|perl|ruby|php)(?:\s|$)'
+    process.command_line|re: '(?i)\bcurl\s+.+\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|da|z|k)?sh|python[0-9.]*|perl|ruby|php)(?![\w.\-])'
   wget_pipe:
-    process.command_line|re: '(?i)\bwget\b.*\s(?:-[a-z]*O\s*-|--output-document=-)(?:\s|$).*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|da|z|k)?sh|python[0-9.]*|perl|ruby|php)(?:\s|$)'
+    process.command_line|re: '(?i)\bwget\b.*\s(?:-[a-z]*O\s*-|--output-document=-)(?:\s|$).*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|da|z|k)?sh|python[0-9.]*|perl|ruby|php)(?![\w.\-])'
   condition: curl_pipe or wget_pipe
 level: critical
 tags:

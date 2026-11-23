@@ -10,7 +10,7 @@ logsource:
   product: linux
 detection:
   decode_pipe:
-    process.command_line|re: '(?i)\bbase64\s+(?:-[a-z]*d[a-z]*|--decode)\b[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|da|z|k)?sh|python[0-9.]*|perl|ruby|php)(?:\s|$)'
+    process.command_line|re: '(?i)\bbase64\s+(?:-[a-z]*d[a-z]*|--decode)\b[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|da|z|k)?sh|python[0-9.]*|perl|ruby|php)(?![\w.\-])'
   decode_eval:
     process.command_line|re: '(?i)(?:\beval\b|\b(?:ba|da|z)?sh\s+-c)\s*[''"]?\$\(.*\bbase64\s+(?:-[a-z]*d[a-z]*|--decode)\b'
   condition: decode_pipe or decode_eval

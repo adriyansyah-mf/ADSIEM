@@ -23,7 +23,7 @@ detection:
   py_pty:
     process.command_line|re: '(?i)\bpython[0-9.]*\b.*pty\.spawn\(\s*[''"]?(?:/bin/)?(?:ba|da|z)?sh'
   perl_shell:
-    process.command_line|re: '(?i)\bperl\b.*\bsocket\b.*(?:\bexec\s*\(|\bsystem\s*\(|/bin/(?:ba|da|z)?sh)'
+    process.command_line|re: '(?i)\bperl\b.*\bsocket\b.*(?:\bexec\b|\bsystem\b|/bin/(?:ba|da|z)?sh)'
   condition: (py_socket and py_shell) or py_pty or perl_shell
 level: critical
 tags:

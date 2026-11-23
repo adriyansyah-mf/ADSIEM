@@ -15,16 +15,18 @@ detection:
   bash_tcp:
     process.command_line|contains: "/dev/tcp/"
   netcat_exec:
-    process.command_line|re: '(?i)(?:^|[\s/;|&(])(?:nc|ncat|netcat)\s+(?:.*\s)?-[a-z]*[el][a-z]*(?:\s|$)'
+    process.command_line|re: '(?i)(?:^|[\s/;|&(''"])(?:nc|ncat|netcat)(?:\.\w+)?\s+(?:.*\s)?(?:-[a-z]*[el][a-z]*(?:\s|$|[''"])|--(?:sh-)?exec\b|-c\s)'
+  fifo_netcat:
+    process.command_line|re: '(?i)\bmkfifo\s+\S+.*\|\s*(?:\S*/)?(?:nc|ncat|netcat)(?:\.\w+)?\s'
   bash_tcp_ebpf:
     CommandLine|contains: "/dev/tcp/"
   netcat_exec_ebpf:
-    Image|re: '(?i)/(?:nc|ncat|netcat)$'
-    CommandLine|re: '(?i)\s-[a-z]*[el][a-z]*(?:\s|$)|-e\s+/bin/(?:ba)?sh'
+    Image|re: '(?i)/(?:nc|ncat|netcat)(?:\.\w+)?$'
+    CommandLine|re: '(?i)\s-[a-z]*[el][a-z]*(?:\s|$)|-e\s+/bin/(?:ba)?sh|\s--(?:sh-)?exec\b|\s-c\s'
   socat_exec_ebpf:
     Image|re: '(?i)/socat$'
     CommandLine|re: '(?i)(?:exec|system):.*\b(?:ba|da|z)?sh\b'
-  condition: bash_tcp or netcat_exec or bash_tcp_ebpf or netcat_exec_ebpf or socat_exec_ebpf
+  condition: bash_tcp or netcat_exec or fifo_netcat or bash_tcp_ebpf or netcat_exec_ebpf or socat_exec_ebpf
 level: critical
 tags:
   - attack.execution

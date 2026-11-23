@@ -41,6 +41,7 @@ import re
 import statistics
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 
 import structlog
 
@@ -151,10 +152,10 @@ def _external(ip: str) -> bool:
     return a.is_global
 
 
-async def _beacon_ignore() -> tuple[set[str], list]:
-    """(program names, networks) from the behavior_beacon_ignore setting."""
+@lru_cache(maxsize=8)
+def _parse_beacon_ignore(raw: str) -> tuple[frozenset[str], tuple]:
     names, nets = set(), []
-    for item in re.split(r"[,\s]+", str(await get_setting("behavior_beacon_ignore", "") or "")):
+    for item in re.split(r"[,\s]+", raw):
         item = item.strip().lower()
         if not item:
             continue
@@ -162,7 +163,13 @@ async def _beacon_ignore() -> tuple[set[str], list]:
             nets.append(ipaddress.ip_network(item, strict=False))
         except ValueError:
             names.add(_base(item))
-    return names, nets
+    return frozenset(names), tuple(nets)
+
+
+async def _beacon_ignore() -> tuple[frozenset[str], tuple]:
+    """(program names, networks) from the behavior_beacon_ignore setting; parsed
+    once per value, not on every connection."""
+    return _parse_beacon_ignore(str(await get_setting("behavior_beacon_ignore", "") or ""))
 
 
 async def _setting_int(key: str, default: int) -> int:
