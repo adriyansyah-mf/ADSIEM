@@ -1,0 +1,28 @@
+title: Java Or Node App Started A Shell
+id: rule-app-runtime-spawn-shell
+description: >-
+  A java or node process started a shell. A webshell or RCE in a Java or
+  Node app (Log4Shell, a deserialization bug, a vulnerable npm package) looks
+  like this, but so does a lot of ordinary work: Jenkins runs every build
+  step through sh, npm/yarn run package scripts through sh -c, and many apps
+  shell out on purpose. Kept below "Web Server Started A Shell" so it goes to
+  triage instead of paging; Jenkins build steps are left out. Add a policy
+  exclusion for an app that shells out by design (T1505.003 / T1059.004)
+logsource:
+  product: linux
+detection:
+  runtime_parent:
+    ParentImage|re: '(?i)/(?:java|node|nodejs)$'
+  runtime_caller:
+    OriginalFileName|re: '(?i)^(?:java|node|nodejs)$'
+  shell_child:
+    Image|re: '(?i)/(?:bash|sh|dash|zsh|ash|ksh)$'
+  filter_jenkins:
+    CommandLine|re: '(?i)(?:^|\s)(?:\S*/)?(?:ba|da)?sh\s+-xe?\s+\S*/(?:jenkins|workspace)\S*\.sh\b|\S*/jenkins\d*\.sh\b'
+  condition: (runtime_parent or runtime_caller) and shell_child and not filter_jenkins
+level: medium
+tags:
+  - attack.execution
+  - attack.t1059.004
+  - attack.persistence
+  - attack.t1505.003

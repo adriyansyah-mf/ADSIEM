@@ -1,26 +1,29 @@
-title: Reverse Shell Attempt
+title: Reverse Shell Or Bind Shell In A Command Line
 id: rule-reverse-shell
+supersedes: Reverse Shell Attempt
 description: >-
   Command line contains reverse/bind shell indicators — bash /dev/tcp,
   netcat/ncat -e or listener flags, or socat exec:/system: piped to a shell.
   Matches both process.command_line (sudo/cron/Sysmon-sourced logs) and the
   eBPF process-exec event fields (Image/CommandLine/ParentImage), since a
-  reverse shell is usually exec'd directly, not via sudo
+  reverse shell is usually exec'd directly, not via sudo. netcat must be the
+  command itself, not the tail of another word: "rsync -e ssh" ends in "nc"
+  and used to read as "nc -e".
 logsource:
   product: linux
 detection:
   bash_tcp:
     process.command_line|contains: "/dev/tcp/"
   netcat_exec:
-    process.command_line|re: 'nc\s+.*-[el]'
+    process.command_line|re: '(?i)(?:^|[\s/;|&(])(?:nc|ncat|netcat)\s+(?:.*\s)?-[a-z]*[el][a-z]*(?:\s|$)'
   bash_tcp_ebpf:
     CommandLine|contains: "/dev/tcp/"
   netcat_exec_ebpf:
     Image|re: '(?i)/(?:nc|ncat|netcat)$'
-    CommandLine|re: '(?i)-[a-z]*[el][a-z]*\s|-e\s+/bin/(?:ba)?sh'
+    CommandLine|re: '(?i)\s-[a-z]*[el][a-z]*(?:\s|$)|-e\s+/bin/(?:ba)?sh'
   socat_exec_ebpf:
     Image|re: '(?i)/socat$'
-    CommandLine|re: '(?i)(?:exec|system):.*(?:sh|bash)'
+    CommandLine|re: '(?i)(?:exec|system):.*\b(?:ba|da|z)?sh\b'
   condition: bash_tcp or netcat_exec or bash_tcp_ebpf or netcat_exec_ebpf or socat_exec_ebpf
 level: critical
 tags:

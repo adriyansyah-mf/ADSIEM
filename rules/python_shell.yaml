@@ -1,17 +1,30 @@
-title: Python/Perl Reverse Shell
+title: Python Or Perl Reverse Shell
 id: rule-python-shell
-description: Python or Perl used to spawn an interactive shell — common post-exploitation technique
+supersedes: Python/Perl Reverse Shell
+description: >-
+  Python or Perl used to spawn an interactive shell — common post-exploitation
+  technique. Opening a socket alone is not enough ("import socket;
+  socket.gethostname()" is a common health check): the socket must be wired to
+  a shell (os.dup2, subprocess, /bin/sh) or pty.spawn must start one. Perl
+  needs a socket and an exec/system in the same one-liner, not just the word
+  "system" anywhere in a path.
 logsource:
   product: linux
 detection:
-  python_socket:
+  py_socket:
+    process.command_line|contains: "socket"
+  py_shell:
     process.command_line|contains:
-      - "import socket"
-      - "socket.socket"
+      - "dup2"
+      - "subprocess"
+      - "/bin/sh"
+      - "/bin/bash"
       - "pty.spawn"
+  py_pty:
+    process.command_line|re: '(?i)\bpython[0-9.]*\b.*pty\.spawn\(\s*[''"]?(?:/bin/)?(?:ba|da|z)?sh'
   perl_shell:
-    process.command_line|re: 'perl\s+.*(?:socket|exec|system|fork)'
-  condition: python_socket or perl_shell
+    process.command_line|re: '(?i)\bperl\b.*\bsocket\b.*(?:\bexec\s*\(|\bsystem\s*\(|/bin/(?:ba|da|z)?sh)'
+  condition: (py_socket and py_shell) or py_pty or perl_shell
 level: critical
 tags:
   - attack.execution

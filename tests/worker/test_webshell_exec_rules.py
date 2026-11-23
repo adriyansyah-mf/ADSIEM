@@ -33,7 +33,7 @@ ADMIN_SHELL = ('Image="/bin/bash" CommandLine="bash" PID=5 PPID=4 User=0 '
 ADMIN_WHOAMI = ('Image="/usr/bin/whoami" CommandLine="whoami" PID=6 PPID=5 User=1000 '
                 'ParentImage="/bin/bash" Comm="bash"')
 
-SPAWN = "Web Server Process Started A Shell"
+SPAWN = "Web Server Started A Shell"
 RECON = "Web Server User Ran Discovery Or Download Tool"
 
 

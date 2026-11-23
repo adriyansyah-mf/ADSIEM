@@ -59,7 +59,7 @@ static_fields:
 
 ## SIGMA SUPPORT (`worker/worker/sigma_engine.py`)
 
-- **Matching:** case-insensitive by default (`|cased` opts out), `*`/`?` wildcards (`\*` = literal star, `\\*` = backslash + wildcard), list-of-maps selections, `keywords` (searched against `raw_message`).
+- **Matching:** case-insensitive by default (`|cased` opts out) — except `|re`, which is case-sensitive unless the pattern starts with `(?i)` or the rule adds `|re|i`; `*`/`?` wildcards (`\*` = literal star, `\\*` = backslash + wildcard), list-of-maps selections, `keywords` (searched against `raw_message`).
 - **Modifiers:** `contains` `startswith` `endswith` `all` `re` (+ `i` `m` `s`) `cidr` `lt` `lte` `gt` `gte` `exists` `cased` `fieldref` `base64` `base64offset` `wide`/`utf16le` `utf16be` `utf16` `windash`. `field: null` matches a missing field.
 - **Condition:** `and`/`or`/`not`, parentheses, `1 of sel_*`, `all of them`, `N of x` (selections starting with `_` are excluded from `them`). `| count()` aggregations are not supported — use a correlation rule or `threshold`.
 - **Correlation rules (Sigma v2):** `type: event_count | value_count | temporal`, referencing rules by `name`, `id` or `title`; `group-by`, `timespan`, `condition` (`gt`/`gte`/`eq`). `generate` defaults to `false`, which silences the referenced rules' own alerts. A file may hold several rules separated by `---`.
@@ -74,7 +74,7 @@ static_fields:
 
 ## ANTI-PATTERNS
 
-- **Do not rename an existing rule `title`** to "update" it — seeding keys on `title`, so a rename creates a duplicate rule and leaves the old one active. When the detection must change on existing installs, give the file a new title and add `supersedes: <old title>`: the seeder turns the old row off once, when it seeds the new one (`worker/worker/seeder.py`).
+- **Do not rename an existing rule `title`** to "update" it — seeding keys on `title`, so a rename creates a duplicate rule and leaves the old one active. When the detection must change on existing installs, give the file a new title and add `supersedes: <old title>` (or a list of every earlier title, for installs that skipped a rename): the seeder turns the old rows off once, when it seeds the new one (`worker/worker/seeder.py`).
 - **Do not mix field vocabularies** — using `Image` in an ECS-logsource rule (or `event.action` in a `process_creation` rule) makes it dead.
 - **Do not put `CREATE TABLE`-style config into these files** — they are pure content, no logic.
 - **Do not assume an edited DB row is permanent** — only *new* titles are seeded; edit YAML and bump the title, or edit in the dashboard and accept it lives only in the DB.
