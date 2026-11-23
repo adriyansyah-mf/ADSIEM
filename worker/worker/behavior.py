@@ -10,18 +10,38 @@ fallback and Windows ETW alike), per host, in Redis:
 - beaconing: one program connecting to the same external address and port
   at a steady rhythm (at least BEACON_MIN_CONNECTIONS, median gap
   10 s - 1 h, jitter at most BEACON_MAX_JITTER): what C2 implants do.
+- new listener: a program bound a port this host never saw it bind (ports
+  from EPHEMERAL_FROM up count as one), that at most RARE_FLEET hosts of the
+  group bind: a bind shell or backdoor listener. Loopback and port 0 (the
+  kernel picks) are left out. Agent bind events carry no protocol and also
+  fire for UDP clients, so a fixed list of daemons cannot tell a listener
+  apart; the host's own history can.
 
 A host learns for `behavior_learning_hours` (platform setting, default 72)
 from its first telemetry before first-seen detections report anything.
+Programs are remembered by where they run from with the parts of the folder
+that change every run or update folded (exe_key), so an installer unpacked to a
+new GUID folder under %TEMP% each run is one program, not a new one each time.
+
+Beaconing is still reported while a host learns (an implant may predate the
+agent), but a program that kept a rhythm on a port during learning is the
+host's own timer: after learning it is not reported again, whatever address
+it calls (cloud services rotate them). That covers small deployments, where
+the fleet check (BEACON_FLEET_MAX hosts) never applies. Programs and
+addresses in `behavior_beacon_ignore` (platform setting: names, IPs or CIDRs,
+comma separated) are never beaconing.
+
 Findings go back into the log stream as siem_behavior lines, so decoders,
 Sigma rules (rules/behavior_*.yaml), dedup and AI triage handle them like
 any detection. Never raises into the pipeline (the caller also guards)."""
 from __future__ import annotations
 
 import ipaddress
+import re
 import statistics
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 
 import structlog
 
@@ -48,6 +68,8 @@ PROCESS_TYPES = {"linux_process_exec", "windows_etw_process"}
 # the server (a feedback loop); they are never beaconing, UEBA or lateral input
 AGENT_PROGRAMS = {"siem-agent", "siem-agent.exe", "agent"}
 NETWORK_TYPES = {"linux_network_connect", "linux_network_snapshot", "windows_etw_network"}
+LISTEN_TYPES = {"linux_network_bind"}
+EPHEMERAL_FROM = 32768
 
 _USER_WRITABLE = ("/tmp/", "/var/tmp/", "/dev/shm/", "/home/", "/run/user/", "/root/",
                   "\\users\\", "\\programdata\\", "\\windows\\temp\\", "\\$recycle.bin\\", "\\perflogs\\")
@@ -70,6 +92,28 @@ def _quote(value) -> str:
 
 def line(event: str, **fields) -> str:
     return " ".join([f"event={event}"] + [f"{k}={_quote(v)}" for k, v in fields.items() if v not in (None, "")])
+
+
+_GUID = re.compile(r"\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?")
+_HEX_ID = re.compile(r"(?=[a-f]*\d)[0-9a-f]{8,}")
+# unpack folders installers and runtimes name at random: NSIS nsXXXX.tmp, Inno
+# is-XXXXX.tmp, 7-Zip SFX 7zSXXXX, Python tempfile tmpXXXXXX, PyInstaller _MEIxxxx
+_RANDOM_DIR = re.compile(r"(?<=[\\/])(?:ns|is-|7zs|tmp|_mei)[0-9a-z]{3,}(?:\.tmp)?(?=[\\/])")
+_DIGITS = re.compile(r"\d+")
+
+
+def exe_key(image: str) -> str:
+    """The program for first-seen baselines: its path lowercased, with GUIDs,
+    hex ids, random unpack folders and numbers in the folder part folded, so
+    %TEMP%\\{GUID}\\setup.exe, /tmp/go-build123/b001/exe/main or
+    app-1.0.9001\\app.exe stays one program across runs and updates. The file
+    name is kept as is: a dropper that names itself at random is still new."""
+    p = image.lower()
+    cut = max(p.rfind("/"), p.rfind("\\")) + 1
+    folder = _GUID.sub("{guid}", p[:cut])
+    folder = _RANDOM_DIR.sub("<tmp>", folder)
+    folder = _HEX_ID.sub("#", folder)
+    return _DIGITS.sub("#", folder) + p[cut:]
 
 
 def user_writable(path: str) -> bool:
@@ -106,6 +150,26 @@ def _external(ip: str) -> bool:
     except ValueError:
         return False
     return a.is_global
+
+
+@lru_cache(maxsize=8)
+def _parse_beacon_ignore(raw: str) -> tuple[frozenset[str], tuple]:
+    names, nets = set(), []
+    for item in re.split(r"[,\s]+", raw):
+        item = item.strip().lower()
+        if not item:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            names.add(_base(item))
+    return frozenset(names), tuple(nets)
+
+
+async def _beacon_ignore() -> tuple[frozenset[str], tuple]:
+    """(program names, networks) from the behavior_beacon_ignore setting; parsed
+    once per value, not on every connection."""
+    return _parse_beacon_ignore(str(await get_setting("behavior_beacon_ignore", "") or ""))
 
 
 async def _setting_int(key: str, default: int) -> int:
@@ -163,11 +227,32 @@ class Behavior:
                     "parent": parent, "image": image, "pair": pair, "fleet_hosts": fleet,
                     "command_line": decoded.get("CommandLine") or decoded.get("process.command_line") or ""}))
         if user_writable(image):
-            new, fleet = await self._first_seen(agent, group, "exe", image.lower())
+            new, fleet = await self._first_seen(agent, group, "exe", exe_key(image))
             if new and fleet <= 1 and not await self.learning(agent):
                 out.append(("behavior_new_rare_executable", {
                     "image": image, "parent": parent, "fleet_hosts": fleet}))
         return out
+
+    async def listen(self, agent: str, group: str, decoded: dict) -> list[tuple[str, dict]]:
+        proc = str(decoded.get("process.name") or "").strip()
+        addr = str(decoded.get("destination.address") or "")
+        try:
+            port = int(decoded.get("destination.port") or 0)
+        except (TypeError, ValueError):
+            return []
+        if port <= 0 or not proc or _base(proc) in AGENT_PROGRAMS:
+            return []
+        try:
+            if ipaddress.ip_address(addr).is_loopback:
+                return []  # reachable from this host only
+        except ValueError:
+            pass
+        await self.mark_seen(agent)
+        slot = str(port) if port < EPHEMERAL_FROM else f"{EPHEMERAL_FROM}+"
+        new, fleet = await self._first_seen(agent, group, "ls", f"{_base(proc)}|{slot}")
+        if new and fleet <= RARE_FLEET and not await self.learning(agent):
+            return [("behavior_new_listener", {"image": proc, "port": port, "address": addr, "fleet_hosts": fleet})]
+        return []
 
     async def network(self, agent: str, group: str, log_type: str, decoded: dict,
                       received: float, raw: str = "") -> list[tuple[str, dict]]:
@@ -177,6 +262,10 @@ class Behavior:
         dst, port_n, proc = conn
         if port_n in NOISY_PORTS or not _external(dst):
             return []
+        await self.mark_seen(agent)
+        names, nets = await _beacon_ignore()
+        if _base(proc) in names or any(ipaddress.ip_address(dst) in n for n in nets):
+            return []
         key = _k("bc", agent, f"{proc.lower()}|{dst}|{port_n}")
         await self.r.lpush(key, str(_event_time(decoded, received)))
         await self.r.ltrim(key, 0, BEACON_KEEP - 1)
@@ -184,6 +273,13 @@ class Behavior:
         times = [float(t) for t in await self.r.lrange(key, 0, -1)]
         stats = beacon_stats(times)
         if stats is None:
+            return []
+        # the host's own timers: what kept a rhythm on this port while it learned
+        base_key, timer = _k("bcbase", agent), f"{_base(proc)}|{port_n}"
+        if await self.learning(agent):
+            await self.r.sadd(base_key, timer)
+            await self.r.expire(base_key, BASELINE_TTL)
+        elif await self.r.sismember(base_key, timer):
             return []
         if not await self.r.set(_k("bcflag", agent, f"{proc.lower()}|{dst}|{port_n}"), "1",
                                 nx=True, ex=BEACON_REPORT_EVERY):
@@ -244,12 +340,14 @@ def _ss_peer(raw: str) -> tuple[str, str, str]:
 async def observe(redis, *, log_type: str, decoded: dict, agent_id, group_id: str, hostname: str,
                   received: float, raw: str = "") -> list[str]:
     """Run the detectors for one event and push their findings; returns the events pushed."""
-    if not agent_id or log_type not in PROCESS_TYPES | NETWORK_TYPES:
+    if not agent_id or log_type not in PROCESS_TYPES | NETWORK_TYPES | LISTEN_TYPES:
         return []
     b = Behavior(redis)
     agent, group = str(agent_id), group_id or "default"
     if log_type in PROCESS_TYPES:
         found = await b.process(agent, group, decoded)
+    elif log_type in LISTEN_TYPES:
+        found = await b.listen(agent, group, decoded)
     else:
         found = await b.network(agent, group, log_type, decoded, received, raw)
     for event, fields in found:

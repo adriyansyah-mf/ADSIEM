@@ -1,14 +1,19 @@
-title: Base64 Encoded Command Execution
+title: Base64 Payload Decoded Into A Shell
 id: rule-base64-execution
-description: Base64-encoded payload decoded and piped to a shell interpreter — obfuscation technique
+supersedes: Base64 Encoded Command Execution
+description: >-
+  Base64-encoded payload decoded and run by a shell or interpreter —
+  obfuscation technique. Only decoding counts: "echo user:pass | base64"
+  (a Basic Auth header, a Kubernetes secret) encodes and used to match, and
+  "| sha256sum" no longer reads as "| sh".
 logsource:
   product: linux
 detection:
-  selection:
-    process.command_line|re: 'base64\s+(-d|--decode)\s*\|?\s*(?:bash|sh|python|perl|eval)'
-  b64_eval:
-    process.command_line|re: 'echo\s+[A-Za-z0-9+/=]{20,}\s*\|\s*base64'
-  condition: selection or b64_eval
+  decode_pipe:
+    process.command_line|re: '(?i)\bbase64\s+(?:-[a-z]*d[a-z]*|--decode)\b[^|]*\|\s*(?:sudo\s+(?:-\S+\s+)*)?(?:\S*/)?(?:(?:ba|da|z|k)?sh|python[0-9.]*|perl|ruby|php)(?![\w.\-])'
+  decode_eval:
+    process.command_line|re: '(?i)(?:\beval\b|\b(?:ba|da|z)?sh\s+-c)\s*[''"]?\$\(.*\bbase64\s+(?:-[a-z]*d[a-z]*|--decode)\b'
+  condition: decode_pipe or decode_eval
 level: high
 tags:
   - attack.defense_evasion

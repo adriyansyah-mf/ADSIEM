@@ -1,23 +1,27 @@
-title: Web Server Process Started A Shell
+title: Web Server Started A Shell
 id: rule-webserver-spawn-shell
-supersedes: Linux Web Server Spawning Interactive Shell
+supersedes:
+  - Web Server Process Started A Shell
+  - Linux Web Server Spawning Interactive Shell
 description: >-
-  A web server or app runtime (apache2, nginx, php-fpm, tomcat/java, node)
+  A web server (apache2, httpd, nginx, php-fpm, tomcat, gunicorn, uwsgi)
   started a shell: the strongest single sign of a webshell or RCE, since a
   web server has no reason to run bash/sh/dash. Sourced from the agent's
   eBPF process-exec monitor. Matches the parent program (ParentImage) or,
   when the agent had none for it, the name of the process that called exec
   (Comm, decoded as OriginalFileName): a forked apache2 worker running PHP
   system() still carries the name apache2 at that point. Agents before
-  1.27.7 sent no ParentImage for a web server started before the agent
-  (T1505.003 / T1059.004)
+  1.27.7 sent no ParentImage for a web server started before the agent.
+  Generic runtimes (java, node) shell out all day (Jenkins builds, npm
+  scripts) and have their own, lower-level rule: "Java Or Node App Started
+  A Shell" (T1505.003 / T1059.004)
 logsource:
   product: linux
 detection:
   webserver_parent:
-    ParentImage|re: '(?i)/(?:apache2|httpd|nginx|php-fpm\d*(?:\.\d+)?|php\d*(?:\.\d+)?|tomcat\d*|java|node|gunicorn|uwsgi)$'
+    ParentImage|re: '(?i)/(?:apache2|httpd|nginx|php-fpm\d*(?:\.\d+)?|php\d*(?:\.\d+)?|tomcat\d*|gunicorn|uwsgi)$'
   webserver_caller:
-    OriginalFileName|re: '(?i)^(?:apache2|httpd|nginx|php-fpm.*|php\d*(?:\.\d+)?|tomcat\d*|java|node|gunicorn|uwsgi)$'
+    OriginalFileName|re: '(?i)^(?:apache2|httpd|nginx|php-fpm.*|php\d*(?:\.\d+)?|tomcat\d*|gunicorn|uwsgi)$'
   shell_child:
     Image|re: '(?i)/(?:bash|sh|dash|zsh|ash|ksh)$'
   condition: (webserver_parent or webserver_caller) and shell_child

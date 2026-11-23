@@ -12,7 +12,7 @@ Splunk/QRadar.
 | | |
 |---|---|
 | Agen endpoint | Go, Linux (eBPF) + Windows (ETW), rilis terbaru **agent-v1.28.0**, self-update bertanda tangan, kontrol USB storage |
-| Konten deteksi | **258** rule Sigma dalam 249 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
+| Konten deteksi | **259** rule Sigma dalam 250 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
 | OT / ICS | Modbus/TCP dan DNP3 di-decode dari Suricata; rule MITRE ATT&CK for ICS untuk pemrograman PLC, stop/restart, listen-only, scan, eksposur ke internet |
 | Analitik perilaku | Baseline host (parent → child yang jarang, executable baru yang jarang, beaconing), UEBA untuk user, IP, host, dan proses, skor risiko entitas, graf lateral movement |
 | Kerentanan | CVE paket per host (OSV.dev per distro) dan build Windows terhadap perbaikan KB Microsoft, diurutkan menurut CISA KEV, FIRST EPSS, dan tingkat keparahan |
@@ -233,7 +233,7 @@ tidak bisa begitu saja menghentikannya.
   `startswith`, `endswith`, `re`, `base64`, `base64offset`, `wide`/`utf16`, `windash`,
   perbandingan numerik), keyword, kondisi boolean, window threshold dan korelasi, sekuens
   `after:`, dan suppression per entitas.
-- **258 rule bawaan** (249 file): Linux, Windows, rantai IOA, serangan web (SQLi, XSS, SSRF,
+- **259 rule bawaan** (250 file): Linux, Windows, rantai IOA, serangan web (SQLi, XSS, SSRF,
   LFI, RCE, Log4Shell, XXE, GraphQL, WordPress), jaringan/firewall, Suricata/Zeek, OT/ICS,
   Active Directory, ransomware, ML, YARA, USB storage, credential access, penyamaran sebagai
   kernel thread (proses bernama `[kworker/…]` yang membuat koneksi keluar atau di-exec), App
@@ -252,8 +252,8 @@ tidak bisa begitu saja menghentikannya.
   dengan baseline per grup, penjelasan per fitur, dan pengaman untuk entitas yang belum punya
   riwayat. User placeholder seperti `(invalid user)` dari auditd diabaikan.
 - **Baseline perilaku host** (`worker/worker/behavior.py`, di sisi server): parent → child
-  yang jarang, executable baru yang jarang dari folder yang bisa ditulis user, dan beaconing
-  berkala ke host eksternal. Temuan "pertama kali terlihat" baru muncul setelah
+  yang jarang, executable baru yang jarang dari folder yang bisa ditulis user, beaconing
+  berkala ke host eksternal, dan port listening baru. Temuan "pertama kali terlihat" baru muncul setelah
   `behavior_learning_hours` (default 72), dan perilaku yang dilakukan beberapa host di grup
   yang sama dianggap normal.
 - **Risiko entitas** (`/entity-risk`): setiap alert menambah risiko ke host dan user-nya

@@ -77,10 +77,12 @@ async def _upsert_rules(db) -> None:
                 # a rule file renamed to change its detection (rows are keyed on
                 # title) turns off the row it replaces, once, as it is seeded:
                 # both would alert on the same event. An analyst who turns the
-                # old one back on keeps it on.
+                # old one back on keeps it on. A list names every earlier title,
+                # for installs that skipped a rename.
                 old = d.get("supersedes")
-                if old and old != title:
-                    await db.execute(update(Rule).where(Rule.title == old).values(is_enabled=False))
+                olds = [o for o in (old if isinstance(old, list) else [old]) if o and o != title]
+                if olds:
+                    await db.execute(update(Rule).where(Rule.title.in_(olds)).values(is_enabled=False))
             log.info("rule_seeded", title=title, supersedes=d.get("supersedes"))
         except Exception as exc:
             log.error("rule_seed_failed", path=path, error=str(exc))

