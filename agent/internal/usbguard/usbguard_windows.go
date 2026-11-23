@@ -28,7 +28,23 @@ var (
 		Data4: [8]byte{0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18}}
 )
 
-const crSuccess = 0
+const (
+	crSuccess       = 0
+	crRemoveVetoed  = 23 // CR_REMOVE_VETOED: a program or driver holds the device
+	vetoNameMaxPath = windows.MAX_PATH
+)
+
+// vetoTypes: PNP_VETO_TYPE, what refused the removal.
+var vetoTypes = []string{"unknown", "legacy device", "pending close", "windows app", "windows service",
+	"outstanding open", "device", "driver", "illegal device request", "insufficient power", "non-disableable",
+	"legacy driver", "insufficient rights", "already removed"}
+
+func vetoType(t uint32) string {
+	if int(t) < len(vetoTypes) {
+		return vetoTypes[t]
+	}
+	return fmt.Sprintf("type %d", t)
+}
 
 type windowsPlatform struct {
 	mu   sync.Mutex
@@ -49,14 +65,21 @@ func (p *windowsPlatform) block(d Device) error {
 		return fmt.Errorf("device %s is gone", d.ID)
 	}
 	var veto uint32
-	name := make([]uint16, windows.MAX_PATH)
+	name := make([]uint16, vetoNameMaxPath)
+	// a veto buffer also keeps Windows from showing its "problem ejecting" dialog
 	r, _, _ := procCMRequestEjectW.Call(uintptr(inst), uintptr(unsafe.Pointer(&veto)),
 		uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)), 0)
+	if veto != 0 || r == crRemoveVetoed {
+		// who holds it: the program (a path) or device, so the analyst can tell
+		// Explorer or an antivirus scan from a copy in progress
+		by := windows.UTF16ToString(name)
+		if by == "" {
+			by = "an unnamed holder"
+		}
+		return fmt.Errorf("eject vetoed (%s) by %s; retrying", vetoType(veto), by)
+	}
 	if r != crSuccess {
 		return fmt.Errorf("eject failed (CONFIGRET %d)", r)
-	}
-	if veto != 0 {
-		return fmt.Errorf("eject vetoed (type %d) by %s", veto, windows.UTF16ToString(name))
 	}
 	return nil
 }
@@ -157,6 +180,7 @@ func Start(ctx context.Context, opts Options) (*Guard, error) {
 						g.Left(id)
 					}
 				}
+				g.RetryFailed() // a block Windows refused while the drive was in use
 			}
 			select {
 			case <-ctx.Done():
