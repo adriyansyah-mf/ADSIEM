@@ -60,6 +60,8 @@ Trained on EMBER2024 (Joyce et al., 2025): Win64 and .NET training files (Sep 20
 
 The ELF test set has 6,000 benign files, so its 0.1% threshold rests on 6 of them: take that column as rough.
 
+Quarantine bar: a `malicious` PE file is quarantined on the model's word alone only when it scores above the 0.01% threshold (where 0.01% of the benign test files score higher). That is 75.0% of all PE files detected at 0.01% false positives (Win64 84.9%, Win32 70.3%, .NET 72.5%), measured on 104,688 benign test files. The ELF test set has too few benign files for a 0.01% threshold, so ELF `malicious` files are quarantined at the 0.1% bar instead.
+
 Recent samples from malware URLs (URLhaus, 2026-11-03, `agent/cmd/detbench`): every labelled stealer was scored `malicious` (SalatStealer 3/3, RustyStealer, SnappyClient, all above 0.99), which the previous model (EMBER 2018) had scored clean; the Mozi ELF samples too.
 
 On known-good software from a Linux workstation (2026-11, `go test -run TestSurvey ./internal/mlscan` with `MLSCAN_DIRS`):
