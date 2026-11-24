@@ -60,6 +60,8 @@ Trained on EMBER2024 (Joyce et al., 2025): Win64 and .NET training files (Sep 20
 
 The ELF test set has 6,000 benign files, so its 0.1% threshold rests on 6 of them: take that column as rough.
 
+Quarantine bar: a `malicious` file is quarantined on the model's word alone only when it scores above the 0.01% threshold (where 0.01% of the benign test files score higher). PE: 75.0% of all PE files detected at 0.01% false positives (Win64 84.9%, Win32 70.3%, .NET 72.5%), measured on 104,688 benign test files. ELF: 47.3% detected, measured on 15,928 benign files: EMBER2024's 6,000 and 9,928 ELF files from Debian 12 (bookworm, main, amd64) packages that are not in EMBER2024 (`ml/v3/elf_benign.py`). None of either set scores above it. The Debian files score lower than EMBER2024's benign files (none reaches even the 1% threshold), so they only set the 0.01% bar; the 1% and 0.1% thresholds stay those of EMBER2024's own test set.
+
 Recent samples from malware URLs (URLhaus, 2026-11-03, `agent/cmd/detbench`): every labelled stealer was scored `malicious` (SalatStealer 3/3, RustyStealer, SnappyClient, all above 0.99), which the previous model (EMBER 2018) had scored clean; the Mozi ELF samples too.
 
 On known-good software from a Linux workstation (2026-11, `go test -run TestSurvey ./internal/mlscan` with `MLSCAN_DIRS`):
@@ -90,7 +92,11 @@ python -m venv .venv && .venv/bin/pip install -r ml/requirements.txt
 # EMBER2024 from Hugging Face (joyce8/EMBER2024): Win64_train, Dot_Net_train, ELF_train and the
 # *_test zips (Win32_train.zip too if you can: 12 GB); put a <name>.done file next to each zip
 .venv/bin/python ml/v3/train.py ember2024/ agent/internal/mlscore/model.json.gz --kind pe
-.venv/bin/python ml/v3/train.py ember2024/ agent/internal/mlscore/model_elf.json.gz --kind elf --rounds 400 --leaves 64
+# benign ELF files from Debian packages for the ELF 0.01% threshold (needs thrember from
+# github.com/FutureComputing4AI/EMBER2024 installed; downloads about 3,000 packages)
+.venv/bin/python ml/v3/elf_benign.py ember2024/ ember2024/Debian_ELF_benign.jsonl --target 8000
+.venv/bin/python ml/v3/train.py ember2024/ agent/internal/mlscore/model_elf.json.gz --kind elf --rounds 400 --leaves 64 \
+    --extra-test Debian_ELF_benign.jsonl
 cd agent && go test ./internal/mlscore    # Go scores match LightGBM's
 ```
 

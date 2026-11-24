@@ -722,30 +722,23 @@ func TestInitiatorGoneAndPIDReuse(t *testing.T) {
 	}
 }
 
-// Safe Mode: the agent service is registered under SafeBoot\Minimal and
-// \Network, once.
+// Safe Mode: the installer registers the agent service under
+// SafeBoot\Minimal and \Network; the agent only reads and removes it.
 type fakeBootStore struct{ m map[string]string }
 
 func (f *fakeBootStore) get(key string) (string, bool, error) { v, ok := f.m[key]; return v, ok, nil }
-func (f *fakeBootStore) set(key, value string) error          { f.m[key] = value; return nil }
 func (f *fakeBootStore) del(key string) error                 { delete(f.m, key); return nil }
 
 func TestSafeModeRegistration(t *testing.T) {
-	s := &fakeBootStore{m: map[string]string{
-		`SYSTEM\CurrentControlSet\Control\SafeBoot\Network\SIEMAgent`: "Driver",
-	}}
-	changed, err := ensureSafeMode(s, "SIEMAgent")
-	if err != nil || len(changed) != 2 {
-		t.Fatalf("changed %v err %v", changed, err)
+	minimal := `SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\SIEMAgent`
+	network := `SYSTEM\CurrentControlSet\Control\SafeBoot\Network\SIEMAgent`
+	s := &fakeBootStore{m: map[string]string{minimal: "Service", network: "Driver"}}
+	if ok, err := safeModeRegistered(s, "SIEMAgent"); ok || err != nil {
+		t.Fatalf("Network is not a Service: registered %v err %v", ok, err)
 	}
-	for _, k := range []string{`SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\SIEMAgent`,
-		`SYSTEM\CurrentControlSet\Control\SafeBoot\Network\SIEMAgent`} {
-		if s.m[k] != "Service" {
-			t.Fatalf("%s = %q", k, s.m[k])
-		}
-	}
-	if changed, err := ensureSafeMode(s, "SIEMAgent"); err != nil || len(changed) != 0 {
-		t.Fatalf("second run changed %v err %v", changed, err)
+	s.m[network] = "Service"
+	if ok, err := safeModeRegistered(s, "SIEMAgent"); !ok || err != nil {
+		t.Fatalf("registered %v err %v", ok, err)
 	}
 	// Uninstall removes both keys, and only the agent's.
 	s.m[`SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\Other`] = "Service"
@@ -757,5 +750,8 @@ func TestSafeModeRegistration(t *testing.T) {
 	}
 	if err := removeSafeMode(s, "SIEMAgent"); err != nil {
 		t.Fatalf("second removal: %v", err)
+	}
+	if ok, _ := safeModeRegistered(s, "SIEMAgent"); ok {
+		t.Fatal("still registered")
 	}
 }

@@ -482,7 +482,7 @@ func run(configPath string, stop <-chan struct{}) {
 		go rb.Run(flowCtx)
 		guard = ransomguard.New(opts)
 		go guard.Run(flowCtx)
-		hardenSafeMode()
+		checkSafeMode()
 	}
 
 	// Projects a developer clones or installs (git clone, npm install): scanned

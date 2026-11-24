@@ -2,7 +2,12 @@
 <!--
   SIEM agent MSI (WiX v5: packaging/build-msi.ps1). Install like Wazuh's:
 
-    msiexec /i siem-agent-<version>-x64.msi /qn SERVER_URL=https://siem.example.com ENROLLMENT_KEY=<key> [AGENT_NAME=web01] [ENABLE_AUDITING=1]
+    msiexec /i siem-agent-<version>-x64.msi /qn SERVER_URL=https://siem.example.com ENROLLMENT_KEY=<key> [AGENT_NAME=web01] [ENABLE_AUDITING=1] [SAFE_MODE=1]
+
+  SAFE_MODE=1 registers the service to start in Safe Mode (anti-ransomware).
+  msiexec writes those SafeBoot keys, never the agent: Microsoft Defender
+  removes an unsigned program that adds itself there (AsyncRAT persistence).
+  Upgrades keep the registration (found by the search below).
 
   The properties go to `siem-agent.exe -configure`, which writes
   %ProgramData%\SIEMAgent\config.yaml before the service starts. Upgrades
@@ -25,6 +30,12 @@
     <Property Id="AGENT_NAME" Secure="yes" />
     <Property Id="ENABLE_AUDITING" Secure="yes" />
     <Property Id="UNINSTALL_TOKEN" Secure="yes" Hidden="yes" />
+    <!-- set by an earlier install's registration ("Service"), so upgrades,
+         self-updates included, keep it without SAFE_MODE=1 on the command line -->
+    <Property Id="SAFE_MODE" Secure="yes">
+      <RegistrySearch Id="SafeModeRegistered" Root="HKLM" Bitness="always64" Type="raw"
+                      Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\SIEMAgent" />
+    </Property>
     <Property Id="ARPCOMMENTS" Value="Log collection and response agent for the SIEM platform" />
     <Property Id="ARPNOMODIFY" Value="1" />
 
@@ -42,11 +53,19 @@
           </ServiceInstall>
           <ServiceControl Id="AgentServiceControl" Name="SIEMAgent" Start="install" Stop="both"
                           Remove="uninstall" Wait="yes" />
-          <!-- The agent registers itself to start in Safe Mode (ransomguard); gone with it. -->
+          <!-- Safe Mode registration (SAFE_MODE=1, or one written by agents
+               before 1.35.0, which registered themselves); gone with the agent. -->
           <RemoveRegistryKey Id="SafeBootMinimal" Root="HKLM" Action="removeOnUninstall"
                              Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\SIEMAgent" />
           <RemoveRegistryKey Id="SafeBootNetwork" Root="HKLM" Action="removeOnUninstall"
                              Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Network\SIEMAgent" />
+        </Component>
+        <Component Id="SafeModeRegistration" Bitness="always64"
+                   Condition="SAFE_MODE AND SAFE_MODE &lt;&gt; &quot;0&quot;">
+          <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Minimal\SIEMAgent"
+                         Type="string" Value="Service" KeyPath="yes" />
+          <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Control\SafeBoot\Network\SIEMAgent"
+                         Type="string" Value="Service" />
         </Component>
       </Directory>
     </StandardDirectory>
@@ -79,6 +98,7 @@
 
     <Feature Id="Main" Title="SIEM Agent">
       <ComponentRef Id="AgentService" />
+      <ComponentRef Id="SafeModeRegistration" />
     </Feature>
   </Package>
 </Wix>

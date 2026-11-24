@@ -8,12 +8,18 @@
   Run from an elevated prompt in the folder that holds siem-agent.exe.
   On upgrade the existing config (and its agent token) is kept; omit both
   parameters to just replace the binary.
+
+  -SafeMode also starts the service in Safe Mode, where ransomware reboots
+  to run without security software (anti-ransomware). The installer writes
+  the SafeBoot keys, not the agent: Microsoft Defender removes an unsigned
+  program that registers itself there (it is how AsyncRAT persists).
 #>
 param(
     [string]$ServerUrl,
     [string]$EnrollmentToken,
     [string]$Group = "default",
-    [switch]$EnableAuditing
+    [switch]$EnableAuditing,
+    [switch]$SafeMode
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,6 +80,13 @@ if ($EnableAuditing) {
     New-Item -Force -Path $sbl | Out-Null
     Set-ItemProperty -Path $sbl -Name EnableScriptBlockLogging -Value 1 -Type DWord
     Write-Host "Enabled logon/process/account auditing and PowerShell script block logging."
+}
+
+if ($SafeMode) {
+    foreach ($mode in "Minimal", "Network") {
+        New-Item -Force -Path "HKLM:\SYSTEM\CurrentControlSet\Control\SafeBoot\$mode\SIEMAgent" -Value "Service" | Out-Null
+    }
+    Write-Host "Registered SIEMAgent to start in Safe Mode."
 }
 
 if (-not $existing) {

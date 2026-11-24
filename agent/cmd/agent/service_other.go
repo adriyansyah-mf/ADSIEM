@@ -23,8 +23,8 @@ func manageService(bool, string) error {
 // (Restart=always); stopping it is reported to the server and alerted on.
 func protectService(bool) error { return nil }
 
-// hardenSafeMode: Safe Mode is a Windows thing.
-func hardenSafeMode() {}
+// checkSafeMode: Safe Mode is a Windows thing.
+func checkSafeMode() {}
 
 // signalStopReason tells a host going down (systemd is "stopping") from
 // someone stopping or killing the agent.
