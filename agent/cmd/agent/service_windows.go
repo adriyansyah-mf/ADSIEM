@@ -103,17 +103,19 @@ const (
 	defaultServiceSDDL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"
 )
 
-// hardenSafeMode registers the agent's service to start in Safe Mode
+// checkSafeMode logs whether the agent's service starts in Safe Mode
 // (ransomware sets safeboot and reboots to run without security software).
-// Only when running as the service; idempotent.
-func hardenSafeMode() {
+// The installer registers it on request (install.ps1 -SafeMode, MSI
+// SAFE_MODE=1); the agent never writes SafeBoot itself, which Microsoft
+// Defender takes for AsyncRAT persistence. Only when running as the service.
+func checkSafeMode() {
 	if isService, err := svc.IsWindowsService(); err != nil || !isService {
 		return
 	}
-	if changed, err := ransomguard.RegisterSafeMode(serviceName); err != nil {
-		slog.Warn("ransomguard: safe mode registration failed", "err", err)
-	} else if len(changed) > 0 {
-		slog.Info("ransomguard: registered for safe mode", "keys", changed)
+	if ok, err := ransomguard.SafeModeRegistered(serviceName); err != nil {
+		slog.Warn("ransomguard: safe mode registration unreadable", "err", err)
+	} else if !ok {
+		slog.Info("ransomguard: not registered for safe mode (install with -SafeMode or SAFE_MODE=1)")
 	}
 }
 

@@ -27,15 +27,6 @@ func (regBootStore) get(key string) (string, bool, error) {
 	return v, err == nil, err
 }
 
-func (regBootStore) set(key, value string) error {
-	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, key, registry.SET_VALUE)
-	if err != nil {
-		return err
-	}
-	defer k.Close()
-	return k.SetStringValue("", value)
-}
-
 func (regBootStore) del(key string) error {
 	err := registry.DeleteKey(registry.LOCAL_MACHINE, key)
 	if errors.Is(err, registry.ErrNotExist) {

@@ -85,12 +85,20 @@ try {
 
     # 2. Install the way the dashboard tells you to.
     $code = Invoke-Msiexec @("/i", "`"$Msi`"", "SERVER_URL=https://127.0.0.1:$port", "ENROLLMENT_KEY=ci-smoke-key-123",
-                             "AGENT_NAME=ci-windows", "ENABLE_AUDITING=1") "install.log"
+                             "AGENT_NAME=ci-windows", "ENABLE_AUDITING=1", "SAFE_MODE=1") "install.log"
     if ($code -ne 0) { Fail "msiexec /i exited $code" }
     $svc = Get-Service SIEMAgent -ErrorAction SilentlyContinue
     if (-not $svc) { Fail "SIEMAgent service not installed" }
     $svc.WaitForStatus("Running", "00:00:30")
     Write-Host "ok: SIEMAgent installed and running"
+
+    # SAFE_MODE=1: msiexec registers the service for Safe Mode (the agent never does).
+    $safeBoot = "HKLM:\SYSTEM\CurrentControlSet\Control\SafeBoot"
+    foreach ($mode in "Minimal", "Network") {
+        $v = (Get-Item "$safeBoot\$mode\SIEMAgent" -ErrorAction SilentlyContinue).GetValue("")
+        if ($v -ne "Service") { Fail "SAFE_MODE=1 didn't register SafeBoot\$mode\SIEMAgent (value '$v')" }
+    }
+    Write-Host "ok: registered for Safe Mode by the installer"
 
     # 3. Enrollment reaches the server with the MSI properties.
     $deadline = (Get-Date).AddSeconds(60)
@@ -289,7 +297,10 @@ try {
     if ($code -ne 0) { Fail "msiexec /x with the uninstall token exited $code" }
     if (Get-Service SIEMAgent -ErrorAction SilentlyContinue) { Fail "service still present after uninstall" }
     if (-not (Test-Path (Join-Path $dataDir "config.yaml"))) { Fail "config removed on uninstall" }
-    Write-Host "ok: uninstalled; config kept in $dataDir"
+    foreach ($mode in "Minimal", "Network") {
+        if (Test-Path "$safeBoot\$mode\SIEMAgent") { Fail "SafeBoot\$mode\SIEMAgent left after uninstall" }
+    }
+    Write-Host "ok: uninstalled; config kept in $dataDir; Safe Mode registration removed"
     $stopping = Get-Content (Join-Path $mockOut "heartbeats.jsonl") | ConvertFrom-Json |
         Where-Object { $_.status -eq "stopping" } | Select-Object -Last 1
     if (-not $stopping -or $stopping.reason -ne "service_stop") { Fail "no stop notice (status=stopping reason=service_stop) on uninstall" }
