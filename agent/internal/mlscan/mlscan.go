@@ -71,20 +71,27 @@ type Verdict struct {
 	Score     float64
 	Threshold float64 // the one Level crossed (malicious or suspicious)
 	Reasons   []string
+	// Certain: malicious and sure enough to quarantine on this verdict
+	// alone (policy ml_action block). A model's score must also be over its
+	// FPR001 threshold when it has one: automatic action wants a far lower
+	// false-positive rate than a report (Kaspersky, "Machine Learning for
+	// Malware Detection", 2021). The ELF heuristics and the staging
+	// thresholds are always certain.
+	Certain bool
 }
 
 var levelRank = map[string]int{"clean": 0, "suspicious": 1, "malicious": 2}
 
-func byThresholds(m *mlscore.Model, score float64) (level string, threshold float64) {
-	// the thresholds are where 0.1% / 1% of the benign test files score
-	// higher (ml/v3/train.py)
+func byThresholds(m *mlscore.Model, score float64) (level string, threshold float64, certain bool) {
+	// the thresholds are where 0.1% / 1% (0.01% for certain) of the benign
+	// test files score higher (ml/v3/train.py)
 	switch {
 	case score > m.Thresholds.FPR01:
-		return "malicious", m.Thresholds.FPR01
+		return "malicious", m.Thresholds.FPR01, m.Thresholds.FPR001 <= 0 || score > m.Thresholds.FPR001
 	case score > m.Thresholds.FPR1:
-		return "suspicious", m.Thresholds.FPR1
+		return "suspicious", m.Thresholds.FPR1, false
 	}
-	return "clean", 0
+	return "clean", 0, false
 }
 
 // Classify scores data with the PE model (files starting "MZ"), the HTML
@@ -116,7 +123,7 @@ func ClassifyAt(m, elf *mlscore.Model, data []byte, path string) (v Verdict, ok 
 		if m.Format == 2 {
 			v.Engine = "ember2024_lgbm"
 		}
-		v.Level, v.Threshold = byThresholds(m, score)
+		v.Level, v.Threshold, v.Certain = byThresholds(m, score)
 		return v, true
 	}
 	// HTML pages (phishing kits, redirectors, HTML smuggling): the HTML
@@ -128,7 +135,7 @@ func ClassifyAt(m, elf *mlscore.Model, data []byte, path string) (v Verdict, ok 
 		}
 		score, _ := h.ScoreFile(data)
 		v := Verdict{Kind: "html", Engine: "html_lgbm", Score: score}
-		v.Level, v.Threshold = byThresholds(h, score)
+		v.Level, v.Threshold, v.Certain = byThresholds(h, score)
 		return v, true
 	}
 	score, reasons, ok := mlscore.ScoreELF(data)
@@ -138,7 +145,7 @@ func ClassifyAt(m, elf *mlscore.Model, data []byte, path string) (v Verdict, ok 
 	v = Verdict{Kind: "elf", Engine: "elf_heuristic", Score: score, Reasons: reasons}
 	switch {
 	case score >= ELFMalicious:
-		v.Level, v.Threshold = "malicious", ELFMalicious
+		v.Level, v.Threshold, v.Certain = "malicious", ELFMalicious, true
 	case score >= ELFSuspicious:
 		v.Level, v.Threshold = "suspicious", ELFSuspicious
 	default:
@@ -146,7 +153,9 @@ func ClassifyAt(m, elf *mlscore.Model, data []byte, path string) (v Verdict, ok 
 	}
 	if elf != nil {
 		if s, scored := elf.ScoreFile(data); scored {
-			if level, th := byThresholds(elf, s); levelRank[level] >= levelRank[v.Level] {
+			if level, th, certain := byThresholds(elf, s); levelRank[level] >= levelRank[v.Level] {
+				// at the same level the heuristics' certainty stays
+				v.Certain = certain || (level == v.Level && v.Certain)
 				v.Engine, v.Score, v.Level, v.Threshold = "ember2024_elf_lgbm", s, level, th
 			}
 			if inStaging(path) {
@@ -157,8 +166,9 @@ func ClassifyAt(m, elf *mlscore.Model, data []byte, path string) (v Verdict, ok 
 				case s >= ELFStagingSuspicious:
 					level, th = "suspicious", ELFStagingSuspicious
 				}
-				if levelRank[level] > levelRank[v.Level] {
+				if levelRank[level] > levelRank[v.Level] || (level == "malicious" && !v.Certain) {
 					v.Engine, v.Score, v.Level, v.Threshold = "ember2024_elf_lgbm", s, level, th
+					v.Certain = level == "malicious"
 					v.Reasons = append(v.Reasons, "ELF in a temp directory")
 				}
 			}
@@ -238,7 +248,10 @@ func (c *Checker) Check(path, sha string, data []byte, trigger string) bool {
 		return false
 	}
 	e := Event{Verdict: v, Action: "detected", SHA256: sha, Path: path, Size: int64(len(data)), Trigger: trigger}
-	if mode == ModeBlock && v.Level == "malicious" && c.Quarantine != nil {
+	if mode == ModeBlock && v.Level == "malicious" && !v.Certain {
+		e.Reasons = append(e.Reasons, "under the quarantine threshold (0.01% false positives): reported only")
+	}
+	if mode == ModeBlock && v.Level == "malicious" && v.Certain && c.Quarantine != nil {
 		if err := c.Quarantine(path); err != nil {
 			e.Error = err.Error()
 			slog.Warn("mlscan: not quarantined", "path", path, "err", err)

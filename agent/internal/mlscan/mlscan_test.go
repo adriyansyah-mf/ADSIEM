@@ -144,6 +144,52 @@ func TestCheckerModes(t *testing.T) {
 	}
 }
 
+// A model with the 0.01% threshold quarantines only over it; between the
+// 0.1% and 0.01% thresholds a file is reported as malicious, not quarantined.
+func TestCheckerQuarantinesOverTheStrictThreshold(t *testing.T) {
+	pe := readPE(t)
+	strict := func(logit float64) *mlscore.Model {
+		var gz bytes.Buffer
+		w := gzip.NewWriter(&gz)
+		fmt.Fprintf(w, `{"format":1,"dim":%d,"trees":[{"root":-1,"v":[%g]}],"thresholds":{"fpr_1pct":0.5,"fpr_0_1pct":0.9,"fpr_0_01pct":0.99}}`,
+			mlscore.Dim, logit)
+		w.Close()
+		m, err := mlscore.LoadModel(gz.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	for _, c := range []struct {
+		logit    float64 // 4: 0.982, 6: 0.9975
+		certain  bool
+		wantLine string
+	}{
+		{4, false, `action=detected level=malicious kind=pe engine=ember_lgbm score=0.9820 threshold=0.9000 sha256=abc path="C:\\d.exe" size=`},
+		{6, true, "action=quarantined level=malicious"},
+	} {
+		if v, ok := Classify(strict(c.logit), nil, pe); !ok || v.Level != "malicious" || v.Certain != c.certain {
+			t.Fatalf("logit %v: %+v ok=%v, want certain %v", c.logit, v, ok, c.certain)
+		}
+		var p pushed
+		var q []string
+		ch := &Checker{Model: strict(c.logit), Push: p.push,
+			Quarantine: func(path string) error { q = append(q, path); return nil },
+			Mode:       func(string, string) string { return ModeBlock }}
+		ch.Check(`C:\d.exe`, "abc", pe, "")
+		if len(p.lines) != 1 || !strings.Contains(p.lines[0], c.wantLine) || (len(q) == 1) != c.certain {
+			t.Fatalf("logit %v: lines %q quarantined %q", c.logit, p.lines, q)
+		}
+		if !c.certain && !strings.Contains(p.lines[0], `reasons="under the quarantine threshold`) {
+			t.Fatalf("no reason in %q", p.lines[0])
+		}
+	}
+	// a model without the threshold quarantines over the 0.1% one, as before
+	if v, _ := Classify(constModel(t, 4), nil, pe); !v.Certain {
+		t.Fatalf("older model: %+v", v)
+	}
+}
+
 func TestCheckerReportsOnce(t *testing.T) {
 	var p pushed
 	ch := &Checker{Model: constModel(t, -4), Push: p.push}

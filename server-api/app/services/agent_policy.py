@@ -14,13 +14,16 @@ import time
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import AgentPolicy
+from app.models.models import AgentPolicy, MlFalsePositive
 
 DEFAULT_GROUP = "default"
 CACHE_SECONDS = 30.0
 MAX_EXCLUSIONS = 500
+# fleet-wide ML false positives sent with every policy (routes/ml_false_positives.py)
+MAX_ML_FALSE_POSITIVES = 5000
 
 Scope = Literal["prevention", "malware", "yara", "ransomware", "script", "ml", "ioa", "alerts"]
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -187,8 +190,17 @@ def invalidate() -> None:
     _cache.clear()
 
 
+async def ml_false_positives(db: AsyncSession) -> list[str]:
+    """SHA-256 of the files the static ML check is wrong about (every group)."""
+    rows = await db.execute(select(MlFalsePositive.sha256).order_by(MlFalsePositive.sha256)
+                            .limit(MAX_ML_FALSE_POSITIVES))
+    return list(rows.scalars().all())
+
+
 async def effective(db: AsyncSession, group_id: str | None) -> dict:
-    """{"group": the group whose policy applies, "settings": validated dict, "version": hash}."""
+    """{"group": the group whose policy applies, "settings": validated dict, "version": hash,
+    "ml_false_positives": hashes for_agent adds}. The version covers the false
+    positives too, so agents fetch the policy again when the list changes."""
     group_id = group_id or DEFAULT_GROUP
     now = time.monotonic()
     hit = _cache.get(group_id)
@@ -201,6 +213,18 @@ async def effective(db: AsyncSession, group_id: str | None) -> dict:
     if row is None:
         source = "built-in"
     settings = PolicySettings.model_validate(row.settings if row else {}).model_dump()
-    out = {"group": source, "settings": settings, "version": version_of(settings)}
+    fps = await ml_false_positives(db)
+    version = version_of({**settings, "ml_false_positives": fps} if fps else settings)
+    out = {"group": source, "settings": settings, "version": version, "ml_false_positives": fps}
     _cache[group_id] = (now, out)
     return out
+
+
+def for_agent(eff: dict) -> dict:
+    """The policy as agents get it: the ML false positives become sha256
+    exclusions with the ml scope, which every agent with static ML honours."""
+    have = {e["value"] for e in eff["settings"]["exclusions"] if e["kind"] == "sha256" and "ml" in e["scopes"]}
+    extra = [{"kind": "sha256", "value": h, "scopes": ["ml"], "comment": "ML false positive"}
+             for h in eff["ml_false_positives"] if h not in have]
+    settings = {**eff["settings"], "exclusions": eff["settings"]["exclusions"] + extra}
+    return {"group": eff["group"], "settings": settings, "version": eff["version"]}
