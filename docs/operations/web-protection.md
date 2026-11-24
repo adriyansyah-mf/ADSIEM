@@ -5,6 +5,15 @@ blocklist (manual entries, alert-derived domains, URLhaus and PhishTank). The
 agent shows a block page instead of the site and reports each attempt to the
 SIEM as a `web_block` event.
 
+Feeds list URLs, but the agent blocks names, so one listed URL blocks its
+whole host. The built-in allowlist (`BUILTIN_ALLOWLIST` in
+`worker/worker/web_domains.py`, added on server start) keeps big shared hosts
+off the list: cloud storage and CDNs, and package registries and code hosts
+(PyPI and `files.pythonhosted.org`, npm, crates.io, RubyGems, NuGet, Maven
+Central, the Go proxy, Docker Hub, Hugging Face, GitLab, Bitbucket), where
+URLhaus lists single malicious uploads. Their feed entries are kept as
+`suppressed`; files from them are still checked by hash, YARA and ML.
+
 ## What the agent does
 
 When the group's policy enables it, the agent:
