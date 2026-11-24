@@ -281,7 +281,7 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 		if !d.skipMass(ev.Path) {
 			w.destroyed++
 		}
-		if ne := ext(ev.Path); ne != ext(ev.From) && ne != "" {
+		if ne := ext(ev.Path); ne != ext(ev.From) && ne != "" && !d.atomicSave(ev) {
 			w.extRenames[ne]++
 		}
 		w.target(ev.Path)
@@ -362,6 +362,24 @@ func (d *detector) observe(ev linsensor.FileEvent) *finding {
 }
 
 func (w *procWindow) target(p string) { w.targets = appendRecent(w.targets, p) }
+
+// stagingExts are extensions of files written whole and then renamed to
+// their real name (an atomic save), not files anyone keeps.
+var stagingExts = map[string]bool{
+	".tmp": true, ".temp": true, ".part": true, ".partial": true, ".crdownload": true,
+	".download": true, ".new": true, ".swp": true, ".journal": true,
+}
+
+// atomicSave reports whether a rename finishes an atomic save in program
+// state: a staging file renamed to its final name in a location mass_modify
+// leaves out (skipMass: caches, temp, profiles, AppData). Firefox's DOM cache
+// writes every body as {uuid}.tmp and renames it to {uuid}.final, compressed
+// and so high entropy, dozens a minute on a busy site. Such renames do not
+// count toward extension_change. Elsewhere they still do: ransomware may
+// encrypt to a temporary name and rename it to its own extension.
+func (d *detector) atomicSave(ev linsensor.FileEvent) bool {
+	return stagingExts[ext(ev.From)] && d.skipMass(ev.Path)
+}
 
 // appendRecent keeps the 8 newest paths.
 func appendRecent(list []string, p string) []string {
