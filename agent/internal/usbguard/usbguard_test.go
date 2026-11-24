@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 type fakePlatform struct {
@@ -12,11 +13,13 @@ type fakePlatform struct {
 	blocked   []string
 	unblocked []string
 	fail      error
+	tries     int
 }
 
 func (f *fakePlatform) block(d Device) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.tries++
 	if f.fail != nil {
 		return f.fail
 	}
@@ -180,6 +183,96 @@ func TestAFailedBlockIsReportedOnce(t *testing.T) {
 	r.g.Reapply()
 	if got := r.actions(); len(got) != 1 || got[0] != "block_failed" || r.lines[0]["error"] != "permission denied" {
 		t.Fatalf("%v %v", got, r.lines)
+	}
+}
+
+// Windows refuses an eject while something holds the drive (Explorer or
+// AutoPlay right after plug-in, an antivirus scan): the block must be tried
+// again until it takes, not left failed until the stick is re-plugged.
+func TestAFailedBlockIsRetriedUntilItTakes(t *testing.T) {
+	r := newRig("block")
+	now := time.Date(2026, 11, 23, 17, 11, 58, 0, time.UTC)
+	r.g.now = func() time.Time { return now }
+	r.plat.fail = errors.New("eject vetoed (windows app) by \\Device\\HarddiskVolume3\\Windows\\explorer.exe; retrying")
+	r.g.Arrived(stick)
+	if got := r.actions(); len(got) != 1 || got[0] != "block_failed" || r.plat.tries != 1 {
+		t.Fatalf("first try: %v tries=%d", got, r.plat.tries)
+	}
+	r.g.RetryFailed() // not due yet
+	if r.plat.tries != 1 {
+		t.Fatalf("retried before RetryMin: tries=%d", r.plat.tries)
+	}
+	now = now.Add(RetryMin)
+	r.g.RetryFailed() // due, still held: no second report
+	if r.plat.tries != 2 || len(r.actions()) != 1 {
+		t.Fatalf("second try: %v tries=%d", r.actions(), r.plat.tries)
+	}
+	now = now.Add(RetryMin) // backed off to 2*RetryMin: not due yet
+	r.g.RetryFailed()
+	if r.plat.tries != 2 {
+		t.Fatalf("no back-off: tries=%d", r.plat.tries)
+	}
+	now = now.Add(RetryMin)
+	r.plat.fail = nil // Explorer let go
+	r.g.RetryFailed()
+	if got := r.actions(); r.plat.tries != 3 || len(got) != 2 || got[1] != "blocked" {
+		t.Fatalf("block that took: %v tries=%d", got, r.plat.tries)
+	}
+	now = now.Add(RetryMax)
+	r.g.RetryFailed()
+	if r.plat.tries != 3 || len(r.actions()) != 2 {
+		t.Fatalf("retried a blocked device: %v tries=%d", r.actions(), r.plat.tries)
+	}
+}
+
+func TestRetryBackOffStopsAtRetryMax(t *testing.T) {
+	r := newRig("block")
+	now := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	r.g.now = func() time.Time { return now }
+	r.plat.fail = errors.New("held")
+	r.g.Arrived(stick)
+	for i := 0; i < 20; i++ {
+		now = now.Add(RetryMax)
+		r.g.RetryFailed()
+	}
+	if r.plat.tries != 21 {
+		t.Fatalf("a held device must be tried every RetryMax at worst: tries=%d", r.plat.tries)
+	}
+	if got := r.actions(); len(got) != 1 {
+		t.Fatalf("reported more than once: %v", got)
+	}
+}
+
+func TestNoRetryOnceTheDeviceLeftOrIsAllowedOrTheModeChanged(t *testing.T) {
+	r := newRig("block")
+	now := time.Date(2026, 11, 23, 0, 0, 0, 0, time.UTC)
+	r.g.now = func() time.Time { return now }
+	r.plat.fail = errors.New("held")
+
+	r.g.Arrived(stick)
+	r.g.Left(stick.ID)
+	now = now.Add(RetryMax)
+	r.g.RetryFailed()
+	if r.plat.tries != 1 {
+		t.Fatalf("retried an unplugged device: tries=%d", r.plat.tries)
+	}
+
+	r.g.Arrived(stick) // tries=2, fails
+	r.allow = []string{"0781:5567"}
+	now = now.Add(RetryMax)
+	r.g.RetryFailed()
+	if got := r.actions(); r.plat.tries != 2 || got[len(got)-1] != "connected" {
+		t.Fatalf("allowed meanwhile: %v tries=%d", got, r.plat.tries)
+	}
+
+	r.allow = nil
+	r.g.Left(stick.ID)
+	r.g.Arrived(stick) // tries=3, fails
+	r.mode = "audit"
+	now = now.Add(RetryMax)
+	r.g.RetryFailed()
+	if r.plat.tries != 3 {
+		t.Fatalf("retried under audit: tries=%d", r.plat.tries)
 	}
 }
 

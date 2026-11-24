@@ -1,5 +1,9 @@
-title: Out-of-Band Interaction Domain Reference (Blind Vuln Probe)
+title: Out-of-Band Callback Domain In A Web Request (Blind Vuln Probe)
 id: rule-oob-interaction-domain
+supersedes: Out-of-Band Interaction Domain Reference (Blind Vuln Probe)
+# blind payloads fire in whatever logs or parses the request, not only in the
+# handler that answers it: keep the level whatever the response status
+http_outcome: any
 description: >-
   Request parameter references a known OOB/collaborator callback domain
   (interact.sh, oast.*, Burp Collaborator, dnslog.cn, ceye.io, webhook.site,

@@ -40,7 +40,15 @@ Every report carries the device's vendor ID, product ID and serial (the
   until it is re-plugged.
 - **Windows:** the agent lists disks every 2 seconds. A disk whose parent is
   a USB device is ejected (`CM_Request_Device_EjectW`), and ejected again on
-  every re-plug. Windows refuses the eject while files on the device are open;
-  the result is the high alert above.
+  every re-plug. Windows refuses the eject (`CR_REMOVE_VETOED`) while a program
+  holds the drive: Explorer or AutoPlay right after plug-in, an antivirus scan,
+  a copy in progress. The first refusal raises the high alert above, and its
+  `error` names the holder, e.g. `eject vetoed (windows app) by
+  \Device\HarddiskVolume3\Windows\explorer.exe; retrying`. The agent then
+  tries the eject again every poll, backing off from 2 to 30 seconds, for as
+  long as the device stays plugged in, and reports `blocked` once it takes
+  (agent 1.34.1; before, a refused block was never tried again until the
+  stick was re-plugged). Between the refusal and the eject that takes, the
+  drive is usable: eject is not a driver-level block.
 - Internal USB card readers in laptops are mass storage too. Allow their
   `VID:PID` before switching a laptop group to `block`.

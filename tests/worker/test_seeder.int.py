@@ -73,15 +73,19 @@ async def test_replicas_seeding_together_insert_each_rule_once(sessions):
 
 async def test_renamed_rule_turns_off_the_row_it_supersedes_once(sessions):
     # production before the rename: the old title is seeded and enabled
-    old, new = "Linux Web Server Spawning Interactive Shell", "Web Server Process Started A Shell"
+    # (an install that skipped a release still has both earlier titles: a
+    # supersedes list turns off each of them)
+    old, mid = "Linux Web Server Spawning Interactive Shell", "Web Server Process Started A Shell"
+    new = "Web Server Started A Shell"
     async with sessions() as db:
-        db.add(Rule(title=old, content="title: x", level="critical", tags=[], mitre_tags=[], is_enabled=True))
+        for t in (old, mid):
+            db.add(Rule(title=t, content="title: x", level="critical", tags=[], mitre_tags=[], is_enabled=True))
         await db.commit()
     await seeder.seed_if_empty()
     async with sessions() as db:
         rows = dict((await db.execute(select(Rule.title, Rule.is_enabled)
-                                      .where(Rule.title.in_([old, new])))).all())
-    assert rows == {old: False, new: True}
+                                      .where(Rule.title.in_([old, mid, new])))).all())
+    assert rows == {old: False, mid: False, new: True}
 
     # an analyst turns the old rule back on: the next start leaves it on
     async with sessions() as db:

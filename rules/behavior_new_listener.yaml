@@ -1,0 +1,25 @@
+title: New Listening Port On Host
+id: rule-behavior-new-listener
+supersedes: Non-Service Process Binding a Listening Port
+description: >-
+  A program bound a port this host has never seen it bind, after the host's
+  learning period, and at most two hosts of the group bind it: how bind
+  shells and backdoor listeners appear (nc -lvp, a webshell's own listener).
+  A new service or a developer's test server looks the same;
+  process.executable and destination.port show which. Replaces "Non-Service
+  Process Binding a Listening Port", which never ran (its logsource matched
+  no log type) and, with a fixed list of daemons, would have alerted on every
+  UDP client and dev server (worker/worker/behavior.py).
+logsource:
+  product: siem
+  service: behavior
+detection:
+  selection:
+    event.action: behavior_new_listener
+  condition: selection
+level: medium
+tags:
+  - attack.persistence
+  - attack.t1205
+  - attack.command_and_control
+  - attack.t1571

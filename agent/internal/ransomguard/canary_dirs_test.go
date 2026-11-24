@@ -96,6 +96,8 @@ func keys(m map[string]string) []string {
 // was confirmed and the updater killed. PNGs keep their header, so that work
 // is never confirmed. OneDriveSetup.exe is not trusted by its name (malware
 // takes that name): the heuristics see it, the magic check keeps it alive.
+// (Its own AppData folder no longer counts toward mass_modify at all, like
+// any program state; the same work in user data still must be seen.)
 func TestOneDriveSetupPNGTilesNotKilled(t *testing.T) {
 	d := newDetector(nil)
 	for _, img := range []string{
@@ -105,7 +107,7 @@ func TestOneDriveSetupPNGTilesNotKilled(t *testing.T) {
 		d.procs = map[uint32]*procWindow{}
 		var f *finding
 		for i := 0; i < minWrites; i++ {
-			p := fmt.Sprintf(`C:\Users\bob\AppData\Local\Microsoft\OneDrive\25.1\images\d%d\tile%d.png`, i%20, i)
+			p := fmt.Sprintf(`C:\Users\bob\OneDrive\Pictures\d%d\tile%d.png`, i%20, i)
 			e := ev(70, "create", p, "", 0)
 			e.Image, e.Comm = img, "OneDriveSetup.exe"
 			if got := d.observe(e); got != nil {
@@ -125,6 +127,7 @@ func TestOneDriveSetupPNGTilesNotKilled(t *testing.T) {
 	var out sink
 	g := New(Options{Push: out.push, CanaryDirs: []string{filepath.Join(t.TempDir(), "none")}, Kill: true})
 	g.response = func(uint32) (int, error) { t.Error("killed an updater writing PNGs"); return 0, nil }
+	g.det.skipMass = func(string) bool { return false } // the samples live under the temp dir
 	dir := t.TempDir()
 	for i := 0; i < minWrites; i++ {
 		sub := filepath.Join(dir, fmt.Sprintf("d%d", i%minWriteDirs))

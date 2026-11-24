@@ -10,7 +10,9 @@ import (
 func TestNetshIsolateBlocksBothDirectionsAndAllowsTheList(t *testing.T) {
 	f := newFakeWindows()
 	b := f.backend()
-	if err := b.Isolate([]string{"192.0.2.10/32", "::1/128", "bogus"}); err != nil {
+	// loopback is dropped: Windows Firewall does not filter it, and netsh
+	// rejects ::1 in remoteip, which failed the whole isolation
+	if err := b.Isolate([]string{"192.0.2.10/32", "::1/128", "127.0.0.0/8", "2001:db8::1/128", "bogus"}); err != nil {
 		t.Fatal(err)
 	}
 	var policy, allowOut, allowIn bool
@@ -20,9 +22,9 @@ func TestNetshIsolateBlocksBothDirectionsAndAllowsTheList(t *testing.T) {
 		case strings.Contains(line, "firewallpolicy blockinbound,blockoutbound"):
 			policy = true
 		case strings.Contains(line, "name="+isolateAllowOut) && strings.Contains(line, "add"):
-			allowOut = strings.Contains(line, "dir=out") && strings.Contains(line, "remoteip=192.0.2.10/32,::1/128")
+			allowOut = strings.Contains(line, "dir=out") && strings.Contains(line, "remoteip=192.0.2.10/32,2001:db8::1/128 ")
 		case strings.Contains(line, "name="+isolateAllowIn) && strings.Contains(line, "add"):
-			allowIn = strings.Contains(line, "dir=in") && strings.Contains(line, "remoteip=192.0.2.10/32,::1/128")
+			allowIn = strings.Contains(line, "dir=in") && strings.Contains(line, "remoteip=192.0.2.10/32,2001:db8::1/128 ")
 		}
 	}
 	if !policy || !allowOut || !allowIn {

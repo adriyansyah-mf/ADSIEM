@@ -1,8 +1,16 @@
-title: Outbound Connection to Uncommon High Port
+title: Outbound Connection To A Metasploit-Style Port (4444-4450)
 id: rule-net-uncommon-high-port
-description: A process opened an outbound TCP connection to a high port that is rarely used by legitimate services (common C2 / reverse-shell range)
+supersedes: Outbound Connection to Uncommon High Port
+description: >-
+  A process opened an outbound TCP connection to a public address on ports
+  4444-4450, the default range of Metasploit and many reverse-shell
+  one-liners. A few legitimate services use these ports too (Selenium Grid on
+  4444), so it is raised once a day per host, address and port. Its
+  logsource used to be "product: linux_network", which matches no log type:
+  the rule never ran.
 logsource:
-  product: linux_network
+  product: linux
+  service: network_connect
 detection:
   selection:
     event.action: network_connect
@@ -11,6 +19,12 @@ detection:
     destination.port|gte: 4444
     destination.port|lte: 4450
   condition: selection
+suppression:
+  timewindow: 86400
+  group_by:
+    - hostname
+    - destination.address
+    - destination.port
 level: high
 tags:
   - attack.command_and_control

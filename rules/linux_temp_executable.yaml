@@ -1,9 +1,12 @@
-title: Program Made Executable Or Run From A Temporary Folder On Linux
+title: Program Made Executable Or Run From A Temp Folder On Linux
 id: rule-linux-temp-executable
+supersedes: Program Made Executable Or Run From A Temporary Folder On Linux
 description: >-
   A file in /tmp, /var/tmp or /dev/shm was made executable (chmod +x or a
   7xx / 5xx mode), or a program was started from there: the step after a
-  dropper downloads its payload (T1105, T1059.004).
+  dropper downloads its payload (T1105, T1059.004). Binaries the Go toolchain
+  builds and runs from its own temp folder (go run, go test:
+  /tmp/go-build<n>/...) are left out.
 logsource:
   product: linux
   category: process_creation
@@ -24,7 +27,9 @@ detection:
       - /tmp/
       - /var/tmp/
       - /dev/shm/
-  condition: (chmod and temp_arg) or run_from_temp
+  filter_go_build:
+    Image|re: '^/tmp/go-build\d+/b\d+/(?:exe/[^/]+|[^/]+\.test)$'
+  condition: (chmod and temp_arg) or (run_from_temp and not filter_go_build)
 level: medium
 tags:
   - attack.execution

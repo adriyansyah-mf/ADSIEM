@@ -22,6 +22,7 @@ log = structlog.get_logger()
 _CONTEXT_KEYS = (
     "tags", "correlation_hit_count", "correlation_group", "correlation_window",
     "correlation_group_by", "correlation_type", "correlation_rules", "matched_fields",
+    "http_outcome", "http_status",
 )
 
 
@@ -82,6 +83,13 @@ async def _get_entity_risk_max(source_ip: str | None, hostname: str | None) -> f
 # noise stays out of the "new" queue (an analyst can still pick one up).
 BELOW_THRESHOLD = "below_threshold"
 OPEN_STATUSES = ("new", "in_progress", BELOW_THRESHOLD)
+
+
+def dedup_severities(level: str) -> list[str]:
+    """Severities an alert of `level` may be counted into as a duplicate: its own and higher."""
+    if level not in _SEVERITY_ORDER:
+        return [level]
+    return _SEVERITY_ORDER[_SEVERITY_ORDER.index(level):]
 
 
 async def _ai_min_severity() -> str:
@@ -169,6 +177,10 @@ async def create_alert(
             dedup_q = dedup_q.where(Alert.source_ip == source_ip)
         elif hostname:
             dedup_q = dedup_q.where(Alert.hostname == hostname)
+        # only into an alert at least as severe: one rule can alert at two levels
+        # (a web payload answered 404 is one lower than the same payload answered
+        # 200), and the stronger one must not vanish into the weaker one's count
+        dedup_q = dedup_q.where(Alert.severity.in_(dedup_severities(rule_match["level"])))
         existing = (await db.execute(dedup_q.limit(1))).scalar_one_or_none()
         if existing:
             existing.duplicate_count = (existing.duplicate_count or 0) + 1
