@@ -105,6 +105,19 @@ def load(data: str, sources: dict[str, int], cache: str, workers: int):
     return X, y, kind
 
 
+def load_jsonl(path: str, kind: str):
+    """Records of a JSONL file (ml/v3/elf_benign.py), vectorised like the dataset's."""
+    xs, ys = [], []
+    with open(path) as f:
+        for line in f:
+            rec = json.loads(line)
+            if rec.get("label") in (0, 1):
+                xs.append(np.asarray(vector(rec), dtype=np.float32))
+                ys.append(rec["label"])
+    X = np.vstack(xs) if xs else np.zeros((0, DIM), np.float32)
+    return X, np.asarray(ys, np.int8), np.array([kind] * len(ys), dtype=object)
+
+
 def threshold_at(scores, labels, fpr):
     benign = np.sort(scores[labels == 0])
     t = float(benign[min(int(len(benign) * (1 - fpr)), len(benign) - 1)])
@@ -151,6 +164,8 @@ def main() -> None:
     ap.add_argument("--kind", choices=("pe", "elf"), default="pe")
     ap.add_argument("--cache", default="")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--extra-test", action="append", default=[], metavar="JSONL",
+                    help="extra test records (label 0 or 1) in <data>/JSONL, e.g. Debian_ELF_benign.jsonl")
     ap.add_argument("--rounds", type=int, default=800)
     ap.add_argument("--leaves", type=int, default=128)
     args = ap.parse_args()
@@ -175,25 +190,37 @@ def main() -> None:
     del ds
 
     Xt, yt, kt = load(args.data, test_src, cache, args.workers)
+    n_base = len(yt)
+    for extra in args.extra_test:
+        # more benign test files (ELF: Debian packages), never trained on
+        xe, ye, ke = load_jsonl(os.path.join(args.data, extra), os.path.splitext(os.path.basename(extra))[0])
+        Xt, yt, kt = np.vstack([Xt, xe]), np.concatenate([yt, ye]), np.concatenate([kt, ke])
     print(f"test {Xt.shape}", flush=True)
     scores = model.predict(Xt)
-    t1, tpr1 = threshold_at(scores, yt, 0.01)
-    t01, tpr01 = threshold_at(scores, yt, 0.001)
+    # 1% and 0.1% on the dataset's own test files only: extra benign files
+    # (distro packages) score lower than the dataset's and would loosen them
+    t1, tpr1 = threshold_at(scores[:n_base], yt[:n_base], 0.01)
+    t01, tpr01 = threshold_at(scores[:n_base], yt[:n_base], 0.001)
     # the bar for quarantining on the model alone (agent mlscan: Certain);
-    # needs at least 10,000 benign test files to mean anything
+    # needs at least 10,000 benign test files to mean anything, never below 0.1%
     t001, tpr001 = threshold_at(scores, yt, 0.0001)
+    t001 = max(t001, t01)
+    tpr001 = float((scores[yt == 1] > t001).mean())
     metrics = {"auc": auc(scores, yt), "tpr_at_fpr_1pct": tpr1, "tpr_at_fpr_0_1pct": tpr01,
                "tpr_at_fpr_0_01pct": tpr001, "benign_test_samples": int((yt == 0).sum()),
                "test_samples": int(len(yt)), "train_samples": n_train, "by_type": {}}
     for kd in sorted(set(kt)):
         m = kt == kd
         s, l = scores[m], yt[m]
-        metrics["by_type"][kd] = {
-            "samples": int(m.sum()), "auc": auc(s, l),
-            "tpr_at_threshold_1pct": float((s[l == 1] > t1).mean()), "fpr_at_threshold_1pct": float((s[l == 0] > t1).mean()),
-            "tpr_at_threshold_0_1pct": float((s[l == 1] > t01).mean()),
-            "fpr_at_threshold_0_1pct": float((s[l == 0] > t01).mean()),
-            "tpr_at_threshold_0_01pct": float((s[l == 1] > t001).mean())}
+        row = {"samples": int(m.sum()),
+               "fpr_at_threshold_1pct": float((s[l == 0] > t1).mean()),
+               "fpr_at_threshold_0_1pct": float((s[l == 0] > t01).mean()),
+               "fpr_at_threshold_0_01pct": float((s[l == 0] > t001).mean())}
+        if (l == 1).any() and (l == 0).any():  # benign-only extras have no AUC or TPR
+            row.update({"auc": auc(s, l), "tpr_at_threshold_1pct": float((s[l == 1] > t1).mean()),
+                        "tpr_at_threshold_0_1pct": float((s[l == 1] > t01).mean()),
+                        "tpr_at_threshold_0_01pct": float((s[l == 1] > t001).mean())})
+        metrics["by_type"][kd] = row
     print(json.dumps(metrics, indent=1), flush=True)
     dump = model.dump_model()
     payload = {"format": 2, "features": "v3", "kind": args.kind, "dim": DIM,
