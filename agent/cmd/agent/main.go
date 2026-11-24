@@ -648,6 +648,7 @@ func run(configPath string, stop <-chan struct{}) {
 	}
 	heartbeat.WebBlockHealth = func() any { return webCtl.Health() }
 	heartbeat.SensorHealth = func() any { return sensorstat.Default.Snapshot() }
+	heartbeat.Isolation = func() *bool { return task.HostIsolated(fwEngine) }
 	// OnChange applies the store's newest list, never an older one that lost
 	// a race with it.
 	webStore.OnChange = func(*webblock.List) { webCtl.ApplyCurrent(webStore.Current); kickSink() }

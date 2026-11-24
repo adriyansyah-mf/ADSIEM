@@ -63,6 +63,9 @@ type HeartbeatRequest struct {
 	// TokenRotation = 1: this agent stores a token handed back in
 	// HeartbeatResponse.AgentToken (servers rotate only agents that say so).
 	TokenRotation int `json:"token_rotation,omitempty"`
+	// Isolated: whether the host is network-isolated (Isolation); ransomguard
+	// isolates without a task, so the server learns it only from here.
+	Isolated *bool `json:"isolated,omitempty"`
 }
 
 // Updater, when set, reports its status on every heartbeat and receives the
@@ -361,6 +364,9 @@ var WebBlockHealth func() any
 // SensorHealth, when set, returns the telemetry sensors' state for the heartbeat.
 var SensorHealth func() any
 
+// Isolation, when set, returns whether the host is isolated (nil: unknown).
+var Isolation func() *bool
+
 // SupportsEvidenceV2 reports whether the last successful heartbeat advertised
 // durable ingest protocol 2. The evidence sender sends nothing until it does.
 func SupportsEvidenceV2() bool { return evidenceV2.Load() }
@@ -422,6 +428,9 @@ func Loop(
 		}
 		if SensorHealth != nil {
 			payload.SensorHealth = SensorHealth()
+		}
+		if Isolation != nil {
+			payload.Isolated = Isolation()
 		}
 		payload.Update = updateStatus()
 		resp, err := c.Post("/api/ingest/heartbeat", payload)

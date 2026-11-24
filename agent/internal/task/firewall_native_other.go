@@ -17,6 +17,8 @@ func nativeIsolate(string) error { return errNoNative }
 
 func nativeUnisolate() error { return errNoNative }
 
+func nativeIsolated() (isolated, ok bool) { return false, true }
+
 func nativeBlock(firewall.Rule) error { return errNoNative }
 
 func nativeUnblock(firewall.Rule) error { return errNoNative }

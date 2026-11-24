@@ -137,6 +137,25 @@ func isolateWith(eng *firewall.Engine, serverURL string) (map[string]any, error)
 	return eng.Isolate()
 }
 
+// HostIsolated reports for the heartbeat whether the host is isolated, by a
+// task, by ransomguard or by an isolation re-applied at start: the server
+// shows it on the agent's page. nil when it cannot tell (netsh did not run).
+func HostIsolated(eng *firewall.Engine) *bool {
+	return hostIsolated(eng != nil && eng.Isolated(), nativeFirewall, nativeIsolated)
+}
+
+func hostIsolated(engine, native bool, check func() (isolated, ok bool)) *bool {
+	isolated := engine
+	if !isolated && native {
+		v, ok := check()
+		if !ok {
+			return nil
+		}
+		isolated = v
+	}
+	return &isolated
+}
+
 func (r *Runner) handleIsolateHost() (any, error) {
 	return isolateWith(r.fw, r.cfg.Server.URL)
 }
