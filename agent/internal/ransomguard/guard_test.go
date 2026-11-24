@@ -36,6 +36,32 @@ func TestExtensionChange(t *testing.T) {
 	}
 }
 
+// Firefox's DOM cache saves each body as {uuid}.tmp and renames it to
+// {uuid}.final under AppData: an atomic save, not ransomware. The same
+// pattern in user data still fires.
+func TestAtomicSaveInProgramStateDoesNotFire(t *testing.T) {
+	const morgue = `C:\Users\wonka\AppData\Local\Packages\Mozilla.Firefox_n80bbvh6b1yt2\LocalCache\Roaming\Mozilla\Firefox\Profiles\w3s2fxxt.default-release\storage\default\https+++web.whatsapp.com\cache\morgue\%d\{29fb6787-1704-480d-9d5e-a6a8219df4%02d}`
+	d := newDetector(nil)
+	for i := 0; i < 3*minExtRenames; i++ {
+		p := fmt.Sprintf(morgue, i%8, i)
+		e := ev(34196, "rename", p+".final", p+".tmp", time.Duration(i)*time.Second/2)
+		e.Image, e.Comm = `C:\Program Files\WindowsApps\Mozilla.Firefox_160.0.1.0_x64__n80bbvh6b1yt2\VFS\ProgramFiles\Firefox Package Root\firefox.exe`, "firefox.exe"
+		if f := d.observe(e); f != nil {
+			t.Fatalf("Firefox cache atomic save fired: %+v", f)
+		}
+	}
+	var f *finding
+	for i := 0; i < minExtRenames; i++ {
+		p := fmt.Sprintf(`C:\Users\wonka\Documents\d%d\r%d.docx`, i%3, i)
+		if got := d.observe(ev(66, "rename", p+".locked", p+".tmp", 0)); got != nil {
+			f = got
+		}
+	}
+	if f == nil || f.kind != "extension_change" || f.ext != ".locked" {
+		t.Fatalf("staging renames in user data must still fire: %+v", f)
+	}
+}
+
 func TestRenamesWithoutCommonExtensionDoNotFire(t *testing.T) {
 	d := newDetector(nil)
 	for i := 0; i < 3*minExtRenames; i++ {
