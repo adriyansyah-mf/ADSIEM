@@ -23,9 +23,12 @@ $nums = [regex]::Matches($Version, '\d+') | ForEach-Object { [int]$_.Value }
 $ver = @(0, 0, 0, 0)
 for ($i = 0; $i -lt [Math]::Min(4, $nums.Count); $i++) { $ver[$i] = $nums[$i] }
 $vi = Get-Content -Raw "packaging\windows\versioninfo.json" | ConvertFrom-Json
-foreach ($key in "FileVersion", "ProductVersion") {
-    $vi.FixedFileInfo.$key = [pscustomobject]@{ Major = $ver[0]; Minor = $ver[1]; Patch = $ver[2]; Build = $ver[3] }
-}
+# Windows Installer keeps an installed file whose fixed FileVersion is higher than
+# the one being installed, so a rollback to an older MSI would leave the newer exe
+# in place. The fixed FileVersion therefore stays 0.0.0.0; ProductVersion and the
+# string FileVersion carry the real version.
+$vi.FixedFileInfo.FileVersion = [pscustomobject]@{ Major = 0; Minor = 0; Patch = 0; Build = 0 }
+$vi.FixedFileInfo.ProductVersion = [pscustomobject]@{ Major = $ver[0]; Minor = $ver[1]; Patch = $ver[2]; Build = $ver[3] }
 $vi.StringFileInfo.FileVersion = $ver -join "."
 $vi.StringFileInfo.ProductVersion = $ver -join "."
 $viDir = Join-Path ([IO.Path]::GetTempPath()) "siem-versioninfo"
