@@ -109,4 +109,4 @@ async def agent_policy_fetch(
 ):
     if not agent.approved:
         raise HTTPException(status_code=403, detail="agent not approved")
-    return await agent_policy.effective(db, agent.group_id)
+    return agent_policy.for_agent(await agent_policy.effective(db, agent.group_id))

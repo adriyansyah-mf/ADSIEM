@@ -179,7 +179,11 @@ def main() -> None:
     scores = model.predict(Xt)
     t1, tpr1 = threshold_at(scores, yt, 0.01)
     t01, tpr01 = threshold_at(scores, yt, 0.001)
+    # the bar for quarantining on the model alone (agent mlscan: Certain);
+    # needs at least 10,000 benign test files to mean anything
+    t001, tpr001 = threshold_at(scores, yt, 0.0001)
     metrics = {"auc": auc(scores, yt), "tpr_at_fpr_1pct": tpr1, "tpr_at_fpr_0_1pct": tpr01,
+               "tpr_at_fpr_0_01pct": tpr001, "benign_test_samples": int((yt == 0).sum()),
                "test_samples": int(len(yt)), "train_samples": n_train, "by_type": {}}
     for kd in sorted(set(kt)):
         m = kt == kd
@@ -188,12 +192,16 @@ def main() -> None:
             "samples": int(m.sum()), "auc": auc(s, l),
             "tpr_at_threshold_1pct": float((s[l == 1] > t1).mean()), "fpr_at_threshold_1pct": float((s[l == 0] > t1).mean()),
             "tpr_at_threshold_0_1pct": float((s[l == 1] > t01).mean()),
-            "fpr_at_threshold_0_1pct": float((s[l == 0] > t01).mean())}
+            "fpr_at_threshold_0_1pct": float((s[l == 0] > t01).mean()),
+            "tpr_at_threshold_0_01pct": float((s[l == 1] > t001).mean())}
     print(json.dumps(metrics, indent=1), flush=True)
     dump = model.dump_model()
     payload = {"format": 2, "features": "v3", "kind": args.kind, "dim": DIM,
                "trees": [flatten(t) for t in dump["tree_info"]],
-               "thresholds": {"fpr_1pct": t1, "fpr_0_1pct": t01}, "metrics": metrics,
+               # too few benign files: no 0.01% threshold, the agent quarantines over 0.1%
+               "thresholds": {"fpr_1pct": t1, "fpr_0_1pct": t01,
+                              **({"fpr_0_01pct": t001} if metrics["benign_test_samples"] >= 10000 else {})},
+               "metrics": metrics,
                "dataset": "EMBER2024 (Joyce et al. 2025), feature version 3 without authenticode/pefilewarnings"}
     with gzip.open(args.out, "wt") as f:
         json.dump(payload, f, separators=(",", ":"))

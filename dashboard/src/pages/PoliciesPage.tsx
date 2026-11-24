@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Plus, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
+import MlFalsePositives from '@/components/MlFalsePositives'
 
 type Scope = 'prevention' | 'malware' | 'yara' | 'ransomware' | 'script' | 'ml' | 'ioa' | 'alerts'
 type Kind = 'path_prefix' | 'image' | 'sha256' | 'command_line'
@@ -211,11 +212,11 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
           <select value={s.ml_action ?? 'detect'} onChange={e => set({ ml_action: e.target.value as Settings['ml_action'] })}
             className="w-full bg-muted border border-border rounded px-2 py-1.5 text-sm">
             <option value="detect">Detect: alert only</option>
-            <option value="block">Block: quarantine files scored malicious</option>
+            <option value="block">Block: quarantine files the model is sure about</option>
             <option value="off">Off</option>
           </select>
           <span className="block text-xs text-muted-foreground">
-            Scores Windows programs (PE) with a model trained on EMBER and Linux programs (ELF) with heuristics: new files in the watched folders, programs the file sensors see written anywhere, and programs as they start. Exclude false positives with the Static ML scope.
+            Scores Windows programs (PE) with a model trained on EMBER and Linux programs (ELF) with heuristics: new files in the watched folders, programs the file sensors see written anywhere, and programs as they start. Block quarantines only files over the model's strictest threshold (0.01% false positives when the model has one); the rest of the malicious ones are reported. Exclude false positives with the Static ML scope, or for every group from the list below the groups.
           </span>
         </label>
         <div className="rounded border border-border p-3 space-y-1">
@@ -441,6 +442,7 @@ export default function PoliciesPage() {
             <button disabled={!newGroup.trim()} onClick={() => setOpen(newGroup.trim())}
               className="px-3 py-1.5 rounded border border-border text-sm hover:bg-muted disabled:opacity-40">Edit its policy</button>
           </div>
+          <MlFalsePositives />
         </>
       )}
     </div>

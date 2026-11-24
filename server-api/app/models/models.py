@@ -1263,6 +1263,20 @@ class MalwareHash(Base):
     __table_args__ = (Index("ix_malware_hashes_source_status", "source", "status"),)
 
 
+class MlFalsePositive(Base):
+    """A file analysts said the static ML check is wrong about, for every
+    agent: agents get it as a sha256 exclusion with the ml scope in their
+    policy (services/agent_policy.py), so a false positive is fixed in a
+    heartbeat or two without retraining or releasing the model."""
+    __tablename__ = "ml_false_positives"
+    sha256   = Column(String(64), primary_key=True)
+    engine   = Column(String(40), nullable=False, default="", server_default="")
+    path     = Column(String(1024), nullable=False, default="", server_default="")
+    comment  = Column(String(500), nullable=False, default="", server_default="")
+    added_by = Column(String(255))
+    added_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+
 _web_block_seq = Sequence("web_block_seq")
 
 

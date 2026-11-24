@@ -664,6 +664,8 @@ for router in [
     app.include_router(router)
 from app.api.routes.vulnerabilities import router as vulnerabilities_router  # noqa: E402
 app.include_router(vulnerabilities_router)
+from app.api.routes.ml_false_positives import router as ml_false_positives_router  # noqa: E402
+app.include_router(ml_false_positives_router)
 from app.api.routes.saved_searches import router as saved_searches_router  # noqa: E402
 from app.api.routes.dashboards import router as dashboards_router  # noqa: E402
 app.include_router(saved_searches_router)

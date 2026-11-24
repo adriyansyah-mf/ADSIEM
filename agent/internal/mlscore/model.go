@@ -30,6 +30,10 @@ type Model struct {
 	Thresholds struct {
 		FPR1  float64 `json:"fpr_1pct"`
 		FPR01 float64 `json:"fpr_0_1pct"`
+		// FPR001: where 0.01% of the benign test files score higher, the bar
+		// for quarantining on the model's word alone (mlscan); 0 in models
+		// trained before it, which then quarantine over FPR01.
+		FPR001 float64 `json:"fpr_0_01pct"`
 	} `json:"thresholds"`
 	Metrics map[string]any `json:"metrics"`
 }

@@ -15,6 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import MarkdownNote from './MarkdownNote'
 import AiFeedbackWidget from './AiFeedbackWidget'
+import { MlFalsePositiveButton } from './MlFalsePositives'
 
 interface Props {
   alertId: string
@@ -81,6 +82,17 @@ function buildDocument(a: Alert, d?: AlertDetail): Record<string, DocValue> {
   }
   return Object.fromEntries(Object.entries(doc).filter(([, v]) =>
     v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)))
+}
+
+/** A decoded field by its dotted name, stored flat ("file.hash.sha256") or nested. */
+function eventField(d: AlertDetail | undefined, name: string): string | undefined {
+  const data = d?.event?.data as Record<string, unknown> | undefined
+  if (!data) return undefined
+  let v: unknown = data[name]
+  if (v === undefined) {
+    v = name.split('.').reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined), data)
+  }
+  return typeof v === 'string' || typeof v === 'number' ? String(v) : undefined
 }
 
 /** Lucene query for "find more events like this field" on the Logs page. */
@@ -403,6 +415,8 @@ function AlertDetailBody({ alert, detail, variant, onClose }: {
   const [suppressDone, setSuppressDone] = useState(false)
   const isPage = variant === 'page'
   const doc = useMemo(() => buildDocument(alert, detail), [alert, detail])
+  // a static ML detection: offer to mark the file as a false positive for every agent
+  const mlSha = detail?.event?.log_type === 'ml_detection' ? eventField(detail, 'file.hash.sha256') : undefined
 
   const updateAlert = useUpdateAlert()
   const addNote = useAddAlertNote()
@@ -555,6 +569,11 @@ function AlertDetailBody({ alert, detail, variant, onClose }: {
                   <button onClick={() => setFpSuggestion(null)} className="rounded border border-border px-2 py-1 hover:bg-muted">Dismiss</button>
                 </div>
               </div>
+            )}
+            {mlSha && /^[0-9a-fA-F]{64}$/.test(mlSha) && (
+              <MlFalsePositiveButton sha256={mlSha} engine={eventField(detail, 'ml.engine')}
+                path={eventField(detail, 'file.path')}
+                onMarked={() => { if (alert.status !== 'false_positive') handleStatusChange('false_positive') }} />
             )}
             {suppressDone && (
               <div className="flex items-center gap-2 rounded border border-emerald-600/40 bg-emerald-900/20 p-2 text-xs text-emerald-300">
