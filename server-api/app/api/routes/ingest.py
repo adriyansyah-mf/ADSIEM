@@ -340,6 +340,9 @@ async def heartbeat(
     if agent.approved:
         task_result = await db.execute(
             select(AgentTask).where(AgentTask.agent_id == agent.id, AgentTask.status == "pending")
+            # oldest first: the agent runs host-state tasks (isolate/unisolate,
+            # block/unblock) in this order, so the last one queued wins
+            .order_by(AgentTask.created_at, AgentTask.id)
         )
         pending_tasks = task_result.scalars().all()
     task_ids = [t.id for t in pending_tasks]
