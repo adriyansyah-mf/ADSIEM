@@ -101,6 +101,30 @@ async def _fail_interrupted_tasks(db: AsyncSession, agent_id, now: datetime) -> 
         log.info("agent_task_interrupted_by_restart", task_id=str(task_id), agent_id=str(agent_id))
     return ids
 
+ISOLATION_TASKS = ("isolate_host", "unisolate_host")
+OPEN_TASK_STATES = ("pending", "dispatched", "running")
+
+
+async def _reported_isolation(db: AsyncSession, agent: Agent, isolated: bool | None, now: datetime) -> dict:
+    """The isolation the agent reports, for Agent.is_isolated: ransomguard (and
+    a restart that re-applies a saved isolation) isolate the host without a
+    task, and the dashboard then offered "Isolate host" for an isolated host.
+    Ignored while an isolate/unisolate task is on its way (the heartbeat
+    carries the state from before it ran); a task left open past the
+    30-minute task timeout no longer holds it."""
+    if isolated is None or isolated == agent.is_isolated:
+        return {}
+    open_task = await db.scalar(
+        select(AgentTask.id).where(
+            AgentTask.agent_id == agent.id, AgentTask.task_type.in_(ISOLATION_TASKS),
+            AgentTask.status.in_(OPEN_TASK_STATES), AgentTask.created_at > now - timedelta(minutes=30))
+        .limit(1))
+    if open_task is not None:
+        return {}
+    log.info("agent_isolation_reported", agent_id=str(agent.id), isolated=isolated)
+    return {"is_isolated": isolated}
+
+
 @router.post("/log", status_code=202)
 async def ingest_log(
     body: LogIngestRequest,
@@ -307,10 +331,11 @@ async def heartbeat(
         previous.get("state") != "failed" or previous.get("revision") != update_status["revision"]
         or previous.get("attempts") != update_status["attempts"]))
     reported_update = {"update_status": update_status, "update_status_at": now} if update_status else {}
+    isolation = await _reported_isolation(db, agent, body.isolated, now)
     await db.execute(
         update(Agent).where(Agent.id == agent.id)
         .values(status="online", last_seen_at=now, version=body.version, stop_reason=None,
-                **integrity_updates, **evidence, **reported_update)
+                **integrity_updates, **evidence, **reported_update, **isolation)
     )
     await db.commit()
     if agent.approved:
@@ -340,6 +365,9 @@ async def heartbeat(
     if agent.approved:
         task_result = await db.execute(
             select(AgentTask).where(AgentTask.agent_id == agent.id, AgentTask.status == "pending")
+            # oldest first: the agent runs host-state tasks (isolate/unisolate,
+            # block/unblock) in this order, so the last one queued wins
+            .order_by(AgentTask.created_at, AgentTask.id)
         )
         pending_tasks = task_result.scalars().all()
     task_ids = [t.id for t in pending_tasks]

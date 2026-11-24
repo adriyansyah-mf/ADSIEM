@@ -3,7 +3,9 @@
 package task
 
 import (
+	"errors"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -19,6 +21,18 @@ const nativeFirewall = true
 func nativeIsolate(serverURL string) error { return isolateHost(serverURL) }
 
 func nativeUnisolate() error { return unisolateHost() }
+
+// nativeIsolated reports whether nativeIsolate's allow rule is in place:
+// netsh exits non-zero when no rule matches. ok is false when netsh could not
+// run at all.
+func nativeIsolated() (isolated, ok bool) {
+	err := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+isolateAllowOut).Run()
+	if err == nil {
+		return true, true
+	}
+	var exit *exec.ExitError
+	return false, errors.As(err, &exit)
+}
 
 func blockRuleName(cidr string) string {
 	return "SIEM-Block-" + strings.NewReplacer("/", "_", ":", "-").Replace(cidr)

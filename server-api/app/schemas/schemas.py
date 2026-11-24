@@ -325,6 +325,9 @@ class HeartbeatRequest(BaseModel):
                              Field(max_length=16)] | None = None
     # 1 = this agent stores a token handed back in HeartbeatResponse.agent_token
     token_rotation: int | None = None
+    # the host's network isolation as the agent sees it (agents >= 1.34.4):
+    # ransomguard isolates without a task, so only the agent knows
+    isolated: bool | None = None
 
     @field_validator("evidence_health", "update", "web_block_health", "sensor_health", mode="wrap")
     @classmethod

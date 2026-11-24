@@ -31,6 +31,13 @@ type Runner struct {
 	client   *client.Client
 	fw       *firewall.Engine
 	inflight sync.Map
+	// serial runs the tasks that change the host's network state one at a
+	// time, in the order they were dispatched (see serialTask).
+	serialOnce sync.Once
+	serial     chan TaskDef
+	// exec and submit replace execute and submitResult in tests.
+	exec   func(TaskDef) (any, error)
+	submit func(string, TaskResult)
 	// FileScan runs a file_scan task (internal/fullscan, set by main): kind
 	// quick, full or custom, paths for custom; it returns the summary.
 	FileScan func(kind string, paths []string, requested string) (any, error)
@@ -122,24 +129,60 @@ func stateDirFor(cfg *config.Config) string {
 	return "/var/lib/siem-agent"
 }
 
-// Dispatch runs a task in a goroutine, skipping if already in-flight.
+// serialTask reports whether a task type changes the host's network state.
+// Those run one at a time in dispatch order: run concurrently, an
+// isolate_host and an unisolate_host delivered in one heartbeat raced, the
+// isolate finished last and left the host isolated (re-applied every time
+// the server's address changed) though the analyst had released it.
+func serialTask(taskType string) bool {
+	switch taskType {
+	case "isolate_host", "unisolate_host", "block_ip", "unblock_ip", "firewall_flush":
+		return true
+	}
+	return false
+}
+
+// Dispatch runs a task, skipping it if already in flight. Tasks that change
+// the host's network state (serialTask) are queued and run in the order
+// Dispatch was called; the others run in their own goroutine.
 func (r *Runner) Dispatch(task TaskDef) {
 	if _, loaded := r.inflight.LoadOrStore(task.ID, true); loaded {
 		return
 	}
-	go func() {
-		defer r.inflight.Delete(task.ID)
-		result, err := r.execute(task)
-		tr := TaskResult{Status: "done", Result: result}
-		if err != nil {
-			tr.Status = "failed"
-			tr.Error = err.Error()
-			slog.Error("task failed", "id", task.ID, "type", task.TaskType, "err", err)
-		} else {
-			slog.Info("task done", "id", task.ID, "type", task.TaskType)
-		}
-		r.submitResult(task.ID, tr)
-	}()
+	if serialTask(task.TaskType) {
+		r.serialOnce.Do(func() {
+			r.serial = make(chan TaskDef, 256)
+			go func() {
+				for t := range r.serial {
+					r.run(t)
+				}
+			}()
+		})
+		r.serial <- task
+		return
+	}
+	go r.run(task)
+}
+
+func (r *Runner) run(task TaskDef) {
+	defer r.inflight.Delete(task.ID)
+	exec, submit := r.exec, r.submit
+	if exec == nil {
+		exec = r.execute
+	}
+	if submit == nil {
+		submit = r.submitResult
+	}
+	result, err := exec(task)
+	tr := TaskResult{Status: "done", Result: result}
+	if err != nil {
+		tr.Status = "failed"
+		tr.Error = err.Error()
+		slog.Error("task failed", "id", task.ID, "type", task.TaskType, "err", err)
+	} else {
+		slog.Info("task done", "id", task.ID, "type", task.TaskType)
+	}
+	submit(task.ID, tr)
 }
 
 func (r *Runner) execute(task TaskDef) (any, error) {
