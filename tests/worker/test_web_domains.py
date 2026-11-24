@@ -53,3 +53,12 @@ def test_builtin_allowlist_is_normalized():
     assert ("github.com", True) in BUILTIN_ALLOWLIST
     assert ("weebly.com", False) in BUILTIN_ALLOWLIST
     assert len({d for d, _ in BUILTIN_ALLOWLIST}) == len(BUILTIN_ALLOWLIST)
+
+
+def test_package_registries_are_never_feed_blocked():
+    # URLhaus lists single uploads on them; blocking the host breaks pip, npm, docker pull
+    for host in ("files.pythonhosted.org", "pypi.org", "registry.npmjs.org", "static.crates.io",
+                 "api.nuget.org", "repo1.maven.org", "proxy.golang.org", "registry-1.docker.io",
+                 "cdn-lfs.huggingface.co", "gitlab.com"):
+        assert allow_match(host, BUILTIN_ALLOWLIST), host
+    assert allow_match("pythonhosted.org.evil.example", BUILTIN_ALLOWLIST) is None

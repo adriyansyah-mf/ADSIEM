@@ -25,6 +25,14 @@ BUILTIN_ALLOWLIST: tuple[tuple[str, bool], ...] = (
     ("windows.net", True), ("dropbox.com", True), ("dropboxusercontent.com", True),
     ("discordapp.com", True), ("discord.com", True), ("amazonaws.com", True), ("cloudfront.net", True),
     ("apple.com", True), ("icloud.com", True), ("cloudflare.com", True), ("akamaized.net", True),
+    # package registries and code hosts: URLhaus lists single uploads on them (a malicious wheel on
+    # files.pythonhosted.org), and a feed URL blocks its whole host, which would cut every endpoint
+    # off pip, npm, docker pull... Their uploads are caught by hash, YARA and ML instead.
+    ("pythonhosted.org", True), ("pypi.org", True), ("npmjs.org", True), ("npmjs.com", True),
+    ("yarnpkg.com", True), ("crates.io", True), ("rubygems.org", True), ("nuget.org", True),
+    ("maven.org", True), ("golang.org", True), ("go.dev", True), ("docker.io", True),
+    ("docker.com", True), ("huggingface.co", True), ("hf.co", True), ("gitlab.com", True),
+    ("bitbucket.org", True),
     ("weebly.com", False), ("wixsite.com", False), ("blogspot.com", False), ("wordpress.com", False),
     ("000webhostapp.com", False), ("netlify.app", False), ("vercel.app", False), ("pages.dev", False),
     ("web.app", False), ("firebaseapp.com", False), ("herokuapp.com", False),
