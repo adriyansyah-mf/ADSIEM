@@ -10,8 +10,8 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 
 | | |
 |---|---|
-| Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.28.0**, signed self-update, USB storage control |
-| Detection content | **259** Sigma rules in 250 files (13 for OT/ICS, 10 for Active Directory attacks), **138** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
+| Endpoint agent | Go, Linux (eBPF) + Windows (ETW), current release **agent-v1.36.0**, group-managed config, signed self-update, USB storage control |
+| Detection content | **259** Sigma rules in 250 files (13 for OT/ICS, 10 for Active Directory attacks), **141** decoders, 7 built-in + 14 community YARA sets, SigmaHQ importer, retro-hunt over stored logs |
 | OT / ICS | Modbus/TCP and DNP3 decoded from Suricata; MITRE ATT&CK for ICS rules for PLC programming, stop/restart, listen-only, scans, internet exposure |
 | Behaviour analytics | Host baselines (rare parent → child, rare new executables, beaconing), UEBA for users, IPs, hosts and processes, entity risk scoring, lateral movement graph |
 | Vulnerabilities | Package CVEs per host (OSV.dev per distro) and Windows builds against Microsoft's KB fixes, ranked by CISA KEV, FIRST EPSS and severity |
@@ -22,30 +22,30 @@ React dashboard, without Splunk/QRadar-scale infrastructure or licensing.
 | Audit and reporting | Append-only, hash-chained audit log with IP and browser; incident reports per case, finalized into a numbered PDF whose SHA-256 anyone can verify; period reports compared with the previous period, as a PDF in Indonesian or English, with history |
 | Storage | PostgreSQL 16 (pgvector) · Elasticsearch 8 · Redis 7 |
 
-## For the Judges — Kartika Cyber Hackathon 2026
+## Why ADSIEM
 
-*Bahasa Indonesia: [Untuk Juri](README.id.md#untuk-juri--kartika-cyber-hackathon-2026).*
+**The problem.** Many organizations run two worlds at once: IT (servers, staff PCs, web
+applications) and OT (PLCs, RTUs, HMIs and building systems in plants, substations, depots
+and warehouses). Modern attacks jump from IT to OT: phishing or a webshell on a server, then a
+pivot to an engineering workstation, then a stop/write command to a PLC. SOC teams are small,
+alerts number in the thousands, and in regulated or sovereign environments operational data
+must not leave for a foreign cloud.
 
-**The problem.** An Army unit runs two worlds at once: IT (servers, staff PCs, web
-applications) and OT (generator and pump PLCs at a fuel depot, substation RTUs, warehouse
-HVAC). Modern attacks jump from IT to OT: phishing or a webshell on a server, then a pivot to
-an engineering workstation, then a stop/write command to a PLC. SOC analysts are few, alerts
-number in the thousands, and operational data must not leave for a foreign cloud.
-
-**The solution.** ADSIEM is one on-premise platform that guards **IT endpoints** (a Go agent
+**The approach.** ADSIEM is one on-premise platform that guards **IT endpoints** (a Go agent
 on Linux and Windows), **OT networks** (Modbus/DNP3 from a Suricata sensor on a mirror port,
 without touching the PLCs), and an **AI analyst** that triages every alert, groups alerts
 into a case per attacker campaign, then investigates the case itself by collecting evidence
 from the hosts. Everything runs on your own servers. The AI can point at a local model
 (Ollama through 9router), so no data leaves.
 
-**IT/OT relevance.**
+**Where it fits.**
 
-| What the unit needs | What ADSIEM does |
+| What you need | What ADSIEM does |
 |---|---|
 | PLCs/RTUs cannot run an agent | A passive Suricata sensor on a SPAN port. ADSIEM reads Modbus/DNP3 function codes and alerts on program downloads to a PLC (UMAS), RTU stop/restart, listen-only mode, function-code or unit-ID scans, control commands from the internet, and exposed OT services. 13 OT/ICS rules, 12 of them tagged MITRE ATT&CK for ICS ([runbook](docs/operations/ot-ics-detection.md)) |
 | The IT → OT bridge (HMI, SCADA server, engineering workstation) | An EDR agent with eBPF/ETW: process, network, file, YARA (file and memory), RansomGuard, IOA chains (web server → shell → recon), host isolation, quarantine |
-| Few analysts, many alerts | AI L1 triages **every** alert. Alerts are merged into one case per attacker. AI Investigate collects its own evidence, then a multi-agent debate panel (Skeptic, Threat hunter, Evidence auditor, ...) challenges it before the final report |
+| A small team, many alerts | AI L1 triages **every** alert. Alerts are merged into one case per attacker. AI Investigate collects its own evidence, then a multi-agent debate panel (Skeptic, Threat hunter, Evidence auditor, ...) challenges it before the final report |
+| Managing a fleet without logging in to every host | Agents enroll with a reusable key, update themselves from signed packages in staged rollouts, and take their operational settings (an overlay on `config.yaml`) from their group's policy in the dashboard |
 | USB sticks and removable media | USB storage control per group: `audit` (log every stick plugged in) or `block` with an allow list of devices, on Linux and Windows ([runbook](docs/operations/usb-control.md)) |
 | Attacks on Active Directory | Rules for Kerberoasting, AS-REP roasting, DCSync, password spray, and persistence (new SPN, SID History, DSRM password) ([runbook](docs/operations/ad-detections.md)) |
 | Which patch first? | The **Vulnerabilities** page: CVEs on every host ranked by CISA KEV (exploited in the wild), EPSS and severity, including missing Windows KBs |
@@ -67,28 +67,29 @@ from the hosts. Everything runs on your own servers. The AI can point at a local
 4. **IT and OT in one case.** An attack from a webshell to an engineering workstation and on
    to a PLC shows up as one story, not three separate consoles.
 
-**Running, not slides.** ADSIEM has watched our internet-facing test web server since early
+**In production.** ADSIEM has watched internet-facing servers and staff laptops since early
 November 2026 and has caught real attacks:
 - a webshell wave on 4–6 Nov;
 - a crypto miner on 11 Nov, detected and handled;
 - a new webshell on 14 Nov that ran recon as `www-data`.
 
 The 14 Nov incident also exposed an eBPF detection gap for parent processes older than the
-agent. It was fixed straight away in agent 1.27.7, and agents were updated from the dashboard
-with signed packages.
+agent. It was fixed in agent 1.27.7 and rolled out from the dashboard with signed packages.
 
-**Try it in 5 minutes.**
-1. Log in to the dashboard with `admin` / `admin123` (a demo account for the judges). The demo
-   URL is in the submission form.
-2. **Alerts / Cases:** alerts already triaged by AI, with their notes and verdicts. Open a
+**A first tour** (after [installing the server](#server-installation) and
+[an agent](#agent-installation)):
+1. **Alerts / Cases:** alerts already triaged by AI, with their notes and verdicts. Open a
    case, click **Investigate with AI**, then look at the **Activity**, **Evidence** and
    **Debate** tabs.
-3. **OT attack demo:** from a machine registered under *Environment → Syslog devices* (log
+2. **OT detection:** from a machine registered under *Environment → Syslog devices* (log
    type `suricata`), run `python3 scripts/ot-demo-replay.py --host <server> --delay 2`. It
-   produces 10 OT alerts, from PLC fingerprinting to a PLC stop command and a substation RTU
-   restart.
-4. **SOAR:** try connecting an *AI Decide* node straight to *Response → isolate*. The editor
+   replays an attack and produces 10 OT alerts, from PLC fingerprinting to a PLC stop command
+   and a substation RTU restart.
+3. **SOAR:** try connecting an *AI Decide* node straight to *Response → isolate*. The editor
    refuses until there is an *Approval* node in between.
+4. **Policies:** per-group protections, USB control, and the **Agent config** section that
+   overrides the agents' local `config.yaml`. The **Agents** page shows whether each agent
+   has applied it.
 5. **Security posture** and **Vulnerabilities:** IP, gateway, DNS, open ports and processes,
    each host's security posture, then the CVEs to patch first (KEV/EPSS).
 6. **Investigation → Dashboards:** build a dashboard from Log search queries, and use
@@ -101,7 +102,7 @@ with signed packages.
 
 ```mermaid
 flowchart LR
-  subgraph Site[Unit / Site]
+  subgraph Site[Site]
     EP[IT endpoints<br/>Go agent: eBPF / ETW] -->|HTTPS + agent token| API
     OT[OT network<br/>PLC · RTU · HMI] -. SPAN .-> SUR[Suricata sensor]
     SUR -->|eve.json via syslog| SYS
@@ -121,11 +122,11 @@ flowchart LR
   UI[React dashboard] --> API
 ```
 
-**Honest limits.**
+**Known limitations.**
 - OT detection currently covers Modbus/TCP and DNP3. S7, IEC 104 and EtherNet/IP are only
   detected at the port/exposure level and through Suricata signatures.
-- The OT rules and demo were tested with replayed Suricata EVE logs, not yet with a sensor on
-  a real OT network.
+- The OT rules were tested with replayed Suricata EVE logs, not yet with a sensor on a live
+  OT network.
 - Automatic response without a human only comes from deterministic, policy-driven engines:
   RansomGuard, malware hashes, prevention rules and threat intel. AI decisions always wait for
   an analyst.
@@ -133,25 +134,32 @@ flowchart LR
   OSV, MalwareBazaar, URLhaus) and threat intel need internet. The AI needs a model: point
   9router at a local model for a closed network. An air-gapped install bundle does not exist
   yet.
+- There is no macOS agent yet.
 
-**Quality.** More than 1,200 Python test functions (about 190 files) and 990 Go test functions
-(251 files) run in CI on every PR, including evidence-durability and agent self-update
-acceptance tests. Full technical details follow below.
+**Project status.** ADSIEM is under active development and runs in production. Changes land
+through pull requests gated by CI: about 1,350 Python test functions (206 files) and 1,100 Go
+test functions (272 files), including evidence-durability and agent self-update acceptance
+tests. Agents are released from `agent-vX.Y.Z` tags as signed `.deb`, `.rpm`, `.msi` and
+`.zip` packages; the current release is **agent-v1.36.0**. The server keeps accepting older
+agents, so a fleet can be updated in stages.
 
-> **Security Warning:** Default credentials (`admin` / `admin123`) are for development only.
-> Change `JWT_SECRET`, `POSTGRES_PASSWORD`, `AGENT_ENROLLMENT_TOKEN`, and the admin password
-> immediately in production. See [Production Deployment](#production-deployment).
+**Reporting a vulnerability.** Please do not open a public issue for a security problem.
+Report it privately through **Security → Report a vulnerability** on this repository.
+
+> **Security Warning:** The default credentials (`admin` / `admin123`) exist only to bootstrap
+> a fresh install. Change `JWT_SECRET`, `POSTGRES_PASSWORD`, `AGENT_ENROLLMENT_TOKEN`, and the
+> admin password before exposing the server. See [Production Deployment](#production-deployment).
 
 ## Contents
 
-- [For the Judges — Kartika Cyber Hackathon 2026](#for-the-judges--kartika-cyber-hackathon-2026)
+- [Why ADSIEM](#why-adsiem)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Requirements](#requirements) · [Services](#services) · [Server Installation](#server-installation)
 - [Agent Installation](#agent-installation) · [RBAC](#rbac)
 - [Adding Rules](#adding-rules) · [Adding Decoders](#adding-decoders) · [Syslog, Suricata, Zeek and OT](#syslog-suricata-zeek-and-ot)
 - [Production Deployment](#production-deployment) · [Observability](#observability) · [Troubleshooting](#troubleshooting)
-- [Detection Benchmark](#detection-benchmark) · [Documentation](#documentation) · [Testing and CI](#testing-and-ci) · [Roadmap](#roadmap)
+- [Detection Benchmark](#detection-benchmark) · [Documentation](#documentation) · [Testing and CI](#testing-and-ci) · [Roadmap](#roadmap) · [License](#license)
 
 ## Features
 
@@ -187,6 +195,7 @@ across crashes and reboots (`-evidence-list`, `-evidence-salvage`, …).
 | User pop-up notifications | ✓ | ✓ | `internal/notify` |
 | Local threshold detections | ✓ | ✓ | `internal/detect` |
 | Group protection policy (which protections run, exclusions) | ✓ | ✓ same policy | `internal/policy` |
+| Agent config from the dashboard (per-group overlay on `config.yaml`; whitelisted fields only, `server.url` limited to the same host, automatic restart with a loop guard and rollback) | ✓ | ✓ | `internal/config`, `internal/policy` |
 | Offline enforcement (last prevention + YARA rule set cached, tamper-evident) | ✓ | ✓ | `internal/rulecache` |
 | Encrypted sample archives (ZipCrypto, `infected`) scanned in memory | ✓ | ✓ | `internal/zipcrypto` |
 | Own-process tracking (spoofed parent PID can't pass as the agent) | ✓ | ✓ | `internal/ownproc` |
@@ -223,7 +232,7 @@ cannot simply stop it.
   [Syslog, Suricata, Zeek and OT](#syslog-suricata-zeek-and-ot).
 - **Firewalls and appliances:** FortiGate (traffic, UTM, event, VPN, admin login) and any CEF
   sender.
-- **138 decoders** in four types (`regex`, `kv`, `json`, `cef`), covering Linux auth, syslog,
+- **141 decoders** in four types (`regex`, `kv`, `json`, `cef`), covering Linux auth, syslog,
   auditd, iptables, Windows Security/System/PowerShell/Sysmon/ETW, Apache, Nginx, PHP,
   MySQL, Postfix and every agent-native detection.
 
@@ -646,8 +655,8 @@ host is the dashboard's deploy command; the options below cover doing it by hand
 package from this server, installs it, enrolls the agent and starts it:
 
 ```bash
-curl -fsSLo /tmp/siem-agent_1.28.0_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.28.0_amd64.deb' \
-  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.28.0_amd64.deb
+curl -fsSLo /tmp/siem-agent_1.36.0_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.36.0_amd64.deb' \
+  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.36.0_amd64.deb
 ```
 
 The RPM command is the same with `rpm -Uvh`. On Windows, an elevated PowerShell
@@ -677,7 +686,7 @@ This stops anyone holding a key from taking over a live agent by reporting its h
 The platform builds the packages on every stack start: the `package-builder` service
 runs the same scripts as the release, at the version in `agent/VERSION`. The dashboard
 serves them, and so does each tagged GitHub release
-(`.github/workflows/agent-release.yml`, triggered by a tag like `agent-v1.28.0`).
+(`.github/workflows/agent-release.yml`, triggered by a tag like `agent-v1.36.0`).
 
 ```bash
 sudo dpkg -i siem-agent_<version>_amd64.deb          # or: sudo rpm -Uvh siem-agent-<version>-1.x86_64.rpm
@@ -1303,3 +1312,10 @@ and `scripts/` holds backup, GeoIP update and Let's Encrypt renewal helpers.
 - [ ] Multi-tenancy group management UI
 - [ ] macOS endpoint agent
 - [ ] Let's Encrypt automation (a cron renewal script exists in `scripts/renew-letsencrypt.sh`)
+
+## License
+
+ADSIEM is licensed under the [Apache License 2.0](LICENSE). Bundled third-party detection
+content keeps its own licence: the community YARA sets in `yara/community/` are DRL-1.1,
+BSD-2-Clause, MIT or Apache-2.0 (each listed in `yara/community/MANIFEST.json`), and rules
+imported from SigmaHQ stay under DRL-1.1. See [NOTICE](NOTICE).

@@ -1,0 +1,13 @@
+ADSIEM
+Copyright 2026 The ADSIEM Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party content bundled with this product keeps its own licence:
+
+- yara/community/: YARA rule sets from community repositories, under DRL-1.1,
+  BSD-2-Clause, MIT or Apache-2.0. yara/community/MANIFEST.json lists each set
+  with its source repository, commit and licence. Rule authorship and reference
+  metadata are kept inside each rule, as DRL-1.1 requires.
+- Rules imported at runtime by the SigmaHQ importer keep the licence of the
+  SigmaHQ repository (DRL-1.1).
