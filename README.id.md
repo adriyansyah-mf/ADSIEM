@@ -161,7 +161,7 @@ privat lewat **Security → Report a vulnerability** di repositori ini.
 - [Instalasi Agen](#instalasi-agen) · [RBAC](#rbac)
 - [Menambah Rule](#menambah-rule) · [Menambah Decoder](#menambah-decoder) · [Syslog, Suricata, Zeek dan OT](#syslog-suricata-zeek-dan-ot)
 - [Deployment Produksi](#deployment-produksi) · [Observability](#observability) · [Troubleshooting](#troubleshooting)
-- [Benchmark Deteksi](#benchmark-deteksi) · [Dokumentasi](#dokumentasi) · [Testing dan CI](#testing-dan-ci) · [Roadmap](#roadmap)
+- [Benchmark Deteksi](#benchmark-deteksi) · [Dokumentasi](#dokumentasi) · [Testing dan CI](#testing-dan-ci) · [Roadmap](#roadmap) · [Lisensi](#lisensi)
 
 ## Fitur
 
@@ -1353,3 +1353,11 @@ development, dan `scripts/` berisi helper backup, update GeoIP, dan perpanjangan
 - [ ] UI manajemen grup multi-tenant
 - [ ] Agen endpoint macOS
 - [ ] Otomasi Let's Encrypt (sudah ada skrip perpanjangan cron di `scripts/renew-letsencrypt.sh`)
+
+## Lisensi
+
+ADSIEM dilisensikan di bawah [Apache License 2.0](LICENSE). Konten deteksi pihak ketiga yang
+ikut dibundel tetap memakai lisensinya sendiri: set YARA komunitas di `yara/community/`
+berlisensi DRL-1.1, BSD-2-Clause, MIT, atau Apache-2.0 (masing-masing tercatat di
+`yara/community/MANIFEST.json`), dan rule yang diimpor dari SigmaHQ tetap berlisensi DRL-1.1.
+Lihat [NOTICE](NOTICE).

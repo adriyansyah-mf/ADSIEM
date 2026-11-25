@@ -159,7 +159,7 @@ Report it privately through **Security → Report a vulnerability** on this repo
 - [Agent Installation](#agent-installation) · [RBAC](#rbac)
 - [Adding Rules](#adding-rules) · [Adding Decoders](#adding-decoders) · [Syslog, Suricata, Zeek and OT](#syslog-suricata-zeek-and-ot)
 - [Production Deployment](#production-deployment) · [Observability](#observability) · [Troubleshooting](#troubleshooting)
-- [Detection Benchmark](#detection-benchmark) · [Documentation](#documentation) · [Testing and CI](#testing-and-ci) · [Roadmap](#roadmap)
+- [Detection Benchmark](#detection-benchmark) · [Documentation](#documentation) · [Testing and CI](#testing-and-ci) · [Roadmap](#roadmap) · [License](#license)
 
 ## Features
 
@@ -1312,3 +1312,10 @@ and `scripts/` holds backup, GeoIP update and Let's Encrypt renewal helpers.
 - [ ] Multi-tenancy group management UI
 - [ ] macOS endpoint agent
 - [ ] Let's Encrypt automation (a cron renewal script exists in `scripts/renew-letsencrypt.sh`)
+
+## License
+
+ADSIEM is licensed under the [Apache License 2.0](LICENSE). Bundled third-party detection
+content keeps its own licence: the community YARA sets in `yara/community/` are DRL-1.1,
+BSD-2-Clause, MIT or Apache-2.0 (each listed in `yara/community/MANIFEST.json`), and rules
+imported from SigmaHQ stay under DRL-1.1. See [NOTICE](NOTICE).
