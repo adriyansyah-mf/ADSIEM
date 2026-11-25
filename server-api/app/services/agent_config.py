@@ -41,7 +41,8 @@ class _Section(BaseModel):
 
 class ServerOverlay(_Section):
     url: str | None = Field(None, max_length=2048)
-    heartbeat_interval: int | None = Field(None, ge=10, le=3600)
+    # The worker marks an agent offline after 300 s without a heartbeat.
+    heartbeat_interval: int | None = Field(None, ge=10, le=240)
 
     @field_validator("url")
     @classmethod
@@ -99,9 +100,9 @@ class LinuxSensorOverlay(_Section):
 
 
 class RansomwareOverlay(_Section):
+    # No canary_dirs or canary_names: they are paths the agent writes as
+    # SYSTEM/root, which the server must not choose.
     disabled: bool | None = None
-    canary_dirs: TextList | None = None
-    canary_names: TextList | None = None
     canary_visible: bool | None = None
     allow_images: TextList | None = None
 

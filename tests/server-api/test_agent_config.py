@@ -37,7 +37,10 @@ def test_overlay_rejects(bad):
 
 @pytest.mark.parametrize("bad", [
     {"server": {"url": "https://"}},
-    {"server": {"heartbeat_interval": 3601}},
+    {"server": {"heartbeat_interval": 241}},     # the worker marks agents offline after 300 s
+    {"server": {"heartbeat_interval": 3600}},
+    {"ransomware": {"canary_dirs": ["C:\\Windows"]}},  # paths the agent writes as SYSTEM/root
+    {"ransomware": {"canary_names": ["evil.dll"]}},
     {"memory_sweep": {"interval_minutes": 1441}},
     {"yara": {"max_file_size_mb": 0}},
     {"yara": {"max_file_size_mb": 1025}},
@@ -71,6 +74,13 @@ def test_valid_overlay_keeps_explicit_false_zero_and_empty_lists():
            "prevention": {"disabled": True}}
     assert dump_overlay(AgentConfigOverlay.model_validate(raw)) == raw
     assert config_version_of(raw) != ""
+
+
+def test_heartbeat_interval_bounds_and_ransomware_fields():
+    for v in (10, 240):
+        assert AgentConfigOverlay.model_validate({"server": {"heartbeat_interval": v}}).server.heartbeat_interval == v
+    raw = {"ransomware": {"disabled": False, "canary_visible": True, "allow_images": ["backup.exe"]}}
+    assert dump_overlay(AgentConfigOverlay.model_validate(raw)) == raw
 
 
 def test_dump_drops_unset_fields_and_empty_sections():
