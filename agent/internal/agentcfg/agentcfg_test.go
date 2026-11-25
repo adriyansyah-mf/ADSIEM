@@ -495,3 +495,143 @@ func TestWantClearsStillDiffersWhenBackToRunning(t *testing.T) {
 		t.Fatalf("stale err %q", e)
 	}
 }
+
+// Once the overlay URL has reached the server after boot it works: a later
+// outage is the server's, not the URL's, and must not drop the overlay.
+func TestCheckContactAfterSuccessNeverReverts(t *testing.T) {
+	useClock(t)
+	r := Boot(localCfg(), t.TempDir(), pol(t, "v1", `{"server":{"url":"https://siem.example.com:8443"}}`))
+	r.Now = func() time.Time { return t0.Add(31 * time.Minute) }
+	if r.CheckContact(t0.Add(time.Minute)) {
+		t.Fatal("reverted after a 30-minute gap that followed a contact at boot+1m")
+	}
+	r.Now = func() time.Time { return t0.Add(24 * time.Hour) }
+	if r.CheckContact(t0.Add(time.Minute)) {
+		t.Fatal("reverted a day later")
+	}
+	if _, e := r.Status(); e != "" {
+		t.Fatalf("err %q", e)
+	}
+}
+
+// A contact from before this boot (a previous process) is no contact.
+func TestCheckContactBeforeBootIsNoContact(t *testing.T) {
+	useClock(t)
+	r := Boot(localCfg(), t.TempDir(), pol(t, "v1", `{"server":{"url":"https://siem.example.com:8443"}}`))
+	r.Now = func() time.Time { return t0.Add(9 * time.Minute) }
+	if r.CheckContact(t0.Add(-time.Minute)) {
+		t.Fatal("reverted before 10m")
+	}
+	r.Now = func() time.Time { return t0.Add(11 * time.Minute) }
+	if !r.CheckContact(t0.Add(-time.Minute)) {
+		t.Fatal("a contact from before boot kept the overlay URL")
+	}
+}
+
+// Going back to the running version clears an error from a version that
+// never came in (here v2's failed probe).
+func TestWantBackToRunningClearsProbeError(t *testing.T) {
+	useClock(t)
+	r := Boot(localCfg(), t.TempDir(), pol(t, "v1", `{"fim":{"enabled":false}}`))
+	if r.Want(pol(t, "v2", `{"server":{"url":"https://siem.example.com:8443"}}`), func(string) error { return errors.New("down") }) {
+		t.Fatal("restart despite failed probe")
+	}
+	if _, e := r.Status(); !strings.Contains(e, "unreachable") {
+		t.Fatalf("err %q", e)
+	}
+	if r.Want(pol(t, "v1", `{"fim":{"enabled":false}}`), okProbe) {
+		t.Fatal("restart for the running version")
+	}
+	if _, e := r.Status(); e != "" {
+		t.Fatalf("stale err %q", e)
+	}
+}
+
+// The overlay warnings of the running version are still true once the
+// policy is back on it: they stay, while the later error goes.
+func TestWantBackToRunningKeepsItsOverlayWarnings(t *testing.T) {
+	useClock(t)
+	v1 := pol(t, "v1", `{"server":{"url":"https://evil.example.net"},"fim":{"enabled":false}}`)
+	r := Boot(localCfg(), t.TempDir(), v1)
+	_, boot := r.Status()
+	if !strings.Contains(boot, "host must stay") {
+		t.Fatalf("boot err %q", boot)
+	}
+	r.Want(pol(t, "v2", `{"server":{"url":"https://siem.example.com:8443"}}`), func(string) error { return errors.New("down") })
+	if r.Want(v1, okProbe) {
+		t.Fatal("restart for the running version")
+	}
+	if _, e := r.Status(); e != boot {
+		t.Fatalf("err %q, want %q", e, boot)
+	}
+}
+
+// Boot refused v1 and runs the local config; once the overlay is removed
+// ("" wanted, "" running) the rejection of v1 is no longer the story.
+func TestWantOverlayRemovedClearsBootRejection(t *testing.T) {
+	c := useClock(t)
+	dir := t.TempDir()
+	p := pol(t, "v1", `{"fim":{"enabled":false}}`)
+	for i := 0; i < 3; i++ {
+		Boot(localCfg(), dir, p)
+		c.t = c.t.Add(time.Minute)
+	}
+	r := Boot(localCfg(), dir, p)
+	if v, e := r.Status(); v != "" || !strings.Contains(e, "config v1 rejected") {
+		t.Fatalf("status %q %q", v, e)
+	}
+	// Still asked for v1: the rejection stays.
+	if r.Want(p, okProbe) {
+		t.Fatal("restart for a rejected version")
+	}
+	if _, e := r.Status(); !strings.Contains(e, "config v1 rejected") {
+		t.Fatalf("err %q", e)
+	}
+	if r.Want(pol(t, "", ``), okProbe) {
+		t.Fatal("restart with no overlay running and none wanted")
+	}
+	if _, e := r.Status(); e != "" {
+		t.Fatalf("stale err %q", e)
+	}
+}
+
+// Outside a service manager the agent cannot restart itself: the status says
+// so, after any error already there, once.
+func TestRestartRequiredSetsError(t *testing.T) {
+	useClock(t)
+	r := Boot(localCfg(), t.TempDir(), pol(t, "v1", `{"fim":{"enabled":false}}`))
+	r.RestartRequired()
+	r.RestartRequired()
+	if _, e := r.Status(); e != "restart required (not under a service manager)" {
+		t.Fatalf("err %q", e)
+	}
+	r = Boot(localCfg(), t.TempDir(), pol(t, "v1", `{"server":{"url":"https://evil.example.net"}}`))
+	r.RestartRequired()
+	r.RestartRequired()
+	if _, e := r.Status(); e != "server.url: host must stay siem.example.com; restart required (not under a service manager)" {
+		t.Fatalf("err %q", e)
+	}
+	// The policy back on the running version: no restart is needed any more.
+	r.Want(pol(t, "v1", `{"server":{"url":"https://evil.example.net"}}`), okProbe)
+	if _, e := r.Status(); e != "server.url: host must stay siem.example.com" {
+		t.Fatalf("err %q", e)
+	}
+}
+
+// A policy change that keeps the config version, before the restart has
+// happened (console mode, or the restart jitter), is no failed restart.
+func TestWantSameNewVersionBeforeRestartKeepsError(t *testing.T) {
+	useClock(t)
+	r := Boot(localCfg(), t.TempDir(), pol(t, "v1", `{"fim":{"enabled":false}}`))
+	v2 := pol(t, "v2", `{"fim":{"enabled":true}}`)
+	if !r.Want(v2, okProbe) {
+		t.Fatal("no restart for a new version")
+	}
+	r.RestartRequired()
+	if r.Want(v2, okProbe) {
+		t.Fatal("asked to restart twice in one process")
+	}
+	if _, e := r.Status(); e != "restart required (not under a service manager)" {
+		t.Fatalf("err %q", e)
+	}
+}

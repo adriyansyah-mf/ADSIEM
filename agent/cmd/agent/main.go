@@ -285,7 +285,7 @@ func run(configPath string, stop <-chan struct{}) {
 	probe := probeServer(c)
 	polStore.OnChange(func(p *policy.Policy) {
 		if rt.Want(p, probe) {
-			go restartAfter(internalStop, restartJitter())
+			go restartAfter(internalStop, restartJitter(), rt.RestartRequired)
 		}
 	})
 	go func() {
@@ -296,7 +296,7 @@ func run(configPath string, stop <-chan struct{}) {
 		for range t.C {
 			// The overlay server.url lost the server: fall back once.
 			if rt.CheckContact(heartbeat.LastContact()) {
-				go restartAfter(internalStop, restartJitter())
+				go restartAfter(internalStop, restartJitter(), rt.RestartRequired)
 				return
 			}
 			if !healthy && time.Since(started) >= 10*time.Minute {

@@ -30,23 +30,30 @@ func closed(ch chan struct{}) bool {
 	}
 }
 
-func TestRestartAfterNotUnderManagerOnlyLogs(t *testing.T) {
+func noNote() {}
+
+func TestRestartAfterNotUnderManagerOnlyNotes(t *testing.T) {
 	withServiceManager(t, false)
 	stop := make(chan struct{})
-	restartAfter(stop, 0)
-	restartAfter(stop, 0)
+	notes := 0
+	note := func() { notes++ }
+	restartAfter(stop, 0, note)
+	restartAfter(stop, 0, note)
 	if closed(stop) {
 		t.Fatal("stop closed outside a service manager")
 	}
 	if restartRequested.Load() {
 		t.Fatal("restartRequested set outside a service manager")
 	}
+	if notes != 2 {
+		t.Fatalf("restart required noted %d times, want 2", notes)
+	}
 }
 
 func TestRestartAfterUnderManagerCloses(t *testing.T) {
 	withServiceManager(t, true)
 	stop := make(chan struct{})
-	restartAfter(stop, time.Millisecond)
+	restartAfter(stop, time.Millisecond, func() { t.Error("restart required noted under a service manager") })
 	if !closed(stop) {
 		t.Fatal("stop not closed under a service manager")
 	}
@@ -54,7 +61,7 @@ func TestRestartAfterUnderManagerCloses(t *testing.T) {
 		t.Fatal("restartRequested not set")
 	}
 	// A second restart must not close the channel again (that would panic).
-	restartAfter(stop, 0)
+	restartAfter(stop, 0, noNote)
 }
 
 func TestRestartAfterConcurrentClosesOnce(t *testing.T) {
@@ -62,7 +69,7 @@ func TestRestartAfterConcurrentClosesOnce(t *testing.T) {
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	for range 5 {
-		go func() { restartAfter(stop, time.Millisecond); done <- struct{}{} }()
+		go func() { restartAfter(stop, time.Millisecond, noNote); done <- struct{}{} }()
 	}
 	for range 5 {
 		<-done

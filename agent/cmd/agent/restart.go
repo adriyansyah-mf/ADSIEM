@@ -26,10 +26,12 @@ var inServiceManager = underServiceManager
 
 // restartAfter closes stop after d so run shuts down and restarts. It acts
 // at most once per process. Outside a service manager nothing would start
-// the agent again, so it only logs; the config error shows the rest.
-func restartAfter(stop chan<- struct{}, d time.Duration) {
+// the agent again, so it only logs and calls required, which puts it in the
+// config error the heartbeat reports.
+func restartAfter(stop chan<- struct{}, d time.Duration, required func()) {
 	if !inServiceManager() {
 		slog.Warn("config changed: restart required")
+		required()
 		return
 	}
 	if !restartRequested.CompareAndSwap(false, true) {

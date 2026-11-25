@@ -29,8 +29,9 @@ const (
 	// the window, without ever turning healthy, reject that version.
 	crashWindow = 10 * time.Minute
 	crashStarts = 3
-	// contactTimeout is how long an overlay server.url may go without a
-	// successful contact before the agent falls back to the local URL.
+	// contactTimeout is how long after boot an overlay server.url may go
+	// without a first successful contact before the agent falls back to the
+	// local URL.
 	contactTimeout = 10 * time.Minute
 	// maxRejected bounds the rejected list (oldest dropped first).
 	maxRejected = 100
@@ -60,9 +61,16 @@ type Runtime struct {
 	urlSet     bool   // the running server.url comes from the overlay
 	runningURL string
 
+	// bootErr is the config error Boot found: the overlay warnings of the
+	// running version, or the rejection of bootRejected (the version p asked
+	// for at boot, which was refused; "" when none was).
+	bootErr      string
+	bootRejected string
+
 	mu     sync.Mutex
 	st     state
 	errMsg string
+	asked  bool // Want asked this process to restart (it has not yet)
 }
 
 // Boot applies the overlay of p to cfg unless that version is refused, and
@@ -85,6 +93,7 @@ func Boot(cfg *config.Config, stateDir string, p *policy.Policy) *Runtime {
 	case v == "":
 	case slices.Contains(r.st.Rejected, v):
 		r.errMsg = fmt.Sprintf("config %s rejected", v)
+		r.bootRejected = v
 	default:
 		if r.st.Version != v {
 			r.st.Version, r.st.Starts, r.st.Healthy = v, nil, false
@@ -93,6 +102,7 @@ func Boot(cfg *config.Config, stateDir string, p *policy.Policy) *Runtime {
 		if len(r.st.Starts) >= crashStarts && !r.st.Healthy {
 			r.reject(v)
 			r.errMsg = fmt.Sprintf("config %s rejected: agent kept failing to start", v)
+			r.bootRejected = v
 			slog.Warn("agentcfg: overlay rejected, booting local config", "version", v, "starts", len(r.st.Starts))
 			break
 		}
@@ -107,6 +117,7 @@ func Boot(cfg *config.Config, stateDir string, p *policy.Policy) *Runtime {
 		slog.Info("agentcfg: overlay applied", "version", v)
 	}
 	r.runningURL = cfg.Server.URL
+	r.bootErr = r.errMsg
 	r.save()
 	return r
 }
@@ -129,6 +140,25 @@ func (r *Runtime) Status() (version, errMsg string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.running, r.errMsg
+}
+
+// restartRequiredMsg is the config error of an agent that needs a restart
+// it cannot do itself.
+const restartRequiredMsg = "restart required (not under a service manager)"
+
+// RestartRequired records that a restart is needed but nothing would start
+// the agent again (console mode). It goes after any error already reported,
+// once; Want clears it when the policy is back on the running version.
+func (r *Runtime) RestartRequired() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	switch {
+	case strings.Contains(r.errMsg, restartRequiredMsg):
+	case r.errMsg == "":
+		r.errMsg = restartRequiredMsg
+	default:
+		r.errMsg += "; " + restartRequiredMsg
+	}
 }
 
 // OverlaySetsURL reports whether the running server.url comes from the
@@ -161,20 +191,32 @@ func (r *Runtime) Want(p *policy.Policy, probe func(url string) error) (restart 
 	r.mu.Lock()
 	switch {
 	case v == r.running:
-		// The wanted version is running again: an earlier loop error is stale.
-		if strings.HasSuffix(r.errMsg, "still differs after restart") {
-			r.errMsg = ""
+		// The wanted version is running again: errors about other versions
+		// are stale. What remains is its own overlay warnings from boot. A
+		// running version rejected since (lost contact) keeps its error.
+		if !slices.Contains(r.st.Rejected, v) {
+			r.errMsg = r.bootErr
+			if r.bootRejected != "" {
+				r.errMsg = ""
+			}
 		}
 		r.mu.Unlock()
 		return false
 	case slices.Contains(r.st.Rejected, v):
-		if r.errMsg == "" {
+		switch {
+		case v == r.bootRejected:
+			r.errMsg = r.bootErr
+		case r.errMsg == "":
 			r.errMsg = fmt.Sprintf("config %s rejected", v)
 		}
 		r.mu.Unlock()
 		return false
 	case r.st.RestartFor != nil && *r.st.RestartFor == v:
-		r.errMsg = fmt.Sprintf("config %s still differs after restart", v)
+		// Asked in this process: the restart is still to come (jitter, or
+		// console mode), not one that failed.
+		if !r.asked {
+			r.errMsg = fmt.Sprintf("config %s still differs after restart", v)
+		}
 		r.mu.Unlock()
 		return false
 	}
@@ -200,23 +242,26 @@ func (r *Runtime) Want(p *policy.Policy, probe func(url string) error) (restart 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.st.RestartFor = &v
+	r.asked = true
 	r.save()
 	return true
 }
 
 // CheckContact reports whether the agent must restart because the overlay's
-// server.url has had no successful contact (lastOK) for 10 minutes since
-// boot; the version is then rejected so the next boot uses the local URL.
+// server.url never reached the server: no successful contact (lastOK) since
+// this boot, 10 minutes after it. The version is then rejected so the next
+// boot uses the local URL. Once a contact succeeded after boot the URL
+// works, and a later outage never drops the overlay. A lastOK from before
+// the boot (a previous process) counts as no contact.
 func (r *Runtime) CheckContact(lastOK time.Time) (restart bool) {
 	// An overlay URL equal to the local one has nothing to fall back to.
 	if !r.urlSet || r.runningURL == r.local.Server.URL {
 		return false
 	}
-	since := r.bootTime
-	if lastOK.After(since) {
-		since = lastOK
+	if !lastOK.IsZero() && !lastOK.Before(r.bootTime) {
+		return false
 	}
-	if r.Now().Sub(since) <= contactTimeout {
+	if r.Now().Sub(r.bootTime) <= contactTimeout {
 		return false
 	}
 	r.mu.Lock()
