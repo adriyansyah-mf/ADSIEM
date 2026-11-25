@@ -1,3 +1,4 @@
+# Can be overridden from the dashboard (Policies -> Agent config).
 agent:
   id: ""
   name: ""               # set to hostname if blank at runtime
@@ -6,6 +7,7 @@ agent:
   enrollment_token: ""   # set this OR use AGENT_ENROLLMENT_TOKEN env var
   buffer_size: 10000
 
+# Can be overridden from the dashboard (Policies -> Agent config).
 server:
   url: http://your-siem-server:8000
   heartbeat_interval: 30
@@ -15,6 +17,7 @@ config_version: 2
 # Containment (block_ip / isolate from the console or SOAR) through Windows
 # Firewall, with persistence, expiry and an anti-lockout guard (the server's
 # address is never blocked). Off: block_ip calls netsh directly, without them.
+# Can be overridden from the dashboard (Policies -> Agent config).
 firewall:
   enabled: true
   backend: auto          # netsh
@@ -58,6 +61,7 @@ logs:
 # channels resume from bookmarks. Needs a local fixed NTFS volume. Enable only
 # once the server advertises it (EVIDENCE_INGEST_ENABLED) and per the rollout
 # in docs/operations/agent-evidence-recovery.md.
+# Can be overridden from the dashboard (Policies -> Agent config).
 # evidence:
 #   enabled: true
 #   dir: evidence            # inside %ProgramData%\SIEMAgent
