@@ -72,10 +72,10 @@ type LinuxSensorOverlay struct {
 	DisabledEvents *[]string `json:"disabled_events,omitempty"`
 }
 
+// RansomwareOverlay leaves out canary_dirs and canary_names: they are file
+// paths the agent writes as SYSTEM/root, which the server must not choose.
 type RansomwareOverlay struct {
 	Disabled      *bool     `json:"disabled,omitempty"`
-	CanaryDirs    *[]string `json:"canary_dirs,omitempty"`
-	CanaryNames   *[]string `json:"canary_names,omitempty"`
 	CanaryVisible *bool     `json:"canary_visible,omitempty"`
 	AllowImages   *[]string `json:"allow_images,omitempty"`
 }
@@ -165,8 +165,6 @@ func ApplyOverlay(cfg *Config, o *Overlay) (warnings []string) {
 	}
 	if r := o.Ransomware; r != nil {
 		set(&cfg.Ransomware.Disabled, r.Disabled)
-		setList(&cfg.Ransomware.CanaryDirs, r.CanaryDirs)
-		setList(&cfg.Ransomware.CanaryNames, r.CanaryNames)
 		set(&cfg.Ransomware.CanaryVisible, r.CanaryVisible)
 		setList(&cfg.Ransomware.AllowImages, r.AllowImages)
 	}

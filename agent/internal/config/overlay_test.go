@@ -85,7 +85,7 @@ func TestApplyOverlayAllSections(t *testing.T) {
 		!cfg.Netwatch.SnapshotFallback || cfg.ETW.Mode != "on" || cfg.ETW.DisabledEvents[0] != "file" ||
 		cfg.Detect.MaxBlocked != 3 || cfg.Detect.MaxBlocksPerMin != 4 || cfg.Detect.Rules[0] != "a" ||
 		!cfg.LinuxSensor.Disabled || cfg.LinuxSensor.DisabledEvents[0] != "exit" ||
-		!cfg.Ransomware.Disabled || cfg.Ransomware.CanaryDirs[0] != "d" || cfg.Ransomware.CanaryNames[0] != "n" || !cfg.Ransomware.CanaryVisible || cfg.Ransomware.AllowImages[0] != "x.exe" ||
+		!cfg.Ransomware.Disabled || !cfg.Ransomware.CanaryVisible || cfg.Ransomware.AllowImages[0] != "x.exe" ||
 		cfg.Yara.WatchPaths[0] != "w" || cfg.Yara.MaxFileSizeMB != 7 ||
 		!cfg.MemorySweep.Disabled || cfg.MemorySweep.IntervalMinutes != 2 ||
 		!cfg.Evidence.Enabled || cfg.Evidence.MaxBytes != 1 || cfg.Evidence.SegmentBytes != 2 || cfg.Evidence.ReservedBytes != 3 || cfg.Evidence.MaxEventBytes != 4 ||
@@ -93,7 +93,21 @@ func TestApplyOverlayAllSections(t *testing.T) {
 		t.Fatalf("%+v", cfg)
 	}
 	// Fields the spec keeps out of the overlay stay as they were.
-	if cfg.Ransomware.ReportOnly || cfg.Ransomware.Isolate || cfg.Yara.Disabled || cfg.Evidence.Dir != "" || len(cfg.Update.TrustedKeys) != 0 {
+	if cfg.Ransomware.ReportOnly || cfg.Ransomware.Isolate || len(cfg.Ransomware.CanaryDirs) != 0 || len(cfg.Ransomware.CanaryNames) != 0 ||
+		cfg.Yara.Disabled || cfg.Evidence.Dir != "" || len(cfg.Update.TrustedKeys) != 0 {
 		t.Fatalf("%+v", cfg)
+	}
+}
+
+// Canary dirs and names are file paths the agent writes as SYSTEM/root: the
+// server must not choose them, so an overlay carrying them changes nothing.
+func TestApplyOverlayKeepsLocalCanaryPaths(t *testing.T) {
+	cfg := &Config{Ransomware: RansomwareConfig{CanaryDirs: []string{`C:\local`}, CanaryNames: []string{"local.docx"}}}
+	var o Overlay
+	mustUnmarshal(t, `{"ransomware":{"canary_dirs":["C:\\Windows\\System32"],"canary_names":["evil.dll"],"canary_visible":true}}`, &o)
+	ApplyOverlay(cfg, &o)
+	if len(cfg.Ransomware.CanaryDirs) != 1 || cfg.Ransomware.CanaryDirs[0] != `C:\local` ||
+		len(cfg.Ransomware.CanaryNames) != 1 || cfg.Ransomware.CanaryNames[0] != "local.docx" || !cfg.Ransomware.CanaryVisible {
+		t.Fatalf("%+v", cfg.Ransomware)
 	}
 }
