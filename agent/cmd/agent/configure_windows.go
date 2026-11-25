@@ -5,7 +5,6 @@ package main
 import (
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/windows/registry"
@@ -28,16 +27,8 @@ func defaultLogSources() []config.LogSource {
 }
 
 // restrictConfigAccess limits the data directory (config with the agent token,
-// agent.log) to SYSTEM and Administrators.
-func restrictConfigAccess(path string) error {
-	dir := filepath.Dir(path)
-	out, err := exec.Command("icacls", dir, "/inheritance:r", "/grant:r",
-		"*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("icacls: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
+// agent.log) and the config itself to SYSTEM and Administrators.
+func restrictConfigAccess(path string) error { return protectDataDir(path) }
 
 // enableAuditing turns on what the Windows decoders and rules read: logon,
 // process creation (with command line), account and group management,

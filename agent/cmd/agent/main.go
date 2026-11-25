@@ -241,9 +241,10 @@ func run(configPath string, stop <-chan struct{}) {
 	}
 	// Windows: re-apply the data directory ACL (config with the token) at
 	// every service start. Only under the SCM: a console run may point at a
-	// config in a user's folder. Elsewhere configure's chmod 0600 holds.
-	if runtime.GOOS == "windows" && underServiceManager() {
-		if err := restrictConfigAccess(configPath); err != nil {
+	// config in a user's folder. Elsewhere configure's chmod 0600 holds
+	// (protectDataDir is a no-op there).
+	if underServiceManager() {
+		if err := protectDataDir(configPath); err != nil {
 			slog.Warn("could not restrict access to the config", "err", err)
 		}
 	}
