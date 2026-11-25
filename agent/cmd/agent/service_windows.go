@@ -158,6 +158,13 @@ func protectService(unlock bool) error {
 // signalStopReason: Ctrl+C on an agent run from a console.
 func signalStopReason() string { return "service_stop" }
 
+// underServiceManager reports whether the SCM started the agent (its
+// recovery action restarts it after a failure exit).
+func underServiceManager() bool {
+	isService, err := svc.IsWindowsService()
+	return err == nil && isService
+}
+
 // manageService installs (auto-start, restart on failure) or removes the service.
 func manageService(install bool, configPath string) error {
 	m, err := mgr.Connect()

@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/siem-platform/agent/internal/agentcfg"
 	"github.com/siem-platform/agent/internal/appcontrol"
 	"github.com/siem-platform/agent/internal/browserpolicy"
 	"github.com/siem-platform/agent/internal/buffer"
@@ -189,6 +190,17 @@ func run(configPath string, stop <-chan struct{}) {
 	heartbeat.ConfigPath = configPath
 	enrollment.AgentVersion = Version
 	slog.Info("siem-agent starting", "version", Version)
+	// A restart into a new dashboard config exits with restartExitCode once
+	// the shutdown at the end of run is done (this defer runs last), so the
+	// service manager starts the agent again; the SCM is told nothing.
+	internalStop := make(chan struct{})
+	restarting := false
+	defer func() {
+		if restarting && restartRequested.Load() && underServiceManager() {
+			slog.Info("restarting into the new config", "exit_code", restartExitCode)
+			os.Exit(restartExitCode)
+		}
+	}()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -227,6 +239,20 @@ func run(configPath string, stop <-chan struct{}) {
 	if err := protectService(cfg.AntiTamper.UnlockService); err != nil {
 		slog.Warn("could not set the service's tamper protection", "err", err)
 	}
+	// Windows: re-apply the data directory ACL (config with the token) at
+	// every service start. Only under the SCM: a console run may point at a
+	// config in a user's folder. Elsewhere configure's chmod 0600 holds.
+	if runtime.GOOS == "windows" && underServiceManager() {
+		if err := restrictConfigAccess(configPath); err != nil {
+			slog.Warn("could not restrict access to the config", "err", err)
+		}
+	}
+
+	// The dashboard config overlay of the cached group policy, applied
+	// before anything reads cfg.
+	polPath := filepath.Join(task.StateDir(cfg), policy.FileName)
+	rt := agentcfg.Boot(cfg, task.StateDir(cfg), policy.Load(polPath))
+	heartbeat.ConfigStatus = rt.Status
 
 	c := client.New(cfg.Server.URL, cfg.Agent.Token)
 	heartbeat.Updater = newUpdater(cfg, c) // before the heartbeat loop starts
@@ -254,7 +280,31 @@ func run(configPath string, stop <-chan struct{}) {
 	// (after the legacy import above, so old entries do not pop up again).
 	// The group policy from the server (protections on/off, exclusions),
 	// applied to each protection as it starts and on every change.
-	polStore := policy.Open(filepath.Join(task.StateDir(cfg), policy.FileName))
+	polStore := policy.Open(polPath)
+	// A new dashboard config takes effect by restarting (at most once).
+	probe := probeServer(c)
+	polStore.OnChange(func(p *policy.Policy) {
+		if rt.Want(p, probe) {
+			go restartAfter(internalStop, restartJitter())
+		}
+	})
+	go func() {
+		started := time.Now()
+		healthy := false
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for range t.C {
+			// The overlay server.url lost the server: fall back once.
+			if rt.CheckContact(heartbeat.LastContact()) {
+				go restartAfter(internalStop, restartJitter())
+				return
+			}
+			if !healthy && time.Since(started) >= 10*time.Minute {
+				rt.MarkHealthy()
+				healthy = true
+			}
+		}
+	}()
 	// Script content (Windows: AMSI; Linux: interpreters' code) scanned with
 	// the YARA rules; its rules are attached once the YARA scanner exists.
 	scripts := &scriptscan.Scanner{
@@ -320,8 +370,10 @@ func run(configPath string, stop <-chan struct{}) {
 	if err := config.Watch(configPath, func(newCfg *config.Config) {
 		cfg.Agent.Name = newCfg.Agent.Name
 		cfg.Agent.Group = newCfg.Agent.Group
-		cfg.Server.URL = newCfg.Server.URL
-		c.BaseURL = newCfg.Server.URL
+		if !rt.OverlaySetsURL() { // the dashboard's server.url wins until it changes
+			cfg.Server.URL = newCfg.Server.URL
+			c.BaseURL = newCfg.Server.URL
+		}
 	}); err != nil {
 		slog.Warn("config watcher failed to start", "err", err)
 	}
@@ -896,7 +948,11 @@ func run(configPath string, stop <-chan struct{}) {
 		}
 	}()
 
-	<-stop
+	select {
+	case <-stop:
+	case <-internalStop:
+		restarting = true
+	}
 	slog.Info("shutting down", "reason", getStopReason())
 	heartbeat.SendStopping(cfg, c, getStopReason())
 	stopFlows()
