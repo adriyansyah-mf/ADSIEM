@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/siem-platform/agent/internal/config"
 )
 
 // Path is the agent endpoint that returns this agent's group policy.
@@ -101,13 +103,18 @@ type Settings struct {
 	QuickScanTime    string      `json:"quick_scan_time"`
 	FullScanSchedule string      `json:"full_scan_schedule"`
 	Exclusions       []Exclusion `json:"exclusions"`
+	// AgentConfig is the config.yaml overlay the group sets from the dashboard;
+	// nil keeps the local config.
+	AgentConfig *config.Overlay `json:"agent_config,omitempty"`
 }
 
 // Policy is one version of the settings.
 type Policy struct {
-	Group    string   `json:"group"`
-	Version  string   `json:"version"`
-	Settings Settings `json:"settings"`
+	Group   string `json:"group"`
+	Version string `json:"version"`
+	// ConfigVersion is the overlay version from the server; "" means no overlay.
+	ConfigVersion string   `json:"config_version,omitempty"`
+	Settings      Settings `json:"settings"`
 }
 
 // Default is what runs before the first policy arrives: everything on, as
@@ -248,16 +255,27 @@ type Store struct {
 	onChange []func(*Policy)
 }
 
+// Load reads the saved policy file without starting a store (used at boot). It
+// returns nil when the file is missing or unreadable as JSON.
+func Load(path string) *Policy {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var p Policy
+	if json.Unmarshal(b, &p) != nil {
+		return nil
+	}
+	return &p
+}
+
 // Open loads the saved policy (else Default).
 func Open(path string) *Store {
 	s := &Store{path: path, wake: make(chan struct{}, 1)}
 	p := Default()
-	if b, err := os.ReadFile(path); err == nil {
-		var saved Policy
-		if json.Unmarshal(b, &saved) == nil && saved.Version != "" {
-			p = &saved
-			slog.Info("policy: loaded", "group", p.Group, "version", p.Version)
-		}
+	if saved := Load(path); saved != nil && saved.Version != "" {
+		p = saved
+		slog.Info("policy: loaded", "group", p.Group, "version", p.Version)
 	}
 	s.cur.Store(p)
 	return s

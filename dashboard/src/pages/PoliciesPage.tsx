@@ -4,6 +4,8 @@ import { Loader2, Plus, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-reac
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 import MlFalsePositives from '@/components/MlFalsePositives'
+import type { AgentConfig } from '@/types'
+import { AgentConfigEditor, pruneAgentConfig } from './policies/AgentConfigEditor'
 
 type Scope = 'prevention' | 'malware' | 'yara' | 'ransomware' | 'script' | 'ml' | 'ioa' | 'alerts'
 type Kind = 'path_prefix' | 'image' | 'sha256' | 'command_line'
@@ -34,6 +36,7 @@ interface Settings {
   quick_scan_time: string
   full_scan_schedule: string
   exclusions: Exclusion[]
+  agent_config?: AgentConfig | null
 }
 
 interface GroupRow {
@@ -135,7 +138,7 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
               <RotateCcw size={13} /> Use default policy
             </button>
           )}
-          <button onClick={() => save.mutate(s)} disabled={save.isPending}
+          <button onClick={() => save.mutate({ ...s, agent_config: pruneAgentConfig(s.agent_config, true) })} disabled={save.isPending}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm disabled:opacity-50">
             <Save size={13} /> {save.isPending ? 'Saving…' : 'Save'}
           </button>
@@ -387,6 +390,8 @@ function Editor({ group, onClose }: { group: string; onClose: () => void }) {
           </div>
         )}
       </section>
+
+      <AgentConfigEditor value={s.agent_config ?? null} onChange={v => set({ agent_config: v })} />
     </div>
   )
 }

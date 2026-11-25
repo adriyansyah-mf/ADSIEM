@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -37,3 +38,6 @@ func signalStopReason() string {
 	}
 	return "service_stop"
 }
+
+// underServiceManager: systemd sets INVOCATION_ID for the units it starts.
+func underServiceManager() bool { return os.Getenv("INVOCATION_ID") != "" }

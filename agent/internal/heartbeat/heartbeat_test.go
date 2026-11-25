@@ -137,3 +137,29 @@ func TestIntegrityHashesBinaryAndConfig(t *testing.T) {
 		t.Fatalf("the failure count must reset after a good hash: %+v", in)
 	}
 }
+
+// The loop always reports the config status, "" included: the server stores
+// what it gets, so an empty version or error clears the one it had. Stopping
+// and uninstall-check heartbeats have no status and must not clear it.
+func TestConfigStatusIsSentEvenWhenEmpty(t *testing.T) {
+	old := ConfigStatus
+	t.Cleanup(func() { ConfigStatus = old })
+	ConfigStatus = func() (string, string) { return "", "" }
+	p := HeartbeatRequest{AgentID: "a"}
+	addConfigStatus(&p)
+	b, _ := json.Marshal(p)
+	if !strings.Contains(string(b), `"config_version":""`) || !strings.Contains(string(b), `"config_error":""`) {
+		t.Fatalf("empty config status not sent: %s", b)
+	}
+	ConfigStatus = func() (string, string) { return "0123456789abcdef", "boom" }
+	p = HeartbeatRequest{AgentID: "a"}
+	addConfigStatus(&p)
+	b, _ = json.Marshal(p)
+	if !strings.Contains(string(b), `"config_version":"0123456789abcdef"`) || !strings.Contains(string(b), `"config_error":"boom"`) {
+		t.Fatalf("config status lost: %s", b)
+	}
+	b, _ = json.Marshal(HeartbeatRequest{AgentID: "a", Status: "stopping"})
+	if strings.Contains(string(b), "config_") {
+		t.Fatalf("stopping heartbeat carries a config status: %s", b)
+	}
+}

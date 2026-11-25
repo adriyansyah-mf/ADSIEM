@@ -194,6 +194,12 @@ class AgentOut(BaseModel):
     # per telemetry sensor from the last heartbeat (app/services/sensor_health.py)
     sensor_health: dict | None = None
     sensor_health_at: datetime | None = None
+    # the group policy's agent config overlay: the version the agent runs ("" its
+    # local config), its last config error, and the version its group expects
+    # (filled by the routes from agent_policy.effective; "" for no overlay)
+    config_version: str | None = None
+    config_error: str | None = None
+    config_expected: str | None = None
     model_config = {"from_attributes": True}
 
     @computed_field
@@ -328,8 +334,19 @@ class HeartbeatRequest(BaseModel):
     # the host's network isolation as the agent sees it (agents >= 1.34.4):
     # ransomguard isolates without a task, so only the agent knows
     isolated: bool | None = None
+    # the agent config overlay running ("" for the local config) and the last
+    # config error (agents with the dashboard config); unset keeps the stored ones
+    config_version: str | None = Field(None, max_length=64)
+    config_error: str | None = Field(None, max_length=500)
 
-    @field_validator("evidence_health", "update", "web_block_health", "sensor_health", mode="wrap")
+    @field_validator("config_error", mode="before")
+    @classmethod
+    def clip_config_error(cls, value):
+        # a long error must not fail the heartbeat: keep its start
+        return value[:500] if isinstance(value, str) else value
+
+    @field_validator("evidence_health", "update", "web_block_health", "sensor_health", "config_version",
+                     mode="wrap")
     @classmethod
     def drop_invalid_evidence_health(cls, value, handler):
         # An invalid or unbounded health object is rejected on its own: the

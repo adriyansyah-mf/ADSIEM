@@ -26,6 +26,7 @@ from app.schemas.schemas import (
 )
 from pydantic import BaseModel, Field
 from typing import Literal
+from app.services import agent_policy
 from app.services.audit import audit_log
 
 router = APIRouter(tags=["agents"])
@@ -90,6 +91,13 @@ async def download_package(
         filename=filename,
     )
 
+async def _with_config_expected(db: AsyncSession, agent: Agent) -> AgentOut:
+    """AgentOut with the agent config version its group's policy expects
+    (agent_policy.effective caches it per group)."""
+    out = AgentOut.model_validate(agent)
+    out.config_expected = (await agent_policy.effective(db, agent.group_id))["config_version"]
+    return out
+
 @router.get("/api/agents", response_model=PaginatedResponse)
 async def list_agents(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -112,7 +120,7 @@ async def list_agents(
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
     agents = result.scalars().all()
     return PaginatedResponse(total=total, page=page, page_size=page_size,
-                             items=[AgentOut.model_validate(a) for a in agents])
+                             items=[await _with_config_expected(db, a) for a in agents])
 
 @router.post("/api/agent/enroll", response_model=EnrollResponse, status_code=201)
 async def enroll_agent(
@@ -319,7 +327,7 @@ async def get_agent(
         db, Agent, agent_id, group_filter,
         options=[selectinload(Agent.log_sources)], detail="Agent not found",
     )
-    return AgentOut.model_validate(agent)
+    return await _with_config_expected(db, agent)
 
 @router.put("/api/agents/{agent_id}", response_model=AgentOut)
 async def update_agent(

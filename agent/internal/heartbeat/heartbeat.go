@@ -66,6 +66,12 @@ type HeartbeatRequest struct {
 	// Isolated: whether the host is network-isolated (Isolation); ransomguard
 	// isolates without a task, so the server learns it only from here.
 	Isolated *bool `json:"isolated,omitempty"`
+	// The dashboard config overlay running ("" for the local config) and the
+	// last config error ("" for none), from ConfigStatus. The loop always sets
+	// both, so "" reaches the server and clears what it stored; heartbeats
+	// without a status (stopping, uninstall check) leave them out.
+	ConfigVersion *string `json:"config_version,omitempty"`
+	ConfigError   *string `json:"config_error,omitempty"`
 }
 
 // Updater, when set, reports its status on every heartbeat and receives the
@@ -367,6 +373,19 @@ var SensorHealth func() any
 // Isolation, when set, returns whether the host is isolated (nil: unknown).
 var Isolation func() *bool
 
+// ConfigStatus, when set, returns the dashboard config version running and
+// the last config error for the heartbeat.
+var ConfigStatus func() (version, errMsg string)
+
+// addConfigStatus puts ConfigStatus into p, empty values included.
+func addConfigStatus(p *HeartbeatRequest) {
+	if ConfigStatus == nil {
+		return
+	}
+	version, errMsg := ConfigStatus()
+	p.ConfigVersion, p.ConfigError = &version, &errMsg
+}
+
 // SupportsEvidenceV2 reports whether the last successful heartbeat advertised
 // durable ingest protocol 2. The evidence sender sends nothing until it does.
 func SupportsEvidenceV2() bool { return evidenceV2.Load() }
@@ -432,6 +451,7 @@ func Loop(
 		if Isolation != nil {
 			payload.Isolated = Isolation()
 		}
+		addConfigStatus(&payload)
 		payload.Update = updateStatus()
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
 		if err != nil {

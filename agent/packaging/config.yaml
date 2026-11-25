@@ -1,3 +1,4 @@
+# Only agent.buffer_size can be overridden from the dashboard (Policies -> Agent config).
 agent:
   id: ""
   name: ""               # set to hostname if blank at runtime
@@ -6,6 +7,7 @@ agent:
   enrollment_token: ""   # set this OR use AGENT_ENROLLMENT_TOKEN env var
   buffer_size: 10000
 
+# Can be overridden from the dashboard (Policies -> Agent config).
 server:
   url: http://your-siem-server:8000
   heartbeat_interval: 30
@@ -14,6 +16,7 @@ config_version: 2
 
 # Containment (block_ip / isolate from the console or SOAR). Off means those
 # tasks fail instead of being applied; the server's address is never blocked.
+# Can be overridden from the dashboard (Policies -> Agent config).
 firewall:
   enabled: true
   backend: auto          # Linux: nft, Windows: netsh
@@ -23,6 +26,7 @@ firewall:
 # Network telemetry (connect/accept/bind/DNS via eBPF; needs root). It feeds IP
 # IoC matching, beaconing, UEBA host features and the lateral movement graph.
 # snapshot_fallback polls `ss` every 10 s where eBPF cannot attach.
+# Can be overridden from the dashboard (Policies -> Agent config).
 netwatch:
   enabled: true
   snapshot_fallback: true
@@ -48,6 +52,7 @@ logs:
 # once the server advertises it (EVIDENCE_INGEST_ENABLED) and per the rollout
 # in docs/operations/agent-evidence-recovery.md. On first start the legacy
 # spill is imported into the journal (the file itself is kept).
+# Can be overridden from the dashboard (Policies -> Agent config).
 # evidence:
 #   enabled: true
 #   dir: evidence            # inside agent.state_dir (/var/lib/siem-agent)

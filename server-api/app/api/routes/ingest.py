@@ -305,6 +305,11 @@ async def heartbeat(
                if body.sensor_health is not None else None)
     if sensors is not None:
         evidence |= {"sensor_health": sensors, "sensor_health_at": now}
+    # the agent config overlay status (agents with the dashboard config)
+    if body.config_version is not None:
+        evidence["config_version"] = body.config_version
+    if body.config_error is not None:
+        evidence["config_error"] = body.config_error
     anomaly, restarted = await _session_anomaly(redis, agent.id, body)
     if restarted:
         await _fail_interrupted_tasks(db, agent.id, now)

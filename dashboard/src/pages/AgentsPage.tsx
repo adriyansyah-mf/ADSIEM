@@ -34,6 +34,28 @@ function SensorBadges({ sensors }: { readonly sensors?: Record<string, AgentSens
   </div>
 }
 
+type ConfigStatus = 'diterapkan' | 'pending' | 'error'
+
+/** Status of the group's dashboard config overlay; null when the server does not know what to expect or the agent never reported one (an agent too old for the overlay). */
+function configStatus(a: Agent): ConfigStatus | null {
+  if (a.config_expected === null || a.config_expected === undefined) return null
+  if (a.config_version === null || a.config_version === undefined) return null
+  if (a.config_error) return 'error'
+  return a.config_version === a.config_expected ? 'diterapkan' : 'pending'
+}
+
+function ConfigBadge({ agent }: { readonly agent: Agent }) {
+  const status = configStatus(agent)
+  if (!status) return null
+  const tone = status === 'error' ? 'border-red-500/40 text-red-600 dark:text-red-400'
+    : status === 'pending' ? 'border-amber-500/40 text-amber-600 dark:text-amber-400'
+      : 'border-green-500/40 text-green-600 dark:text-green-400'
+  const title = status === 'error' ? agent.config_error ?? ''
+    : status === 'pending' ? `Menunggu agent restart ke config ${agent.config_expected || 'lokal'}`
+      : agent.config_expected ? `Config ${agent.config_expected}` : 'Tanpa Agent config: config lokal'
+  return <span title={title} className={`rounded border px-1.5 py-0.5 text-[11px] font-medium ${tone}`}>{status}</span>
+}
+
 export default function AgentsPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
@@ -56,6 +78,8 @@ export default function AgentsPage() {
       exportValue: row => row.evidence?.status ?? 'not_reported' },
     { key: 'sensors', header: 'Sensors', render: row => <SensorBadges sensors={row.sensor_health} />,
       exportValue: row => Object.entries(row.sensor_health ?? {}).map(([n, s]) => `${n}:${s.running ? 'on' : 'off'}`).join(' ') },
+    { key: 'config', header: 'Config', render: row => <ConfigBadge agent={row} />,
+      exportValue: row => configStatus(row) ?? '' },
     { key: 'version', header: 'Version', render: row => <span className="font-mono">{row.version ?? '—'}</span> },
     { key: 'last_seen_at', header: 'Last seen', render: row => row.last_seen_at ? <time className="whitespace-nowrap" dateTime={row.last_seen_at} title={new Date(row.last_seen_at).toLocaleString()}>{formatDistanceToNow(new Date(row.last_seen_at), { addSuffix: true })}</time> : 'Never' },
     { key: 'sources', header: 'Log sources', render: row => row.log_sources.length, exportValue: row => row.log_sources.length },

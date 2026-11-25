@@ -48,6 +48,49 @@ export interface Agent {
   /** Telemetry sensors from the last heartbeat (etw, procexec, netwatch, linsensor); absent from older agents. */
   sensor_health?: Record<string, AgentSensorStat> | null
   sensor_health_at?: string | null
+  /** Dashboard config overlay version the agent runs ("": local config only); absent from older API servers. */
+  config_version?: string | null
+  /** Why the agent did not (fully) apply the overlay; null when it did. */
+  config_error?: string | null
+  /** Overlay version the agent's group policy expects ("": none); null or absent: unknown, no badge. */
+  config_expected?: string | null
+}
+
+/** Mirrors AgentConfigOverlay (server-api/app/services/agent_config.py). Every field is optional:
+ * unset keeps the agent's local value, while false, 0 or [] override it. Never send null. */
+export interface AgentConfig {
+  server?: { url?: string; heartbeat_interval?: number }
+  agent?: { buffer_size?: number }
+  fim?: { enabled?: boolean }
+  firewall?: {
+    enabled?: boolean
+    backend?: 'auto' | 'nft' | 'netsh' | 'noop'
+    dry_run?: boolean
+    protected_ips?: string[]
+    isolation_release_after_offline_minutes?: number
+  }
+  netwatch?: { enabled?: boolean; snapshot_fallback?: boolean }
+  etw?: { mode?: 'auto' | 'on' | 'off'; disabled_events?: ('file' | 'image')[] }
+  detect?: { enabled?: boolean; rules?: string[]; max_blocked?: number; max_blocks_per_minute?: number }
+  linux_sensor?: { disabled?: boolean; disabled_events?: string[] }
+  ransomware?: {
+    disabled?: boolean
+    canary_visible?: boolean
+    allow_images?: string[]
+  }
+  yara?: { watch_paths?: string[]; max_file_size_mb?: number }
+  memory_sweep?: { disabled?: boolean; interval_minutes?: number }
+  evidence?: {
+    enabled?: boolean
+    max_bytes?: number
+    segment_bytes?: number
+    reserved_bytes?: number
+    max_event_bytes?: number
+  }
+  prevention?: { disabled?: boolean }
+  notify?: { disabled?: boolean }
+  project_scan?: { disabled?: boolean }
+  update?: { disabled?: boolean }
 }
 
 export interface AgentSensorStat {

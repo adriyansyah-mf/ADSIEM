@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -109,5 +110,29 @@ func TestStoreSyncSaveAndChange(t *testing.T) {
 	}
 	if again := Open(path).Current(); again.Version != "v1" || again.Group != "servers" || len(again.Settings.Exclusions) != 1 {
 		t.Fatalf("not saved: %+v", again)
+	}
+}
+
+func TestPolicyAgentConfigRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), FileName)
+	if err := os.WriteFile(p, []byte(`{"config_version":"abc","settings":{"agent_config":{"fim":{"enabled":false}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := Load(p)
+	if got == nil {
+		t.Fatal("Load returned nil")
+	}
+	if got.ConfigVersion != "abc" {
+		t.Fatalf("ConfigVersion = %q", got.ConfigVersion)
+	}
+	ac := got.Settings.AgentConfig
+	if ac == nil || ac.FIM == nil || ac.FIM.Enabled == nil || *ac.FIM.Enabled {
+		t.Fatalf("AgentConfig.FIM.Enabled not false: %+v", ac)
+	}
+}
+
+func TestLoadMissing(t *testing.T) {
+	if Load(filepath.Join(t.TempDir(), "nope.json")) != nil {
+		t.Fatal("Load of a missing file must be nil")
 	}
 }

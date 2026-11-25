@@ -13,11 +13,12 @@ import re
 import time
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import AgentPolicy, MlFalsePositive
+from app.services.agent_config import AgentConfigOverlay, config_version_of, dump_overlay
 
 DEFAULT_GROUP = "default"
 CACHE_SECONDS = 30.0
@@ -117,6 +118,12 @@ class PolicySettings(BaseModel):
     quick_scan_time: str = Field(default="", max_length=32)
     full_scan_schedule: str = Field(default="", max_length=32)
     exclusions: list[Exclusion] = Field(default_factory=list, max_length=MAX_EXCLUSIONS)
+    # part of the agents' config.yaml (services/agent_config.py); None: the local config
+    agent_config: AgentConfigOverlay | None = None
+
+    @field_serializer("agent_config")
+    def _agent_config(self, v: AgentConfigOverlay | None) -> dict | None:
+        return dump_overlay(v)  # only the fields set; nothing set is None
 
     @field_validator("quick_scan_time")
     @classmethod
@@ -180,6 +187,9 @@ class PolicySettings(BaseModel):
 
 
 def version_of(settings: dict) -> str:
+    if "agent_config" in settings and settings["agent_config"] is None:
+        # policies without an overlay keep the version they had before it existed
+        settings = {k: v for k, v in settings.items() if k != "agent_config"}
     return hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:16]
 
 
@@ -199,8 +209,10 @@ async def ml_false_positives(db: AsyncSession) -> list[str]:
 
 async def effective(db: AsyncSession, group_id: str | None) -> dict:
     """{"group": the group whose policy applies, "settings": validated dict, "version": hash,
+    "config_version": hash of settings.agent_config alone ("" for none),
     "ml_false_positives": hashes for_agent adds}. The version covers the false
-    positives too, so agents fetch the policy again when the list changes."""
+    positives and the overlay too, so agents fetch the policy again when either
+    changes; config_version changes only with the overlay (agents restart for it)."""
     group_id = group_id or DEFAULT_GROUP
     now = time.monotonic()
     hit = _cache.get(group_id)
@@ -215,16 +227,22 @@ async def effective(db: AsyncSession, group_id: str | None) -> dict:
     settings = PolicySettings.model_validate(row.settings if row else {}).model_dump()
     fps = await ml_false_positives(db)
     version = version_of({**settings, "ml_false_positives": fps} if fps else settings)
-    out = {"group": source, "settings": settings, "version": version, "ml_false_positives": fps}
+    out = {"group": source, "settings": settings, "version": version,
+           "config_version": config_version_of(settings["agent_config"]), "ml_false_positives": fps}
     _cache[group_id] = (now, out)
     return out
 
 
 def for_agent(eff: dict) -> dict:
     """The policy as agents get it: the ML false positives become sha256
-    exclusions with the ml scope, which every agent with static ML honours."""
+    exclusions with the ml scope, which every agent with static ML honours.
+    config_version goes at the top level (policy.Policy.ConfigVersion), and
+    settings carry no agent_config key when the group has no overlay."""
     have = {e["value"] for e in eff["settings"]["exclusions"] if e["kind"] == "sha256" and "ml" in e["scopes"]}
     extra = [{"kind": "sha256", "value": h, "scopes": ["ml"], "comment": "ML false positive"}
              for h in eff["ml_false_positives"] if h not in have]
     settings = {**eff["settings"], "exclusions": eff["settings"]["exclusions"] + extra}
-    return {"group": eff["group"], "settings": settings, "version": eff["version"]}
+    if settings.get("agent_config") is None:
+        settings.pop("agent_config", None)
+    return {"group": eff["group"], "settings": settings, "version": eff["version"],
+            "config_version": eff["config_version"]}
