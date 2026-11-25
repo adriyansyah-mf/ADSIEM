@@ -75,8 +75,6 @@ export interface AgentConfig {
   linux_sensor?: { disabled?: boolean; disabled_events?: string[] }
   ransomware?: {
     disabled?: boolean
-    canary_dirs?: string[]
-    canary_names?: string[]
     canary_visible?: boolean
     allow_images?: string[]
   }

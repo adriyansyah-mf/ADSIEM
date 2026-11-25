@@ -36,11 +36,12 @@ function SensorBadges({ sensors }: { readonly sensors?: Record<string, AgentSens
 
 type ConfigStatus = 'diterapkan' | 'pending' | 'error'
 
-/** Status of the group's dashboard config overlay; null when the server does not know what to expect. */
+/** Status of the group's dashboard config overlay; null when the server does not know what to expect or the agent never reported one (an agent too old for the overlay). */
 function configStatus(a: Agent): ConfigStatus | null {
   if (a.config_expected === null || a.config_expected === undefined) return null
+  if (a.config_version === null || a.config_version === undefined) return null
   if (a.config_error) return 'error'
-  return (a.config_version ?? '') === a.config_expected ? 'diterapkan' : 'pending'
+  return a.config_version === a.config_expected ? 'diterapkan' : 'pending'
 }
 
 function ConfigBadge({ agent }: { readonly agent: Agent }) {

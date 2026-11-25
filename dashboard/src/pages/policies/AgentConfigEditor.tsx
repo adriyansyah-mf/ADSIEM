@@ -177,7 +177,7 @@ export function AgentConfigEditor({ value, onChange }: { value: AgentConfig | nu
             onChange={e => set('server', 'url')(e.target.value === '' ? undefined : e.target.value)}
             className={`${inputCls} font-mono`} />
         </Field>
-        <NumField {...bind('server', 'heartbeat_interval')} min={10} max={3600} hint="Detik, 10–3600." />
+        <NumField {...bind('server', 'heartbeat_interval')} min={10} max={240} hint="Detik, 10–240 (agent dianggap offline setelah 300 detik)." />
         <NumField {...bind('agent', 'buffer_size')} min={1} max={INT_MAX} hint="Jumlah event di buffer memori." />
       </Section>
 
@@ -210,8 +210,6 @@ export function AgentConfigEditor({ value, onChange }: { value: AgentConfig | nu
       <Section title="Ransomware">
         <TriBool {...bind('ransomware', 'disabled')} />
         <TriBool {...bind('ransomware', 'canary_visible')} />
-        <ListField {...bind('ransomware', 'canary_dirs')} />
-        <ListField {...bind('ransomware', 'canary_names')} />
         <ListField {...bind('ransomware', 'allow_images')} />
       </Section>
 
