@@ -1,7 +1,7 @@
 # yaracheck: the agents' own YARA engine (agent/internal/yara) as a CLI, so
 # rules validate here exactly as they compile on endpoints
 # (app/services/yara_capability.py). Same module, same commit as the agents.
-FROM golang:1.26-alpine AS yaracheck
+FROM golang:1.27-alpine AS yaracheck
 WORKDIR /src/agent
 COPY agent/go.mod agent/go.sum ./
 COPY agent/internal/yara/ ./internal/yara/
