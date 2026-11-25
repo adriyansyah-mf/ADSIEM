@@ -1,0 +1,129 @@
+# Dependabot: pembaruan dependensi mingguan, dikelompokkan agar PR tidak membludak.
+# Dokumentasi: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+
+updates:
+  # GitHub Actions di .github/workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+    labels: ["dependencies", "ci"]
+
+  # Go agent (go.work juga memuat tests/agent)
+  - package-ecosystem: gomod
+    directory: /agent
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      go-agent:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(agent)"
+    labels: ["dependencies", "agent"]
+
+  - package-ecosystem: gomod
+    directory: /tests/agent
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      go-agent-tests:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(agent-tests)"
+    labels: ["dependencies", "agent"]
+
+  # Dashboard React (npm)
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      npm-dashboard:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(dashboard)"
+    labels: ["dependencies", "dashboard"]
+
+  # Python: server-api, worker, ml
+  - package-ecosystem: pip
+    directory: /server-api
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      pip-server-api:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(server-api)"
+    labels: ["dependencies", "server-api"]
+
+  - package-ecosystem: pip
+    directory: /worker
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      pip-worker:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(worker)"
+    labels: ["dependencies", "worker"]
+
+  - package-ecosystem: pip
+    directory: /ml
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      pip-ml:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(ml)"
+    labels: ["dependencies", "ml"]
+
+  # Docker base image (Dockerfile per komponen)
+  - package-ecosystem: docker
+    directory: /agent
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps(agent-docker)"
+    labels: ["dependencies", "docker"]
+
+  - package-ecosystem: docker
+    directory: /dashboard
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps(dashboard-docker)"
+    labels: ["dependencies", "docker"]
+
+  - package-ecosystem: docker
+    directory: /server-api
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps(server-api-docker)"
+    labels: ["dependencies", "docker"]
+
+  - package-ecosystem: docker
+    directory: /worker
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps(worker-docker)"
+    labels: ["dependencies", "docker"]
