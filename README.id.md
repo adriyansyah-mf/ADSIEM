@@ -146,7 +146,7 @@ dan `.zip` bertanda tangan; rilis terbaru adalah **agent-v1.36.0**. Server tetap
 agen versi lama, sehingga armada agen bisa di-update bertahap.
 
 **Melaporkan kerentanan.** Jangan buka issue publik untuk masalah keamanan. Laporkan secara
-privat lewat **Security → Report a vulnerability** di repositori ini.
+privat lewat **Security → Report a vulnerability** di repositori ini. Cakupan dan waktu respons ada di [SECURITY.md](SECURITY.md).
 
 > **Peringatan keamanan:** Kredensial default (`admin` / `admin123`) hanya untuk memulai
 > instalasi baru. Ganti `JWT_SECRET`, `POSTGRES_PASSWORD`, `AGENT_ENROLLMENT_TOKEN`, dan
