@@ -13,7 +13,7 @@ explicit `false`, `0` or `[]` overrides it. **Overlay fields win over
 
 | Section | Fields |
 |---|---|
-| `server` | `url`, `heartbeat_interval` (10-3600) |
+| `server` | `url`, `heartbeat_interval` (10-240; the server marks an agent offline after 300 s without a heartbeat) |
 | `agent` | `buffer_size` |
 | `fim` | `enabled` |
 | `firewall` | `enabled`, `backend` (auto, nft, netsh, noop), `dry_run`, `protected_ips`, `isolation_release_after_offline_minutes` |
@@ -21,7 +21,7 @@ explicit `false`, `0` or `[]` overrides it. **Overlay fields win over
 | `etw` | `mode` (auto, on, off), `disabled_events` (file, image) |
 | `detect` | `enabled`, `rules`, `max_blocked`, `max_blocks_per_minute` |
 | `linux_sensor` | `disabled`, `disabled_events` |
-| `ransomware` | `disabled`, `canary_dirs`, `canary_names`, `canary_visible`, `allow_images` |
+| `ransomware` | `disabled`, `canary_visible`, `allow_images` |
 | `yara` | `watch_paths`, `max_file_size_mb` (1-1024) |
 | `memory_sweep` | `disabled`, `interval_minutes` (1-1440) |
 | `evidence` | `enabled`, `max_bytes`, `segment_bytes`, `reserved_bytes`, `max_event_bytes` |
@@ -31,8 +31,9 @@ Lists hold at most 500 items of 1-1024 characters. The server rejects values
 out of range when you save.
 
 **Stays local** (edit `config.yaml` on the host): agent identity and token,
-state paths, live response, anti-tamper, update keys, and every other field not
-in the table. `logs` and `fim.watch_paths` are not in the overlay either: they
+state paths, live response, anti-tamper, update keys, `ransomware.canary_dirs`
+and `ransomware.canary_names` (file paths the agent writes as SYSTEM/root,
+which the server must not choose), and every other field not in the table. `logs` and `fim.watch_paths` are not in the overlay either: they
 are already managed per agent from the server through the heartbeat.
 
 **`server.url`** may change the port or path only, on the same host, and must
@@ -49,8 +50,9 @@ version restarts agents; other policy changes do not.
 - Under the Windows service (SCM) or systemd, the agent shuts down normally
   and exits with code 3, so the service manager starts it again. It waits a
   random 0-60 s first, so a group does not restart in the same second.
-- In console mode nothing would start it again: it only logs
-  `config changed: restart required`.
+- In console mode nothing would start it again: it logs
+  `config changed: restart required` and reports the config error
+  `restart required (not under a service manager)`.
 - A new `server.url` is probed first, with a POST to `/api/ingest/policy`
   using the agent token. If it fails, the version is rejected and the agent
   does not restart.
@@ -62,19 +64,25 @@ version restarts agents; other policy changes do not.
 
 A bad overlay must not take the agent down.
 
-- **Crash guard:** if one overlay version is started 3 times within 10 minutes
-  without ever running healthy, it is rejected and the agent boots on its local
-  config. An agent counts as healthy after 10 minutes of uptime. Error:
+- **Crash guard:** after 3 unhealthy starts within 10 minutes, the next start
+  rejects the version and the agent boots on its local config. An agent counts
+  as healthy after 10 minutes of uptime. Error:
   `config <version> rejected: agent kept failing to start`.
-- **URL fallback:** if the overlay's `server.url` has no successful contact for
-  10 minutes after boot, the version is rejected and the agent restarts on the
-  local URL. Error: `server.url <url> unreachable: no contact for 10m0s`.
+- **URL fallback:** if the overlay's `server.url` has had no successful
+  contact since boot, 10 minutes after boot the version is rejected and the
+  agent restarts on the local URL. Error:
+  `server.url <url> unreachable: no contact for 10m0s`. Once the URL has
+  reached the server after boot it counts as working: a later outage never
+  drops the overlay.
 - A rejected version is never applied again on that agent (the last 100 are
   kept in `agent_config_state.json` in the state dir). To retry, change the
   overlay: that makes a new version.
 - Other errors: `config <version> rejected` (seen again after a rejection),
   `server.url <url> unreachable: <reason>` (probe failed), and
   `server.url: host must stay <host>` (refused field; the rest still applies).
+- When the policy is back on the version the agent runs (or the overlay is
+  removed while the agent runs its local config), errors about other versions
+  clear; only the refused fields of the running version stay.
 
 ## Reading the status on the Agents page
 
@@ -83,14 +91,18 @@ Each agent shows a badge, compared with the version its group expects:
 | Badge | Meaning |
 |---|---|
 | `diterapkan` | The agent runs the expected config (or the group has none and it runs its local one). |
-| `pending` | Waiting for the agent to restart into the expected config. Stays so while the agent is offline or in console mode. |
+| `pending` | Waiting for the agent to restart into the expected config. Stays so while the agent is offline. |
 | `error` | The agent reported a config error; hover for the text. See the errors above. |
 
-No badge means the server does not know what to expect for that agent.
+No badge means the server does not know what to expect for that agent, or the
+agent never reported a config version (an agent older than this feature).
 
 ## Data folder ACL
 
 On Windows the ACL of the data directory (it holds `config.yaml` with the
 token) is re-applied on every service start, so a restart into a new config
-also restores it. This happens only under the SCM: a console run may point at
+also restores it: a fresh protected DACL with only SYSTEM and Administrators
+(full control, inherited by files and subfolders) replaces whatever ACEs the
+directory had, and `config.yaml` gets the same. A failure is logged as a
+warning and the agent starts anyway. This happens only under the SCM: a console run may point at
 a config in a user's folder. On Linux, `siem-agent-configure` sets chmod 0600.

@@ -98,7 +98,7 @@ Field yang boleh di-overlay (whitelist):
 | etw | `mode`, `disabled_events` |
 | detect | `enabled`, `rules`, `max_blocked`, `max_blocks_per_minute` |
 | linux_sensor | `disabled`, `disabled_events` |
-| ransomware | `disabled`, `canary_dirs`, `canary_names`, `canary_visible`, `allow_images` |
+| ransomware | `disabled`, `canary_visible`, `allow_images` (bukan `canary_dirs`/`canary_names`: path yang ditulis agent sebagai SYSTEM/root) |
 | yara | `watch_paths`, `max_file_size_mb` |
 | memory_sweep | `disabled`, `interval_minutes` |
 | evidence | `enabled`, `max_bytes`, `segment_bytes`, `reserved_bytes`, `max_event_bytes` |
@@ -193,7 +193,7 @@ mematikan proteksi.
 ### Server dan dashboard
 
 - Pydantic memvalidasi rentang nilai, misalnya:
-  - `heartbeat_interval` 10–3600.
+  - `heartbeat_interval` 10–240 (worker menandai agent offline setelah 300 detik).
   - `interval_minutes` ≥ 1.
   - `url` harus https.
   - enum `etw.mode` dan `firewall.backend`.

@@ -1,4 +1,4 @@
-# Can be overridden from the dashboard (Policies -> Agent config).
+# Only agent.buffer_size can be overridden from the dashboard (Policies -> Agent config).
 agent:
   id: ""
   name: ""               # set to hostname if blank at runtime
