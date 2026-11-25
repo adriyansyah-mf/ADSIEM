@@ -14,7 +14,7 @@ function cleanList(items: readonly string[]): string[] {
 /**
  * The overlay with unset fields and empty sections removed; null when nothing is set.
  * With cleanLists (on save), list items are trimmed and blank ones dropped: a list that was
- * only blanks becomes unset, while an explicit [] ("kosongkan") stays [].
+ * only blanks becomes unset, while an explicit [] ("clear") stays [].
  */
 export function pruneAgentConfig(c: AgentConfig | null | undefined, cleanLists = false): AgentConfig | null {
   if (!c) return null
@@ -40,7 +40,7 @@ export function pruneAgentConfig(c: AgentConfig | null | undefined, cleanLists =
 }
 
 const inputCls = 'w-full bg-muted border border-border rounded px-2 py-1.5 text-sm'
-const LOCAL = 'pakai nilai lokal'
+const LOCAL = 'use local value'
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -52,7 +52,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
-/** Three states: lokal (indeterminate) → on → off → lokal. */
+/** Three states: local (indeterminate) → on → off → local. */
 function TriBool({ label, value, onChange }: { label: string; value: boolean | undefined; onChange: (v: boolean | undefined) => void }) {
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => { if (ref.current) ref.current.indeterminate = value === undefined }, [value])
@@ -62,7 +62,7 @@ function TriBool({ label, value, onChange }: { label: string; value: boolean | u
       <input ref={ref} type="checkbox" checked={value === true} onChange={() => onChange(next)} />
       <span className="font-mono text-xs">{label}</span>
       <span className={`text-xs ${value === undefined ? 'text-muted-foreground' : 'font-medium'}`}>
-        {value === undefined ? 'lokal' : value ? 'on' : 'off'}
+        {value === undefined ? 'local' : value ? 'on' : 'off'}
       </span>
     </label>
   )
@@ -93,7 +93,7 @@ function EnumField<T extends string>({ label, hint, value, options, onChange }: 
   )
 }
 
-/** One item per line. Empty textarea: unset (local value); "kosongkan": an explicit []. */
+/** One item per line. Empty textarea: unset (local value); "clear": an explicit []. */
 function ListField({ label, hint, value, onChange, placeholder }: {
   label: string; hint?: string; value: string[] | undefined; onChange: (v: string[] | undefined) => void; placeholder?: string
 }) {
@@ -103,11 +103,11 @@ function ListField({ label, hint, value, onChange, placeholder }: {
       <div className="flex items-center gap-2">
         <span className="font-mono text-xs">{label}</span>
         <label className="ml-auto flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
-          <input type="checkbox" checked={cleared} onChange={e => onChange(e.target.checked ? [] : undefined)} /> kosongkan
+          <input type="checkbox" checked={cleared} onChange={e => onChange(e.target.checked ? [] : undefined)} /> clear
         </label>
       </div>
       <textarea rows={3} disabled={cleared} value={(value ?? []).join('\n')}
-        placeholder={cleared ? 'daftar kosong: menimpa nilai lokal' : placeholder ?? `${LOCAL} (satu item per baris)`}
+        placeholder={cleared ? 'empty list: overrides the local value' : placeholder ?? `${LOCAL} (one item per line)`}
         onChange={e => onChange(e.target.value.trim() === '' ? undefined : e.target.value.split('\n'))}
         onBlur={e => { const items = cleanList(e.target.value.split('\n')); onChange(items.length > 0 ? items : undefined) }}
         className={`${inputCls} text-xs font-mono disabled:opacity-50`} />
@@ -116,7 +116,7 @@ function ListField({ label, hint, value, onChange, placeholder }: {
   )
 }
 
-/** A list limited to fixed choices: lokal, or exactly the ones ticked (none ticked: []). */
+/** A list limited to fixed choices: local, or exactly the ones ticked (none ticked: []). */
 function ChoiceList<T extends string>({ label, hint, value, options, onChange }: {
   label: string; hint?: string; value: T[] | undefined; options: readonly T[]; onChange: (v: T[] | undefined) => void
 }) {
@@ -126,7 +126,7 @@ function ChoiceList<T extends string>({ label, hint, value, options, onChange }:
         <select value={value === undefined ? '' : 'set'} onChange={e => onChange(e.target.value ? [] : undefined)}
           className="bg-muted border border-border rounded px-2 py-1.5 text-sm">
           <option value="">{LOCAL}</option>
-          <option value="set">atur</option>
+          <option value="set">set</option>
         </select>
         {value !== undefined && options.map(o => (
           <label key={o} className="flex items-center gap-1 cursor-pointer">
@@ -163,22 +163,22 @@ export function AgentConfigEditor({ value, onChange }: { value: AgentConfig | nu
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-semibold text-sm">Agent config</h3>
         <span className="text-xs text-muted-foreground">
-          Menimpa config.yaml lokal agent di group ini. Field yang kosong memakai nilai lokal.
+          Overrides the local config.yaml of agents in this group. Empty fields keep the local value.
         </span>
       </div>
       <p className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-        Menyimpan perubahan merestart agent di group ini (±10 detik, dengan jeda acak hingga 1 menit).
+        Saving changes restarts the agents in this group (about 10 s, after a random delay of up to 1 minute).
       </p>
-      <p className="text-xs text-muted-foreground">Group dengan policy sendiri tidak mewarisi Agent config dari default.</p>
+      <p className="text-xs text-muted-foreground">A group with its own policy does not inherit the Agent config from the default group.</p>
 
       <Section title="Server">
-        <Field label="server.url" hint="Hanya port/path di host yang sama. Pindah host lewat config.yaml lokal.">
+        <Field label="server.url" hint="Port/path changes on the same host only. Moving to another host goes through the local config.yaml.">
           <input type="url" value={get('server', 'url') ?? ''} placeholder={LOCAL}
             onChange={e => set('server', 'url')(e.target.value === '' ? undefined : e.target.value)}
             className={`${inputCls} font-mono`} />
         </Field>
-        <NumField {...bind('server', 'heartbeat_interval')} min={10} max={240} hint="Detik, 10–240 (agent dianggap offline setelah 300 detik)." />
-        <NumField {...bind('agent', 'buffer_size')} min={1} max={INT_MAX} hint="Jumlah event di buffer memori." />
+        <NumField {...bind('server', 'heartbeat_interval')} min={10} max={240} hint="Seconds, 10–240 (an agent is marked offline after 300 s)." />
+        <NumField {...bind('agent', 'buffer_size')} min={1} max={INT_MAX} hint="Number of events held in the memory buffer." />
       </Section>
 
       <Section title="Firewall">
@@ -186,8 +186,8 @@ export function AgentConfigEditor({ value, onChange }: { value: AgentConfig | nu
         <TriBool {...bind('firewall', 'dry_run')} />
         <EnumField {...bind('firewall', 'backend')} options={['auto', 'nft', 'netsh', 'noop'] as const} />
         <NumField {...bind('firewall', 'isolation_release_after_offline_minutes')} min={0} max={INT_MAX}
-          hint="Menit offline sebelum isolasi dilepas." />
-        <ListField {...bind('firewall', 'protected_ips')} placeholder={`${LOCAL} (satu IP/CIDR per baris)`} />
+          hint="Minutes offline before isolation is released." />
+        <ListField {...bind('firewall', 'protected_ips')} placeholder={`${LOCAL} (one IP/CIDR per line)`} />
       </Section>
 
       <Section title="ETW">
@@ -197,8 +197,8 @@ export function AgentConfigEditor({ value, onChange }: { value: AgentConfig | nu
 
       <Section title="Detect">
         <TriBool {...bind('detect', 'enabled')} />
-        <NumField {...bind('detect', 'max_blocked')} min={0} max={INT_MAX} hint="0: default agent." />
-        <NumField {...bind('detect', 'max_blocks_per_minute')} min={0} max={INT_MAX} hint="0: default agent." />
+        <NumField {...bind('detect', 'max_blocked')} min={0} max={INT_MAX} hint="0: agent default." />
+        <NumField {...bind('detect', 'max_blocks_per_minute')} min={0} max={INT_MAX} hint="0: agent default." />
         <ListField {...bind('detect', 'rules')} />
       </Section>
 
@@ -215,18 +215,18 @@ export function AgentConfigEditor({ value, onChange }: { value: AgentConfig | nu
 
       <Section title="Memory sweep">
         <TriBool {...bind('memory_sweep', 'disabled')} />
-        <NumField {...bind('memory_sweep', 'interval_minutes')} min={1} max={1440} hint="Menit, 1–1440." />
+        <NumField {...bind('memory_sweep', 'interval_minutes')} min={1} max={1440} hint="Minutes, 1–1440." />
       </Section>
 
       <Section title="Evidence">
         <TriBool {...bind('evidence', 'enabled')} />
-        <NumField {...bind('evidence', 'max_bytes')} min={1} max={INT64_MAX} hint="Byte." />
-        <NumField {...bind('evidence', 'segment_bytes')} min={1} max={INT64_MAX} hint="Byte." />
-        <NumField {...bind('evidence', 'reserved_bytes')} min={0} max={INT64_MAX} hint="Byte." />
-        <NumField {...bind('evidence', 'max_event_bytes')} min={1} max={INT_MAX} hint="Byte." />
+        <NumField {...bind('evidence', 'max_bytes')} min={1} max={INT64_MAX} hint="Bytes." />
+        <NumField {...bind('evidence', 'segment_bytes')} min={1} max={INT64_MAX} hint="Bytes." />
+        <NumField {...bind('evidence', 'reserved_bytes')} min={0} max={INT64_MAX} hint="Bytes." />
+        <NumField {...bind('evidence', 'max_event_bytes')} min={1} max={INT_MAX} hint="Bytes." />
       </Section>
 
-      <Section title="Modul lain">
+      <Section title="Other modules">
         <TriBool {...bind('fim', 'enabled')} />
         <TriBool {...bind('netwatch', 'enabled')} />
         <TriBool {...bind('netwatch', 'snapshot_fallback')} />
