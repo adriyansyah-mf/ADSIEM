@@ -423,3 +423,75 @@ func TestCheckContactIgnoresLocalURL(t *testing.T) {
 		t.Fatal("reverted to the same url")
 	}
 }
+
+// A healthy run without the overlay must not credit the overlay's version:
+// v1 crashes twice, the overlay is removed, the local run turns healthy,
+// then the same v1 comes back and must still be guarded.
+func TestMarkHealthyOnlyCreditsRunningVersion(t *testing.T) {
+	c := useClock(t)
+	dir := t.TempDir()
+	p := pol(t, "v1", `{"fim":{"enabled":false}}`)
+	for i := 0; i < 2; i++ {
+		Boot(localCfg(), dir, p)
+		c.t = c.t.Add(time.Minute)
+	}
+	r := Boot(localCfg(), dir, pol(t, "", ``))
+	c.t = c.t.Add(10 * time.Minute) // MarkHealthy runs after 10 minutes of uptime
+	r.MarkHealthy()
+	c.t = c.t.Add(time.Minute) // v1's two old starts are now out of the window
+	for i := 0; i < 3; i++ {
+		cfg := localCfg()
+		Boot(cfg, dir, p)
+		if cfg.FIM.Enabled {
+			t.Fatalf("start %d rejected too early", i)
+		}
+		c.t = c.t.Add(time.Minute)
+	}
+	cfg := localCfg()
+	r = Boot(cfg, dir, p)
+	if !cfg.FIM.Enabled {
+		t.Fatal("crash guard off for v1 after a healthy run without it")
+	}
+	if _, e := r.Status(); !strings.Contains(e, "kept failing") {
+		t.Fatalf("err %q", e)
+	}
+}
+
+// A healthy run of a rejected version's local fallback must not credit it.
+func TestMarkHealthyNoopWhenVersionRejected(t *testing.T) {
+	c := useClock(t)
+	dir := t.TempDir()
+	p := pol(t, "v1", `{"fim":{"enabled":false}}`)
+	for i := 0; i < 4; i++ {
+		Boot(localCfg(), dir, p)
+		c.t = c.t.Add(time.Minute)
+	}
+	Boot(localCfg(), dir, p).MarkHealthy()
+	b, err := os.ReadFile(filepath.Join(dir, StateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"healthy":true`) {
+		t.Fatalf("rejected version marked healthy: %s", b)
+	}
+}
+
+func TestWantClearsStillDiffersWhenBackToRunning(t *testing.T) {
+	useClock(t)
+	dir := t.TempDir()
+	v1 := pol(t, "v1", `{"fim":{"enabled":false}}`)
+	r := Boot(localCfg(), dir, v1)
+	v2 := pol(t, "v2", `{}`)
+	r.Want(v2, okProbe)
+	r = Boot(localCfg(), dir, v1)
+	r.Want(v2, okProbe)
+	if _, e := r.Status(); !strings.Contains(e, "still differs") {
+		t.Fatalf("err %q", e)
+	}
+	if r.Want(v1, okProbe) {
+		t.Fatal("restart for the running version")
+	}
+	if _, e := r.Status(); e != "" {
+		t.Fatalf("stale err %q", e)
+	}
+}

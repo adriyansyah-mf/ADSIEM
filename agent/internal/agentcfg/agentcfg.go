@@ -137,9 +137,14 @@ func (r *Runtime) OverlaySetsURL() bool { return r.urlSet }
 
 // MarkHealthy records that the running version stayed up; it is called
 // after 10 minutes of uptime and ends the crash count of that version.
+// It credits only the overlay version actually running: a healthy local run
+// says nothing about a version that was not applied.
 func (r *Runtime) MarkHealthy() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.running == "" || r.st.Version != r.running {
+		return
+	}
 	r.st.Healthy, r.st.Starts = true, nil
 	r.save()
 }
@@ -156,6 +161,10 @@ func (r *Runtime) Want(p *policy.Policy, probe func(url string) error) (restart 
 	r.mu.Lock()
 	switch {
 	case v == r.running:
+		// The wanted version is running again: an earlier loop error is stale.
+		if strings.HasSuffix(r.errMsg, "still differs after restart") {
+			r.errMsg = ""
+		}
 		r.mu.Unlock()
 		return false
 	case slices.Contains(r.st.Rejected, v):
