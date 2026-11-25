@@ -144,7 +144,7 @@ tests. Agents are released from `agent-vX.Y.Z` tags as signed `.deb`, `.rpm`, `.
 agents, so a fleet can be updated in stages.
 
 **Reporting a vulnerability.** Please do not open a public issue for a security problem.
-Report it privately through **Security → Report a vulnerability** on this repository.
+Report it privately through **Security → Report a vulnerability** on this repository. See [SECURITY.md](SECURITY.md) for the scope and response times.
 
 > **Security Warning:** The default credentials (`admin` / `admin123`) exist only to bootstrap
 > a fresh install. Change `JWT_SECRET`, `POSTGRES_PASSWORD`, `AGENT_ENROLLMENT_TOKEN`, and the
