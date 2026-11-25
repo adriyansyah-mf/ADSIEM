@@ -89,7 +89,7 @@ Field yang boleh di-overlay (whitelist):
 
 | Bagian | Field |
 |---|---|
-| server | `url`, `heartbeat_interval` |
+| server | `url` (host sama saja, lihat bawah), `heartbeat_interval` |
 | agent | `buffer_size` |
 | logs | seluruh list (`path`, `type`, `enabled`) |
 | fim | `enabled`, `watch_paths` |
@@ -148,6 +148,47 @@ sekali.
      itu sebagai ditolak, sehingga tidak dicoba lagi.
 4. **Status:** heartbeat mengirim `config_version` (versi overlay yang sedang
    berjalan) dan `config_error` (kosong kalau tidak ada error).
+
+5. **Overlay membuat agent gagal start** (keputusan builder):
+   - Agent mencatat penghitung crash per versi overlay di state dir.
+   - Kalau agent mati 3 kali dalam 10 menit setelah menerapkan versi V, start
+     berikutnya memakai config lokal saja, menandai V ditolak, dan
+     melaporkan `config_error`.
+6. **Prioritas** (keputusan builder):
+   - Overlay menang atas `config.yaml`.
+   - `config.Watch` tetap meng-hot-reload `server.url` dari file hanya kalau
+     overlay tidak mengisinya.
+   - Edit lokal pada field lain tetap baru berlaku setelah restart manual,
+     sama seperti sekarang. Edit file tidak memicu restart otomatis.
+7. **Cara restart** (keputusan builder):
+   - Windows: proses keluar tanpa melapor `SERVICE_STOPPED`, sehingga SCM
+     menganggapnya crash dan menjalankan failure action. Alternatifnya,
+     set flag `FailureActionsOnNonCrashFailures`.
+   - Linux: cukup `Restart=always`.
+   - Kalau tidak berjalan sebagai service (mode konsol/dev): jangan keluar,
+     cukup log "restart diperlukan" dan laporkan di `config_error`.
+   - Sebelum restart, tunggu jitter acak 0–60 detik supaya perubahan di
+     DEFAULT group tidak merestart seluruh fleet di detik yang sama.
+8. **Versi config** (keputusan builder):
+   - `config_version` = hash dari `agent_config` saja, terpisah dari
+     `policy_version` yang juga memuat ML false positive.
+   - Server menghitung hash yang diharapkan per group dengan cara yang sama.
+   - Overlay kosong → versi kosong, dihitung "diterapkan".
+9. **Fallback group** (keputusan builder): ikut perilaku policy sekarang,
+   yaitu satu baris utuh. Group yang punya baris policy sendiri dengan
+   `agent_config` kosong memakai config lokal dan tidak mewarisi DEFAULT.
+   UI menulis ini dengan jelas.
+
+### Batas `server.url` (keputusan user)
+
+Dari dashboard, `server.url` hanya boleh mengganti port dan/atau path di **host
+yang sama** dengan URL di `config.yaml` lokal. Agent menolak overlay yang
+host-nya berbeda, melaporkan `config_error`, dan memakai URL lokal. Server juga
+menolaknya saat validasi. Pindah ke host lain tetap lewat file lokal. Ini
+mencegah server yang disusupi mengalihkan agent ke host penyerang sambil
+membawa token. Saklar `disabled` modul dan `update.disabled` tetap boleh diatur
+dari dashboard: risikonya diterima, karena policy yang ada pun sudah bisa
+mematikan proteksi.
 
 ### Server dan dashboard
 
