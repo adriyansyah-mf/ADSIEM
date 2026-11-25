@@ -1,7 +1,7 @@
 # agent-demo VM image: the SIEM agent plus the vulnerable company-profile app
 # it is meant to protect. Same Debian userland as the old victim container
 # (Apache + PHP-FPM + MySQL + sshd), with the agent binary added on top.
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache clang
 WORKDIR /src
 COPY go.mod go.sum ./
