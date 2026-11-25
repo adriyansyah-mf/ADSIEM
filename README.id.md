@@ -11,8 +11,8 @@ Splunk/QRadar.
 
 | | |
 |---|---|
-| Agen endpoint | Go, Linux (eBPF) + Windows (ETW), rilis terbaru **agent-v1.28.0**, self-update bertanda tangan, kontrol USB storage |
-| Konten deteksi | **259** rule Sigma dalam 250 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **138** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
+| Agen endpoint | Go, Linux (eBPF) + Windows (ETW), rilis terbaru **agent-v1.36.0**, config dikelola per grup, self-update bertanda tangan, kontrol USB storage |
+| Konten deteksi | **259** rule Sigma dalam 250 file (13 untuk OT/ICS, 10 untuk serangan Active Directory), **141** decoder, 7 set YARA bawaan + 14 set komunitas, importer SigmaHQ, retro-hunt atas log yang tersimpan |
 | OT / ICS | Modbus/TCP dan DNP3 di-decode dari Suricata; rule MITRE ATT&CK for ICS untuk pemrograman PLC, stop/restart, listen-only, scan, eksposur ke internet |
 | Analitik perilaku | Baseline host (parent → child yang jarang, executable baru yang jarang, beaconing), UEBA untuk user, IP, host, dan proses, skor risiko entitas, graf lateral movement |
 | Kerentanan | CVE paket per host (OSV.dev per distro) dan build Windows terhadap perbaikan KB Microsoft, diurutkan menurut CISA KEV, FIRST EPSS, dan tingkat keparahan |
@@ -23,28 +23,30 @@ Splunk/QRadar.
 | Audit dan pelaporan | Audit log append-only berantai hash dengan IP dan browser; incident report per kasus yang difinalisasi menjadi PDF bernomor, dan SHA-256-nya bisa diverifikasi siapa saja; laporan periode yang dibandingkan dengan periode sebelumnya, sebagai PDF bahasa Indonesia atau Inggris, beserta riwayatnya |
 | Penyimpanan | PostgreSQL 16 (pgvector) · Elasticsearch 8 · Redis 7 |
 
-## Untuk Juri — Kartika Cyber Hackathon 2026
+## Kenapa ADSIEM
 
-**Masalah.** Satuan TNI AD menjalankan dua dunia sekaligus: IT (server, PC staf, aplikasi
-web) dan OT (PLC genset dan pompa di depo BBM, RTU gardu, HVAC gudang). Serangan modern
-melompat dari IT ke OT: phishing atau webshell di server, lalu pivot ke workstation
-engineering, lalu perintah stop/write ke PLC. Analis SOC jumlahnya sedikit, alert
-jumlahnya ribuan, dan data operasi tidak boleh keluar ke cloud asing.
+**Masalah.** Banyak organisasi menjalankan dua dunia sekaligus: IT (server, PC staf,
+aplikasi web) dan OT (PLC, RTU, HMI, dan sistem gedung di pabrik, gardu, depo, dan gudang).
+Serangan modern melompat dari IT ke OT: phishing atau webshell di server, lalu pivot ke
+workstation engineering, lalu perintah stop/write ke PLC. Tim SOC kecil, alert jumlahnya
+ribuan, dan di lingkungan yang diatur regulasi atau menuntut kedaulatan data, data operasi
+tidak boleh keluar ke cloud asing.
 
-**Solusi.** ADSIEM adalah satu platform on-premise yang menjaga **endpoint IT** (agen Go
+**Pendekatan.** ADSIEM adalah satu platform on-premise yang menjaga **endpoint IT** (agen Go
 di Linux dan Windows), **jaringan OT** (Modbus/DNP3 lewat sensor Suricata di port mirror,
 tanpa menyentuh PLC), dan **analis AI** yang men-triase setiap alert, mengelompokkannya
 menjadi kasus per kampanye penyerang, lalu menginvestigasi kasus sendiri dengan
 mengumpulkan bukti dari host. Semua berjalan di server sendiri. AI-nya bisa diarahkan ke
 model lokal (Ollama lewat 9router), sehingga tidak ada data yang keluar.
 
-**Relevansi IT/OT.**
+**Cocok untuk apa.**
 
-| Kebutuhan satuan | Yang ADSIEM lakukan |
+| Kebutuhan | Yang ADSIEM lakukan |
 |---|---|
 | PLC/RTU tidak bisa dipasangi agen | Sensor Suricata pasif di SPAN port. ADSIEM membaca function code Modbus/DNP3 dan memberi alert untuk program download ke PLC (UMAS), stop/restart RTU, mode listen-only, scan function code atau unit ID, perintah kontrol dari internet, dan layanan OT yang terekspos. 13 rule OT/ICS, 12 di antaranya bertag MITRE ATT&CK for ICS ([runbook](docs/operations/ot-ics-detection.md)) |
 | Jembatan IT → OT (HMI, SCADA server, engineering workstation) | Agen EDR dengan eBPF/ETW: proses, jaringan, file, YARA (file dan memori), RansomGuard, rantai IOA (web server → shell → recon), isolasi host, karantina |
-| Analis sedikit, alert banyak | AI L1 men-triase **setiap** alert. Alert digabung menjadi satu kasus per penyerang. AI Investigate mengumpulkan bukti sendiri lalu diuji panel debat beberapa agen (Skeptic, Threat hunter, Evidence auditor, ...) sebelum laporan final |
+| Tim kecil, alert banyak | AI L1 men-triase **setiap** alert. Alert digabung menjadi satu kasus per penyerang. AI Investigate mengumpulkan bukti sendiri lalu diuji panel debat beberapa agen (Skeptic, Threat hunter, Evidence auditor, ...) sebelum laporan final |
+| Mengelola banyak agen tanpa login ke tiap host | Agen didaftarkan dengan enrollment key yang bisa dipakai ulang, meng-update dirinya dari paket bertanda tangan secara bertahap, dan mengambil setting operasionalnya (overlay di atas `config.yaml`) dari policy grupnya di dashboard |
 | Flashdisk dan media lepasan | Kontrol USB storage per grup: `audit` (catat setiap flashdisk yang dicolok) atau `block` dengan daftar perangkat yang diizinkan, di Linux dan Windows ([runbook](docs/operations/usb-control.md)) |
 | Serangan ke Active Directory | Rule untuk Kerberoasting, AS-REP roasting, DCSync, password spray, dan persistence (SPN baru, SID History, password DSRM) ([runbook](docs/operations/ad-detections.md)) |
 | Patch mana dulu? | Halaman **Vulnerabilities**: CVE di setiap host diurutkan menurut CISA KEV (sudah dieksploitasi), EPSS, dan tingkat keparahan, termasuk KB Windows yang belum terpasang |
@@ -66,28 +68,30 @@ model lokal (Ollama lewat 9router), sehingga tidak ada data yang keluar.
 4. **IT dan OT dalam satu kasus.** Serangan dari webshell ke workstation engineering lalu
    ke PLC muncul sebagai satu cerita, bukan tiga konsol terpisah.
 
-**Bukti berjalan, bukan slide.** ADSIEM memantau server web uji kami yang terekspos ke
-internet sejak awal November 2026, dan sudah menangkap serangan sungguhan:
+**Berjalan di produksi.** ADSIEM memantau server yang terekspos ke internet dan laptop staf
+sejak awal November 2026, dan sudah menangkap serangan sungguhan:
 - gelombang webshell 4–6 Nov;
 - penambang kripto 11 Nov, yang terdeteksi lalu ditangani;
 - webshell baru 14 Nov yang menjalankan recon sebagai `www-data`.
 
 Insiden 14 Nov juga memperlihatkan celah deteksi eBPF untuk proses induk yang lebih tua
-dari agen. Celah itu langsung diperbaiki di agent 1.27.7. Agen di-update dari dashboard
-dengan paket bertanda tangan.
+dari agen. Celah itu diperbaiki di agent 1.27.7 dan disebar dari dashboard dengan paket
+bertanda tangan.
 
-**Coba dalam 5 menit.**
-1. Login dashboard dengan `admin` / `admin123` (akun demo untuk juri). URL demo ada di
-   formulir submission.
-2. **Alerts / Cases:** alert yang sudah ditriase AI, beserta catatan dan verdict-nya. Buka
+**Tur pertama** (setelah [instalasi server](#instalasi-server) dan [agen](#instalasi-agen)):
+1. **Alerts / Cases:** alert yang sudah ditriase AI, beserta catatan dan verdict-nya. Buka
    satu kasus, klik **Investigate with AI**, lalu lihat tab **Activity**, **Evidence**,
    dan **Debate**.
-3. **Demo serangan OT:** dari mesin yang terdaftar di *Environment → Syslog devices*
+2. **Deteksi OT:** dari mesin yang terdaftar di *Environment → Syslog devices*
    (log type `suricata`), jalankan
-   `python3 scripts/ot-demo-replay.py --host <server> --delay 2`. Hasilnya 10 alert OT,
-   mulai dari fingerprinting PLC sampai perintah stop PLC dan restart RTU gardu.
-4. **SOAR:** coba sambungkan node *AI Decide* langsung ke *Response → isolate*. Editor
+   `python3 scripts/ot-demo-replay.py --host <server> --delay 2`. Skrip ini me-replay
+   serangan dan menghasilkan 10 alert OT, mulai dari fingerprinting PLC sampai perintah stop
+   PLC dan restart RTU gardu.
+3. **SOAR:** coba sambungkan node *AI Decide* langsung ke *Response → isolate*. Editor
    menolaknya sampai ada node *Approval* di antaranya.
+4. **Policies:** proteksi per grup, kontrol USB, dan bagian **Agent config** yang menimpa
+   `config.yaml` lokal agen. Halaman **Agents** menampilkan apakah tiap agen sudah
+   menerapkannya.
 5. **Security posture** dan **Vulnerabilities:** IP, gateway, DNS, port terbuka dan proses,
    postur keamanan tiap host, lalu CVE yang harus ditambal lebih dulu (KEV/EPSS).
 6. **Investigation → Dashboards:** dashboard sendiri dari query Log search, dan
@@ -100,7 +104,7 @@ dengan paket bertanda tangan.
 
 ```mermaid
 flowchart LR
-  subgraph Site[Satuan / Site]
+  subgraph Site[Site]
     EP[Endpoint IT<br/>agen Go: eBPF / ETW] -->|HTTPS + token agen| API
     OT[Jaringan OT<br/>PLC · RTU · HMI] -. SPAN .-> SUR[Sensor Suricata]
     SUR -->|eve.json via syslog| SYS
@@ -120,11 +124,11 @@ flowchart LR
   UI[Dashboard React] --> API
 ```
 
-**Batasan yang jujur.**
+**Batasan yang diketahui.**
 - Deteksi OT saat ini untuk Modbus/TCP dan DNP3. S7, IEC 104, dan EtherNet/IP baru
   terdeteksi di level port/eksposur dan signature Suricata.
-- Rule OT dan demo diuji dengan log EVE Suricata yang direplay, belum dengan sensor di
-  jaringan OT sungguhan.
+- Rule OT diuji dengan log EVE Suricata yang direplay, belum dengan sensor di jaringan OT
+  yang sedang beroperasi.
 - Respons otomatis tanpa manusia hanya berasal dari engine deterministik yang diatur
   policy: RansomGuard, hash malware, prevention rule, dan threat intel. Keputusan AI
   selalu menunggu analis.
@@ -132,18 +136,25 @@ flowchart LR
   (KEV, EPSS, OSV, MalwareBazaar, URLhaus) dan threat intel butuh internet. AI butuh
   model: arahkan 9router ke model lokal untuk jaringan tertutup. Paket instalasi
   air-gapped belum ada.
+- Agen macOS belum ada.
 
-**Kualitas.** Lebih dari 1.200 fungsi test Python (sekitar 190 file) dan 990 fungsi test Go
-(251 file) berjalan di CI setiap PR, termasuk test penerimaan evidence durability dan
-self-update agen. Detail teknis lengkap ada di bawah.
+**Status proyek.** ADSIEM dikembangkan secara aktif dan sudah berjalan di produksi.
+Perubahan masuk lewat pull request yang dijaga CI: sekitar 1.350 fungsi test Python (206
+file) dan 1.100 fungsi test Go (272 file), termasuk test penerimaan evidence durability dan
+self-update agen. Agen dirilis dari tag `agent-vX.Y.Z` sebagai paket `.deb`, `.rpm`, `.msi`,
+dan `.zip` bertanda tangan; rilis terbaru adalah **agent-v1.36.0**. Server tetap menerima
+agen versi lama, sehingga armada agen bisa di-update bertahap.
 
-> **Peringatan keamanan:** Kredensial default (`admin` / `admin123`) hanya untuk development.
-> Segera ganti `JWT_SECRET`, `POSTGRES_PASSWORD`, `AGENT_ENROLLMENT_TOKEN`, dan password admin
-> di produksi. Lihat [Deployment Produksi](#deployment-produksi).
+**Melaporkan kerentanan.** Jangan buka issue publik untuk masalah keamanan. Laporkan secara
+privat lewat **Security → Report a vulnerability** di repositori ini.
+
+> **Peringatan keamanan:** Kredensial default (`admin` / `admin123`) hanya untuk memulai
+> instalasi baru. Ganti `JWT_SECRET`, `POSTGRES_PASSWORD`, `AGENT_ENROLLMENT_TOKEN`, dan
+> password admin sebelum server diekspos. Lihat [Deployment Produksi](#deployment-produksi).
 
 ## Daftar Isi
 
-- [Untuk Juri — Kartika Cyber Hackathon 2026](#untuk-juri--kartika-cyber-hackathon-2026)
+- [Kenapa ADSIEM](#kenapa-adsiem)
 - [Fitur](#fitur)
 - [Arsitektur](#arsitektur)
 - [Kebutuhan Sistem](#kebutuhan-sistem) · [Layanan](#layanan) · [Instalasi Server](#instalasi-server)
@@ -187,6 +198,7 @@ evidence yang durable menjaga deteksi tetap ada walaupun agen crash atau host re
 | Notifikasi pop-up ke user | ✓ | ✓ | `internal/notify` |
 | Deteksi threshold lokal | ✓ | ✓ | `internal/detect` |
 | Policy proteksi per grup (proteksi mana yang aktif, pengecualian) | ✓ | ✓ policy yang sama | `internal/policy` |
+| Agent config dari dashboard (overlay per grup di atas `config.yaml`; hanya field yang di-whitelist, `server.url` dibatasi ke host yang sama, restart otomatis dengan pengaman loop dan rollback) | ✓ | ✓ | `internal/config`, `internal/policy` |
 | Penegakan offline (set rule prevention + YARA terakhir di-cache, tamper-evident) | ✓ | ✓ | `internal/rulecache` |
 | Arsip sampel terenkripsi (ZipCrypto, `infected`) di-scan di memori | ✓ | ✓ | `internal/zipcrypto` |
 | Pelacakan proses milik agen (parent PID palsu tidak bisa menyamar sebagai agen) | ✓ | ✓ | `internal/ownproc` |
@@ -223,7 +235,7 @@ tidak bisa begitu saja menghentikannya.
   [Syslog, Suricata, Zeek dan OT](#syslog-suricata-zeek-dan-ot).
 - **Firewall dan appliance:** FortiGate (traffic, UTM, event, VPN, login admin) dan pengirim
   CEF apa pun.
-- **138 decoder** dalam empat tipe (`regex`, `kv`, `json`, `cef`), mencakup Linux auth, syslog,
+- **141 decoder** dalam empat tipe (`regex`, `kv`, `json`, `cef`), mencakup Linux auth, syslog,
   auditd, iptables, Windows Security/System/PowerShell/Sysmon/ETW, Apache, Nginx, PHP, MySQL,
   Postfix, dan setiap deteksi bawaan agen.
 
@@ -674,8 +686,8 @@ key**. Anda lalu mendapat satu perintah untuk dijalankan di host, yang mengunduh
 server ini, memasangnya, mendaftarkan agen, dan menjalankannya:
 
 ```bash
-curl -fsSLo /tmp/siem-agent_1.28.0_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.28.0_amd64.deb' \
-  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.28.0_amd64.deb
+curl -fsSLo /tmp/siem-agent_1.36.0_amd64.deb 'https://siem.example.com/api/agents/packages/siem-agent_1.36.0_amd64.deb' \
+  && sudo SIEM_SERVER_URL='https://siem.example.com' SIEM_ENROLLMENT_KEY='<key>' dpkg -i /tmp/siem-agent_1.36.0_amd64.deb
 ```
 
 Perintah RPM sama, dengan `rpm -Uvh`. Di Windows, PowerShell dengan hak admin mengunduh zip dan
@@ -706,7 +718,7 @@ melaporkan hostname-nya.
 Platform membangun paket setiap kali stack dijalankan: layanan `package-builder` menjalankan
 skrip yang sama dengan rilis, pada versi di `agent/VERSION`. Dashboard menyajikan paket itu,
 begitu juga setiap rilis GitHub yang di-tag (`.github/workflows/agent-release.yml`, dipicu tag
-seperti `agent-v1.28.0`).
+seperti `agent-v1.36.0`).
 
 ```bash
 sudo dpkg -i siem-agent_<version>_amd64.deb          # or: sudo rpm -Uvh siem-agent-<version>-1.x86_64.rpm
