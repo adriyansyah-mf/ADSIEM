@@ -10,11 +10,13 @@ import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from app.api.routes import ingest, malware_hashes, policies
+from app.api.routes import agents, ingest, malware_hashes, policies
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.redis_client import get_redis
+from app.models import models
 from app.services import agent_policy
+from app.services.agent_config import config_version_of
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +39,7 @@ async def api(evidence_api, monkeypatch):
 
     monkeypatch.setattr(policies, "audit_log", audit)
     app = FastAPI()
-    for r in (policies.router, policies.agent_router, ingest.router, malware_hashes.agent_router):
+    for r in (policies.router, policies.agent_router, ingest.router, malware_hashes.agent_router, agents.router):
         app.include_router(r)
     app.dependency_overrides[get_db] = database
     app.dependency_overrides[get_redis] = redis
@@ -174,3 +176,117 @@ async def test_agents_follow_the_version_and_malware_action(api):
     red = (await c.post("/api/ingest/malware-hashes", json={"since": 0},
                         headers={"X-Agent-Token": "red-token"})).json()
     assert red["action"] == "detect"
+
+
+def test_policy_settings_carry_the_agent_config_without_nulls():
+    s = agent_policy.PolicySettings.model_validate({})
+    assert s.agent_config is None and s.model_dump()["agent_config"] is None
+    d = agent_policy.PolicySettings.model_validate(
+        {"agent_config": {"fim": {"enabled": False}, "etw": {}, "netwatch": {"enabled": None}}}).model_dump()
+    assert d["agent_config"] == {"fim": {"enabled": False}}
+    assert agent_policy.PolicySettings.model_validate({"agent_config": {"fim": {}}}).model_dump()["agent_config"] is None
+    with pytest.raises(ValidationError):
+        agent_policy.PolicySettings.model_validate({"agent_config": {"etw": {"mode": "sometimes"}}})
+    # a policy without an overlay keeps the version it had before overlays existed
+    assert agent_policy.version_of({"ioa": "off", "agent_config": None}) == agent_policy.version_of({"ioa": "off"})
+
+
+def test_for_agent_puts_config_version_on_top():
+    base = agent_policy.PolicySettings.model_validate({}).model_dump()
+    eff = {"group": "g", "settings": base, "version": "v", "config_version": "", "ml_false_positives": []}
+    out = agent_policy.for_agent(eff)
+    assert out["config_version"] == "" and "agent_config" not in out["settings"]
+    overlay = {"fim": {"enabled": False}}
+    out = agent_policy.for_agent({**eff, "settings": {**base, "agent_config": overlay},
+                                  "config_version": config_version_of(overlay)})
+    assert out["config_version"] == config_version_of(overlay) and out["settings"]["agent_config"] == overlay
+
+
+def _no_nulls(v) -> bool:
+    if isinstance(v, dict):
+        return all(x is not None and _no_nulls(x) for x in v.values())
+    if isinstance(v, list):
+        return all(_no_nulls(x) for x in v)
+    return True
+
+
+async def test_agent_config_overlay_reaches_the_agent(api):
+    c = api.api
+    blue = {"X-Agent-Token": "blue-token"}
+    pol = (await c.post("/api/ingest/policy", headers=blue)).json()
+    assert pol["config_version"] == "" and "agent_config" not in pol["settings"]
+
+    api.user = api.make_user(role="admin", group="blue", perms=("agents:manage",))
+    for bad in ({"server": {"url": "http://siem.example.com"}}, {"server": {"heartbeat_interval": 5}},
+                {"anti_tamper": {"unlock_service": True}}, {"agent": {"token": "x"}}, {"etw": {"mode": "x"}}):
+        assert (await c.put("/api/policies/blue", json={"agent_config": bad})).status_code == 422, bad
+
+    overlay = {"fim": {"enabled": False}, "etw": {"mode": "off"}, "server": {"heartbeat_interval": 60},
+               "detect": {"rules": []}}
+    r = await c.put("/api/policies/blue", json={"agent_config": {
+        **overlay, "netwatch": {}, "yara": {"max_file_size_mb": None}}})
+    assert r.status_code == 200 and r.json()["settings"]["agent_config"] == overlay
+    async with api.sessions() as db:
+        assert (await db.get(models.AgentPolicy, "blue")).settings["agent_config"] == overlay  # stored clean
+
+    pol = (await c.post("/api/ingest/policy", headers=blue)).json()
+    assert pol["config_version"] == config_version_of(overlay) != ""
+    assert pol["settings"]["agent_config"] == overlay and _no_nulls(pol["settings"]["agent_config"])
+    # the red group has no overlay
+    red = (await c.post("/api/ingest/policy", headers={"X-Agent-Token": "red-token"})).json()
+    assert red["config_version"] == "" and "agent_config" not in red["settings"]
+
+
+async def test_ml_false_positive_changes_the_version_not_the_config_version(api):
+    c = api.api
+    blue = {"X-Agent-Token": "blue-token"}
+    api.user = api.make_user(role="admin", group="blue", perms=("agents:manage",))
+    assert (await c.put("/api/policies/blue", json={"agent_config": {"fim": {"enabled": False}}})).status_code == 200
+    before = (await c.post("/api/ingest/policy", headers=blue)).json()
+    async with api.sessions() as db:
+        db.add(models.MlFalsePositive(sha256="ab" * 32))
+        await db.commit()
+    agent_policy.invalidate()
+    after = (await c.post("/api/ingest/policy", headers=blue)).json()
+    assert after["version"] != before["version"]
+    assert after["config_version"] == before["config_version"] != ""
+
+
+async def test_heartbeat_stores_the_config_status(api):
+    c = api.api
+    blue = {"X-Agent-Token": "blue-token"}
+    hb = {"agent_id": str(api.agents["blue"]), "hostname": "blue-host"}
+
+    async def row():
+        async with api.sessions() as db:
+            return await db.get(models.Agent, api.agents["blue"])
+
+    r = await c.post("/api/ingest/heartbeat", headers=blue,
+                     json={**hb, "config_version": "0123456789abcdef", "config_error": "server.url: host must stay x"})
+    assert r.status_code == 200
+    a = await row()
+    assert (a.config_version, a.config_error) == ("0123456789abcdef", "server.url: host must stay x")
+    # a heartbeat without them keeps what was stored
+    assert (await c.post("/api/ingest/heartbeat", json=hb, headers=blue)).status_code == 200
+    a = await row()
+    assert (a.config_version, a.config_error) == ("0123456789abcdef", "server.url: host must stay x")
+    # an overlong error is clipped and a bad version dropped; the heartbeat itself still goes through
+    r = await c.post("/api/ingest/heartbeat", headers=blue,
+                     json={**hb, "config_version": "x" * 65, "config_error": "e" * 600})
+    assert r.status_code == 200
+    a = await row()
+    assert a.config_version == "0123456789abcdef" and a.config_error == "e" * 500
+
+
+async def test_agent_api_shows_the_expected_config_version(api):
+    c = api.api
+    api.user = api.make_user(role="superadmin", group="default", perms=("agents:manage",))
+    overlay = {"memory_sweep": {"interval_minutes": 30}}
+    assert (await c.put("/api/policies/blue", json={"agent_config": overlay})).status_code == 200
+    await c.post("/api/ingest/heartbeat", headers={"X-Agent-Token": "blue-token"},
+                 json={"agent_id": str(api.agents["blue"]), "hostname": "blue-host", "config_version": ""})
+    got = (await c.get(f"/api/agents/{api.agents['blue']}")).json()
+    assert got["config_expected"] == config_version_of(overlay) and got["config_version"] == ""
+    listing = {a["name"]: a for a in (await c.get("/api/agents")).json()["items"]}
+    assert listing["blue"]["config_expected"] == config_version_of(overlay)
+    assert listing["red"]["config_expected"] == "" and listing["red"]["config_version"] is None

@@ -86,6 +86,10 @@ class Agent(Base):
     web_block_health_at = Column(DateTime(timezone=True))
     sensor_health       = Column(JSONB)   # per telemetry sensor, from heartbeats (services/sensor_health.py)
     sensor_health_at    = Column(DateTime(timezone=True))
+    # the group policy's agent config overlay, from heartbeats: the version
+    # running ("" for the local config) and the last config error
+    config_version = Column(String(64))
+    config_error   = Column(Text)
     # Self-update: rollout ring (0 canary … 2 everyone else) and the agent's
     # last reported update status (schemas.AgentUpdateStatus)
     update_ring        = Column(Integer, nullable=False, default=2, server_default="2")
