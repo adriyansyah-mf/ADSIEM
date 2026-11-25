@@ -67,9 +67,11 @@ type HeartbeatRequest struct {
 	// isolates without a task, so the server learns it only from here.
 	Isolated *bool `json:"isolated,omitempty"`
 	// The dashboard config overlay running ("" for the local config) and the
-	// last config error (ConfigStatus).
-	ConfigVersion string `json:"config_version,omitempty"`
-	ConfigError   string `json:"config_error,omitempty"`
+	// last config error ("" for none), from ConfigStatus. The loop always sets
+	// both, so "" reaches the server and clears what it stored; heartbeats
+	// without a status (stopping, uninstall check) leave them out.
+	ConfigVersion *string `json:"config_version,omitempty"`
+	ConfigError   *string `json:"config_error,omitempty"`
 }
 
 // Updater, when set, reports its status on every heartbeat and receives the
@@ -375,6 +377,15 @@ var Isolation func() *bool
 // the last config error for the heartbeat.
 var ConfigStatus func() (version, errMsg string)
 
+// addConfigStatus puts ConfigStatus into p, empty values included.
+func addConfigStatus(p *HeartbeatRequest) {
+	if ConfigStatus == nil {
+		return
+	}
+	version, errMsg := ConfigStatus()
+	p.ConfigVersion, p.ConfigError = &version, &errMsg
+}
+
 // SupportsEvidenceV2 reports whether the last successful heartbeat advertised
 // durable ingest protocol 2. The evidence sender sends nothing until it does.
 func SupportsEvidenceV2() bool { return evidenceV2.Load() }
@@ -440,9 +451,7 @@ func Loop(
 		if Isolation != nil {
 			payload.Isolated = Isolation()
 		}
-		if ConfigStatus != nil {
-			payload.ConfigVersion, payload.ConfigError = ConfigStatus()
-		}
+		addConfigStatus(&payload)
 		payload.Update = updateStatus()
 		resp, err := c.Post("/api/ingest/heartbeat", payload)
 		if err != nil {

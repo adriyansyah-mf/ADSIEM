@@ -202,6 +202,15 @@ def test_for_agent_puts_config_version_on_top():
     assert out["config_version"] == config_version_of(overlay) and out["settings"]["agent_config"] == overlay
 
 
+def test_heartbeat_request_keeps_an_empty_config_status():
+    from app.schemas.schemas import HeartbeatRequest
+    agent_id = "00000000-0000-0000-0000-000000000001"
+    h = HeartbeatRequest.model_validate({"agent_id": agent_id, "config_version": "", "config_error": ""})
+    assert (h.config_version, h.config_error) == ("", "")  # stored: clears the old values
+    h = HeartbeatRequest.model_validate({"agent_id": agent_id})
+    assert (h.config_version, h.config_error) == (None, None)  # older agents: row left alone
+
+
 def _no_nulls(v) -> bool:
     if isinstance(v, dict):
         return all(x is not None and _no_nulls(x) for x in v.values())
@@ -276,6 +285,16 @@ async def test_heartbeat_stores_the_config_status(api):
     assert r.status_code == 200
     a = await row()
     assert a.config_version == "0123456789abcdef" and a.config_error == "e" * 500
+    # "" is a value: back on the local config with no error clears both
+    r = await c.post("/api/ingest/heartbeat", headers=blue, json={**hb, "config_version": "", "config_error": ""})
+    assert r.status_code == 200
+    a = await row()
+    assert (a.config_version, a.config_error) == ("", "")
+    # a stopping heartbeat (no status) leaves them as they are
+    await c.post("/api/ingest/heartbeat", headers=blue, json={**hb, "config_version": "fedcba9876543210"})
+    await c.post("/api/ingest/heartbeat", headers=blue, json={**hb, "status": "stopping"})
+    a = await row()
+    assert (a.config_version, a.config_error) == ("fedcba9876543210", "")
 
 
 async def test_agent_api_shows_the_expected_config_version(api):
