@@ -1,7 +1,7 @@
 # Linux agent for the evidence fault harness (tests/evidence/run.py): the
 # production build of agent/Dockerfile without the demo victim userland.
 # Build context: agent/.
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache clang
 WORKDIR /src
 COPY go.mod go.sum ./
