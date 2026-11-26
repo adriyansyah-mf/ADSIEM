@@ -4,7 +4,10 @@ import yaml
 from dataclasses import dataclass, field
 from typing import Any
 
-_KV_RE = re.compile(r'(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
+# \b: a key starts a word. Without it a long run of word characters with no
+# "=" is rescanned from every offset (quadratic on hostile log lines); the
+# matches are the same, since a key that fails from the word start fails inside it.
+_KV_RE = re.compile(r'\b(\w+)=("(?:[^"\\]|\\.)*"|\S+)')
 _KV_UNESCAPE_RE = re.compile(r'\\(["\\])')
 
 # Web request fields are URL-decoded before rules see them: payloads arrive

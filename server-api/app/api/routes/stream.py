@@ -156,8 +156,9 @@ async def stream_events(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            # Log the exception (it can name Redis or Elasticsearch hosts), not stream it.
             log.warning("sse_stream_error", error=str(exc))
-            yield f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'message': 'Live stream failed; reconnect to resume.'})}\n\n"
         finally:
             if pubsub is not None:
                 try:

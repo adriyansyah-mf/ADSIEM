@@ -141,3 +141,13 @@ def test_unclosed_url_is_neutralised():
     assert "url(http" not in wp.sanitize('<p style="background:url(http://x.example/i">x</p>')
     assert "url(http" not in wp.sanitize('<style>a{background:url(http://x.example/i</style>'
                                          '<style>)}</style>')
+
+
+def test_placeholders_removed_like_the_regex_and_in_linear_time():
+    import time
+    assert wp._replace_placeholders("a{{x}}b{{y}}c", " ") == "a b c"
+    assert wp._replace_placeholders("a{{{}}}b", "") == "a}b"
+    assert wp._replace_placeholders("a{{x}b", "") == "a{{x}b"  # unclosed stays
+    start = time.perf_counter()
+    wp.sanitize('<p style="' + "{{" * 50_000 + '">x</p>')
+    assert time.perf_counter() - start < 2

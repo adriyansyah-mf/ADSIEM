@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
 )
 
 const (
@@ -38,6 +39,11 @@ func checkSegmentHeader(b []byte, agentID string, sequence uint64) error {
 }
 
 func encodeFrame(kind byte, payload []byte) []byte {
+	// The length field is 32 bits. Callers keep payloads far below this (journal
+	// size limits); a larger one is a bug, not data to truncate silently.
+	if uint64(len(payload)) > math.MaxUint32-frameHeaderSize {
+		panic(fmt.Sprintf("evidence: frame payload of %d bytes exceeds the 32-bit length field", len(payload)))
+	}
 	b := make([]byte, frameHeaderSize+len(payload))
 	copy(b, "EVJR")
 	b[4], b[5] = 1, kind

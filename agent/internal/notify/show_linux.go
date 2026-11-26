@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"os/user"
@@ -85,15 +86,18 @@ func notifyAs(notifySend string, args []string, uid int, runtimeDir, busPath str
 	}
 	cmd.Env = env
 
+	if uid < 0 || uint64(uid) > math.MaxUint32 {
+		return fmt.Errorf("uid %d out of range", uid)
+	}
 	if os.Geteuid() == 0 {
-		gid := uid
+		gid := uint32(uid)
 		if fi, err := os.Stat(runtimeDir); err == nil {
 			if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-				gid = int(st.Gid)
+				gid = st.Gid
 			}
 		}
 		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), NoSetGroups: true},
+			Credential: &syscall.Credential{Uid: uint32(uid), Gid: gid, NoSetGroups: true},
 		}
 	} else if os.Geteuid() != uid {
 		return fmt.Errorf("cannot reach uid %d session bus as uid %d", uid, os.Geteuid())

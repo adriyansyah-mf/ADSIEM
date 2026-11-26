@@ -2,6 +2,7 @@ package yara
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -187,6 +188,9 @@ func (l *lexer) number() (token, error) {
 		v, err := strconv.ParseUint(src[start+2:l.pos], base, 64)
 		if err != nil {
 			return t, l.errf("invalid number %s", src[start:l.pos])
+		}
+		if v > math.MaxInt64 { // integers are signed 64-bit; do not wrap to negative
+			return t, l.errf("number %s is out of range", src[start:l.pos])
 		}
 		t.kind, t.i = tInt, int64(v)
 		return t, nil

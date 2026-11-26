@@ -82,8 +82,9 @@ async def download_package(
     # Prevent path traversal
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
-    path = PACKAGES_DIR / filename
-    if not path.exists() or path.suffix not in _MEDIA_TYPES or _parse_package(filename) is None:
+    # serve a file the directory lists, never a path built from the request
+    path = next((f for f in PACKAGES_DIR.iterdir() if f.name == filename), None) if PACKAGES_DIR.exists() else None
+    if path is None or not path.is_file() or path.suffix not in _MEDIA_TYPES or _parse_package(path.name) is None:
         raise HTTPException(status_code=404, detail="Package not found")
     return FileResponse(
         path=str(path),

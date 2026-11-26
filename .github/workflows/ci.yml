@@ -37,8 +37,8 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install server-api dependencies
-        run: pip install -r server-api/requirements.txt
+      - name: Install server-api dependencies (with test tools)
+        run: pip install -r server-api/requirements-dev.txt
 
       - name: Install worker dependencies
         run: pip install -r worker/requirements.txt

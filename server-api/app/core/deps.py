@@ -2,7 +2,7 @@
 from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 from datetime import datetime, timezone
 
 from sqlalchemy import and_, or_, select

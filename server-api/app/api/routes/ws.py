@@ -2,7 +2,7 @@ import json
 from typing import List
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.security import decode_token
-from jose import JWTError
+from jwt import PyJWTError as JWTError
 
 router = APIRouter(tags=["websocket"])
 

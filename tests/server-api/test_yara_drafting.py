@@ -129,3 +129,14 @@ def test_file_entities_skip_truncated_reads_and_keep_yara_matches():
     assert ledger._file_entities(rows) == {
         "files": [{"path": "/tmp/a", "sha256": SHA, "size": 5, "type": "ELF"}],
         "yara_matches": [{"file": "/tmp/a", "rule": "Miner"}]}
+
+
+def test_parse_rule_sections_and_linear_time_on_unclosed_keywords():
+    import time
+    rule = d.parse_rule('rule r {\n strings:\n  $a = "x" ascii\n condition:\n  $a and\n  filesize < 1MB\n}\n')
+    assert [s["id"] for s in rule["strings"]] == ["$a"] and rule["condition"] == "$a and filesize < 1MB"
+    assert d.parse_rule("rule r { condition: true")["condition"] == ""  # no closing brace
+    start = time.perf_counter()
+    d.parse_rule("strings: " * 20_000)
+    d.parse_rule("condition: }x " * 20_000)
+    assert time.perf_counter() - start < 2
