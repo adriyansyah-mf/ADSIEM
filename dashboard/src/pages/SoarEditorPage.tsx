@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, addEdge, useEdgesState, useNodesState, useReactFlow,
+  Background, Controls, MiniMap, NodeChangeset, ReactFlow, ReactFlowProvider, addEdge, useEdgesState, useNodesState, useReactFlow,
 } from '@xyflow/react'
-import type { Connection, Edge, IsValidConnection, NodeChange } from '@xyflow/react'
+import type { Connection, Edge, IsValidConnection } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { AlertTriangle, ArrowLeft, CheckCircle2, Play, Save, ShieldCheck, X } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
@@ -125,7 +125,7 @@ function RunCanvas({ run, selected, onSelect }: { run: RunDetail; selected: stri
   }, [run, selected, decorate, setNodes, setEdges, stepFor])
 
   return (
-    <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} colorMode="dark" fitView
+    <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} nodeTypes={nodeTypes} forceColorMode="dark" fitView
       nodesConnectable={false} nodesDraggable={false} elementsSelectable
       onNodeClick={(_, n) => onSelect(n.id)} onPaneClick={() => onSelect(null)}>
       <Background color="#1a2d45" gap={20} />
@@ -267,9 +267,10 @@ function Editor({ playbook, catalog }: { playbook: Playbook; catalog: Catalog })
     return () => window.removeEventListener('beforeunload', warn)
   }, [dirty])
 
-  const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
-    onNodesChangeBase(canEdit ? changes : changes.filter(c => c.type === 'dimensions' || c.type === 'select'))
-    changes.forEach(c => {
+  const onNodesChange = useCallback((changes: NodeChangeset<FlowNode>) => {
+    const list = changes.toArray()
+    onNodesChangeBase(canEdit ? changes : new NodeChangeset(list.filter(c => c.type === 'dimensions' || c.type === 'select')))
+    list.forEach(c => {
       if (c.type === 'select' && c.selected) setSelected(c.id)
       if (c.type === 'remove' && c.id === selected) setSelected(null)
     })
@@ -409,7 +410,7 @@ function Editor({ playbook, catalog }: { playbook: Playbook; catalog: Catalog })
           {viewing && run.data ? (
             <RunCanvas key={run.data.id} run={run.data} selected={selected} onSelect={setSelected} />
           ) : (
-            <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} colorMode="dark" fitView
+            <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} forceColorMode="dark" fitView
               onNodesChange={onNodesChange} onEdgesChange={canEdit ? onEdgesChange : undefined}
               onConnect={canEdit ? onConnect : undefined} isValidConnection={isValidConnection}
               nodesDraggable={canEdit} nodesConnectable={canEdit} deleteKeyCode={canEdit ? ['Backspace', 'Delete'] : null}

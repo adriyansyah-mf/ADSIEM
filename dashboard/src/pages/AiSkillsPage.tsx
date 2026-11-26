@@ -65,7 +65,7 @@ export default function AiSkillsPage() {
   })
   const remove = useMutation({ mutationFn: (id: string) => api.delete(`/api/ai-skills/${id}`), onSuccess: invalidate })
   const save = useMutation({
-    mutationFn: (f: NonNullable<typeof form>) => f.id
+    mutationFn: (f: NonNullable<typeof form>): Promise<unknown> => f.id
       ? api.patch(`/api/ai-skills/${f.id}`, { description: f.description, content: f.content })
       : api.post('/api/ai-skills', { name: f.name, description: f.description, content: f.content }),
     onSuccess: () => { setForm(null); invalidate() },

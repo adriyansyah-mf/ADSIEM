@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { GripVertical, LayoutGrid, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
-import { Responsive, WidthProvider } from 'react-grid-layout'
-import type { Layout } from 'react-grid-layout'
+import { ResponsiveGridLayout, useContainerWidth, verticalCompactor } from 'react-grid-layout'
+import type { Layout, LayoutItem, ResponsiveLayouts } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import '@/components/dashboards/dashboards.css'
@@ -30,7 +30,28 @@ interface Dashboard {
 
 interface Draft { id?: string; name: string; shared: boolean; widgets: Widget[] }
 
-const Grid = WidthProvider(Responsive)
+function DashGrid({ className, layout, editing, onLayout, children }: {
+  className: string
+  layout: LayoutItem[]
+  editing: boolean
+  onLayout: (layout: Layout) => void
+  children: ReactNode
+}) {
+  const { width, containerRef, mounted } = useContainerWidth()
+  return (
+    <div ref={containerRef}>
+      {mounted && (
+        <ResponsiveGridLayout className={className} width={width} layouts={{ lg: layout }}
+          breakpoints={{ lg: 768, xs: 0 }} cols={{ lg: 12, xs: 1 }} rowHeight={44} margin={[12, 12]} containerPadding={[0, 0]}
+          dragConfig={{ enabled: editing, handle: '.viz-panel__drag' }} resizeConfig={{ enabled: editing }}
+          compactor={verticalCompactor}
+          onLayoutChange={(_: Layout, all: ResponsiveLayouts) => { if (all.lg) onLayout(all.lg) }}>
+          {children}
+        </ResponsiveGridLayout>
+      )}
+    </div>
+  )
+}
 const REFRESH: [number | false, string][] = [[false, 'Off'], [30_000, '30 s'], [60_000, '1 min'], [300_000, '5 min']]
 const newId = () => Math.random().toString(36).slice(2, 14)
 
@@ -164,7 +185,7 @@ export default function CustomDashboardsPage() {
     setDraft(d ? { id: d.id, name: d.name, shared: d.shared, widgets: prepare(d.widgets) } : { name: '', shared: false, widgets: [] })
   }
   const setWidgets = (fn: (ws: Widget[]) => Widget[]) => setDraft(d => d && { ...d, widgets: fn(prepare(d.widgets)) })
-  const onLayout = (layout: Layout[]) => {
+  const onLayout = (layout: Layout) => {
     if (!editing) return
     const at = new Map(layout.map(l => [l.i, l]))
     setWidgets(ws => {
@@ -172,7 +193,7 @@ export default function CustomDashboardsPage() {
       return next.every((w, i) => w.x === ws[i].x && w.y === ws[i].y && w.w === ws[i].w && w.h === ws[i].h) ? ws : next
     })
   }
-  const layout: Layout[] = widgets.map(w => ({ i: w.id!, x: w.x ?? 0, y: w.y ?? 0, w: w.w ?? 4, h: w.h ?? 4, minW: 2, minH: 2 }))
+  const layout: LayoutItem[] = widgets.map(w => ({ i: w.id!, x: w.x ?? 0, y: w.y ?? 0, w: w.w ?? 4, h: w.h ?? 4, minW: 2, minH: 2 }))
 
   return (
     <div className="workspace space-y-3">
@@ -261,10 +282,8 @@ export default function CustomDashboardsPage() {
             <span className="text-sm font-medium">{editing || current?.editable ? 'Add your first visualization' : 'This dashboard has no panels yet'}</span>
           </button>
         ) : (
-          <Grid className={`dash-grid ${editing ? 'dash-grid--editing' : ''}`} layouts={{ lg: layout }}
-            breakpoints={{ lg: 768, xs: 0 }} cols={{ lg: 12, xs: 1 }} rowHeight={44} margin={[12, 12]} containerPadding={[0, 0]}
-            isDraggable={editing} isResizable={editing} draggableHandle=".viz-panel__drag" compactType="vertical"
-            onLayoutChange={(_, all) => { if (all.lg) onLayout(all.lg) }}>
+          <DashGrid className={`dash-grid ${editing ? 'dash-grid--editing' : ''}`} layout={layout}
+            editing={editing} onLayout={onLayout}>
             {widgets.map((w, i) => (
               <div key={w.id}>
                 <Panel w={w} scope={scope} editing={editing} onFilter={addFilter}
@@ -272,7 +291,7 @@ export default function CustomDashboardsPage() {
                   onRemove={() => setWidgets(ws => ws.filter(x => x.id !== w.id))} />
               </div>
             ))}
-          </Grid>
+          </DashGrid>
         )}
 
       {editor && editing && (
