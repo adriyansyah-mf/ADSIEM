@@ -36,7 +36,6 @@ _IMPORT = re.compile(r"@import[^;]*;?", re.I)
 _CSS_URL = re.compile(r"url\(\s*(?!['\"]?data:image/)[^)]*(?:\)|\Z)", re.I)
 _COMMENT = re.compile(r"/\*.*?(?:\*/|$)", re.S)
 _IMAGE_SET = re.compile(r"(?:-webkit-)?image-set\s*\([^)]*\)?", re.I)
-_PLACEHOLDER = re.compile(r"\{\{.*?\}\}", re.S)
 _EXPRESSION = re.compile(r"expression\s*\(", re.I)
 _VAR = re.compile(r"\{\{\s*(" + "|".join(VARIABLES) + r")\s*\}\}")
 _TAGS = set(nh3.ALLOWED_TAGS) | {"main", "section", "header", "footer", "article", "span", "div", "small", "img"}
@@ -48,11 +47,22 @@ class PageError(ValueError):
     """Why a block page cannot be saved; shown to the analyst."""
 
 
+def _replace_placeholders(text: str, repl: str) -> str:
+    """Replace each "{{...}}" with repl: the matches of re.sub(r"\\{\\{.*?\\}\\}", re.S),
+    in linear time (that regex rescans to the end from every unclosed "{{")."""
+    out, i = [], 0
+    while (start := text.find("{{", i)) >= 0 and (end := text.find("}}", start + 2)) >= 0:
+        out += (text[i:start], repl)
+        i = end + 2
+    out.append(text[i:])
+    return "".join(out)
+
+
 def _clean_css_once(css: str) -> str:
     # Every removal leaves a space so the text around it cannot splice into a
     # live token (urexpression(l( -> url(). Comments and backslash escapes could
     # spell "@import", "url(" or "expression(" (u\72l(, @\69mport), so go too.
-    css = _PLACEHOLDER.sub(" ", css)
+    css = _replace_placeholders(css, " ")
     css = _COMMENT.sub(" ", css).replace("\\", " ").replace("<", " ")
     css = _IMPORT.sub(" ", css)
     css = _CSS_URL.sub("none", css)
@@ -74,7 +84,7 @@ def _attribute_filter(tag: str, attr: str, value: str) -> str | None:
     if attr == "style":  # inline styles get the same cleaning as <style> blocks
         return _clean_css(value) or None
     if attr not in ("title", "alt"):  # a rendered value must not reach a URL/class/id
-        value = _PLACEHOLDER.sub("", value)
+        value = _replace_placeholders(value, "")
     normalized = re.sub(r"[\x00-\x20]", "", value).lower()
     if normalized.startswith(("javascript:", "vbscript:")):
         return None

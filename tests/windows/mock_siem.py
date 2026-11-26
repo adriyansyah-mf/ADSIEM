@@ -147,8 +147,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("X-Agent-Token") != "mock-agent-token":
                 return self._reply(401, {"detail": "Invalid agent token"})
             name = self.path[len(prefix):]
-            pkg = Path(os.environ["MOCK_UPDATE_DIR"]) / name
-            if "/" in name or "\\" in name or not pkg.is_file():
+            # serve a file the directory lists, never a path built from the request
+            pkg = next((p for p in Path(os.environ["MOCK_UPDATE_DIR"]).iterdir()
+                        if p.name == name and p.is_file()), None)
+            if pkg is None:
                 return self._reply(404, {"detail": "Package not found"})
             data = pkg.read_bytes()
             with open(OUT / "downloads.jsonl", "a") as fh:
@@ -168,6 +170,7 @@ class Handler(BaseHTTPRequestHandler):
 server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
 if len(sys.argv) >= 5:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2  # what the agent negotiates; no legacy TLS
     ctx.load_cert_chain(sys.argv[3], sys.argv[4])
     server.socket = ctx.wrap_socket(server.socket, server_side=True)
 server.serve_forever()

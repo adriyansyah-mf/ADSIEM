@@ -2,6 +2,7 @@
 # SIEM Platform pytest configuration
 # Registers pytest markers and auto-skips service_e2e tests when docker-compose stack is down
 
+import asyncio
 import socket
 from typing import Generator
 
@@ -34,6 +35,15 @@ def page() -> Generator["Page", None, None]:
         yield pg
         context.close()
         browser.close()
+
+
+@pytest.fixture
+async def event_loop():
+    """The loop async tests run on (pytest.ini: one per session).
+
+    pytest-asyncio 1.x dropped its own event_loop fixture; tests still take
+    this one to make it the thread's current loop for synchronous helpers."""
+    return asyncio.get_running_loop()
 
 
 def pytest_configure(config):

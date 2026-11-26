@@ -128,7 +128,8 @@ def package_path(filename: str) -> Path | None:
     """The signed package file an agent may download, or None."""
     for p in signed_packages():
         if p["file"] == filename and offerable(p):
-            return PACKAGES_DIR / "archive" / filename if p["archived"] else PACKAGES_DIR / filename
+            # the listed name, not the requested one: the path never comes from the request
+            return PACKAGES_DIR / "archive" / p["file"] if p["archived"] else PACKAGES_DIR / p["file"]
     return None
 
 

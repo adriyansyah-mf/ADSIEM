@@ -5,6 +5,7 @@ package memscan
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -59,8 +60,13 @@ func Regions(pid int) ([]Region, error) {
 
 type procMem struct{ f *os.File }
 
-func (m procMem) ReadAt(p []byte, addr uint64) (int, error) { return m.f.ReadAt(p, int64(addr)) }
-func (m procMem) Close() error                              { return m.f.Close() }
+func (m procMem) ReadAt(p []byte, addr uint64) (int, error) {
+	if addr > math.MaxInt64 { // file offsets are signed; such an address is not readable
+		return 0, fmt.Errorf("address %#x beyond the file offset range", addr)
+	}
+	return m.f.ReadAt(p, int64(addr))
+}
+func (m procMem) Close() error { return m.f.Close() }
 
 // Reader reads another process's memory.
 type Reader interface {

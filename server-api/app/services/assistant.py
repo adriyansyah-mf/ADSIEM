@@ -231,8 +231,10 @@ async def stream_assistant_chat(
             elif mode == "values":
                 final_state = chunk
     except Exception as exc:
+        # The exception text can name hosts, keys or provider internals: log it,
+        # send the browser a fixed message.
         log.warning("assistant_stream_failed", error=str(exc))
-        yield {"type": "error", "message": str(exc)}
+        yield {"type": "error", "message": "The assistant hit an error. Details are in the server log."}
         return
 
     if final_state:

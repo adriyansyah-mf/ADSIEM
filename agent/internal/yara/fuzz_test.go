@@ -99,6 +99,17 @@ func TestStepBudget(t *testing.T) {
 	}
 }
 
+// Integers are signed 64-bit: a hex literal above that is an error, not a
+// negative number.
+func TestHexLiteralRange(t *testing.T) {
+	if _, err := Compile(`rule a { condition: filesize != 0x7FFFFFFFFFFFFFFF }`); err != nil {
+		t.Fatalf("largest int64 rejected: %v", err)
+	}
+	if _, err := Compile(`rule a { condition: filesize != 0x8000000000000000 }`); err == nil {
+		t.Fatal("0x8000000000000000 compiled; it would wrap to a negative number")
+	}
+}
+
 func TestCompileSourcesKeepsGoodSources(t *testing.T) {
 	rules, errs := CompileSources([]Source{
 		{Namespace: "good", Text: `rule a { condition: true }`},

@@ -49,10 +49,11 @@ var platformShow = func(title, message string) error {
 	shown := 0
 	var lastErr error
 	for _, entry := range entries {
-		uid, err := strconv.Atoi(entry.Name())
-		if err != nil || uid < 1000 || !entry.IsDir() {
+		parsed, err := strconv.ParseUint(entry.Name(), 10, 32)
+		if err != nil || parsed < 1000 || !entry.IsDir() {
 			continue
 		}
+		uid := uint32(parsed)
 		runtimeDir := filepath.Join("/run/user", entry.Name())
 		busPath := filepath.Join(runtimeDir, "bus")
 		if _, err := os.Stat(busPath); err != nil {
@@ -71,7 +72,7 @@ var platformShow = func(title, message string) error {
 	return nil
 }
 
-func notifyAs(notifySend string, args []string, uid int, runtimeDir, busPath string) error {
+func notifyAs(notifySend string, args []string, uid uint32, runtimeDir, busPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), notifySendTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, notifySend, args...)
@@ -80,23 +81,24 @@ func notifyAs(notifySend string, args []string, uid int, runtimeDir, busPath str
 		"DBUS_SESSION_BUS_ADDRESS=unix:path=" + busPath,
 		"XDG_RUNTIME_DIR=" + runtimeDir,
 	}
-	if u, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+	if u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10)); err == nil {
 		env = append(env, "HOME="+u.HomeDir, "USER="+u.Username, "LOGNAME="+u.Username)
 	}
 	cmd.Env = env
 
-	if os.Geteuid() == 0 {
+	euid := os.Geteuid()
+	if euid == 0 {
 		gid := uid
 		if fi, err := os.Stat(runtimeDir); err == nil {
 			if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-				gid = int(st.Gid)
+				gid = st.Gid
 			}
 		}
 		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid), NoSetGroups: true},
+			Credential: &syscall.Credential{Uid: uid, Gid: gid, NoSetGroups: true},
 		}
-	} else if os.Geteuid() != uid {
-		return fmt.Errorf("cannot reach uid %d session bus as uid %d", uid, os.Geteuid())
+	} else if euid < 0 || uint32(euid) != uid {
+		return fmt.Errorf("cannot reach uid %d session bus as uid %d", uid, euid)
 	}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w: %s", err, out)

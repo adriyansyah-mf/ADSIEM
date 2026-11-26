@@ -95,10 +95,16 @@ function eventField(d: AlertDetail | undefined, name: string): string | undefine
   return typeof v === 'string' || typeof v === 'number' ? String(v) : undefined
 }
 
+/** A value inside a quoted Lucene phrase: escape backslashes as well as quotes,
+ *  so a value ending in "\" (a Windows path) cannot escape the closing quote. */
+function quotePhrase(value: unknown): string {
+  return String(value).replace(/[\\"]/g, '\\$&')
+}
+
 /** Lucene query for "find more events like this field" on the Logs page. */
 function pivotQuery(field: string, value: DocValue): string | null {
   if (value === null || value === undefined || Array.isArray(value)) return null
-  const v = String(value).replace(/"/g, '\\"')
+  const v = quotePhrase(value)
   if (field.startsWith('data.')) return `decoded_fields.${field.slice(5)}:"${v}"`
   const direct: Record<string, string> = {
     location: 'location', 'decoder.name': 'decoder', 'log.type': 'log_type', 'agent.id': 'agent_id', 'source.ip': 'source_ip',
@@ -262,7 +268,7 @@ function Overview({ a, d, onPivot, wide }: { a: Alert; d?: AlertDetail; onPivot:
               ...keyFields.map(k => [k, (
                 <span className="inline-flex items-center gap-1 font-mono">
                   {String(data[k])}
-                  <button title="Search logs for this value" onClick={() => onPivot(`decoded_fields.${k}:"${String(data[k]).replace(/"/g, '\\"')}"`)}
+                  <button title="Search logs for this value" onClick={() => onPivot(`decoded_fields.${k}:"${quotePhrase(data[k])}"`)}
                     className="text-muted-foreground hover:text-primary"><Search size={11} /></button>
                 </span>
               )] as [string, ReactNode]),

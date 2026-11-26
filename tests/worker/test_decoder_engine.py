@@ -69,3 +69,13 @@ def test_static_field_applied():
     raw = "May 21 sshd: Failed password for alice from 10.0.0.1 port 22 ssh2"
     result = engine.decode("linux_auth", raw)
     assert result["event.category"] == "authentication"
+
+
+def test_kv_parse_is_linear_on_a_long_word_without_equals():
+    """A hostile line of word characters and no "=" once took quadratic time."""
+    import time
+    from worker.decoder_engine import _parse_kv
+    start = time.perf_counter()
+    assert _parse_kv("a" * 100_000) == {}
+    assert time.perf_counter() - start < 2
+    assert _parse_kv('x.devname=fw1 msg="a \\"b\\"" k=v') == {"devname": "fw1", "msg": 'a "b"', "k": "v"}

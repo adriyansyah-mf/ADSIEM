@@ -273,15 +273,28 @@ _RULE_RE = re.compile(r"^\s*(?:(?:private|global)\s+)*rule\s+([A-Za-z_][A-Za-z0-
 # one definition anywhere (analysts put several on a line), then its known modifiers
 _STRING_RE = re.compile(r'(\$[A-Za-z0-9_]*)\s*=\s*("(?:[^"\\]|\\.)*"|\{[^}]*\}|/(?:[^/\\\n]|\\.)+/[is]*)'
                         r'((?:\s+(?:ascii|wide|nocase|fullword|xor|base64wide|base64|private)\b)*)')
+_STRINGS_KW = re.compile(r"\bstrings:\s*")
+_CONDITION_KW = re.compile(r"\bcondition:\s*")
 
 
 def parse_rule(text: str) -> dict:
     """Name, strings and condition of the (first) rule in a text, for quality checks after edits."""
-    names = _RULE_RE.findall(text or "")
-    strings_part = re.search(r"\bstrings:\s*(.*?)\bcondition:", text or "", re.S)
-    cond = re.search(r"\bcondition:\s*(.*?)\}\s*$", text or "", re.S)
+    text = text or ""
+    names = _RULE_RE.findall(text)
+    # Section bounds by plain searches: lazy ".*?" between two keywords rescans
+    # to the end from every "strings:"/"condition:" when the closer is missing
+    # (quadratic on a pasted draft).
+    strings_part = ""
+    head = _STRINGS_KW.search(text)
+    if head and (tail := _CONDITION_KW.search(text, head.end())):
+        strings_part = text[head.end():tail.start()]
+    cond = None
+    head = _CONDITION_KW.search(text)
+    body_end = len(text.rstrip()) - 1  # the closing "}" of the rule
+    if head and body_end >= head.end() and text[body_end] == "}":
+        cond = text[head.end():body_end]
     strings = []
-    for sid, literal, mods in _STRING_RE.findall(strings_part.group(1) if strings_part else ""):
+    for sid, literal, mods in _STRING_RE.findall(strings_part):
         if literal.startswith('"'):
             kind, value = "text", bytes(literal[1:-1], "utf-8").decode("unicode_escape", errors="replace")
         elif literal.startswith("{"):
@@ -290,7 +303,7 @@ def parse_rule(text: str) -> dict:
             kind, value = "regex", literal
         strings.append({"id": sid, "kind": kind, "value": value, "modifiers": mods.split()})
     return {"names": names, "strings": strings,
-            "condition": re.sub(r"\s+", " ", cond.group(1)).strip() if cond else ""}
+            "condition": re.sub(r"\s+", " ", cond).strip() if cond is not None else ""}
 
 
 def quality(text: str) -> dict:
