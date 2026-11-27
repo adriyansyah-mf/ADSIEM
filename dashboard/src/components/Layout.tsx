@@ -1,58 +1,33 @@
 import { Suspense, useEffect, useRef, useState } from 'react'
-import { Link, Outlet, useLocation } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, Menu, Search, Wifi, WifiOff } from 'lucide-react'
-import { api } from '@/api/client'
+import { Outlet, useLocation } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { Menu } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import AssistantWidget from '@/components/AssistantWidget'
 import { QueryState } from '@/components/Workspace'
-import { AppSidebar, pageLabel } from '@/components/AppSidebar'
-import type { Alert, Case } from '@/types'
-
-interface SearchResults {
-  readonly alerts: readonly Pick<Alert, 'id' | 'title'>[]
-  readonly cases: readonly Pick<Case, 'id' | 'title'>[]
-}
+import { AppSidebar, SectionTabs, pageLabel, sectionFor } from '@/components/AppSidebar'
+import CommandPalette, { type CommandPaletteHandle } from '@/components/CommandPalette'
 
 export default function Layout() {
   const { pathname } = useLocation()
-  const { accessToken, user } = useAuthStore()
+  const { accessToken } = useAuthStore()
   const queryClient = useQueryClient()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === '1')
   const [wsConnected, setWsConnected] = useState(false)
-  const [search, setSearch] = useState('')
-  const [query, setQuery] = useState('')
-  const [searchOpen, setSearchOpen] = useState(false)
   const mobileNav = useRef<HTMLDialogElement>(null)
-  const searchRegion = useRef<HTMLDivElement>(null)
-  const searchInput = useRef<HTMLInputElement>(null)
+  const palette = useRef<CommandPaletteHandle>(null)
 
   useEffect(() => { localStorage.setItem('sidebar-collapsed', collapsed ? '1' : '0') }, [collapsed])
-  useEffect(() => {
-    mobileNav.current?.close()
-    setSearchOpen(false)
-  }, [pathname])
-  useEffect(() => {
-    const timer = window.setTimeout(() => setQuery(search.trim()), 250)
-    return () => window.clearTimeout(timer)
-  }, [search])
+  useEffect(() => { mobileNav.current?.close() }, [pathname])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        searchInput.current?.focus()
+        palette.current?.open()
       }
-      if (event.key === 'Escape') setSearchOpen(false)
-    }
-    const onPointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && !searchRegion.current?.contains(event.target)) setSearchOpen(false)
     }
     window.addEventListener('keydown', onKey)
-    window.addEventListener('pointerdown', onPointer)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('pointerdown', onPointer)
-    }
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
   useEffect(() => {
     const onResize = () => { if (window.innerWidth >= 768) mobileNav.current?.close() }
@@ -82,64 +57,42 @@ export default function Layout() {
     return () => { window.clearInterval(ping); ws.close() }
   }, [accessToken, queryClient])
 
-  const results = useQuery<SearchResults>({
-    queryKey: ['global-search', query],
-    queryFn: () => api.get('/api/search', { params: { q: query, limit: 5 } }).then(response => response.data),
-    enabled: query.length >= 2,
-  })
-  const visibleResults = searchOpen && search.trim().length >= 2
+  const section = sectionFor(pathname)
   const currentLabel = pageLabel(pathname)
+  const openSearch = () => { mobileNav.current?.close(); palette.current?.open() }
 
   return (
     <div className="app-shell">
       <a className="skip-link ui-button ui-button--primary" href="#workspace-content">Skip to content</a>
-      <div className="desktop-navigation"><AppSidebar collapsed={collapsed} onCollapse={() => setCollapsed(value => !value)} /></div>
+      <div className="desktop-navigation">
+        <AppSidebar collapsed={collapsed} onCollapse={() => setCollapsed(value => !value)} onOpenSearch={openSearch} />
+      </div>
       <dialog className="mobile-navigation" ref={mobileNav} aria-label="Navigation">
-        <AppSidebar onNavigate={() => mobileNav.current?.close()} onClose={() => mobileNav.current?.close()} />
+        <AppSidebar onNavigate={() => mobileNav.current?.close()} onClose={() => mobileNav.current?.close()} onOpenSearch={openSearch} />
       </dialog>
       <div className="app-main">
         <header className="app-header">
+          <button className="ui-icon-button mobile-menu" onClick={() => mobileNav.current?.showModal()} aria-label="Open navigation"><Menu size={18} /></button>
           <div className="app-header__location">
-            <button className="ui-icon-button mobile-menu" onClick={() => mobileNav.current?.showModal()} aria-label="Open navigation"><Menu size={18} /></button>
-            <span className="breadcrumb-root">Workspace</span><ChevronRight size={14} aria-hidden="true" />
-            <span>{currentLabel}</span>
-          </div>
-          <div className="global-search" ref={searchRegion}>
-            <Search size={16} aria-hidden="true" />
-            <input ref={searchInput} id="global-search-input" aria-label="Search alerts and cases"
-              value={search} placeholder="Search alerts and cases…" onChange={event => { setSearch(event.target.value); setSearchOpen(true) }}
-              onFocus={() => setSearchOpen(true)} aria-expanded={visibleResults} aria-controls="global-search-results" />
-            <kbd>⌘ / Ctrl K</kbd>
-            {visibleResults && (
-              <div className="global-search__results" id="global-search-results" aria-label="Search results">
-                {query !== search.trim() || results.isPending ? <p role="status">Searching alerts and cases…</p>
-                  : results.isError ? <p role="alert">Search is unavailable. Try again in a moment.</p>
-                  : results.data && (
-                    <>
-                      {(['alerts', 'cases'] as const).map(type => (
-                        <div key={type}>
-                          <h2>{type === 'alerts' ? 'Alerts' : 'Cases'}</h2>
-                          {results.data[type].map(item => <Link key={item.id} to={`/${type}/${item.id}`}>{item.title}</Link>)}
-                        </div>
-                      ))}
-                      {results.data.alerts.length + results.data.cases.length === 0 && <p>No matching alerts or cases.</p>}
-                    </>
-                  )}
-              </div>
-            )}
-          </div>
-          <div className="workspace-scope" title={user?.group_id}>
-            <span className="connection-state" title={wsConnected ? 'Live alert updates connected' : 'Live updates disconnected; lists still refresh automatically'}>
-              {wsConnected ? <Wifi size={15} /> : <WifiOff size={15} />}
-              <span>{wsConnected ? 'Live' : 'Polling'}</span>
+            <SectionTabs />
+            <span className="app-header__crumb">
+              {section && section.label !== currentLabel && <span className="app-header__crumb-root">{section.label} / </span>}
+              <strong>{currentLabel}</strong>
             </span>
-            <span className="workspace-scope__group">{user?.role === 'superadmin' ? 'All groups' : user?.group_id}</span>
+          </div>
+          <div className="workspace-scope">
+            <span className={`connection-state ${wsConnected ? 'connection-state--live' : ''}`}
+              title={wsConnected ? 'Live alert updates connected' : 'Live updates disconnected; lists still refresh automatically'}>
+              <span className="connection-state__dot" aria-hidden="true" />
+              {wsConnected ? 'Live' : 'Polling'}
+            </span>
           </div>
         </header>
         <main id="workspace-content" className="app-content" tabIndex={-1}>
           <Suspense fallback={<QueryState kind="loading" title="Loading…" description="Fetching this page." />}><Outlet /></Suspense>
         </main>
       </div>
+      <CommandPalette ref={palette} />
       <AssistantWidget />
     </div>
   )

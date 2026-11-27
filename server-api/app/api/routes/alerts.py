@@ -3,9 +3,9 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Literal
 from uuid import UUID
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,6 +42,14 @@ async def _push_feedback_reindex(feedback_id: str) -> None:
 _RESOLVED_STATUSES = {"resolved", "closed", "false_positive"}
 
 
+_SEVERITY_ORDER = case(
+    {"critical": 0, "high": 1, "medium": 2, "low": 3}, value=Alert.severity, else_=4)
+
+
+def _csv(value: str | None) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()] if value else []
+
+
 @router.get("", response_model=PaginatedResponse)
 async def list_alerts(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -52,28 +60,40 @@ async def list_alerts(
     assignee_id: UUID | None = None, source_ip: str | None = None,
     hostname: str | None = None, search: str | None = None,
     start_time: datetime | None = None, end_time: datetime | None = None,
+    unassigned: bool = False,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    sort: Literal["recent", "priority"] = "recent",
 ):
-    q = select(Alert).options(selectinload(Alert.notes)).order_by(Alert.created_at.desc())
+    # status and severity accept one value or a comma-separated list ("new,acknowledged")
+    statuses = _csv(status)
+    severities = _csv(severity)
+    order = (_SEVERITY_ORDER, Alert.created_at.desc()) if sort == "priority" else (Alert.created_at.desc(),)
+    query = select(Alert).options(selectinload(Alert.notes)).order_by(*order)
     if group_filter:
-        q = q.where(Alert.group_id == group_filter)
-    if status:
-        q = q.where(Alert.status == status)
-    if severity:
-        q = q.where(Alert.severity == severity)
+        query = query.where(Alert.group_id == group_filter)
+    if statuses:
+        query = query.where(Alert.status.in_(statuses))
+    if severities:
+        query = query.where(Alert.severity.in_(severities))
     if assignee_id:
-        q = q.where(Alert.assignee_id == assignee_id)
+        query = query.where(Alert.assignee_id == assignee_id)
+    elif unassigned:
+        query = query.where(Alert.assignee_id.is_(None))
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.where(or_(Alert.title.ilike(like), Alert.hostname.ilike(like), Alert.source_ip.ilike(like)))
     if source_ip:
-        q = q.where(Alert.source_ip == source_ip)
+        query = query.where(Alert.source_ip == source_ip)
     if hostname:
-        q = q.where(Alert.hostname.ilike(f"%{hostname}%"))
+        query = query.where(Alert.hostname.ilike(f"%{hostname}%"))
     if search:
-        q = q.where(Alert.title.ilike(f"%{search}%"))
+        query = query.where(Alert.title.ilike(f"%{search}%"))
     if start_time:
-        q = q.where(Alert.created_at >= start_time)
+        query = query.where(Alert.created_at >= start_time)
     if end_time:
-        q = q.where(Alert.created_at <= end_time)
-    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
-    result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
+        query = query.where(Alert.created_at <= end_time)
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar()
+    result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
     rows = result.scalars().all()
     # asset criticality comes from each alert's agent: one lookup for the page
     agent_ids = {a.agent_id for a in rows if a.agent_id}
