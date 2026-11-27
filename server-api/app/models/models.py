@@ -684,6 +684,20 @@ class CaseNote(Base):
     created_at      = Column(DateTime(timezone=True), default=now_utc)
     case            = relationship("Case", back_populates="notes")
 
+class CaseTask(Base):
+    """A to-do on a case (routes/case_tasks.py): who owns it, when it is due,
+    and when it was finished. Scoped through its case's group."""
+    __tablename__ = "case_tasks"
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id      = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    title        = Column(String(300), nullable=False)
+    done         = Column(Boolean, nullable=False, default=False)
+    assignee_id  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    due_at       = Column(DateTime(timezone=True))
+    created_by   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at   = Column(DateTime(timezone=True), default=now_utc)
+    completed_at = Column(DateTime(timezone=True))
+
 class UebaFeatureSnapshot(Base):
     __tablename__ = "ueba_feature_snapshots"
     id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
