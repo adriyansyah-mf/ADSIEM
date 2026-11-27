@@ -882,7 +882,7 @@ async def analyze_and_maybe_create_case(
         return
     model = await get_setting("ninerouter_model", NINEROUTER_MODEL)
 
-    from worker.case_correlation import choose_case, grouping_lock, record_link
+    from worker.case_correlation import cases_opened_since, choose_case, grouping_lock, record_link
     from worker.alert_iocs import index_triaged_alert
     graph = build_triage_graph(
         base_url=NINEROUTER_BASE_URL,
@@ -892,6 +892,7 @@ async def analyze_and_maybe_create_case(
             "choose_case": choose_case,
             "record_link": record_link,
             "grouping_lock": grouping_lock,
+            "cases_opened_since": cases_opened_since,
             "enrich": _graph_enrich,
             "escalate_severity": _escalate_severity,
             "suggest_mitre": suggest_mitre,

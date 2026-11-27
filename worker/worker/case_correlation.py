@@ -60,12 +60,40 @@ class Candidate(BaseModel):
 
 @asynccontextmanager
 async def grouping_lock(group_id: str):
-    """Serialize selection and creation across worker replicas, per group."""
+    """Serialize case creation across worker replicas, per group.
+
+    Hold it only around DB writes, never across an LLM call: every alert in
+    the group waits on it, on every replica."""
     async with AsyncSessionLocal() as db:
         async with db.begin():
             await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
                              {"key": f"case-correlation:{group_id}"})
             yield
+
+
+async def cases_opened_since(incoming: CorrelationInput, since: datetime) -> bool:
+    """Whether a case that could be a candidate for `incoming` (shared IOC,
+    host or account, as in choose_case) opened in its group after `since`:
+    a decision made before then missed it."""
+    async with AsyncSessionLocal() as db:
+        cases = (await db.execute(select(Case).where(
+            Case.group_id == incoming.group_id, Case.status == "open", Case.created_at >= since,
+        ).limit(200))).scalars().all()
+        for case in cases:
+            ioc = case.ioc_data or {}
+            keys = set(ioc.get("ioc_keys") or [])
+            if ioc.get("source_ip"):
+                keys.add(f"ip:{ioc['source_ip']}")
+            hosts = set(ioc.get("affected_hosts") or []) | ({ioc["hostname"]} if ioc.get("hostname") else set())
+            if keys.intersection(incoming.keys) or incoming.hostname in hosts:
+                return True
+            if incoming.accounts:
+                links = (await db.execute(select(CaseAlert).where(
+                    CaseAlert.case_id == case.id, CaseAlert.status == "linked",
+                ))).scalars().all()
+                if {a for link in links for a in link.accounts}.intersection(incoming.accounts):
+                    return True
+    return False
 
 
 def validate_decision(decision: Decision, candidates: list[Candidate]) -> Decision:

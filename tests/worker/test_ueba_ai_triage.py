@@ -128,6 +128,105 @@ async def test_ambiguous_grouping_records_suggestion_and_creates_separate_case()
     assert ("link", new_id, "join") in calls
 
 
+def _lock_probe(calls):
+    from contextlib import asynccontextmanager
+    held = {"now": False}
+
+    @asynccontextmanager
+    async def lock(group_id):
+        calls.append(("lock", group_id))
+        held["now"] = True
+        try:
+            yield
+        finally:
+            held["now"] = False
+
+    return held, lock
+
+
+async def test_case_routing_llm_runs_outside_the_group_lock():
+    from worker.case_correlation import Decision
+    calls = []
+    deps = _deps(calls)
+    held, lock = _lock_probe(calls)
+
+    async def choose(incoming):
+        calls.append(("choose", held["now"]))
+        return Decision()
+
+    async def record(incoming, decision, **kwargs):
+        return True
+
+    async def opened_since(incoming, since):
+        return False
+
+    async def create(**kwargs):
+        calls.append(("create", held["now"]))
+        return "55555555-5555-5555-5555-555555555555"
+
+    deps.update(choose_case=choose, record_link=record, grouping_lock=lock,
+                cases_opened_since=opened_since, create_case_from_verdict=create)
+    graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
+    final = await graph.ainvoke(_state({"user.name": "admin"}))
+    assert final["case_id"] == "55555555-5555-5555-5555-555555555555"
+    assert ("choose", False) in calls
+    assert ("create", True) in calls  # creation stays serialized
+
+
+async def test_joining_an_existing_case_never_takes_the_group_lock():
+    from worker.case_correlation import Decision
+    calls = []
+    deps = _deps(calls)
+    _, lock = _lock_probe(calls)
+    case_id = "22222222-2222-2222-2222-222222222222"
+
+    async def choose(incoming):
+        return Decision(action="join", case_id=case_id, confidence=0.95, reason="Shared evidence")
+
+    async def record(incoming, decision, **kwargs):
+        return True
+
+    deps.update(choose_case=choose, record_link=record, grouping_lock=lock)
+    graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
+    final = await graph.ainvoke(_state({"user.name": "admin"}))
+    assert final["case_id"] == case_id
+    assert not any(c[0] == "lock" for c in calls)
+
+
+async def test_case_opened_by_another_replica_is_rechecked_under_the_lock():
+    from worker.case_correlation import Decision
+    calls = []
+    deps = _deps(calls)
+    held, lock = _lock_probe(calls)
+    other_case = "44444444-4444-4444-4444-444444444444"
+
+    async def choose(incoming):
+        calls.append(("choose", held["now"]))
+        # The first pass, unlocked, ran before the other replica's case existed.
+        return (Decision(action="join", case_id=other_case, confidence=0.95, reason="Same campaign")
+                if held["now"] else Decision())
+
+    async def record(incoming, decision, **kwargs):
+        calls.append(("link", str(decision.case_id)))
+        return True
+
+    async def opened_since(incoming, since):
+        return True
+
+    async def create(**kwargs):
+        calls.append(("create",))
+        return "case-duplicate"
+
+    deps.update(choose_case=choose, record_link=record, grouping_lock=lock,
+                cases_opened_since=opened_since, create_case_from_verdict=create)
+    graph = triage_graph.build_triage_graph(base_url="x", api_key="k", model="m", deps=deps)
+    final = await graph.ainvoke(_state({"user.name": "admin"}))
+    assert final["case_id"] == other_case
+    assert [c for c in calls if c[0] == "choose"] == [("choose", False), ("choose", True)]
+    assert ("create",) not in calls
+    assert ("link", other_case) in calls
+
+
 @pytest.fixture(autouse=True)
 def fake_llm(monkeypatch):
     _FakeLLM.prompts = []
