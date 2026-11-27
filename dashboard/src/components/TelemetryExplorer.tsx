@@ -32,7 +32,7 @@ const MODES = [
 ]
 
 function quote(value: string) {
-  return /^[\w.:\\/-]+$/.test(value) ? value : `"${value.replace(/"/g, '\\"')}"`
+  return /^[\w.:\\/-]+$/.test(value) ? value : `"${value.replace(/[\\"]/g, '\\$&')}"`
 }
 
 export default function TelemetryExplorer({ kind }: { readonly kind: Kind }) {
