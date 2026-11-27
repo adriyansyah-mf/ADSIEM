@@ -76,6 +76,8 @@ async def list_cases(
     start_time: datetime | None = None, end_time: datetime | None = None,
     alert_id: UUID | None = None,
     summary: bool = False,
+    updated_after: datetime | None = None,
+    unassigned: bool = False,
 ):
     q = select(Case)
     if group_filter:
@@ -83,10 +85,17 @@ async def list_cases(
     if alert_id:
         q = q.where(or_(Case.alert_id == alert_id, Case.id.in_(
             select(CaseAlert.case_id).where(CaseAlert.alert_id == alert_id, CaseAlert.status == "linked"))))
-    if status:
-        q = q.where(Case.status == status)
-    if severity:
-        q = q.where(Case.severity == severity)
+    # comma-separated, like /api/alerts
+    statuses = [part.strip() for part in (status or "").split(",") if part.strip()]
+    severities = [part.strip() for part in (severity or "").split(",") if part.strip()]
+    if statuses:
+        q = q.where(Case.status.in_(statuses))
+    if severities:
+        q = q.where(Case.severity.in_(severities))
+    if updated_after:
+        q = q.where(Case.updated_at >= updated_after)
+    if unassigned:
+        q = q.where(Case.assignee_id.is_(None))
     if hostname:
         matching_alerts = select(Alert.id).where(Alert.hostname.ilike(f"%{hostname}%"))
         q = q.where(or_(Case.alert_id.in_(matching_alerts), Case.id.in_(

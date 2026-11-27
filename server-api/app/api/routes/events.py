@@ -1,7 +1,10 @@
 # server-api/app/api/routes/events.py
 import json
+from datetime import datetime
 from typing import Annotated
 from fastapi import APIRouter, Depends
+
+from app.services.telemetry_facets import facets as telemetry_facets, time_filter
 
 from app.core.deps import get_scoped_group, require_permission
 from app.core.es_client import search as es_search
@@ -11,16 +14,11 @@ from app.schemas.schemas import EventOut, PaginatedResponse
 router = APIRouter(prefix="/api/events", tags=["events"])
 Perm = require_permission("logs:read")
 
-@router.get("", response_model=PaginatedResponse)
-async def list_events(
-    group_filter: Annotated[str | None, Depends(get_scoped_group)],
-    _=Depends(Perm),
-    page_size: int = 25,
-    after: str | None = None,
-    search: str | None = None,
-    source_ip: str | None = None, event_action: str | None = None,
-    filter_tree: str | None = None,
-):
+FACET_FIELDS = ["event_action", "event_category", "user_name", "source_ip"]
+
+
+def _filters(group_filter: str | None, source_ip: str | None, event_action: str | None,
+             search: str | None, filter_tree: str | None) -> list[dict]:
     filters: list[dict] = []
     if group_filter:
         filters.append({"term": {"group_id": group_filter}})
@@ -34,6 +32,38 @@ async def list_events(
         q = tree_to_query(json.loads(filter_tree))
         if q:
             filters.append(q)
+    return filters
+
+
+@router.get("/facets")
+async def event_facets(
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(Perm),
+    search: str | None = None,
+    source_ip: str | None = None, event_action: str | None = None,
+    filter_tree: str | None = None,
+    since: datetime | None = None, until: datetime | None = None,
+):
+    """Count histogram and top values for the same query as the list (default window: 24 h)."""
+    filters = _filters(group_filter, source_ip, event_action, search, filter_tree)
+    window = time_filter(since, until)
+    return await telemetry_facets(filters + ([window] if window else []), FACET_FIELDS, since, until)
+
+@router.get("", response_model=PaginatedResponse)
+async def list_events(
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(Perm),
+    page_size: int = 25,
+    after: str | None = None,
+    search: str | None = None,
+    source_ip: str | None = None, event_action: str | None = None,
+    filter_tree: str | None = None,
+    since: datetime | None = None, until: datetime | None = None,
+):
+    filters = _filters(group_filter, source_ip, event_action, search, filter_tree)
+    window = time_filter(since, until)
+    if window:
+        filters.append(window)
     query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
 
     search_after = json.loads(after) if after else None

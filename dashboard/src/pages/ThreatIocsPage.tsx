@@ -1,27 +1,31 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Ban, Check, Copy, Crosshair, Loader2, Search, ShieldX, X } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Check, Copy, Search } from 'lucide-react'
+import { formatDistanceToNowStrict } from 'date-fns'
+import { api } from '@/api/client'
 import { IOC_PAGE, IOC_TYPES, type Ioc, type IocFilter, type IocType, useIocAlerts, useIocs } from '@/hooks/useIocs'
-import { useAddMalwareHashes } from '@/hooks/useMalwareHashes'
+import { useAddMalwareHashes, useMalwareHashes } from '@/hooks/useMalwareHashes'
 import { useStartHunt } from '@/hooks/useHunts'
 import { apiError, useBlockWeb } from '@/hooks/useWebProtection'
+import { CanvasHeader, CanvasPage, Chip, Empty, KpiStrip, severityTone, type Tone } from '@/components/canvas/Canvas'
 
 const TYPE_LABEL: Record<IocType, string> = {
-  ip: 'IP', domain: 'Domain', url: 'URL', sha256: 'SHA-256', sha1: 'SHA-1', md5: 'MD5', email: 'Email',
+  ip: 'IPv4', domain: 'Domain', url: 'URL', sha256: 'SHA-256', sha1: 'SHA-1', md5: 'MD5', email: 'Email',
 }
-const WINDOWS = [{ days: 1, label: '24 h' }, { days: 7, label: '7 days' }, { days: 30, label: '30 days' },
-  { days: 90, label: '90 days' }, { days: 0, label: 'All time' }]
-const SEVERITY_CLASS: Record<string, string> = {
-  critical: 'text-red-500', high: 'text-orange-500', medium: 'text-yellow-500', low: 'text-blue-400', info: 'text-muted-foreground',
-}
+const WINDOWS = [{ days: 1, label: 'Last 24 h' }, { days: 7, label: 'Last 7 days' }, { days: 30, label: 'Last 30 days' },
+  { days: 90, label: 'Last 90 days' }, { days: 0, label: 'All time' }]
 
-function ago(iso: string | null): string {
-  if (!iso) return '—'
-  const s = (Date.now() - new Date(iso).getTime()) / 1000
-  if (s < 90) return 'just now'
-  if (s < 5400) return `${Math.round(s / 60)} min ago`
-  if (s < 172800) return `${Math.round(s / 3600)} h ago`
-  return `${Math.round(s / 86400)} days ago`
+interface WebFeed { name: string; enabled_key_present: boolean; status: string; last_success: string | null; entries?: number | null; error: string }
+
+const TABS = [
+  { to: '/threat-iocs', label: 'Indicators' },
+  { to: '/malware-hashes', label: 'Malware hashes' },
+  { to: '/mitre-heatmap', label: 'MITRE coverage' },
+]
+
+function ago(iso: string | null | undefined): string {
+  return iso ? `${formatDistanceToNowStrict(new Date(iso))} ago` : '—'
 }
 
 function huntType(type: IocType): 'ip' | 'hash' | null {
@@ -29,75 +33,17 @@ function huntType(type: IocType): 'ip' | 'hash' | null {
   return type === 'sha256' || type === 'sha1' || type === 'md5' ? 'hash' : null
 }
 
-function Detail({ ioc, onClose }: { ioc: Ioc; onClose: () => void }) {
-  const { data, isLoading, isError } = useIocAlerts(ioc)
-  const hunt = useStartHunt()
-  const addHash = useAddMalwareHashes()
-  const block = useBlockWeb()
-  const navigate = useNavigate()
-  const kind = huntType(ioc.type)
-  return (
-    <aside className="rounded-lg border border-border p-4 space-y-3 lg:w-96 shrink-0">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0">
-          <div className="text-xs text-muted-foreground">{TYPE_LABEL[ioc.type]}</div>
-          <div className="font-mono text-sm break-all">{ioc.value}</div>
-        </div>
-        <button onClick={onClose} aria-label="Close" className="ml-auto p-1 rounded hover:bg-muted"><X size={14} /></button>
-      </div>
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div><div className="text-muted-foreground">Alerts</div>{ioc.alerts}</div>
-        <div><div className="text-muted-foreground">Hosts</div>{ioc.hosts}</div>
-        <div><div className="text-muted-foreground">First seen</div>{ago(ioc.first_seen)}</div>
-        <div><div className="text-muted-foreground">Last seen</div>{ago(ioc.last_seen)}</div>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {kind && (
-          <button disabled={hunt.isPending}
-            onClick={() => hunt.mutate({ ioc_type: kind, ioc_value: ioc.value }, { onSuccess: () => navigate('/hunts') })}
-            className="text-xs px-2 py-1 rounded border border-border hover:bg-muted inline-flex items-center gap-1">
-            <Crosshair size={12} /> Hunt
-          </button>
-        )}
-        {ioc.type === 'sha256' && (
-          <button disabled={addHash.isPending || addHash.isSuccess}
-            onClick={() => addHash.mutate({ hashes: [ioc.value], label: '', reference: 'Threat IoCs' })}
-            className="text-xs px-2 py-1 rounded border border-border hover:bg-muted inline-flex items-center gap-1">
-            <ShieldX size={12} /> {addHash.isSuccess ? 'Added to malware hashes' : 'Add to malware hashes'}
-          </button>
-        )}
-        {(ioc.type === 'domain' || ioc.type === 'url') && (
-          ioc.blocked ? <span className="text-xs px-2 py-1 rounded border border-border text-muted-foreground">Blocked on endpoints</span> : (
-            <button disabled={block.isPending || block.isSuccess}
-              onClick={() => block.mutate({ value: ioc.value, reason: `Threat IoC seen in ${ioc.alerts} alert(s)` })}
-              className="text-xs px-2 py-1 rounded border border-border hover:bg-muted inline-flex items-center gap-1 disabled:opacity-40">
-              <Ban size={12} /> {block.isSuccess ? 'Blocked' : 'Block web'}
-            </button>
-          )
-        )}
-      </div>
-      {hunt.isError && <p className="text-xs text-destructive">Hunt could not be started.</p>}
-      {addHash.isError && <p className="text-xs text-destructive">Could not add the hash.</p>}
-      {block.isError && <p className="text-xs text-destructive">{apiError(block.error, 'Could not block.')}</p>}
-      <div className="text-xs font-semibold">Alerts with this indicator</div>
-      {isError ? <p className="text-xs text-destructive">Could not load alerts.</p> :
-        isLoading ? <Loader2 size={14} className="animate-spin" /> : !data?.items.length ? (
-        <p className="text-xs text-muted-foreground">No alerts visible to you.</p>
-      ) : (
-        <ul className="space-y-1">
-          {data.items.map(a => (
-            <li key={a.id} className="text-xs border-t border-border pt-1">
-              <Link to={`/alerts/${a.id}`} className="hover:underline font-medium">{a.title}</Link>
-              <div className="text-muted-foreground">
-                <span className={SEVERITY_CLASS[a.severity] ?? ''}>{a.severity}</span>
-                {' · '}{a.hostname ?? 'no host'}{' · '}{ago(a.created_at)}{a.ai_verdict ? ` · AI: ${a.ai_verdict}` : ''}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </aside>
-  )
+function shortValue(ioc: Ioc) {
+  return ioc.type === 'sha256' || ioc.type === 'sha1' || ioc.type === 'md5' ? `${ioc.value.slice(0, 4)}…${ioc.value.slice(-4)}` : ioc.value
+}
+
+function useTotal(key: string, url: string, params: Record<string, unknown>) {
+  return useQuery<number>({
+    queryKey: ['intel-total', key, params],
+    queryFn: () => api.get(url, { params }).then(r => Number(r.data.total) || 0),
+    retry: false,
+    staleTime: 60_000,
+  })
 }
 
 export default function ThreatIocsPage() {
@@ -106,120 +52,197 @@ export default function ThreatIocsPage() {
   const [selected, setSelected] = useState<Ioc | null>(null)
   const [copied, setCopied] = useState('')
   const { data, isLoading, isError, isFetching } = useIocs(filter)
+  const last24 = useIocs({ type: '', q: '', days: 1, sort: 'last_seen', offset: 0 })
+  const blockedIps = useTotal('ip-blocks', '/api/ip-blocks', { limit: 1 })
+  const hashes = useMalwareHashes({ q: '', source: '', status: '', offset: 0 })
+  const webFeeds = useQuery<{ feeds: WebFeed[] }>({
+    queryKey: ['web-feeds'],
+    queryFn: () => api.get('/api/web-blocks/feeds').then(r => r.data),
+    retry: false,
+    refetchInterval: 60_000,
+  })
   const update = (patch: Partial<IocFilter>) => { setFilter(f => ({ ...f, offset: 0, ...patch })); setSelected(null) }
-  const counts = data?.type_counts ?? {}
-  const all = Object.values(counts).reduce((sum, n) => sum + (n ?? 0), 0)
-
   const isSelected = (ioc: Ioc) => selected?.type === ioc.type && selected.value === ioc.value
-
   const copy = (value: string) => {
-    navigator.clipboard?.writeText(value)
+    void navigator.clipboard?.writeText(value)
     setCopied(value)
     setTimeout(() => setCopied(''), 1500)
   }
+  const activeHashes = (hashes.data?.counts ?? []).filter(c => c.status === 'active').reduce((sum, c) => sum + c.count, 0)
+  const feed = hashes.data?.feed
+  const feeds: { name: string; state: string; tone: Tone }[] = [
+    ...(feed ? [{
+      name: 'Malware hashes · MalwareBazaar',
+      state: feed.status === 'ok' ? `Synced ${ago(feed.last_success)}` : feed.status === 'no_key' ? 'No API key' : feed.status === 'error' ? 'Sync failing' : feed.status ?? 'Never run',
+      tone: (feed.status === 'ok' ? 'good' : feed.status === 'error' ? 'bad' : 'warn') as Tone,
+    }] : []),
+    ...(webFeeds.data?.feeds ?? []).map(item => ({
+      name: `Web blocklist · ${item.name}`,
+      state: !item.enabled_key_present && item.status === 'never_run' ? 'Not configured'
+        : item.status === 'ok' ? `Synced ${ago(item.last_success)}${item.entries ? ` · ${item.entries.toLocaleString('en-US')}` : ''}`
+        : item.status === 'error' ? 'Sync failing' : item.status.replace(/_/g, ' '),
+      tone: (item.status === 'ok' ? 'good' : item.status === 'error' ? 'bad' : 'muted') as Tone,
+    })),
+  ]
+  const staleFeeds = feeds.filter(item => item.tone === 'bad' || item.tone === 'warn').length
 
   return (
-    <div className="p-6 space-y-4">
-      <div>
-        <h1 className="text-xl font-bold">Threat IoCs</h1>
-        <p className="text-sm text-muted-foreground">Attacker indicators recorded in your alerts.</p>
-      </div>
+    <CanvasPage>
+      <CanvasHeader
+        title="Threat intelligence"
+        sub="Attacker indicators recorded in your alerts, with what the platform already blocks"
+        tabs={TABS}
+        actions={<>
+          <Link className="cv-btn" to="/malware-hashes">Import hashes</Link>
+          <Link className="cv-btn cv-btn--primary" to="/ip-blocklist">Block an indicator</Link>
+        </>}
+      />
+      <div className="cv-split">
+        <section className="cv-pane" aria-label="Indicators" style={{ padding: '20px 24px 40px' }}>
+          <KpiStrip items={[
+            { label: 'Indicators', value: data ? data.total.toLocaleString('en-US') : '–', note: WINDOWS.find(w => w.days === filter.days)?.label.toLowerCase() },
+            { label: 'Seen, 24 h', value: last24.data ? last24.data.total.toLocaleString('en-US') : '–', note: 'in new alerts', tone: last24.data?.total ? 'warn' : 'muted' },
+            { label: 'Blocked IPs', value: blockedIps.data != null ? blockedIps.data.toLocaleString('en-US') : '–', note: 'enforced on endpoints' },
+            { label: 'Malware hashes', value: hashes.data ? activeHashes.toLocaleString('en-US') : '–', note: 'active, blocked on execution' },
+          ]} />
 
-      <div className="flex flex-wrap gap-1 border-b border-border" role="tablist">
-        {[{ key: '' as const, label: 'All', count: all }, ...IOC_TYPES.map(t => ({ key: t, label: TYPE_LABEL[t], count: counts[t] ?? 0 }))]
-          .map(tab => (
-            <button key={tab.key || 'all'} role="tab" aria-selected={filter.type === tab.key}
-              onClick={() => { update({ type: tab.key }); setSelected(null) }}
-              className={`px-3 py-1.5 text-sm border-b-2 -mb-px ${filter.type === tab.key
-                ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-              {tab.label} <span className="text-xs text-muted-foreground">{tab.count.toLocaleString()}</span>
-            </button>
-          ))}
-      </div>
+          <div className="cv-row">
+            <form className="cv-search" style={{ flex: '1 1 260px', maxWidth: 380 }} onSubmit={event => { event.preventDefault(); update({ q: search }) }}>
+              <Search size={14} aria-hidden="true" />
+              <label htmlFor="ioc-search" className="sr-only">Search indicators</label>
+              <input id="ioc-search" value={search} onChange={event => setSearch(event.target.value)} placeholder="IP, domain, hash, URL" />
+            </form>
+            <select className="cv-select" aria-label="Type" value={filter.type} onChange={event => update({ type: event.target.value as IocType | '' })}>
+              <option value="">Type: all</option>
+              {IOC_TYPES.map(type => <option key={type} value={type}>{TYPE_LABEL[type]} · {(data?.type_counts?.[type] ?? 0).toLocaleString('en-US')}</option>)}
+            </select>
+            <select className="cv-select" aria-label="Time window" value={filter.days} onChange={event => update({ days: Number(event.target.value) })}>
+              {WINDOWS.map(w => <option key={w.days} value={w.days}>{w.label}</option>)}
+            </select>
+            <select className="cv-select" aria-label="Sort" value={filter.sort} onChange={event => update({ sort: event.target.value as IocFilter['sort'] })}>
+              <option value="last_seen">Most recent</option>
+              <option value="alerts">Most matches</option>
+            </select>
+            {isFetching && <span className="cv-muted cv-small">Updating…</span>}
+          </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <form onSubmit={e => { e.preventDefault(); update({ q: search }) }} className="flex items-center gap-1">
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search indicator"
-            aria-label="Search indicator" className="bg-muted border border-border rounded px-2 py-1.5 text-sm w-64" />
-          <button type="submit" aria-label="Search" className="p-1.5 rounded border border-border hover:bg-muted"><Search size={14} /></button>
-        </form>
-        <select value={filter.days} onChange={e => update({ days: Number(e.target.value) })} aria-label="Time window"
-          className="bg-muted border border-border rounded px-2 py-1.5 text-sm">
-          {WINDOWS.map(w => <option key={w.days} value={w.days}>{w.label}</option>)}
-        </select>
-        <select value={filter.sort} onChange={e => update({ sort: e.target.value as IocFilter['sort'] })} aria-label="Sort"
-          className="bg-muted border border-border rounded px-2 py-1.5 text-sm">
-          <option value="last_seen">Most recent</option>
-          <option value="alerts">Most alerts</option>
-        </select>
-        {isFetching && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
-        <span className="text-xs text-muted-foreground ml-auto">{data ? `${data.total.toLocaleString()} indicators` : ''}</span>
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-4 items-start">
-        <div className="flex-1 min-w-0 space-y-2">
-          {isError ? (
-            <p className="text-sm text-destructive">Could not load indicators.</p>
-          ) : isLoading ? <Loader2 size={16} className="animate-spin" /> : !data?.items.length ? (
-            <p className="text-sm text-muted-foreground">No indicators in this window.</p>
-          ) : (
-            <div className="rounded-lg border border-border overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-xs text-muted-foreground uppercase">
-                  <tr>
-                    <th className="text-left px-3 py-2">Indicator</th>
-                    <th className="text-right px-3 py-2">Alerts</th>
-                    <th className="text-right px-3 py-2">Hosts</th>
-                    <th className="text-left px-3 py-2">Severity</th>
-                    <th className="text-left px-3 py-2">Status</th>
-                    <th className="text-left px-3 py-2">First seen</th>
-                    <th className="text-left px-3 py-2">Last seen</th>
+          <div className="cv-tablewrap">
+            <table className="cv-table" style={{ minWidth: 720 }}>
+              <thead><tr><th>Type</th><th>Indicator</th><th>Hosts</th><th>Severity</th><th className="is-num">Matches</th><th>Last seen</th><th>Action</th></tr></thead>
+              <tbody>
+                {(data?.items ?? []).map(ioc => (
+                  <tr key={`${ioc.type}:${ioc.value}`} className={isSelected(ioc) ? 'is-active' : undefined} style={{ cursor: 'pointer' }}
+                    tabIndex={0} onClick={() => setSelected(ioc)}
+                    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelected(ioc) } }}>
+                    <td><Chip>{TYPE_LABEL[ioc.type]}</Chip></td>
+                    <td className="cv-mono" style={{ maxWidth: 320 }}>
+                      <button type="button" className="cv-rowlink cv-mono" title={`${ioc.value} · copy`} style={{ fontWeight: 400, display: 'inline-flex', gap: 6, alignItems: 'center', maxWidth: '100%' }}
+                        onClick={event => { event.stopPropagation(); copy(ioc.value) }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortValue(ioc)}</span>
+                        {copied === ioc.value ? <Check size={11} className="cv-t-good" /> : <Copy size={11} style={{ opacity: 0.45, flex: 'none' }} />}
+                      </button>
+                    </td>
+                    <td className="cv-dim">{ioc.hosts}</td>
+                    <td>{ioc.max_severity ? <Chip tone={severityTone(ioc.max_severity)}>{ioc.max_severity}</Chip> : '—'}</td>
+                    <td className="is-num">{ioc.alerts}</td>
+                    <td className="cv-dim cv-small" style={{ whiteSpace: 'nowrap' }}>{ago(ioc.last_seen)}</td>
+                    <td>{ioc.blocked ? <span className="cv-t-bad">Block</span> : ioc.alerts > 0 ? <span className="cv-t-warn">Alert</span> : <span className="cv-t-info">Watch</span>}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {data.items.map(ioc => (
-                    <tr key={`${ioc.type}:${ioc.value}`} tabIndex={0} aria-selected={isSelected(ioc)}
-                      onClick={() => setSelected(ioc)}
-                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(ioc) } }}
-                      className={`border-t border-border cursor-pointer hover:bg-muted/40 ${isSelected(ioc) ? 'bg-muted/60' : ''}`}>
-                      <td className="px-3 py-2 max-w-md">
-                        <div className="text-xs text-muted-foreground">{TYPE_LABEL[ioc.type]}</div>
-                        <button onClick={e => { e.stopPropagation(); copy(ioc.value) }}
-                          onKeyDown={e => e.stopPropagation()} title={ioc.value}
-                          className="font-mono text-xs inline-flex items-center gap-1 hover:underline max-w-full">
-                          <span className="truncate">{ioc.value}</span>
-                          {copied === ioc.value ? <Check size={11} className="text-primary shrink-0" /> : <Copy size={11} className="opacity-50 shrink-0" />}
-                        </button>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{ioc.alerts}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{ioc.hosts}</td>
-                      <td className={`px-3 py-2 text-xs ${SEVERITY_CLASS[ioc.max_severity ?? ''] ?? ''}`}>{ioc.max_severity ?? '—'}</td>
-                      <td className="px-3 py-2 text-xs">{ioc.blocked ? 'Blocked' : ioc.blocked === false ? 'Not blocked' : '—'}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{ago(ioc.first_seen)}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{ago(ioc.last_seen)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                ))}
+              </tbody>
+            </table>
+            {isError && <Empty>Could not load indicators.</Empty>}
+            {isLoading && <Empty>Loading indicators…</Empty>}
+            {!isLoading && !isError && !data?.items.length && <Empty>No indicators in this window.</Empty>}
+          </div>
           {data && data.total > IOC_PAGE && (
-            <div className="flex items-center gap-2 text-xs">
-              <button disabled={filter.offset === 0} onClick={() => setFilter(f => ({ ...f, offset: Math.max(0, f.offset - IOC_PAGE) }))}
-                className="px-2 py-1 rounded border border-border disabled:opacity-40">Previous</button>
-              <span className="text-muted-foreground">
-                {filter.offset + 1}–{Math.min(filter.offset + IOC_PAGE, data.total)} of {data.total.toLocaleString()}
-              </span>
-              <button disabled={filter.offset + IOC_PAGE >= data.total} onClick={() => setFilter(f => ({ ...f, offset: f.offset + IOC_PAGE }))}
-                className="px-2 py-1 rounded border border-border disabled:opacity-40">Next</button>
+            <div className="cv-row cv-small">
+              <button type="button" className="cv-btn cv-btn--sm" disabled={filter.offset === 0} onClick={() => setFilter(f => ({ ...f, offset: Math.max(0, f.offset - IOC_PAGE) }))}>Previous</button>
+              <span className="cv-muted">{filter.offset + 1}–{Math.min(filter.offset + IOC_PAGE, data.total)} of {data.total.toLocaleString('en-US')}</span>
+              <button type="button" className="cv-btn cv-btn--sm" disabled={filter.offset + IOC_PAGE >= data.total} onClick={() => setFilter(f => ({ ...f, offset: f.offset + IOC_PAGE }))}>Next</button>
+              {data.total >= 1000 && <span className="cv-muted">Top 1,000 of this window; search or narrow it to see others.</span>}
             </div>
           )}
-          {data && data.total >= 1000 && (
-            <p className="text-xs text-muted-foreground">Showing the top 1,000 indicators of this window. Search or narrow the window to see others.</p>
-          )}
-        </div>
-        {selected && <Detail key={`${selected.type}:${selected.value}`} ioc={selected} onClose={() => setSelected(null)} />}
+        </section>
+
+        <aside className="cv-list" aria-label="Indicator detail and feeds" style={{ flex: '1 1 320px', maxWidth: 380, borderRight: 0, borderLeft: '1px solid #222733', padding: '20px', gap: 12 }}>
+          {selected && <IocDetail key={`${selected.type}:${selected.value}`} ioc={selected} onClose={() => setSelected(null)} />}
+          <section className="cv-card">
+            <div className="cv-card__head">
+              <h2>Feed health</h2>
+              {staleFeeds > 0 && <Chip tone="warn">{staleFeeds} need attention</Chip>}
+            </div>
+            <div className="cv-kv">
+              {feeds.map(item => (
+                <div key={item.name}>
+                  <span style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#C9D0DB' }}><span className={`cv-dot cv-dot--${item.tone}`} />{item.name}</span>
+                  <span className={item.tone === 'bad' ? 'cv-t-bad' : item.tone === 'warn' ? 'cv-t-warn' : 'cv-dim'}>{item.state}</span>
+                </div>
+              ))}
+              {feeds.length === 0 && <span className="cv-muted cv-small">No feed status available.</span>}
+            </div>
+          </section>
+          <section className="cv-card">
+            <h2>Where indicators come from</h2>
+            <p className="cv-dim" style={{ margin: 0 }}>
+              Every IP, domain, URL, hash and email an alert carries is recorded here. Block one from its detail to push it to endpoints; hashes go to the malware list.
+            </p>
+            <Link to="/settings">Feed keys and retention in settings</Link>
+          </section>
+        </aside>
       </div>
-    </div>
+    </CanvasPage>
+  )
+}
+
+function IocDetail({ ioc, onClose }: { readonly ioc: Ioc; readonly onClose: () => void }) {
+  const { data, isLoading, isError } = useIocAlerts(ioc)
+  const hunt = useStartHunt()
+  const addHash = useAddMalwareHashes()
+  const block = useBlockWeb()
+  const navigate = useNavigate()
+  const kind = huntType(ioc.type)
+  return (
+    <section className="cv-card cv-card--accent">
+      <div className="cv-card__head" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+        <div className="cv-stack">
+          <span className="cv-eyebrow">{TYPE_LABEL[ioc.type]}</span>
+          <span className="cv-mono" style={{ fontSize: 13 }}>{ioc.value}</span>
+        </div>
+        <button type="button" className="cv-btn cv-btn--sm" onClick={onClose} aria-label="Close indicator detail">×</button>
+      </div>
+      <div className="cv-kv">
+        <div><span>Alerts</span><span>{ioc.alerts}</span></div>
+        <div><span>Hosts</span><span>{ioc.hosts}</span></div>
+        <div><span>First seen</span><span>{ago(ioc.first_seen)}</span></div>
+        <div><span>Last seen</span><span>{ago(ioc.last_seen)}</span></div>
+      </div>
+      <div className="cv-row">
+        {kind && <button type="button" className="cv-btn cv-btn--sm" disabled={hunt.isPending}
+          onClick={() => hunt.mutate({ ioc_type: kind, ioc_value: ioc.value }, { onSuccess: created => navigate(`/hunts?hunt=${created.id}`) })}>Hunt</button>}
+        {ioc.type === 'sha256' && <button type="button" className="cv-btn cv-btn--sm" disabled={addHash.isPending || addHash.isSuccess}
+          onClick={() => addHash.mutate({ hashes: [ioc.value], label: '', reference: 'Threat IoCs' })}>{addHash.isSuccess ? 'Added to malware hashes' : 'Add to malware hashes'}</button>}
+        {(ioc.type === 'domain' || ioc.type === 'url') && (ioc.blocked
+          ? <Chip tone="bad">Blocked on endpoints</Chip>
+          : <button type="button" className="cv-btn cv-btn--sm cv-btn--danger" disabled={block.isPending || block.isSuccess}
+            onClick={() => block.mutate({ value: ioc.value, reason: `Threat IoC seen in ${ioc.alerts} alert(s)` })}>{block.isSuccess ? 'Blocked' : 'Block web'}</button>)}
+        {ioc.type === 'ip' && <Link className="cv-btn cv-btn--sm" to={`/events?q=${encodeURIComponent(`source_ip:${ioc.value}`)}&range=7d`}>Search events</Link>}
+      </div>
+      {hunt.isError && <p className="cv-t-bad cv-small" style={{ margin: 0 }}>Hunt could not be started.</p>}
+      {addHash.isError && <p className="cv-t-bad cv-small" style={{ margin: 0 }}>Could not add the hash.</p>}
+      {block.isError && <p className="cv-t-bad cv-small" style={{ margin: 0 }}>{apiError(block.error, 'Could not block.')}</p>}
+      <h3 className="cv-h3">Alerts with this indicator</h3>
+      {isError ? <span className="cv-t-bad cv-small">Could not load alerts.</span>
+        : isLoading ? <span className="cv-muted cv-small">Loading…</span>
+        : !data?.items.length ? <span className="cv-muted cv-small">No alerts visible to you.</span>
+        : <div className="cv-feed">{data.items.slice(0, 8).map(alert => (
+          <div key={alert.id} style={{ flexDirection: 'column', gap: 2 }}>
+            <Link to={`/alerts?alert=${alert.id}`} style={{ color: '#E8ECF2' }}>{alert.title}</Link>
+            <span className="cv-muted cv-small">
+              <span className={`cv-t-${severityTone(alert.severity)}`}>{alert.severity}</span> · {alert.hostname ?? 'no host'} · {ago(alert.created_at)}{alert.ai_verdict ? ` · AI: ${alert.ai_verdict}` : ''}
+            </span>
+          </div>
+        ))}</div>}
+    </section>
   )
 }

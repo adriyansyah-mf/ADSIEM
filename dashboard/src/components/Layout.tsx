@@ -1,4 +1,5 @@
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { PageChromeContext } from '@/components/canvas/Canvas'
 import { Outlet, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { Menu } from 'lucide-react'
@@ -14,6 +15,8 @@ export default function Layout() {
   const queryClient = useQueryClient()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar-collapsed') === '1')
   const [wsConnected, setWsConnected] = useState(false)
+  // Pages drawn with CanvasHeader carry their own breadcrumb and tabs; the top bar then only shows on phones.
+  const [ownHeaders, setOwnHeaders] = useState(0)
   const mobileNav = useRef<HTMLDialogElement>(null)
   const palette = useRef<CommandPaletteHandle>(null)
 
@@ -60,6 +63,7 @@ export default function Layout() {
   const section = sectionFor(pathname)
   const currentLabel = pageLabel(pathname)
   const openSearch = () => { mobileNav.current?.close(); palette.current?.open() }
+  const setOwnHeader = useCallback((own: boolean) => setOwnHeaders(count => Math.max(0, count + (own ? 1 : -1))), [])
 
   return (
     <div className="app-shell">
@@ -71,7 +75,7 @@ export default function Layout() {
         <AppSidebar onNavigate={() => mobileNav.current?.close()} onClose={() => mobileNav.current?.close()} onOpenSearch={openSearch} />
       </dialog>
       <div className="app-main">
-        <header className="app-header">
+        <header className={`app-header ${ownHeaders > 0 ? 'app-header--page-owned' : ''}`}>
           <button className="ui-icon-button mobile-menu" onClick={() => mobileNav.current?.showModal()} aria-label="Open navigation"><Menu size={18} /></button>
           <div className="app-header__location">
             <SectionTabs />
@@ -89,7 +93,9 @@ export default function Layout() {
           </div>
         </header>
         <main id="workspace-content" className="app-content" tabIndex={-1}>
-          <Suspense fallback={<QueryState kind="loading" title="Loading…" description="Fetching this page." />}><Outlet /></Suspense>
+          <PageChromeContext.Provider value={setOwnHeader}>
+            <Suspense fallback={<QueryState kind="loading" title="Loading…" description="Fetching this page." />}><Outlet /></Suspense>
+          </PageChromeContext.Provider>
         </main>
       </div>
       <CommandPalette ref={palette} />

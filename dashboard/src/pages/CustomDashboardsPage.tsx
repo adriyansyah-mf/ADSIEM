@@ -13,6 +13,7 @@ import {
 } from '@/components/dashboards/viz'
 import type { Pin, Scope, Widget } from '@/components/dashboards/viz'
 import VizEditor from '@/components/dashboards/VizEditor'
+import { CanvasHeader, CanvasPage, Empty } from '@/components/canvas/Canvas'
 
 // Custom dashboards, Wazuh / OpenSearch Dashboards style: a grid of
 // visualizations sharing one time range, query bar and filter pills
@@ -195,104 +196,130 @@ export default function CustomDashboardsPage() {
   }
   const layout: LayoutItem[] = widgets.map(w => ({ i: w.id!, x: w.x ?? 0, y: w.y ?? 0, w: w.w ?? 4, h: w.h ?? 4, minW: 2, minH: 2 }))
 
-  return (
-    <div className="workspace space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <LayoutGrid size={18} aria-hidden="true" />
-        <h1 className="text-xl font-bold">Dashboards</h1>
-        {editing ? (
-          <>
-            <input className="ui-input w-64 max-w-full" aria-label="Dashboard name" placeholder="Dashboard name, e.g. SOC wall"
-              value={draft.name} maxLength={120} onChange={e => setDraft({ ...draft, name: e.target.value })} />
-            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
-              <input type="checkbox" checked={draft.shared} onChange={e => setDraft({ ...draft, shared: e.target.checked })} /> Share with my team
-            </label>
-            <div className="flex-1" />
-            <button className="ui-button" onClick={() => setEditor({ index: null })} disabled={draft.widgets.length >= 24}>
-              <Plus size={14} /> Add visualization</button>
-            <button className="ui-button ui-button--quiet" onClick={() => setDraft(null)}>Cancel</button>
-            <button className="ui-button ui-button--primary" disabled={!draft.name.trim() || save.isPending} onClick={() => save.mutate(draft)}>
-              {save.isPending ? 'Saving…' : 'Save dashboard'}</button>
-          </>
-        ) : (
-          <>
-            <select className="ui-input w-auto" aria-label="Dashboard" value={selected} onChange={e => { select(e.target.value); setConfirmDelete(false) }}>
-              {!list.data?.length && <option value="">No dashboards yet</option>}
-              {(list.data ?? []).map(d => <option key={d.id} value={d.id}>{d.name}{d.shared ? ' (team)' : ''}</option>)}
-            </select>
-            <div className="flex-1" />
-            {current?.editable && (confirmDelete ? (
-              <span className="control-cluster text-sm">
-                Delete “{current.name}”?
-                <button className="ui-button" disabled={remove.isPending} onClick={() => remove.mutate(current.id)}><Trash2 size={14} /> Delete</button>
-                <button className="ui-button ui-button--quiet" onClick={() => setConfirmDelete(false)}>Keep</button>
-              </span>
-            ) : <>
-              <button className="ui-button" onClick={() => startEdit(current)}><Pencil size={14} /> Edit</button>
-              <button className="ui-button ui-button--quiet" onClick={() => setConfirmDelete(true)}><Trash2 size={14} /> Delete</button>
-            </>)}
-            <button className="ui-button ui-button--primary" onClick={() => startEdit(null)}><Plus size={14} /> New dashboard</button>
-          </>
-        )}
-      </div>
+  const [findText, setFindText] = useState('')
+  const library = (list.data ?? []).filter(d => d.name.toLowerCase().includes(findText.trim().toLowerCase()))
+  const groups = [
+    { name: 'Mine', items: library.filter(d => d.mine) },
+    { name: 'Shared with me', items: library.filter(d => !d.mine) },
+  ].filter(group => group.items.length)
 
-      <section className="panel"><div className="panel__body space-y-2 !py-3">
-        <form className="flex flex-wrap items-center gap-2" onSubmit={e => { e.preventDefault(); setQuery(queryText.trim()) }}>
-          <div className="relative flex-1 min-w-[220px]">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <input className="ui-input w-full pl-8 font-mono text-xs" aria-label="Search every panel (Lucene)" value={queryText} maxLength={512}
-              onChange={e => setQueryText(e.target.value)} placeholder='Search every panel, e.g. host.name:web-01 AND NOT user.name:svc_*' />
-          </div>
-          <select className="ui-input w-auto" aria-label="Time range" value={hours ?? 'own'}
+  return (
+    <CanvasPage>
+      <CanvasHeader
+        title={editing ? (draft.name.trim() || 'New dashboard') : current?.name ?? 'Dashboards'}
+        crumb={<>Dashboards{current && !editing ? ` / ${current.name}` : ''}</>}
+        sub={editing ? 'Editing · drag panels by their grip, resize from the corner, then save'
+          : current ? (current.shared ? 'Shared with your team' : 'Private to you') + ` · ${current.widgets.length} panel${current.widgets.length === 1 ? '' : 's'}`
+          : 'Grids of charts over your logs and events'}
+        actions={editing ? <>
+          <input className="cv-input" style={{ width: 240 }} aria-label="Dashboard name" placeholder="Dashboard name, e.g. SOC wall"
+            value={draft.name} maxLength={120} onChange={e => setDraft({ ...draft, name: e.target.value })} />
+          <label className="cv-row cv-small" style={{ cursor: 'pointer', gap: 6 }}>
+            <input type="checkbox" checked={draft.shared} onChange={e => setDraft({ ...draft, shared: e.target.checked })} /> Share with my team
+          </label>
+          <button type="button" className="cv-btn" onClick={() => setEditor({ index: null })} disabled={draft.widgets.length >= 24}><Plus size={14} /> Add widget</button>
+          <button type="button" className="cv-btn" onClick={() => setDraft(null)}>Cancel</button>
+          <button type="button" className="cv-btn cv-btn--primary" disabled={!draft.name.trim() || save.isPending} onClick={() => save.mutate(draft)}>
+            {save.isPending ? 'Saving…' : 'Save dashboard'}</button>
+        </> : <>
+          <select className="cv-select" aria-label="Time range" value={hours ?? 'own'}
             onChange={e => setHours(e.target.value === 'own' ? null : Number(e.target.value))}>
             {TIME_WINDOWS.map(([h, l]) => <option key={h} value={h}>{l}</option>)}
             <option value="own">Each panel's own</option>
           </select>
-          <select className="ui-input w-auto" aria-label="Auto refresh" value={String(refreshMs)}
+          <select className="cv-select" aria-label="Auto refresh" value={String(refreshMs)}
             onChange={e => setRefreshMs(e.target.value === 'false' ? false : Number(e.target.value))}>
             {REFRESH.map(([ms, l]) => <option key={l} value={String(ms)}>Refresh: {l}</option>)}
           </select>
-          <button className="ui-button ui-button--primary" title="Apply the query and refresh every panel"
-            onClick={() => { void qc.invalidateQueries({ queryKey: ['widget-data'] }) }}><RefreshCw size={14} /> Update</button>
-        </form>
-        <FilterBar filters={filters} setFilters={setFilters} />
-      </div></section>
+          {current?.editable && (confirmDelete ? (
+            <span className="cv-row cv-small">
+              Delete “{current.name}”?
+              <button type="button" className="cv-btn cv-btn--danger" disabled={remove.isPending} onClick={() => remove.mutate(current.id)}><Trash2 size={14} /> Delete</button>
+              <button type="button" className="cv-btn" onClick={() => setConfirmDelete(false)}>Keep</button>
+            </span>
+          ) : <>
+            <button type="button" className="cv-btn" onClick={() => setConfirmDelete(true)}><Trash2 size={14} /> Delete</button>
+            <button type="button" className="cv-btn" onClick={() => startEdit(current)}><Pencil size={14} /> Edit layout</button>
+          </>)}
+        </>}
+      />
+      <div className="cv-split">
+        <aside className="cv-list" aria-label="Dashboard library" style={{ flex: '1 1 240px', maxWidth: 260, padding: 12, gap: 14 }}>
+          <div className="cv-search">
+            <Search size={14} aria-hidden="true" />
+            <label htmlFor="find-dashboard" className="sr-only">Find dashboard</label>
+            <input id="find-dashboard" placeholder="Find dashboard" value={findText} onChange={e => setFindText(e.target.value)} />
+          </div>
+          {groups.map(group => (
+            <div key={group.name} className="cv-stack" style={{ gap: 2 }}>
+              <span className="cv-eyebrow" style={{ padding: '0 8px 4px' }}>{group.name}</span>
+              {group.items.map(d => (
+                <button key={d.id} type="button" className={`cv-navitem ${d.id === selected && !editing ? 'is-active' : ''}`}
+                  onClick={() => { select(d.id); setConfirmDelete(false); setDraft(null) }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+          {list.isLoading && <span className="cv-muted cv-small">Loading…</span>}
+          {list.isError && <span className="cv-t-bad cv-small">Could not load dashboards.</span>}
+          {!list.isLoading && !groups.length && <span className="cv-muted cv-small" style={{ padding: '0 8px' }}>{findText ? 'No dashboard matches.' : 'No dashboards yet.'}</span>}
+          <button type="button" className="cv-filter cv-filter--add" style={{ justifyContent: 'center', padding: '6px 8px' }} onClick={() => startEdit(null)}>+ New dashboard</button>
+        </aside>
 
-      {save.isError && <p role="alert" className="text-xs text-destructive">{apiError(save.error, 'Could not save the dashboard.')}</p>}
-      {editing && widgets.length > 0 && (
-        <p className="text-xs text-muted-foreground">Drag a panel by its grip, resize it from the bottom-right corner, then Save dashboard.</p>
-      )}
+        <section className="cv-pane" aria-label="Dashboard">
+          <form className="cv-row" onSubmit={e => { e.preventDefault(); setQuery(queryText.trim()) }}>
+            <div className="cv-search" style={{ flex: '1 1 320px' }}>
+              <Search size={14} aria-hidden="true" />
+              <input className="cv-mono" aria-label="Search every panel (Lucene)" value={queryText} maxLength={512}
+                onChange={e => setQueryText(e.target.value)} placeholder="Search every panel, e.g. host.name:web-01 AND NOT user.name:svc_*" />
+            </div>
+            <button type="submit" className="cv-btn cv-btn--primary" title="Apply the query and refresh every panel"
+              onClick={() => { void qc.invalidateQueries({ queryKey: ['widget-data'] }) }}><RefreshCw size={14} /> Update</button>
+          </form>
+          <FilterBar filters={filters} setFilters={setFilters} />
 
-      {list.isLoading ? <Loader2 size={16} className="animate-spin" />
-        : list.isError ? <p className="text-sm text-destructive">Could not load dashboards.</p>
-        : !editing && !current ? (
-          <section className="panel"><div className="panel__body space-y-3">
-            <p className="font-medium">No dashboard yet</p>
-            <p className="text-sm text-muted-foreground max-w-2xl">
-              A dashboard is a grid of visualizations: metrics, charts over time, pies, tables, tag clouds and heat maps
-              over your logs and events. The time range, search bar and filters above narrow every panel at once.
-            </p>
-            <button className="ui-button ui-button--primary" onClick={() => startEdit(null)}><Plus size={14} /> Create dashboard</button>
-          </div></section>
-        ) : !widgets.length ? (
-          <button type="button" disabled={!editing && !current?.editable}
-            onClick={() => editing ? setEditor({ index: null }) : startEdit(current)}
-            className="panel w-full min-h-[180px] flex flex-col items-center justify-center gap-2 border-dashed text-muted-foreground hover:text-foreground">
-            <Plus size={22} aria-hidden="true" />
-            <span className="text-sm font-medium">{editing || current?.editable ? 'Add your first visualization' : 'This dashboard has no panels yet'}</span>
-          </button>
-        ) : (
-          <DashGrid className={`dash-grid ${editing ? 'dash-grid--editing' : ''}`} layout={layout}
-            editing={editing} onLayout={onLayout}>
-            {widgets.map((w, i) => (
-              <div key={w.id}>
-                <Panel w={w} scope={scope} editing={editing} onFilter={addFilter}
-                  onEdit={() => setEditor({ index: i })}
-                  onRemove={() => setWidgets(ws => ws.filter(x => x.id !== w.id))} />
+          {save.isError && <p role="alert" className="cv-t-bad cv-small" style={{ margin: 0 }}>{apiError(save.error, 'Could not save the dashboard.')}</p>}
+
+          {list.isLoading ? <Empty>Loading dashboards…</Empty>
+            : !editing && !current ? (
+              <div className="cv-card" style={{ alignItems: 'flex-start' }}>
+                <h2>No dashboard yet</h2>
+                <p className="cv-dim" style={{ margin: 0, maxWidth: 640 }}>
+                  A dashboard is a grid of visualizations: metrics, charts over time, pies, tables, tag clouds and heat maps
+                  over your logs and events. The time range, search bar and filters narrow every panel at once.
+                </p>
+                <button type="button" className="cv-btn cv-btn--primary" onClick={() => startEdit(null)}><Plus size={14} /> Create dashboard</button>
               </div>
-            ))}
-          </DashGrid>
-        )}
+            ) : !widgets.length ? (
+              <button type="button" disabled={!editing && !current?.editable}
+                onClick={() => editing ? setEditor({ index: null }) : startEdit(current)}
+                className="cv-dropzone">
+                <Plus size={20} aria-hidden="true" />
+                <span>{editing || current?.editable ? 'Add a widget from a saved search, a query, or a template' : 'This dashboard has no panels yet'}</span>
+              </button>
+            ) : (
+              <>
+                <DashGrid className={`dash-grid ${editing ? 'dash-grid--editing' : ''}`} layout={layout}
+                  editing={editing} onLayout={onLayout}>
+                  {widgets.map((w, i) => (
+                    <div key={w.id}>
+                      <Panel w={w} scope={scope} editing={editing} onFilter={addFilter}
+                        onEdit={() => setEditor({ index: i })}
+                        onRemove={() => setWidgets(ws => ws.filter(x => x.id !== w.id))} />
+                    </div>
+                  ))}
+                </DashGrid>
+                {(editing || current?.editable) && (
+                  <button type="button" className="cv-dropzone" style={{ minHeight: 72 }} onClick={() => editing ? setEditor({ index: null }) : startEdit(current)}>
+                    <span>Add a widget from a saved search, a query, or a template</span>
+                    <span className="cv-btn cv-btn--sm"><Plus size={13} /> Add widget</span>
+                  </button>
+                )}
+              </>
+            )}
+        </section>
+      </div>
 
       {editor && editing && (
         <VizEditor initial={editor.index == null ? null : widgets[editor.index]} scope={scope} onClose={() => setEditor(null)}
@@ -303,6 +330,6 @@ export default function CustomDashboardsPage() {
             setEditor(null)
           }} />
       )}
-    </div>
+    </CanvasPage>
   )
 }

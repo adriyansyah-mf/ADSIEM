@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { format, formatDistanceStrict } from 'date-fns'
 import {
-  Terminal, Play, Loader2, CheckCircle, XCircle, Clock, Ban, Download, FileCode, Plus, Pencil, Trash2,
+  Play, Loader2, CheckCircle, XCircle, Clock, Ban, Download, FileCode, Plus, Pencil, Trash2,
   ChevronDown, ChevronRight, Filter,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
@@ -13,6 +14,7 @@ import {
   useFlowLogs, useCreateFlow, useCancelFlow, downloadFlowResults,
 } from '@/hooks/useFlows'
 import type { Agent, Flow, FlowArtifact, FlowStatus } from '@/types'
+import { CanvasHeader, CanvasPage, Chip, Empty } from '@/components/canvas/Canvas'
 
 type Tab = 'collect' | 'artifacts' | 'legacy'
 
@@ -227,160 +229,170 @@ function FlowDetailPanel({ flowId, agentName }: { flowId: string; agentName: str
   )
 }
 
-// ─── Collect tab ─────────────────────────────────────────────────
+// ─── Console (collect) ───────────────────────────────────────────
 
-function CollectTab({ agents, artifacts }: { agents: Agent[]; artifacts: FlowArtifact[] }) {
-  const [agentId, setAgentId] = useState('')
+function flowLine(f: Flow): { text: string; tone: string } {
+  switch (f.status) {
+    case 'finished': return { text: `${f.total_rows.toLocaleString('en-US')} rows · ${duration(f)}`, tone: 'cv-t-good' }
+    case 'error': return { text: f.error ? `error · ${f.error}` : 'error', tone: 'cv-t-bad' }
+    case 'cancelled': return { text: 'cancelled', tone: 'cv-t-warn' }
+    case 'running': return { text: 'running…', tone: 'cv-t-info' }
+    default: return { text: 'queued; runs when the agent next polls', tone: 'cv-muted' }
+  }
+}
+
+function paramText(params: Record<string, unknown>) {
+  return Object.entries(params).filter(([, v]) => v !== '' && v !== false && v != null)
+    .map(([k, v]) => v === true ? `--${k}` : `${k}=${String(v)}`).join(' ')
+}
+
+function ConsoleView({ agents, artifacts, agentId }: { agents: Agent[]; artifacts: FlowArtifact[]; agentId: string }) {
   const [artifactName, setArtifactName] = useState('')
   const [params, setParams] = useState<Record<string, string | boolean>>({})
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [timeout, setTimeoutValue] = useState('')
   const [maxRows, setMaxRows] = useState('')
+  const [command, setCommand] = useState('')
+  const [commandError, setCommandError] = useState('')
   // ?flow=<id> opens that flow (linked from AI investigations)
   const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get('flow'))
   const { data: flows = [] } = useFlows(agentId || undefined)
   const createFlow = useCreateFlow()
+  const consoleEnd = useRef<HTMLDivElement>(null)
 
   const runnable = artifacts.filter(a => !a.error)
   const artifact = runnable.find(a => a.name === artifactName)
-  const agentNames = useMemo(() => Object.fromEntries(agents.map(a => [a.id, a.hostname])), [agents])
-  const sortedAgents = [...agents].sort((a, b) => Number(b.status === 'online') - Number(a.status === 'online') || a.hostname.localeCompare(b.hostname))
+  const agent = agents.find(a => a.id === agentId)
+  const host = agent?.hostname ?? 'endpoint'
+  const transcript = [...flows].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at)).slice(-30)
+  const collected = flows.filter(f => f.status === 'finished' && f.total_rows > 0)
 
   useEffect(() => {
     setParams(Object.fromEntries((artifact?.parameters ?? []).map(p => [p.name, p.type === 'bool' ? Boolean(p.default) : String(p.default ?? '')])))
   }, [artifactName]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { consoleEnd.current?.scrollIntoView({ block: 'nearest' }) }, [transcript.length])
 
-  const collect = () => {
-    if (!agentId || !artifact) return
+  const run = (name: string, values: Record<string, string | boolean>, limits = true) => {
+    if (!agentId) return
     createFlow.mutate(
       {
-        agent_id: agentId,
-        artifact: artifact.name,
-        params,
-        timeout: timeout ? Number(timeout) : undefined,
-        max_rows: maxRows ? Number(maxRows) : undefined,
+        agent_id: agentId, artifact: name, params: values,
+        timeout: limits && timeout ? Number(timeout) : undefined,
+        max_rows: limits && maxRows ? Number(maxRows) : undefined,
       },
       { onSuccess: f => setSelected(f.id) },
     )
   }
 
-  const input = 'w-full rounded border border-border bg-muted px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary'
+  if (!agentId) {
+    return <div className="cv-body"><Empty>Pick an endpoint above to open a session. Endpoints without the flow runner need an agent update first.</Empty></div>
+  }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[340px_minmax(0,1fr)]">
-      <div className="h-fit space-y-3 rounded-lg border border-border bg-card p-4">
-        <p className="text-xs font-semibold uppercase text-muted-foreground">New collection</p>
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">Endpoint</span>
-          <select value={agentId} onChange={e => setAgentId(e.target.value)} className={input}>
-            <option value="">Select an agent…</option>
-            {sortedAgents.map(a => (
-              <option key={a.id} value={a.id} disabled={!a.flow_poll_at}>
-                {a.hostname} ({a.status}{a.version ? `, v${a.version}` : ''}){a.flow_poll_at ? '' : ' — no flow runner, update agent'}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">Artifact</span>
-          <select value={artifactName} onChange={e => setArtifactName(e.target.value)} className={input}>
-            <option value="">Select an artifact…</option>
-            {runnable.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
-          </select>
-        </label>
+    <div className="cv-split">
+      <aside className="cv-list" aria-label="Approved actions" style={{ flex: '1 1 260px', maxWidth: 300, padding: 16, gap: 10 }}>
+        <h2 className="cv-h2">Actions</h2>
+        <div className="cv-stack" style={{ gap: 2 }}>
+          {runnable.map(a => (
+            <button key={a.name} type="button" className={`cv-navitem ${a.name === artifactName ? 'is-active' : ''}`}
+              style={{ height: 'auto', minHeight: 32, padding: '6px 8px', justifyContent: 'space-between' }}
+              title={a.description} onClick={() => setArtifactName(a.name === artifactName ? '' : a.name)}>
+              <span className="cv-mono" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{a.name}</span>
+              <span className="cv-small cv-muted" style={{ flex: 'none' }}>{a.builtin ? 'built-in' : 'custom'}</span>
+            </button>
+          ))}
+        </div>
         {artifact && (
-          <div className="space-y-3">
-            <p className="whitespace-pre-line text-xs text-muted-foreground">{artifact.description}</p>
-            <div className="flex flex-wrap gap-1">
-              {artifact.sources.map(s => (
-                <span key={s.name} className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-                  {s.name} · {s.plugin}{s.filtered && <Filter size={10} className="text-primary" />}
-                </span>
-              ))}
-            </div>
+          <div className="cv-card" style={{ gap: 8 }}>
+            {artifact.description && <p className="cv-small cv-dim" style={{ margin: 0, whiteSpace: 'pre-line' }}>{artifact.description}</p>}
             {artifact.parameters.map(p => (
-              <label key={p.name} className="block space-y-1">
-                <span className="font-mono text-xs">{p.name} <span className="text-muted-foreground">({p.type})</span></span>
-                {p.type === 'bool' ? (
-                  <input type="checkbox" checked={Boolean(params[p.name])}
-                    onChange={e => setParams(v => ({ ...v, [p.name]: e.target.checked }))} className="block" />
-                ) : (
-                  <input value={String(params[p.name] ?? '')} inputMode={p.type === 'int' ? 'numeric' : undefined}
-                    onChange={e => setParams(v => ({ ...v, [p.name]: e.target.value }))} className={`${input} font-mono`} />
-                )}
-                {p.description && <span className="block text-[11px] text-muted-foreground">{p.description}</span>}
+              <label key={p.name} className="cv-stack">
+                <span className="cv-mono">{p.name} <span className="cv-muted">({p.type})</span></span>
+                {p.type === 'bool'
+                  ? <input type="checkbox" checked={Boolean(params[p.name])} onChange={e => setParams(v => ({ ...v, [p.name]: e.target.checked }))} />
+                  : <input className="cv-input cv-mono" value={String(params[p.name] ?? '')} inputMode={p.type === 'int' ? 'numeric' : undefined}
+                    onChange={e => setParams(v => ({ ...v, [p.name]: e.target.value }))} />}
+                {p.description && <span className="cv-small cv-muted">{p.description}</span>}
               </label>
             ))}
-            <button onClick={() => setShowAdvanced(x => !x)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <button type="button" className="cv-btn cv-btn--link cv-small" onClick={() => setShowAdvanced(x => !x)}>
               {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Resource limits
             </button>
             {showAdvanced && (
-              <div className="grid grid-cols-2 gap-2">
-                <label className="space-y-1">
-                  <span className="text-[11px] text-muted-foreground">Timeout (s)</span>
-                  <input value={timeout} onChange={e => setTimeoutValue(e.target.value)} placeholder={String(artifact.timeout ?? 600)} className={input} />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-[11px] text-muted-foreground">Max rows</span>
-                  <input value={maxRows} onChange={e => setMaxRows(e.target.value)} placeholder={String(artifact.max_rows ?? 10000)} className={input} />
-                </label>
+              <div className="cv-row" style={{ flexWrap: 'nowrap' }}>
+                <input className="cv-input" aria-label="Timeout in seconds" value={timeout} onChange={e => setTimeoutValue(e.target.value)} placeholder={`timeout ${artifact.timeout ?? 600}s`} style={{ width: '50%' }} />
+                <input className="cv-input" aria-label="Max rows" value={maxRows} onChange={e => setMaxRows(e.target.value)} placeholder={`max ${artifact.max_rows ?? 10000} rows`} style={{ width: '50%' }} />
               </div>
             )}
+            <button type="button" className="cv-btn cv-btn--primary" disabled={createFlow.isPending} onClick={() => run(artifact.name, params)}>
+              {createFlow.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Run on {host}
+            </button>
           </div>
         )}
-        <button onClick={collect} disabled={!agentId || !artifact || createFlow.isPending}
-          className="flex w-full items-center justify-center gap-1.5 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">
-          {createFlow.isPending ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Collect
-        </button>
-        {agentId && agents.find(a => a.id === agentId)?.status !== 'online' && (
-          <p className="text-[11px] text-yellow-400">This agent is offline — the collection will wait until it reconnects (up to 24h).</p>
-        )}
-      </div>
+        <p className="cv-muted cv-small" style={{ margin: 0 }}>
+          Each action is a collection artifact the agent runs read-only unless it says otherwise. Every run, its parameters and its output are kept with the flow.
+        </p>
+      </aside>
 
-      <div className="min-w-0 space-y-4">
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="max-h-[320px] overflow-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-card">
-                <tr className="border-b border-border text-xs text-muted-foreground">
-                  <th className="px-3 py-2 text-left font-semibold">Artifact</th>
-                  <th className="px-3 py-2 text-left font-semibold">Endpoint</th>
-                  <th className="px-3 py-2 text-left font-semibold">Status</th>
-                  <th className="px-3 py-2 text-right font-semibold">Rows</th>
-                  <th className="px-3 py-2 text-left font-semibold">Started</th>
-                  <th className="px-3 py-2 text-left font-semibold">Duration</th>
-                </tr>
-              </thead>
-              <tbody>
-                {flows.length === 0 && (
-                  <tr><td colSpan={6} className="py-8 text-center text-sm text-muted-foreground">No collections yet. Pick an endpoint and an artifact.</td></tr>
-                )}
-                {flows.map(f => (
-                  <tr key={f.id} onClick={() => setSelected(f.id)}
-                    className={`cursor-pointer border-b border-border/40 hover:bg-muted/20 ${selected === f.id ? 'bg-muted/30' : ''}`}>
-                    <td className="px-3 py-1.5 font-mono text-xs">{f.artifact}</td>
-                    <td className="px-3 py-1.5 text-xs">{agentNames[f.agent_id] ?? f.agent_id.slice(0, 8)}</td>
-                    <td className="px-3 py-1.5"><StatusPill status={f.status} /></td>
-                    <td className="px-3 py-1.5 text-right font-mono text-xs">{f.total_rows}</td>
-                    <td className="px-3 py-1.5 text-xs text-muted-foreground">{format(new Date(f.created_at), 'MM-dd HH:mm:ss')}</td>
-                    <td className="px-3 py-1.5 text-xs text-muted-foreground">{duration(f)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <section className="cv-pane" aria-label="Console" style={{ gap: 12 }}>
+        <div className="cv-console" role="log" aria-live="polite">
+          <div className="cv-muted"># {host} · agent {agent?.version ? `v${agent.version}` : 'version unknown'} · {flows.length} collection{flows.length === 1 ? '' : 's'}</div>
+          {transcript.map(f => {
+            const line = flowLine(f)
+            return (
+              <button key={f.id} type="button" className={`cv-console__entry ${selected === f.id ? 'is-active' : ''}`} onClick={() => setSelected(f.id)}>
+                <span><span className="cv-t-info">{host}&gt;</span> {f.artifact}{paramText(f.params) ? ` ${paramText(f.params)}` : ''}</span>
+                <span className={line.tone}>{format(new Date(f.created_at), 'HH:mm:ss')} · {line.text}</span>
+              </button>
+            )
+          })}
+          {transcript.length === 0 && <div className="cv-muted">No collections on this endpoint yet. Pick an action, or type an artifact name below.</div>}
+          <div ref={consoleEnd} />
         </div>
-        {selected && (
-          <FlowDetailPanel flowId={selected}
-            agentName={agentNames[flows.find(f => f.id === selected)?.agent_id ?? ''] ?? 'agent'} />
-        )}
-      </div>
+        <form className="cv-console__input" onSubmit={event => {
+          event.preventDefault()
+          const [name, ...rest] = command.trim().split(/\s+/)
+          const target = runnable.find(a => a.name.toLowerCase() === (name ?? '').toLowerCase())
+          if (!target) { setCommandError(name ? `Unknown artifact “${name}”. Pick one from Actions.` : ''); return }
+          const values: Record<string, string | boolean> = Object.fromEntries(target.parameters.map(p => [p.name, p.type === 'bool' ? Boolean(p.default) : String(p.default ?? '')]))
+          for (const arg of rest) {
+            if (arg.startsWith('--')) values[arg.slice(2)] = true
+            else if (arg.includes('=')) { const [k, ...v] = arg.split('='); values[k] = v.join('=') }
+          }
+          setCommandError('')
+          setCommand('')
+          run(target.name, values, false)
+        }}>
+          <label htmlFor="lr-command" className="sr-only">Command</label>
+          <span className="cv-t-info cv-mono">{host}&gt;</span>
+          <input id="lr-command" list="lr-artifacts" value={command} onChange={e => setCommand(e.target.value)} autoComplete="off" spellCheck={false}
+            placeholder="Type an artifact name, e.g. Windows.System.Pslist key=value" />
+          <datalist id="lr-artifacts">{runnable.map(a => <option key={a.name} value={a.name} />)}</datalist>
+          <button type="submit" className="cv-btn cv-btn--sm" disabled={createFlow.isPending}>Run</button>
+        </form>
+        {commandError && <p className="cv-t-bad cv-small" style={{ margin: 0 }}>{commandError}</p>}
+        {agent?.status !== 'online' && <p className="cv-t-warn cv-small" style={{ margin: 0 }}>This endpoint is offline. Collections wait until it reconnects (up to 24 h).</p>}
+        {selected && <FlowDetailPanel flowId={selected} agentName={host} />}
+      </section>
+
+      <aside className="cv-list" aria-label="Collected results" style={{ flex: '1 1 280px', maxWidth: 320, borderRight: 0, borderLeft: '1px solid #222733', padding: 16, gap: 10 }}>
+        <h2 className="cv-h2">Collected results · {collected.length}</h2>
+        {collected.slice(0, 20).map(f => (
+          <button key={f.id} type="button" className={`cv-card cv-evidence ${selected === f.id ? 'is-active' : ''}`} onClick={() => setSelected(f.id)}>
+            <span className="cv-row cv-row--between" style={{ flexWrap: 'nowrap' }}>
+              <span className="cv-mono" style={{ color: '#E8ECF2', overflowWrap: 'anywhere' }}>{f.artifact}</span>
+            </span>
+            <span className="cv-small cv-dim">{f.total_rows.toLocaleString('en-US')} rows · {format(new Date(f.completed_at ?? f.created_at), 'dd MMM HH:mm')}</span>
+            <span className="cv-small cv-muted">Open to view and download (JSON / CSV)</span>
+          </button>
+        ))}
+        {collected.length === 0 && <span className="cv-muted cv-small">Finished collections with rows show up here.</span>}
+      </aside>
     </div>
   )
 }
 
 // ─── Artifacts tab ───────────────────────────────────────────────
-
 function ArtifactsTab({ artifacts }: { artifacts: FlowArtifact[] }) {
   const [editing, setEditing] = useState<{ name?: string; content: string } | null>(null)
   const [open, setOpen] = useState<string | null>(null)
@@ -451,30 +463,53 @@ function ArtifactsTab({ artifacts }: { artifacts: FlowArtifact[] }) {
 // ─── Page ────────────────────────────────────────────────────────
 
 export default function LiveResponsePage() {
-  const [tab, setTab] = useState<Tab>('collect')
+  const [search, setSearch] = useSearchParams()
+  const tab: Tab = (['collect', 'artifacts', 'legacy'] as const).find(t => t === search.get('tab')) ?? 'collect'
   const { data: agents = [] } = useQuery<Agent[]>({
     queryKey: ['agents-all'],
     queryFn: () => api.get('/api/agents', { params: { page_size: 100 } }).then(r => r.data.items),
   })
   const { data: artifacts = [] } = useFlowArtifacts()
+  const sortedAgents = [...agents].sort((a, b) => Number(b.status === 'online') - Number(a.status === 'online') || a.hostname.localeCompare(b.hostname))
+  const agentId = search.get('agent') ?? ''
+  const agent = agents.find(a => a.id === agentId)
+  const patch = (key: string, value: string | null) => setSearch(current => {
+    const next = new URLSearchParams(current)
+    if (value) next.set(key, value)
+    else next.delete(key)
+    return next
+  }, { replace: true })
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2">
-        <Terminal size={18} />
-        <h1 className="text-xl font-bold">Live Response</h1>
-        <div className="ml-auto flex gap-1 rounded-lg border border-border bg-card p-1">
-          {([['collect', 'Collect'], ['artifacts', 'Artifacts'], ['legacy', 'Legacy tasks']] as const).map(([key, label]) => (
-            <button key={key} onClick={() => setTab(key)}
-              className={`rounded px-3 py-1 text-sm ${tab === key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      {tab === 'collect' && <CollectTab agents={agents} artifacts={artifacts} />}
-      {tab === 'artifacts' && <ArtifactsTab artifacts={artifacts} />}
-      {tab === 'legacy' && <LegacyTasks />}
-    </div>
+    <CanvasPage>
+      <CanvasHeader
+        title={tab === 'collect' && agent ? <>Session on <span className="cv-mono" style={{ fontSize: 17 }}>{agent.hostname}</span></> : 'Live response'}
+        sub={tab === 'collect'
+          ? agent ? <span className="cv-row" style={{ gap: 8 }}>
+            <Chip tone={agent.status === 'online' ? 'good' : 'muted'}>{agent.status === 'online' ? 'CONNECTED' : 'OFFLINE'}</Chip>
+            {agent.is_isolated && <Chip tone="bad">HOST ISOLATED</Chip>}
+            <span>{agent.flow_poll_at ? `flow runner polled ${formatDistanceStrict(new Date(agent.flow_poll_at), new Date())} ago` : 'no flow runner; update the agent'}</span>
+          </span> : 'Run approved collection artifacts on one endpoint and keep what they return'
+          : tab === 'artifacts' ? 'Collection artifacts the agents can run' : 'Tasks from the earlier response engine'}
+        tabs={[
+          { to: '/live-response', label: 'Console', active: tab === 'collect' },
+          { to: '/live-response?tab=artifacts', label: 'Artifacts', count: artifacts.length || null, active: tab === 'artifacts' },
+          { to: '/live-response?tab=legacy', label: 'Legacy tasks', active: tab === 'legacy' },
+        ]}
+        actions={tab === 'collect' && (
+          <select className="cv-select" aria-label="Endpoint" value={agentId} onChange={e => patch('agent', e.target.value || null)} style={{ minWidth: 240 }}>
+            <option value="">Select an endpoint…</option>
+            {sortedAgents.map(a => (
+              <option key={a.id} value={a.id} disabled={!a.flow_poll_at}>
+                {a.hostname} ({a.status}{a.version ? `, v${a.version}` : ''}){a.flow_poll_at ? '' : ' · no flow runner'}
+              </option>
+            ))}
+          </select>
+        )}
+      />
+      {tab === 'collect' && <ConsoleView agents={agents} artifacts={artifacts} agentId={agentId} />}
+      {tab === 'artifacts' && <div className="cv-body"><ArtifactsTab artifacts={artifacts} /></div>}
+      {tab === 'legacy' && <div className="cv-body"><LegacyTasks /></div>}
+    </CanvasPage>
   )
 }

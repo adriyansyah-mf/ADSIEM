@@ -1,4 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { format } from 'date-fns'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/api/client'
+import { useFimEvents } from '@/hooks/useFim'
+import { CanvasHeader, CanvasPage, Chip, Empty, Meter, SectionTitle, severityTone, type Tone } from '@/components/canvas/Canvas'
 import { useHygieneLatest, useAgentVulns } from '@/hooks/useHygiene'
 import type { HygieneSnapshot, HygieneIssue, DiskPartition, OpenPort, InstalledPackage, VulnerablePackage, HostNetwork } from '@/types'
 
@@ -541,82 +547,165 @@ function HostCard({ snap, onClick, selected }: { snap: HygieneSnapshot; onClick:
   )
 }
 
+interface VulnSummary { cves: number; by_priority: Record<string, number>; kev: number; hosts: number }
+interface VulnItem { cve_id: string; title: string | null; priority: string; kev: boolean; hosts: number; hostnames: string[]; packages: string[]; fixes: string[] }
+
+const SEV_WEIGHT: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 }
+
+function postureTone(score: number): Tone {
+  return score >= 80 ? 'good' : score >= 60 ? 'yellow' : 'warn'
+}
+
 export default function HygienePage() {
   const { data: snapshots = [], isLoading, isError } = useHygieneLatest()
   const [selectedId, setSelectedId] = useState<string | null>(null)
-
+  const vulns = useQuery<{ summary: VulnSummary; items: VulnItem[] }>({
+    queryKey: ['vulnerabilities', 'posture'],
+    queryFn: () => api.get('/api/vulnerabilities', { params: { limit: 6 } }).then(r => r.data),
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
+  const fim = useFimEvents()
   const selected = snapshots.find(s => s.agent_id === selectedId) ?? null
 
-  const avgScore = snapshots.length
-    ? Math.round(snapshots.reduce((acc, s) => acc + s.hygiene_score, 0) / snapshots.length)
-    : null
+  const avgScore = snapshots.length ? Math.round(snapshots.reduce((acc, s) => acc + s.hygiene_score, 0) / snapshots.length) : null
+  const failing = snapshots.reduce((acc, s) => acc + s.issues.length, 0)
+  const latestScan = snapshots.reduce<string | null>((max, s) => !max || s.collected_at > max ? s.collected_at : max, null)
 
-  const critical = snapshots.filter(s => s.issues.some(i => i.severity === 'critical')).length
-  const totalIssues = snapshots.reduce((acc, s) => acc + s.issues.length, 0)
-  const totalPackages = snapshots.reduce((acc, s) => acc + (s.packages?.length ?? 0), 0)
+  // Category score: share of hosts with no finding in that category.
+  const categories = useMemo(() => {
+    const names = [...new Set(snapshots.flatMap(s => s.issues.map(i => i.category)))]
+    return names.map(name => ({
+      name,
+      score: Math.round((snapshots.filter(s => !s.issues.some(i => i.category === name)).length / Math.max(1, snapshots.length)) * 100),
+    })).sort((a, b) => a.score - b.score).slice(0, 6)
+  }, [snapshots])
+
+  // Fix first: configuration findings grouped by message, and the top CVEs, ranked by severity × hosts.
+  const fixes = useMemo(() => {
+    const byMessage = new Map<string, { title: string; category: string; severity: string; hosts: Set<string> }>()
+    for (const snap of snapshots) {
+      for (const issue of snap.issues) {
+        const entry = byMessage.get(issue.message) ?? { title: issue.message, category: issue.category, severity: issue.severity, hosts: new Set<string>() }
+        entry.hosts.add(snap.hostname ?? snap.agent_id)
+        if ((SEV_WEIGHT[issue.severity] ?? 0) > (SEV_WEIGHT[entry.severity] ?? 0)) entry.severity = issue.severity
+        byMessage.set(issue.message, entry)
+      }
+    }
+    const config = [...byMessage.values()].map(e => ({
+      key: `cfg-${e.title}`, title: e.title, detail: e.category, type: 'Configuration', tone: 'info' as Tone,
+      hosts: e.hosts.size, severity: e.severity, rank: (SEV_WEIGHT[e.severity] ?? 1) * e.hosts.size, href: undefined as string | undefined,
+    }))
+    const cves = (vulns.data?.items ?? []).map(v => ({
+      key: `cve-${v.cve_id}`, title: v.title ? `${v.cve_id} · ${v.title}` : v.cve_id,
+      detail: `${v.packages.slice(0, 2).join(', ')}${v.fixes.length ? ` · fix: ${v.fixes.slice(0, 2).join(', ')}` : ''}${v.kev ? ' · known exploited' : ''}`,
+      type: 'Vulnerability', tone: 'bad' as Tone, hosts: v.hosts, severity: v.priority,
+      rank: ((SEV_WEIGHT[v.priority] ?? 1) + (v.kev ? 2 : 0)) * v.hosts, href: `/vulnerabilities?q=${encodeURIComponent(v.cve_id)}`,
+    }))
+    return [...cves, ...config].sort((a, b) => b.rank - a.rank).slice(0, 8)
+  }, [snapshots, vulns.data])
+
+  const since = Date.now() - 86_400_000
+  const recentFim = (fim.data ?? []).filter(e => Date.parse(e.detected_at) >= since)
+  const hostOf = (agentId: string) => snapshots.find(s => s.agent_id === agentId)?.hostname ?? agentId.slice(0, 8)
+  const byPriority = vulns.data?.summary.by_priority ?? {}
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '20px', color: 'var(--accent-cyan)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>
-            IT HYGIENE
-          </h1>
-          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Host health + package vulnerability scan via osv.dev · auto-refresh 5 min
-          </div>
-        </div>
-        {avgScore != null && (
-          <div style={{ display: 'flex', gap: '16px' }}>
-            {[
-              { label: 'HOSTS', value: snapshots.length, color: 'var(--text-primary)' },
-              { label: 'AVG SCORE', value: avgScore, color: scoreColor(avgScore) },
-              { label: 'ISSUES', value: totalIssues, color: totalIssues > 0 ? 'var(--accent-yellow)' : 'var(--accent-green)' },
-              { label: 'CRITICAL', value: critical, color: critical > 0 ? 'var(--accent-red)' : 'var(--accent-green)' },
-              { label: 'PACKAGES', value: totalPackages, color: 'var(--text-secondary)' },
-            ].map(({ label, value, color }) => (
-              <div key={label} style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: 'Share Tech Mono, monospace', fontWeight: 700, fontSize: '20px', color, lineHeight: 1 }}>{value}</div>
-                <div style={{ fontFamily: 'Rajdhani, sans-serif', fontSize: '9px', color: 'var(--text-muted)', letterSpacing: '1px', marginTop: '2px' }}>{label}</div>
+    <CanvasPage>
+      <CanvasHeader
+        title="Security posture"
+        sub={`Configuration checks, vulnerabilities and file integrity from ${snapshots.length} agents${latestScan ? ` · last snapshot ${format(new Date(latestScan), 'HH:mm')}` : ''}`}
+        counts={{ '/hygiene': failing || null, '/vulnerabilities': byPriority.critical ?? null, '/fim': recentFim.length || null }}
+        actions={<Link className="cv-btn" to="/vulnerabilities">Scan for vulnerabilities</Link>}
+      />
+      <div className="cv-body">
+        {isLoading ? <Empty>Loading posture…</Empty> : isError ? <Empty>Could not load hygiene snapshots.</Empty> : snapshots.length === 0 ? (
+          <Empty>No hygiene data yet. Agents send their first snapshot 30 seconds after enrollment.</Empty>
+        ) : <>
+          <div className="cv-cols">
+            <section className="cv-card" style={{ flex: '1 1 300px', maxWidth: 380 }}>
+              <h2>Posture score</h2>
+              <p style={{ margin: 0 }}>
+                <span className={`cv-t-${postureTone(avgScore ?? 0)}`} style={{ fontSize: 40, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{avgScore}</span>
+                <span className="cv-muted" style={{ fontSize: 18 }}> / 100</span>
+              </p>
+              <span className="cv-muted cv-small">Average of {snapshots.length} host scores · {failing} findings open</span>
+              <div className="cv-stack" style={{ gap: 10, marginTop: 6 }}>
+                {categories.map(c => (
+                  <div key={c.name} className="cv-stack" style={{ gap: 4 }}>
+                    <span className="cv-row cv-row--between"><span className="cv-dim" style={{ textTransform: 'capitalize' }}>{c.name.replace(/_/g, ' ')}</span><span className="cv-mono">{c.score}</span></span>
+                    <Meter value={c.score} tone={postureTone(c.score)} />
+                  </div>
+                ))}
+                {categories.length === 0 && <span className="cv-t-good cv-small">No failing checks.</span>}
               </div>
-            ))}
+            </section>
+            <section className="cv-main" aria-label="Fix first">
+              <div className="cv-row cv-row--between"><h2 className="cv-h2">Fix first · ranked by severity and reach</h2><Link to="/vulnerabilities">All vulnerabilities</Link></div>
+              <div className="cv-tablewrap">
+                <table className="cv-table" style={{ minWidth: 560 }}>
+                  <thead><tr><th>Finding</th><th>Type</th><th className="is-num">Hosts</th><th>Severity</th></tr></thead>
+                  <tbody>
+                    {fixes.map(f => (
+                      <tr key={f.key}>
+                        <td>
+                          <div className="cv-stack">
+                            {f.href ? <Link to={f.href} style={{ color: '#E8ECF2', fontWeight: 500 }}>{f.title}</Link> : <span style={{ fontWeight: 500 }}>{f.title}</span>}
+                            {f.detail && <span className="cv-muted cv-small" style={{ textTransform: f.type === 'Configuration' ? 'capitalize' : undefined }}>{f.detail.replace(/_/g, ' ')}</span>}
+                          </div>
+                        </td>
+                        <td><Chip tone={f.tone}>{f.type}</Chip></td>
+                        <td className="is-num">{f.hosts}</td>
+                        <td><Chip tone={severityTone(f.severity)}>{f.severity}</Chip></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {fixes.length === 0 && <Empty>Nothing to fix right now.</Empty>}
+              </div>
+            </section>
           </div>
-        )}
-      </div>
 
-      {isLoading ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
-          LOADING HYGIENE DATA...
-        </div>
-      ) : isError ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-red)', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px' }}>
-          FAILED TO LOAD HYGIENE SNAPSHOTS
-        </div>
-      ) : snapshots.length === 0 ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
-          <div style={{ fontSize: '32px' }}>🛡</div>
-          <div style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '16px', letterSpacing: '1px' }}>NO HYGIENE DATA YET</div>
-          <div style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '11px' }}>Agents send their first snapshot 30 seconds after enrollment.</div>
-        </div>
-      ) : (
-        <div style={{ flex: 1, display: 'flex', gap: '12px', overflow: 'hidden' }}>
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px', alignContent: 'start' }}>
+          <div className="cv-cols">
+            <section className="cv-card" style={{ flex: '1 1 320px' }}>
+              <div className="cv-card__head"><h2>Vulnerabilities by priority</h2><Link to="/vulnerabilities">Open</Link></div>
+              {vulns.data ? <div className="cv-row" style={{ gap: 22 }}>
+                {(['critical', 'high', 'medium', 'low'] as const).map(p => (
+                  <span key={p} className="cv-stack">
+                    <strong className={`cv-t-${severityTone(p)}`} style={{ fontSize: 22 }}>{byPriority[p] ?? 0}</strong>
+                    <span className="cv-muted cv-small" style={{ textTransform: 'capitalize' }}>{p}{p === 'critical' && vulns.data.summary.kev ? ` · ${vulns.data.summary.kev} known exploited` : ''}</span>
+                  </span>
+                ))}
+              </div> : <span className="cv-muted cv-small">{vulns.isError ? 'Vulnerability data unavailable.' : 'Loading…'}</span>}
+            </section>
+            <section className="cv-card" style={{ flex: '1 1 320px' }}>
+              <div className="cv-card__head"><h2>File integrity, last 24 h</h2><Link to="/fim">Open</Link></div>
+              <div className="cv-kv">
+                {recentFim.slice(0, 5).map(e => (
+                  <div key={e.id}>
+                    <span className="cv-mono" style={{ color: '#C9D0DB', overflowWrap: 'anywhere', textAlign: 'left' }}>{e.path}</span>
+                    <span className={e.event_type === 'CREATE' ? 'cv-t-bad' : e.event_type === 'MODIFY' ? 'cv-t-warn' : 'cv-dim'} style={{ whiteSpace: 'nowrap' }}>
+                      {e.event_type.toLowerCase()} · {hostOf(e.agent_id)}
+                    </span>
+                  </div>
+                ))}
+                {recentFim.length === 0 && <span className="cv-muted cv-small">No watched file changed in the last 24 h.</span>}
+              </div>
+            </section>
+          </div>
+
+          <SectionTitle>Hosts · {snapshots.length}</SectionTitle>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10, alignContent: 'start' }}>
               {snapshots.map(snap => (
-                <HostCard
-                  key={snap.agent_id}
-                  snap={snap}
-                  selected={selectedId === snap.agent_id}
-                  onClick={() => setSelectedId(selectedId === snap.agent_id ? null : snap.agent_id)}
-                />
+                <HostCard key={snap.agent_id} snap={snap} selected={selectedId === snap.agent_id}
+                  onClick={() => setSelectedId(selectedId === snap.agent_id ? null : snap.agent_id)} />
               ))}
             </div>
+            {selected && <DetailPanel snap={selected} onClose={() => setSelectedId(null)} />}
           </div>
-          {selected && (
-            <DetailPanel snap={selected} onClose={() => setSelectedId(null)} />
-          )}
-        </div>
-      )}
-    </div>
+        </>}
+      </div>
+    </CanvasPage>
   )
 }

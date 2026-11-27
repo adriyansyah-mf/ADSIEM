@@ -1,5 +1,6 @@
 # server-api/app/api/routes/logs.py
 import json
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -8,19 +9,16 @@ from app.core.deps import require_permission, get_scoped_group
 from app.core.es_client import search as es_search
 from app.core.query_builder import text_search, tree_to_query
 from app.schemas.schemas import PaginatedResponse, RawLogOut
+from app.services.telemetry_facets import facets as telemetry_facets, time_filter
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 Perm = require_permission("logs:read")
 
-@router.get("", response_model=PaginatedResponse)
-async def list_logs(
-    group_filter: Annotated[str | None, Depends(get_scoped_group)],
-    _=Depends(Perm),
-    page_size: int = 25,
-    after: str | None = None,
-    log_type: str | None = None, search: str | None = None,
-    filter_tree: str | None = None,
-):
+FACET_FIELDS = ["log_type", "agent_id", "decoder"]
+
+
+def _filters(group_filter: str | None, log_type: str | None, search: str | None,
+             filter_tree: str | None, since: datetime | None, until: datetime | None) -> list[dict]:
     filters: list[dict] = []
     if group_filter is not None:
         filters.append({"term": {"group_id": group_filter}})
@@ -34,6 +32,23 @@ async def list_logs(
         q = tree_to_query(json.loads(filter_tree))
         if q:
             filters.append(q)
+    window = time_filter(since, until)
+    if window:
+        filters.append(window)
+    return filters
+
+
+@router.get("", response_model=PaginatedResponse)
+async def list_logs(
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(Perm),
+    page_size: int = 25,
+    after: str | None = None,
+    log_type: str | None = None, search: str | None = None,
+    filter_tree: str | None = None,
+    since: datetime | None = None, until: datetime | None = None,
+):
+    filters = _filters(group_filter, log_type, search, filter_tree, since, until)
     query = {"bool": {"filter": filters}} if filters else {"match_all": {}}
 
     search_after = json.loads(after) if after else None
@@ -57,3 +72,17 @@ async def list_logs(
         total=total, page=1, page_size=page_size, items=items,
         next_after=json.dumps(next_cursor) if next_cursor else None,
     )
+
+
+@router.get("/facets")
+async def log_facets(
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(Perm),
+    log_type: str | None = None, search: str | None = None,
+    filter_tree: str | None = None,
+    since: datetime | None = None, until: datetime | None = None,
+):
+    """Count histogram and top values for the same query as the list (default window: 24 h)."""
+    filters = _filters(group_filter, log_type, search, filter_tree, None, None)
+    window = time_filter(since, until)
+    return await telemetry_facets(filters + ([window] if window else []), FACET_FIELDS, since, until)

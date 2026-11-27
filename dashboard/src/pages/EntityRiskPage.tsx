@@ -1,14 +1,10 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { RefreshCw } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '@/api/client'
-import DataTable, { type Column } from '@/components/DataTable'
-import SeverityBadge from '@/components/SeverityBadge'
-import { PageHeader, QueryState } from '@/components/Workspace'
-import { WorkspaceDialog } from '@/components/WorkspaceDialog'
-import { UebaRisk } from '@/components/UebaRisk'
+import { useUebaEntityDetail, useUebaRiskHistory } from '@/hooks/useUeba'
+import { CanvasHeader, CanvasPage, Chip, Empty, Meter, SectionTitle, Seg, Spark, severityTone, type Tone } from '@/components/canvas/Canvas'
 
 type EntityType = 'all' | 'host' | 'user'
 
@@ -28,88 +24,181 @@ interface RiskEntity {
 
 interface Contribution { alert_id: string; title: string; severity: string; source: string; tactics: string[]; at: string; points: number }
 type RiskDetail = RiskEntity & { recent: Contribution[] }
-type Row = RiskEntity & { readonly id: string }
 
 const SOURCE_LABEL: Record<string, string> = {
   sigma: 'Sigma', ioa: 'IOA', ioc: 'IoC', behavior: 'Behaviour', ueba: 'UEBA', yara: 'YARA', malware: 'Malware',
   agent_tamper: 'Tamper', network_ids: 'Network IDS', app_control: 'App Control',
 }
-const label = (t: string) => t.replace(/_/g, ' ')
+const label = (text: string) => text.replace(/_/g, ' ')
 
-function Tactics({ tactics }: { readonly tactics: string[] }) {
-  if (!tactics.length) return <span className="text-xs text-muted-foreground">none in 24 h</span>
-  return <div className="flex flex-wrap gap-1">{tactics.map(t =>
-    <span key={t} className="rounded border border-border px-1.5 py-0.5 text-[11px] capitalize">{label(t)}</span>)}</div>
+function riskTone(score: number): Tone {
+  return score >= 70 ? 'bad' : score >= 40 ? 'warn' : 'info'
 }
 
-function Detail({ row, onClose }: { readonly row: Row; readonly onClose: () => void }) {
-  const query = useQuery<RiskDetail>({
-    queryKey: ['entity-risk', row.entity_type, row.entity_value, row.group_id],
-    queryFn: () => api.get(`/api/entity-risk/${row.entity_type}/${encodeURIComponent(row.entity_value)}`,
-      { params: { group_id: row.group_id } }).then(r => r.data),
-  })
-  return <WorkspaceDialog title={`${row.entity_type === 'host' ? 'Host' : 'User'} · ${row.entity_value}`}
-    description="The alerts that built this risk score, newest first" onClose={onClose} wide>
-    {query.isPending ? <QueryState kind="loading" title="Loading contributions…" />
-      : query.isError ? <QueryState kind="error" title="Could not load this entity" onRetry={() => { void query.refetch() }} />
-        : <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-4 text-sm">
-            <UebaRisk score={query.data.risk_score} />
-            <span className="text-muted-foreground">peak {query.data.peak_score.toFixed(0)} · {query.data.alert_count} alerts</span>
-            <Tactics tactics={query.data.tactics} />
-          </div>
-          <div className="table-scroll"><table className="data-table">
-            <thead><tr><th className="p-2 text-left">When</th><th className="p-2 text-left">Alert</th><th className="p-2 text-left">Source</th><th className="p-2 text-right">Risk added</th></tr></thead>
-            <tbody>{query.data.recent.map(c => <tr key={`${c.alert_id}-${c.at}`}>
-              <td className="p-2 whitespace-nowrap text-xs">{formatDistanceToNow(new Date(c.at), { addSuffix: true })}</td>
-              <td className="p-2"><div className="flex items-center gap-2"><SeverityBadge severity={c.severity} />
-                <Link to={`/alerts/${c.alert_id}`} className="underline">{c.title}</Link></div>
-                {c.tactics.length > 0 && <div className="text-[11px] text-muted-foreground capitalize mt-0.5">{c.tactics.map(label).join(', ')}</div>}</td>
-              <td className="p-2 text-xs">{SOURCE_LABEL[c.source] ?? c.source}</td>
-              <td className="p-2 text-right tabular-nums">+{c.points}</td>
-            </tr>)}</tbody>
-          </table></div>
-          <p className="text-xs text-muted-foreground">Each alert adds points by severity (low 5, medium 15, high 30, critical 50), plus 10 for a tactic new in the last 24 h. The score halves every 24 h without new alerts.</p>
-        </div>}
-  </WorkspaceDialog>
+function keyOf(entity: Pick<RiskEntity, 'entity_type' | 'entity_value' | 'group_id'>) {
+  return `${entity.entity_type}|${entity.entity_value}|${entity.group_id}`
 }
 
 export default function EntityRiskPage() {
-  const [entityType, setEntityType] = useState<EntityType>('all')
-  const [minRisk, setMinRisk] = useState(1)
-  const [selected, setSelected] = useState<Row | null>(null)
+  const [params, setParams] = useSearchParams()
+  const entityType = (['all', 'host', 'user'].includes(params.get('type') ?? '') ? params.get('type') : 'all') as EntityType
+  const minRisk = Number(params.get('min') ?? 1) || 1
+  const patch = (changes: Record<string, string | null>) => setParams(current => {
+    const next = new URLSearchParams(current)
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) next.set(key, value)
+      else next.delete(key)
+    }
+    return next
+  }, { replace: true })
+
   const query = useQuery<{ items: RiskEntity[] }>({
     queryKey: ['entity-risk', entityType, minRisk],
     queryFn: () => api.get('/api/entity-risk', { params: { entity_type: entityType, min_risk: minRisk, limit: 100 } }).then(r => r.data),
     refetchInterval: 30_000,
   })
-  const rows: Row[] = (query.data?.items ?? []).map(e => ({ ...e, id: `${e.entity_type}|${e.entity_value}|${e.group_id}` }))
-  const columns: readonly Column<Row>[] = [
-    { key: 'entity_value', header: 'Entity', render: r => <div className="table-primary">{r.entity_value}
-      <div className="table-secondary">{r.entity_type === 'host' ? 'Host' : 'User'}</div></div> },
-    { key: 'risk_score', header: 'Risk', render: r => <UebaRisk score={r.risk_score} />, exportValue: r => r.risk_score },
-    { key: 'tactics', header: 'Tactics (24 h)', render: r => <Tactics tactics={r.tactics} />, exportValue: r => r.tactics.join(' ') },
-    { key: 'sources', header: 'Sources', render: r => <span className="text-xs">{Object.entries(r.sources).map(([s, n]) => `${SOURCE_LABEL[s] ?? s} ${n}`).join(' · ')}</span>,
-      exportValue: r => JSON.stringify(r.sources) },
-    { key: 'top_alert', header: 'Latest alert', render: r => <span className="text-xs">{r.top_alert ?? '—'}</span> },
-    { key: 'last_alert_at', header: 'Last alert', render: r => r.last_alert_at ? <time className="whitespace-nowrap text-xs" dateTime={r.last_alert_at}>{formatDistanceToNow(new Date(r.last_alert_at), { addSuffix: true })}</time> : '—' },
-    { key: 'group_id', header: 'Group', hiddenByDefault: true, render: r => r.group_id },
-  ]
-  return <div className="workspace">
-    <PageHeader eyebrow="Behavior intelligence" title="Entity risk"
-      description="Hosts and users ranked by the alerts they collected across every detection source. A [Risk] alert is raised when one reaches the threshold across two or more tactics."
-      actions={<button className="ui-button" disabled={query.isFetching} onClick={() => { void query.refetch() }}><RefreshCw size={14} /> Refresh</button>} />
-    <section className="panel" aria-label="Filters"><div className="ueba-filters">
-      <label className="field"><span>Entity type</span><select className="ui-input" value={entityType} onChange={e => { setEntityType(e.target.value as EntityType); setSelected(null) }}>
-        <option value="all">Hosts and users</option><option value="host">Hosts</option><option value="user">Users</option></select></label>
-      <label className="field"><span>Minimum risk</span><select className="ui-input" value={minRisk} onChange={e => { setMinRisk(Number(e.target.value)); setSelected(null) }}>
-        <option value={1}>Any risk</option><option value={40}>40 and above</option><option value={70}>70 and above</option><option value={90}>90 and above</option></select></label>
-    </div></section>
-    {query.isPending ? <section className="panel"><QueryState kind="loading" title="Loading entities…" /></section>
-      : query.isError ? <section className="panel"><QueryState kind="error" title="Could not load entity risk" onRetry={() => { void query.refetch() }} /></section>
-        : <DataTable columns={columns} data={rows} total={rows.length} page={1} pageSize={100} onPageChange={() => {}} showPagination={false}
-          onRowClick={setSelected} exportFilename="entity-risk.csv" emptyTitle="No entity carries risk right now"
-          emptyDescription="Risk builds as alerts arrive and halves every 24 hours." />}
-    {selected && <Detail row={selected} onClose={() => setSelected(null)} />}
-  </div>
+  const lateral = useQuery<number>({
+    queryKey: ['lateral', 'count'],
+    queryFn: () => api.get('/api/lateral/graph', { params: { hours: 24 } }).then(r => Array.isArray(r.data?.edges) ? r.data.edges.length : 0),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const rows = query.data?.items ?? []
+  const selected = rows.find(row => keyOf(row) === params.get('entity')) ?? rows[0] ?? null
+
+  return (
+    <CanvasPage>
+      <CanvasHeader
+        title="Entities & risk"
+        sub="Risk scores add up the alerts each host and user collected across every detection source · a score halves every 24 h without new alerts"
+        counts={{ '/lateral': lateral.data || null }}
+      >
+        <div className="cv-row">
+          <Seg label="Entity type" value={entityType} onChange={value => patch({ type: value === 'all' ? null : value, entity: null })}
+            options={[{ value: 'user', label: 'Users' }, { value: 'host', label: 'Hosts' }, { value: 'all', label: 'All' }]} />
+          <select className="cv-select" aria-label="Minimum risk" value={minRisk} onChange={event => patch({ min: event.target.value === '1' ? null : event.target.value, entity: null })}>
+            <option value={1}>Any risk</option><option value={40}>Risk 40+</option><option value={70}>Risk 70+</option><option value={90}>Risk 90+</option>
+          </select>
+          <span className="cv-muted cv-small">{query.isFetching ? 'Updating…' : `${rows.length} entities`}</span>
+        </div>
+      </CanvasHeader>
+
+      <div className="cv-split">
+        <section className="cv-pane" aria-label="Risk ranking" style={{ flex: '999 1 560px' }}>
+          <div className="cv-tablewrap">
+            <table className="cv-table" style={{ minWidth: 680 }}>
+              <thead><tr><th>#</th><th>{entityType === 'host' ? 'Host' : entityType === 'user' ? 'User' : 'Entity'}</th><th>Risk</th><th>Tactics (24 h)</th><th>Top factor</th><th>Last alert</th></tr></thead>
+              <tbody>
+                {rows.map((row, index) => {
+                  const active = selected && keyOf(row) === keyOf(selected)
+                  const sources = Object.entries(row.sources).sort((a, b) => b[1] - a[1])
+                  return (
+                    <tr key={keyOf(row)} className={active ? 'is-active' : undefined} style={{ cursor: 'pointer' }} onClick={() => patch({ entity: keyOf(row) })}>
+                      <td className="cv-muted">{index + 1}</td>
+                      <td>
+                        <div className="cv-stack">
+                          <button type="button" className="cv-rowlink cv-mono" style={{ fontSize: 13 }} onClick={() => patch({ entity: keyOf(row) })}>{row.entity_value}</button>
+                          <span className="cv-muted cv-small">{row.entity_type === 'host' ? 'Host' : 'User'}{row.group_id !== 'default' ? ` · ${row.group_id}` : ''}{sources[0] ? ` · ${sources.map(([s, n]) => `${SOURCE_LABEL[s] ?? s} ${n}`).slice(0, 2).join(', ')}` : ''}</span>
+                        </div>
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <Chip tone={riskTone(row.risk_score)}>{Math.round(row.risk_score)}</Chip>{' '}
+                        <span className="cv-small cv-muted">peak {Math.round(row.peak_score)}</span>
+                      </td>
+                      <td className="cv-small" style={{ textTransform: 'capitalize' }}>{row.tactics.length ? row.tactics.map(label).join(', ') : <span className="cv-muted">none</span>}</td>
+                      <td className="cv-dim" style={{ overflowWrap: 'anywhere' }}>{row.top_alert ?? '—'}</td>
+                      <td className="cv-small cv-dim" style={{ whiteSpace: 'nowrap' }}>{row.last_alert_at ? `${formatDistanceToNowStrict(new Date(row.last_alert_at))} ago` : '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            {query.isPending && <Empty>Loading entities…</Empty>}
+            {query.isError && <Empty>Could not load entity risk.</Empty>}
+            {!query.isPending && !query.isError && rows.length === 0 && <Empty>No entity carries risk right now. Risk builds as alerts arrive.</Empty>}
+          </div>
+          <p className="cv-muted cv-small" style={{ margin: 0 }}>
+            Each alert adds points by severity (low 5, medium 15, high 30, critical 50), plus 10 for a tactic new in the last 24 h.
+            A [Risk] alert is raised when an entity crosses the threshold across two or more tactics.
+          </p>
+        </section>
+
+        <aside className="cv-list" aria-label="Risk breakdown" style={{ flex: '1 1 340px', maxWidth: 400, borderRight: 0, borderLeft: '1px solid #222733', padding: '16px 20px', gap: 14 }}>
+          {selected ? <Breakdown entity={selected} /> : <Empty>Select an entity to see what makes up its score.</Empty>}
+        </aside>
+      </div>
+    </CanvasPage>
+  )
+}
+
+function Breakdown({ entity }: { readonly entity: RiskEntity }) {
+  const detail = useQuery<RiskDetail>({
+    queryKey: ['entity-risk', entity.entity_type, entity.entity_value, entity.group_id],
+    queryFn: () => api.get(`/api/entity-risk/${entity.entity_type}/${encodeURIComponent(entity.entity_value)}`,
+      { params: { group_id: entity.group_id } }).then(r => r.data),
+  })
+  const ueba = useUebaEntityDetail(entity.entity_type, entity.entity_value)
+  const history = useUebaRiskHistory(entity.entity_type, entity.entity_value)
+  const contributions = detail.data?.recent ?? []
+  // Group contributions by alert title, largest first: "what makes up the score".
+  const factors = useMemo(() => {
+    const byTitle = new Map<string, { title: string; severity: string; points: number; count: number; alertId: string }>()
+    for (const c of contributions) {
+      const current = byTitle.get(c.title)
+      if (current) { current.points += c.points; current.count += 1 }
+      else byTitle.set(c.title, { title: c.title, severity: c.severity, points: c.points, count: 1, alertId: c.alert_id })
+    }
+    return [...byTitle.values()].sort((a, b) => b.points - a.points).slice(0, 6)
+  }, [contributions])
+  const maxPoints = Math.max(1, ...factors.map(f => f.points))
+  const reasons = (ueba.data?.anomalies ?? []).flatMap(a => a.reasons ?? []).slice(0, 4)
+  const trend = (history.data?.history ?? []).slice(-14).map(day => day.max_risk)
+  const searchQuery = entity.entity_type === 'user' ? `user_name:"${entity.entity_value}"` : `"${entity.entity_value}"`
+
+  return <>
+    <div className="cv-row cv-row--between" style={{ alignItems: 'flex-start', flexWrap: 'nowrap' }}>
+      <div className="cv-stack">
+        <p className="cv-eyebrow">{entity.entity_type === 'host' ? 'Host' : 'User'}</p>
+        <h2 className="cv-mono" style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{entity.entity_value}</h2>
+        <span className="cv-muted cv-small">{entity.alert_count} alerts · group {entity.group_id}</span>
+      </div>
+      <span className={`cv-riskbadge cv-riskbadge--${riskTone(entity.risk_score)}`}>{Math.round(entity.risk_score)}</span>
+    </div>
+    {trend.length > 1 && (
+      <div className="cv-stack">
+        <span className="cv-muted cv-small">Behaviour risk, last {trend.length} days</span>
+        <Spark values={trend} tone={riskTone(entity.risk_score)} />
+      </div>
+    )}
+
+    <SectionTitle>What makes up the score</SectionTitle>
+    {detail.isPending && <span className="cv-muted cv-small">Loading…</span>}
+    {factors.map(factor => (
+      <div key={factor.title} className="cv-stack" style={{ gap: 5 }}>
+        <div className="cv-row cv-row--between" style={{ flexWrap: 'nowrap', alignItems: 'baseline' }}>
+          <Link to={`/alerts?alert=${factor.alertId}`} style={{ color: '#C9D0DB', overflowWrap: 'anywhere' }}>
+            {factor.title}{factor.count > 1 ? ` ×${factor.count}` : ''}
+          </Link>
+          <span className="cv-mono" style={{ color: '#E8ECF2', whiteSpace: 'nowrap' }}>+{factor.points}</span>
+        </div>
+        <Meter value={(factor.points / maxPoints) * 100} tone={severityTone(factor.severity)} />
+      </div>
+    ))}
+    {!detail.isPending && factors.length === 0 && <span className="cv-muted cv-small">No contributing alerts in the window.</span>}
+
+    <SectionTitle>Deviations from baseline</SectionTitle>
+    {reasons.map((reason, index) => (
+      <div key={`${reason.feature}-${index}`} className="cv-card" style={{ padding: '10px 12px', gap: 2 }}>
+        <span>{reason.text}</span>
+        <span className="cv-muted cv-small">{label(reason.feature)} · {reason.z.toFixed(1)}σ from usual</span>
+      </div>
+    ))}
+    {reasons.length === 0 && <span className="cv-muted cv-small">{ueba.isPending ? 'Loading…' : 'No behaviour anomalies recorded for this entity.'}</span>}
+
+    <div className="cv-row" style={{ marginTop: 4 }}>
+      <Link className="cv-btn" to={`/events?q=${encodeURIComponent(searchQuery)}&range=7d`}>View activity</Link>
+      <Link className="cv-btn" to={`/alerts?view=all&q=${encodeURIComponent(entity.entity_value)}`}>Open alerts</Link>
+      <Link className="cv-btn" to="/hunts">Hunt</Link>
+    </div>
+  </>
 }

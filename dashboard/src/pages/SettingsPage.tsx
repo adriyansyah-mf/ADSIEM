@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useSettings, useUpdateSetting } from '@/hooks/useSettings'
 import type { Setting } from '@/types'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
-import { PageHeader, QueryState } from '@/components/Workspace'
+import { QueryState } from '@/components/Workspace'
+import { CanvasHeader, CanvasPage, Empty } from '@/components/canvas/Canvas'
 import EvidenceUsagePanel from '@/components/EvidenceUsagePanel'
 
 const SETTING_LABELS: Record<string, string> = {
@@ -400,23 +402,79 @@ function MfaSection() {
   )
 }
 
+type SectionKey = 'general' | 'security' | 'ai' | 'intel' | 'detection' | 'data' | 'other'
+
+const SECTION_INFO: Record<SectionKey, { label: string; title: string; sub: string }> = {
+  general: { label: 'General', title: 'General', sub: 'Organization details shown in reports and the interface' },
+  security: { label: 'Authentication', title: 'Authentication', sub: 'Two-factor sign-in for your account' },
+  ai: { label: 'AI analyst', title: 'AI analyst', sub: 'Models, review panel and what the AI may do on its own' },
+  intel: { label: 'Threat intel & enrichment', title: 'Threat intel & enrichment', sub: 'Feed keys and lookups used to enrich alerts and block indicators' },
+  detection: { label: 'Detection & cases', title: 'Detection & cases', sub: 'How alerts group into cases and when the platform raises its own alerts' },
+  data: { label: 'Data & retention', title: 'Data & retention', sub: 'Evidence storage per group, retention and disk protection' },
+  other: { label: 'Other', title: 'Other settings', sub: 'Settings without a section yet' },
+}
+
+function sectionOf(key: string): SectionKey {
+  if (/^(org_|organization|company|timezone|language)/.test(key)) return 'general'
+  if (/^(ai_|ninerouter_|investigation_|searxng)/.test(key)) return 'ai'
+  if (/(virustotal|malwarebazaar|abuseipdb|otx|urlhaus|phishtank|feed|threat|ioc_|ti_|web_block|malware_hash)/.test(key)) return 'intel'
+  if (/^(retention_|es_disk|evidence_|storage)/.test(key)) return 'data'
+  if (/^(case_|bruteforce|agent_|retro_hunt|alert_|rule_|ueba|sigma)/.test(key)) return 'detection'
+  return 'other'
+}
+
 export default function SettingsPage() {
   const { data: settings, isLoading, error } = useSettings()
+  const [params, setParams] = useSearchParams()
+  const hasRole = useAuthStore(s => s.hasRole)
+  const grouped = useMemo(() => {
+    const map: Record<SectionKey, Setting[]> = { general: [], security: [], ai: [], intel: [], detection: [], data: [], other: [] }
+    for (const s of settings ?? []) map[sectionOf(s.key)].push(s)
+    return map
+  }, [settings])
+  const current = (Object.keys(SECTION_INFO) as SectionKey[]).find(k => k === params.get('section')) ?? 'general'
+  const info = SECTION_INFO[current]
+  const go = (key: SectionKey) => setParams({ section: key }, { replace: true })
+
+  const nav: { head: string; items: ({ key: SectionKey } | { to: string; label: string; minRole?: string })[] }[] = [
+    { head: 'Organization', items: [{ key: 'general' }, { to: '/users', label: 'Users & roles', minRole: 'superadmin' }, { key: 'security' }] },
+    { head: 'Platform', items: [{ key: 'ai' }, { key: 'intel' }, { key: 'detection' }, { key: 'data' }, { to: '/policies', label: 'Agent policies' }, { to: '/webhooks', label: 'Integrations', minRole: 'admin' }] },
+    { head: 'Governance', items: [{ to: '/audit-logs', label: 'Audit log', minRole: 'admin' }, ...(grouped.other.length ? [{ key: 'other' as const }] : [])] },
+  ]
 
   return (
-    <div className="workspace">
-      <PageHeader eyebrow="Administration" title="Settings"
-        description="Configure the AI analyst, integrations and platform behaviour. Changes take effect within 60 seconds." />
-
-      <EvidenceUsagePanel />
-
-      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
-        {isLoading && <QueryState kind="loading" title="Loading settings…" />}
-        {error && <QueryState kind="error" title="Could not load settings"
-          description="You may not have permission (superadmin required)." />}
-        <MfaSection />
-        {settings?.map(s => <SettingRow key={s.key} setting={s} />)}
+    <CanvasPage>
+      <CanvasHeader title={info.title} crumb={<>Admin &amp; settings / {info.label}</>}
+        sub={`${info.sub} · changes take effect within 60 seconds and are written to the audit log`} tabs={[]} />
+      <div className="cv-split">
+        <nav aria-label="Settings" className="cv-list" style={{ flex: '1 1 220px', maxWidth: 240, padding: 12, gap: 14 }}>
+          {nav.map(group => (
+            <div key={group.head} className="cv-stack" style={{ gap: 2 }}>
+              <span className="cv-eyebrow" style={{ padding: '0 8px 4px' }}>{group.head}</span>
+              {group.items.map(item => 'key' in item ? (
+                <button key={item.key} type="button" className={`cv-navitem ${current === item.key ? 'is-active' : ''}`} onClick={() => go(item.key)}
+                  style={{ justifyContent: 'space-between' }}>
+                  <span>{SECTION_INFO[item.key].label}</span>
+                  {item.key !== 'security' && grouped[item.key].length > 0 && <span className="cv-muted cv-small">{grouped[item.key].length}</span>}
+                </button>
+              ) : hasRole(item.minRole ?? 'viewer') && (
+                <Link key={item.to} to={item.to} className="cv-navitem" style={{ textDecoration: 'none' }}>{item.label}</Link>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <section className="cv-pane" aria-label={info.title} style={{ maxWidth: 980 }}>
+          {current === 'data' && <EvidenceUsagePanel />}
+          {current === 'security' ? <div className="cv-card" style={{ padding: 0, overflow: 'hidden' }}><MfaSection /></div> : (
+            <div className="cv-card" style={{ padding: 0, overflow: 'hidden' }}>
+              {isLoading && <QueryState kind="loading" title="Loading settings…" />}
+              {error && <QueryState kind="error" title="Could not load settings" description="You may not have permission (superadmin required)." />}
+              {grouped[current].map(s => <SettingRow key={s.key} setting={s} />)}
+              {!isLoading && !error && grouped[current].length === 0 && <Empty>No settings in this section.</Empty>}
+            </div>
+          )}
+        </section>
       </div>
-    </div>
+    </CanvasPage>
   )
 }
