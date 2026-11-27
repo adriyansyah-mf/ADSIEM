@@ -95,6 +95,9 @@ func (j *processJoiner) dns(ev *etw.Event) string {
 	qtype, _ := ev.Get("QueryType")
 	status, _ := ev.Get("QueryStatus")
 	results, _ := ev.Get("QueryResults")
+	if ev.PID == selfPID {
+		return "" // the agent resolving its own server: not telemetry, as for network
+	}
 	image, user := j.owner(ev.PID)
 	return line(22, [][2]string{
 		{"Channel", "ETW"}, {"Provider", "Microsoft-Windows-DNS-Client"},

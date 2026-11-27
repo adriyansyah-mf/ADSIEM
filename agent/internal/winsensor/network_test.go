@@ -63,6 +63,16 @@ func TestDNSQueryNamesTheQueryingProcess(t *testing.T) {
 	}
 }
 
+func TestDNSQueryOfTheAgentItselfIsIgnored(t *testing.T) {
+	j := joiner()
+	got := j.dns(&etw.Event{Provider: dnsClientProvider, ID: dnsQueryCompleted, PID: selfPID, Props: []etw.Property{
+		{Name: "QueryName", Value: "siem.example.com"}, {Name: "QueryStatus", Value: "0"},
+	}})
+	if got != "" {
+		t.Fatalf("agent's own lookup became %s", got)
+	}
+}
+
 func TestOtherNetworkAndDNSEventsAreIgnored(t *testing.T) {
 	j := joiner()
 	if got := j.network(tcp(10, "a", "1", "b", "2")); got != "" { // TCP send: never wanted

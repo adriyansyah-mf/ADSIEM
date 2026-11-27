@@ -2,6 +2,8 @@ package task
 
 import (
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/siem-platform/agent/internal/firewall"
 )
@@ -123,7 +125,9 @@ func IsolateHost(eng *firewall.Engine, serverURL string) error {
 
 func isolateWith(eng *firewall.Engine, serverURL string) (map[string]any, error) {
 	if nativeFirewall && (eng == nil || !eng.Enforcing()) {
-		if err := nativeIsolate(serverURL); err != nil {
+		err := nativeIsolate(serverURL)
+		nativeStatus.invalidate() // isolated, or rolled back half way
+		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"isolated": true, "backend": "netsh", "direction": firewall.DirBoth}, nil
@@ -141,7 +145,49 @@ func isolateWith(eng *firewall.Engine, serverURL string) (map[string]any, error)
 // task, by ransomguard or by an isolation re-applied at start: the server
 // shows it on the agent's page. nil when it cannot tell (netsh did not run).
 func HostIsolated(eng *firewall.Engine) *bool {
-	return hostIsolated(eng != nil && eng.Isolated(), nativeFirewall, nativeIsolated)
+	return hostIsolated(eng != nil && eng.Isolated(), nativeFirewall, nativeStatus.get)
+}
+
+// nativeStatusTTL is how long a netsh answer is reused. The heartbeat asked
+// every few seconds, and each netsh (with its conhost) was a process event the
+// agent itself shipped as evidence: thousands a day on an idle host. The
+// agent's own isolate and unisolate invalidate it at once; only a rule added
+// or removed outside the agent (an analyst, an older agent) waits for the TTL.
+const nativeStatusTTL = 5 * time.Minute
+
+var nativeStatus = &isolationProbe{check: nativeIsolated, now: time.Now, ttl: nativeStatusTTL}
+
+// isolationProbe caches a successful isolation check for ttl. A failed check
+// (netsh did not run) is not cached: the next heartbeat tries again.
+type isolationProbe struct {
+	check func() (isolated, ok bool)
+	now   func() time.Time
+	ttl   time.Duration
+
+	mu       sync.Mutex
+	valid    bool
+	isolated bool
+	at       time.Time
+}
+
+func (p *isolationProbe) get() (isolated, ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.valid && p.now().Sub(p.at) < p.ttl {
+		return p.isolated, true
+	}
+	isolated, ok = p.check()
+	p.valid = ok
+	if ok {
+		p.isolated, p.at = isolated, p.now()
+	}
+	return isolated, ok
+}
+
+func (p *isolationProbe) invalidate() {
+	p.mu.Lock()
+	p.valid = false
+	p.mu.Unlock()
 }
 
 func hostIsolated(engine, native bool, check func() (isolated, ok bool)) *bool {
@@ -163,7 +209,9 @@ func (r *Runner) handleIsolateHost() (any, error) {
 func (r *Runner) handleUnisolateHost() (any, error) {
 	if nativeFirewall && (r.fw == nil || !r.fw.Isolated()) {
 		// isolated by netsh directly (or by an older agent): same rule names
-		if err := nativeUnisolate(); err != nil {
+		err := nativeUnisolate()
+		nativeStatus.invalidate()
+		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"isolated": false}, nil
