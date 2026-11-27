@@ -148,6 +148,10 @@ class AgentUpdate(BaseModel):
     name: str | None = None
     group_id: str | None = None
     update_ring: int | None = Field(default=None, ge=0, le=2)
+    asset_tier: int | None = Field(default=None, ge=0, le=3)
+    asset_role: str | None = Field(default=None, max_length=100)
+    # explicit clear, since None above means "leave unchanged"
+    clear_asset_tier: bool = Field(default=False, exclude=True)
 
 class UpdatePolicyIn(BaseModel):
     target_version: str = Field(min_length=1, max_length=50, pattern=r"^\d+(\.\d+){1,3}$")
@@ -186,6 +190,8 @@ class AgentOut(BaseModel):
     enrolled_at: datetime
     update_ring: int = 2
     update_status: dict | None = None
+    asset_tier: int | None = None
+    asset_role: str | None = None
     log_sources: list[LogSourceOut] = []
     # read from the agent row for the summary below; the full snapshot is
     # served by GET /api/agents/{id}/evidence
@@ -675,6 +681,9 @@ class AlertOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     notes: list[AlertNoteOut] = []
+    # from the alert's agent (filled by list_alerts); None when unclassified
+    asset_tier: int | None = None
+    asset_role: str | None = None
     model_config = {"from_attributes": True}
 
 class AlertRuleInfo(BaseModel):

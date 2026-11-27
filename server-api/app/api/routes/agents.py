@@ -344,6 +344,10 @@ async def update_agent(
     )
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(agent, field, value)
+    if body.clear_asset_tier:
+        agent.asset_tier = None
+    if body.asset_role is not None:
+        agent.asset_role = body.asset_role.strip() or None
     await db.commit()
     await db.refresh(agent)
     background.add_task(audit_log, db, current_user.id, "agent_updated", "agent", str(agent_id))

@@ -74,10 +74,17 @@ async def list_alerts(
         q = q.where(Alert.created_at <= end_time)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
     result = await db.execute(q.offset((page - 1) * page_size).limit(page_size))
+    rows = result.scalars().all()
+    # asset criticality comes from each alert's agent: one lookup for the page
+    agent_ids = {a.agent_id for a in rows if a.agent_id}
+    assets = {} if not agent_ids else {
+        agent_id: (tier, role) for agent_id, tier, role in (await db.execute(
+            select(Agent.id, Agent.asset_tier, Agent.asset_role).where(Agent.id.in_(agent_ids)))).all()}
     items = []
-    for a in result.scalars().all():
+    for a in rows:
         out = AlertOut.model_validate(a)
         out.source_ip_country = lookup_country(a.source_ip)
+        out.asset_tier, out.asset_role = assets.get(a.agent_id, (None, None))
         items.append(out)
     return PaginatedResponse(total=total, page=page, page_size=page_size, items=items)
 
