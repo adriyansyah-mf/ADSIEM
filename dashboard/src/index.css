@@ -531,3 +531,10 @@ a.metric-card:hover { background: var(--bg-hover); }
 .alert-group { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; text-align: left; }
 .alert-group:hover { background: var(--bg-hover); }
 .alert-group__name { flex: 1 1 240px; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+
+/* Page tabs (case detail and other sectioned pages) */
+.page-tabs { display: flex; gap: var(--space-5); border-bottom: 1px solid var(--border-default); overflow-x: auto; }
+.page-tabs__tab { display: inline-flex; align-items: center; gap: 6px; padding: 9px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); white-space: nowrap; }
+.page-tabs__tab:hover { color: var(--text-primary); }
+.page-tabs__tab[aria-selected="true"] { color: var(--text-primary); font-weight: 500; border-bottom-color: var(--action-fill); }
+.page-tabs__count { font-size: 12px; color: var(--text-muted); }
