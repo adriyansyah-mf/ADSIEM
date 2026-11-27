@@ -13,6 +13,10 @@ its memory limit, was killed on its next background save, and crash-looped
 - trims everything already processed: entries older than both the group's
   last-delivered id and its oldest pending message. Unread and in-flight
   entries are never removed.
+
+The steps are independent: at maxmemory (noeviction) re-queuing is refused,
+and that must not stop the trim, the one step that frees memory. A stuck
+evidence reference is only acked, not re-queued: the inbox resends it.
 """
 import asyncio
 
@@ -20,6 +24,7 @@ import structlog
 
 from worker.config import REDIS_CONSUMER_GROUP, REDIS_STREAM_KEY
 from worker.consumer import CONSUMER_NAME
+from worker.evidence_inbox import EVIDENCE_KIND
 from worker.redis_client import get_redis
 
 log = structlog.get_logger()
@@ -43,35 +48,52 @@ def safe_trim_id(last_delivered: str | None, oldest_pending: str | None) -> str 
     return min(ids, key=_id) if ids else None
 
 
-async def maintain_stream(redis) -> dict:
-    stats = {"requeued": 0, "consumers_removed": 0, "trimmed": 0}
-    key, group = REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP
-
+async def _requeue_stale(redis, key: str, group: str, stats: dict) -> None:
     start = "0-0"
     while True:
         reply = await redis.xautoclaim(key, group, CONSUMER_NAME, min_idle_time=STALE_PENDING_MS,
                                        start_id=start, count=CLAIM_BATCH)
         start, claimed = reply[0], reply[1]
         for msg_id, data in claimed:
-            if data:  # still in the stream: hand it to the consume loop again
+            # still in the stream: hand it to the consume loop again (evidence: the inbox resends it)
+            if data and data.get("kind") != EVIDENCE_KIND:
                 await redis.xadd(key, data)
             await redis.xack(key, group, msg_id)
             stats["requeued"] += 1
         if not claimed or start in ("0-0", b"0-0"):
             break
 
+
+async def _remove_idle_consumers(redis, key: str, group: str, stats: dict) -> None:
     for consumer in await redis.xinfo_consumers(key, group):
         if (consumer["name"] != CONSUMER_NAME and not consumer["pending"]
                 and consumer["idle"] > IDLE_CONSUMER_MS):
             await redis.xgroup_delconsumer(key, group, consumer["name"])
             stats["consumers_removed"] += 1
 
+
+async def _trim(redis, key: str, group: str, stats: dict) -> None:
     info = next((g for g in await redis.xinfo_groups(key) if g["name"] == group), None)
     if info:
         pending = await redis.xpending(key, group)
         cutoff = safe_trim_id(info.get("last-delivered-id"), pending.get("min") if pending["pending"] else None)
         if cutoff:
             stats["trimmed"] = await redis.xtrim(key, minid=cutoff, approximate=TRIM_APPROXIMATE)
+
+
+async def maintain_stream(redis) -> dict:
+    stats = {"requeued": 0, "consumers_removed": 0, "trimmed": 0}
+    key, group = REDIS_STREAM_KEY, REDIS_CONSUMER_GROUP
+    errors = []
+    for step in (_requeue_stale, _remove_idle_consumers, _trim):
+        try:
+            await step(redis, key, group, stats)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — the next step still runs
+            errors.append(f"{step.__name__}: {exc}")
+    if errors:
+        log.warning("log_stream_maintenance_failed", error="; ".join(errors), **stats)
     return stats
 
 

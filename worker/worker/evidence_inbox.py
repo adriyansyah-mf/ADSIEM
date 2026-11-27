@@ -5,11 +5,16 @@ carries references:
 
 - dispatch_once sends `kind=evidence_v2` references for eligible pending rows
   and pushes next_dispatch_at out only after XADD succeeded, so a lost, trimmed
-  or duplicated reference is resent later and never loses evidence.
+  or duplicated reference is resent later and never loses evidence. It sends
+  nothing while the workers are behind (DISPATCH_MAX_BACKLOG unread entries),
+  and the resend interval doubles per dispatch: resending every minute into a
+  stream the workers could not keep up with filled Redis to maxmemory with
+  copies of the same references.
 - process_reference locks the row, reads the authoritative payload, runs the
   normal pipeline with a stable document id, and commits completion before the
   consumer acks. A failure is counted in a fresh transaction with capped
-  backoff; the 20th dead-letters the row and keeps its payload.
+  backoff; the 20th dead-letters the row and keeps its payload. Redis being
+  down or full is not the event's fault: it is deferred without counting.
 - evidence_retention_once drops completed payloads after 7 days (releasing the
   group budget in the same transaction) and completed receipts after 30.
   Pending and dead-letter rows never age out.
@@ -23,10 +28,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
+from redis import exceptions as redis_errors
 from sqlalchemy import delete, func, null, select, update
 from sqlalchemy.exc import DBAPIError
 
-from worker.config import REDIS_STREAM_KEY
+from worker.config import (DISPATCH_MAX_BACKLOG, REDIS_CONSUMER_GROUP, REDIS_STREAM_KEY,
+                           REDIS_STREAM_MAXLEN)
 from worker.database import AsyncSessionLocal
 from worker.models import EvidenceGroupUsage, EvidenceInbox
 from worker.redis_client import get_redis
@@ -35,9 +42,11 @@ log = structlog.get_logger()
 
 EVIDENCE_KIND = "evidence_v2"
 DISPATCH_BATCH = 200
-REDISPATCH_SECONDS = 60       # a reference not completed by then is sent again
+REDISPATCH_SECONDS = 60       # a reference not completed by then is sent again...
+REDISPATCH_CAP_SECONDS = 1800  # ...doubling per dispatch, up to this
 PROCESS_TIMEOUT_SECONDS = 60  # one processing attempt
 RETRY_CAP_SECONDS = 60
+TRANSIENT_RETRY_SECONDS = 30  # Redis down or full: try again, not counted as a failure
 MAX_FAILURES = 20
 PAYLOAD_RETENTION = timedelta(days=7)
 RECEIPT_RETENTION = timedelta(days=30)
@@ -62,38 +71,85 @@ def _retry_delay(failures: int) -> timedelta:
     return timedelta(seconds=min(2 ** failures, RETRY_CAP_SECONDS))
 
 
+def redispatch_delay(dispatches: int) -> timedelta:
+    """How long a reference gets before it is sent again, given how many were
+    already sent for the row: 1, 2, 4... minutes, capped."""
+    return timedelta(seconds=min(REDISPATCH_SECONDS * 2 ** min(dispatches, 16), REDISPATCH_CAP_SECONDS))
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Redis unreachable, loading, timing out or at maxmemory, anywhere in the chain."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (redis_errors.ConnectionError, redis_errors.TimeoutError,
+                            redis_errors.OutOfMemoryError)):
+            return True
+        if isinstance(exc, redis_errors.ResponseError) and "maxmemory" in str(exc):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+async def stream_backlog(redis) -> int:
+    """Entries in the log stream the workers have not read yet."""
+    try:
+        groups = await redis.xinfo_groups(REDIS_STREAM_KEY)
+    except redis_errors.ResponseError:  # no stream yet
+        return 0
+    for group in groups:
+        if group.get("name") == REDIS_CONSUMER_GROUP and group.get("lag") is not None:
+            return int(group["lag"])
+    # no group yet, or Redis cannot tell the lag (entries deleted mid-stream): count everything
+    return int(await redis.xlen(REDIS_STREAM_KEY))
+
+
 async def dispatch_once(now: datetime | None = None) -> int:
     """Send references for eligible pending rows. Returns how many were sent."""
     now = now or _now()
     redis = await get_redis()
+    try:
+        room = DISPATCH_MAX_BACKLOG - await stream_backlog(redis)
+    except Exception as exc:  # Redis down: nothing can be sent anyway
+        log.warning("evidence_dispatch_redis_failed", rows=0, error=str(exc))
+        return 0
+    if room <= 0:  # the rows stay due; they go out once the workers caught up
+        return 0
     async with AsyncSessionLocal() as db:
         rows = (await db.execute(
-            select(EvidenceInbox.receipt_id, EvidenceInbox.group_id, EvidenceInbox.hostname)
+            select(EvidenceInbox.receipt_id, EvidenceInbox.group_id, EvidenceInbox.hostname,
+                   EvidenceInbox.dispatch_count)
             .where(EvidenceInbox.status == "pending",
                    EvidenceInbox.next_dispatch_at <= now,
                    EvidenceInbox.next_attempt_at <= now)
             .order_by(EvidenceInbox.next_dispatch_at)
-            .limit(DISPATCH_BATCH)
+            .limit(min(DISPATCH_BATCH, room))
             .with_for_update(skip_locked=True)
         )).all()
         if not rows:
             return 0
         pipe = redis.pipeline(transaction=False)
         for row in rows:
+            # a trimmed reference is safe: the row is resent
             pipe.xadd(REDIS_STREAM_KEY, {"kind": EVIDENCE_KIND, "receipt_id": str(row.receipt_id),
-                                         "group_id": row.group_id, "hostname": row.hostname})
+                                         "group_id": row.group_id, "hostname": row.hostname},
+                      maxlen=REDIS_STREAM_MAXLEN, approximate=True)
         try:
             await pipe.execute()
         except Exception as exc:  # Redis down: leave the rows due, retry next round
             await db.rollback()
             log.warning("evidence_dispatch_redis_failed", rows=len(rows), error=str(exc))
             return 0
-        await db.execute(
-            update(EvidenceInbox)
-            .where(EvidenceInbox.receipt_id.in_([r.receipt_id for r in rows]))
-            .values(next_dispatch_at=now + timedelta(seconds=REDISPATCH_SECONDS),
-                    dispatch_count=EvidenceInbox.dispatch_count + 1)
-        )
+        by_count: dict[int, list[uuid.UUID]] = {}
+        for row in rows:
+            by_count.setdefault(row.dispatch_count, []).append(row.receipt_id)
+        for dispatches, receipt_ids in sorted(by_count.items()):
+            await db.execute(
+                update(EvidenceInbox)
+                .where(EvidenceInbox.receipt_id.in_(receipt_ids))
+                .values(next_dispatch_at=now + redispatch_delay(dispatches),
+                        dispatch_count=EvidenceInbox.dispatch_count + 1)
+            )
         await db.commit()
     return len(rows)
 
@@ -170,8 +226,14 @@ async def _record_failure(receipt_id: uuid.UUID, exc: BaseException) -> str:
             return "missing"
         if row.status != "pending":  # another worker finished it meanwhile
             return "duplicate" if row.status == "completed" else row.status
-        row.failure_count += 1
         row.last_error = f"{type(exc).__name__}: {exc}"[:1000]
+        if is_transient(exc):
+            row.next_attempt_at = _now() + timedelta(seconds=TRANSIENT_RETRY_SECONDS)
+            row.next_dispatch_at = max(row.next_dispatch_at, row.next_attempt_at)
+            await db.commit()
+            log.warning("evidence_processing_deferred", receipt_id=str(receipt_id), error=row.last_error)
+            return "deferred"
+        row.failure_count += 1
         if row.failure_count >= MAX_FAILURES:
             row.status = "dead_letter"
             outcome = "dead_letter"

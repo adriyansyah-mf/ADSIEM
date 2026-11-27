@@ -83,6 +83,35 @@ async def test_retry_is_scoped_to_the_receipts_original_group(evidence_api):
     assert r.status_code == 200
 
 
+async def test_retry_all_resets_the_agents_dead_letters_in_scope(evidence_api):
+    from app.models import models
+    blue = evidence_api.agents["blue"]
+    retried = [await dead_letter(evidence_api) for _ in range(3)]
+    released = await dead_letter(evidence_api, payload=False)
+    moved = await dead_letter(evidence_api, group="old", agent="blue")
+    red = await dead_letter(evidence_api, group="red", agent="red")
+    pending = await dead_letter(evidence_api, status="pending")
+
+    r = await evidence_api.client.post(f"/api/agents/{blue}/evidence/retry-dead-letters")
+    assert r.status_code == 403  # analyst
+    evidence_api.user = manager()
+    r = await evidence_api.client.post(f"/api/agents/{blue}/evidence/retry-dead-letters")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"retried": 3}
+    async with evidence_api.sessions() as db:
+        for receipt in retried:
+            row = await db.get(models.EvidenceInbox, receipt)
+            assert row.status == "pending" and row.failure_count == 0 and row.last_error is None
+        assert (await db.get(models.EvidenceInbox, released)).status == "dead_letter"  # payload gone
+        assert (await db.get(models.EvidenceInbox, moved)).status == "dead_letter"     # other group
+        assert (await db.get(models.EvidenceInbox, red)).status == "dead_letter"       # other agent
+        assert (await db.get(models.EvidenceInbox, pending)).failure_count == 20       # untouched
+    [(actor, action, resource, detail)] = evidence_api.audits
+    assert action == "evidence_retried_all" and resource == str(blue) and detail == {"retried": 3}
+    r = await evidence_api.client.post(f"/api/agents/{evidence_api.agents['red']}/evidence/retry-dead-letters")
+    assert r.status_code == 404
+
+
 async def test_released_payload_cannot_be_retried(evidence_api):
     receipt = await dead_letter(evidence_api, payload=False)
     evidence_api.user = manager()

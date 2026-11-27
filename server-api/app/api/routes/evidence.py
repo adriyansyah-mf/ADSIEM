@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import func, select, true
+from sqlalchemy import func, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -90,6 +90,32 @@ async def get_agent_evidence(
             } for r in dead],
         },
     }
+
+
+@router.post("/api/agents/{agent_id}/evidence/retry-dead-letters")
+async def retry_all_dead_letters(
+    agent_id: UUID,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_permission("agents:manage"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    """Put every dead-lettered event of the agent that still has its payload
+    back to pending with a fresh attempt count, e.g. after an outage."""
+    agent = await fetch_scoped(db, Agent, agent_id, group_filter, detail="Agent not found")
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        update(EvidenceInbox)
+        .where(EvidenceInbox.agent_id == agent.id, _in_scope(group_filter),
+               EvidenceInbox.status == "dead_letter", EvidenceInbox.payload.isnot(None))
+        .values(status="pending", failure_count=0, last_error=None, next_attempt_at=now, next_dispatch_at=now)
+    )
+    await db.commit()
+    retried = result.rowcount or 0
+    if retried:
+        background.add_task(audit_log, db, current_user.id, "evidence_retried_all", "agent", str(agent.id),
+                            {"retried": retried})
+    return {"retried": retried}
 
 
 @router.post("/api/agents/{agent_id}/evidence/{receipt_id}/retry")
