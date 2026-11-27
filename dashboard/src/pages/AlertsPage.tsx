@@ -15,6 +15,8 @@ import { useAlerts, useUpdateAlert } from '@/hooks/useAlerts'
 import { useStartHunt } from '@/hooks/useHunts'
 import { emitToast } from '@/hooks/useToast'
 import { useAuthStore } from '@/stores/auth'
+import { AssetTierChip } from '@/components/AssetTier'
+import { assetTierLabel } from '@/lib/assetTier'
 import type { Alert } from '@/types'
 
 const SEVERITY_RANK: Readonly<Record<Alert['severity'], number>> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 }
@@ -58,6 +60,7 @@ function AlertPreview({ alert, canTriage, onClose }: {
   const detected = new Date(alert.created_at)
   const facts: readonly [string, string | null | undefined][] = [
     ['Host', alert.hostname],
+    ['Asset', alert.asset_tier != null || alert.asset_role ? assetTierLabel(alert.asset_tier, alert.asset_role) : null],
     ['Source IP', alert.source_ip ? `${alert.source_ip}${alert.source_ip_country ? ` · ${alert.source_ip_country}` : ''}` : null],
     ['Detected', `${format(detected, 'dd MMM yyyy, HH:mm:ss')} · ${formatDistanceToNowStrict(detected)} ago`],
     ['Kill chain', alert.kill_chain_stage],
@@ -217,7 +220,11 @@ export default function AlertsPage() {
       {row.mitre_techniques?.length ? <div className="table-secondary">{row.mitre_techniques.join(' · ')}</div> : null}
     </div> },
     { key: 'status', header: 'Status', render: row => <StatusBadge status={row.status} /> },
-    { key: 'hostname', header: 'Host', render: row => <span className="font-mono">{row.hostname ?? '—'}</span> },
+    { key: 'hostname', header: 'Host', render: row => <div><span className="font-mono">{row.hostname ?? '—'}</span>
+      {(row.asset_tier != null || row.asset_role) && <div><AssetTierChip tier={row.asset_tier} role={row.asset_role} /></div>}</div>,
+      exportValue: row => row.hostname ?? '' },
+    { key: 'asset_tier', header: 'Criticality', hiddenByDefault: true, render: row => assetTierLabel(row.asset_tier, row.asset_role),
+      exportValue: row => assetTierLabel(row.asset_tier, row.asset_role) },
     { key: 'source_ip', header: 'Source IP', render: row => <div className="font-mono">{row.source_ip ?? '—'}
       {row.source_ip_country && <div className="table-secondary">{row.source_ip_country}</div>}</div> },
     { key: 'created_at', header: 'Detected', render: row => <time className="whitespace-nowrap" dateTime={row.created_at}

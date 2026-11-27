@@ -95,6 +95,10 @@ class Agent(Base):
     update_ring        = Column(Integer, nullable=False, default=2, server_default="2")
     update_status      = Column(JSONB)
     update_status_at   = Column(DateTime(timezone=True))
+    # Asset criticality, set by an analyst: 0 identity/control plane (DCs, IdP),
+    # 1 business servers, 2 workstations, 3 lab/test. NULL = not classified.
+    asset_tier   = Column(Integer)
+    asset_role   = Column(String(100))   # free text, e.g. "Finance workstation"
     enrolled_at  = Column(DateTime(timezone=True), default=now_utc)
     created_at   = Column(DateTime(timezone=True), default=now_utc)
     updated_at   = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

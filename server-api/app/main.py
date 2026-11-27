@@ -375,6 +375,12 @@ async def _migrate_agent_flow_poll() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS flow_poll_at TIMESTAMPTZ"))
 
+async def _migrate_agent_asset_tier() -> None:
+    from sqlalchemy import text
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS asset_tier INTEGER"))
+        await conn.execute(text("ALTER TABLE agents ADD COLUMN IF NOT EXISTS asset_role VARCHAR(100)"))
+
 async def _migrate_agent_evidence_health() -> None:
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -586,6 +592,7 @@ async def lifespan(app: FastAPI):
         await _migrate_agent_flow_poll()
         await _migrate_agent_integrity()
         await _migrate_agent_evidence_health()
+        await _migrate_agent_asset_tier()
         await _migrate_agent_web_block_health()
         await _migrate_agent_sensor_health()
         await _migrate_agent_config_status()

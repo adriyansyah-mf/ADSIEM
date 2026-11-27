@@ -32,6 +32,8 @@ export interface EnrollmentKey {
 
 export interface Agent {
   id: string
+  asset_tier?: number | null
+  asset_role?: string | null
   name: string
   hostname: string
   group_id: string
@@ -211,6 +213,8 @@ export interface Alert {
   hostname: string | null
   assignee_id: string | null
   ai_verdict: string | null
+  asset_tier?: number | null
+  asset_role?: string | null
   duplicate_count?: number
   mitre_techniques?: string[]
   kill_chain_stage?: string | null

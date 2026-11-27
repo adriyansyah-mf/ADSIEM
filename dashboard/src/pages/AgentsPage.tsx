@@ -8,6 +8,8 @@ import StatusBadge from '@/components/StatusBadge'
 import { PageHeader, QueryState } from '@/components/Workspace'
 import { AgentActions } from '@/components/AgentActions'
 import DeployAgentModal from '@/components/DeployAgentModal'
+import { AssetTierChip, AssetTierEditor } from '@/components/AssetTier'
+import { assetTierLabel } from '@/lib/assetTier'
 import { EvidenceBadge, EvidenceHealthPanel } from '@/components/EvidenceHealth'
 import { useAgents } from '@/hooks/useAgents'
 import { useWorkspaceFilters } from '@/hooks/useWorkspaceFilters'
@@ -71,6 +73,8 @@ export default function AgentsPage() {
   const columns: readonly Column<Agent>[] = [
     { key: 'name', header: 'Endpoint', render: row => <div className="table-primary">{row.name}<div className="table-secondary font-mono">{row.hostname}</div></div> },
     { key: 'group_id', header: 'Group', render: row => row.group_id },
+    { key: 'asset_tier', header: 'Criticality', render: row => <AssetTierChip tier={row.asset_tier} role={row.asset_role} />,
+      exportValue: row => assetTierLabel(row.asset_tier, row.asset_role) },
     { key: 'status', header: 'State', render: row => <div className="control-cluster">
       <StatusBadge status={row.status} />{row.approved === false && <StatusBadge status="pending_approval" />}{row.is_isolated && <StatusBadge status="isolated" />}
     </div> },
@@ -105,6 +109,7 @@ export default function AgentsPage() {
           onRowClick={canManage ? row => navigate(`/agents/${row.id}/sources`) : undefined}
           expandable={canManage} renderExpanded={row => <div className="space-y-4">
             <AgentActions agent={row} />
+            <AssetTierEditor agentId={row.id} tier={row.asset_tier} role={row.asset_role} />
             <EvidenceHealthPanel agent={row} canManage={canManage} />
           </div>}
           exportFilename="agents-page.csv" emptyTitle="No agents match this view" emptyDescription={search || status ? 'Try a different hostname or clear the filters.' : canManage ? 'Deploy an agent to start collecting endpoint telemetry.' : 'An administrator can deploy agents for this group.'} />}
