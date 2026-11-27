@@ -547,3 +547,10 @@ a.metric-card:hover { background: var(--bg-hover); }
 .login-brand__list span { color: var(--text-secondary); }
 .login-brand__notice { margin: 0; font-size: 12px; color: var(--text-muted); max-width: 46ch; }
 .login-card { border-top: 2px solid var(--action-fill); }
+
+/* Severity chips */
+.severity-chip { display: inline-flex; align-items: center; min-height: 20px; padding: 1px 7px; border-radius: 3px; font-size: 11px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; background: #1E222B; color: #A9B2C1; }
+.severity-chip--critical { background: #3A1C22; color: #FF8D98; }
+.severity-chip--high { background: #3A2A18; color: #FFB46E; }
+.severity-chip--medium { background: #332E17; color: #F2D45C; }
+.severity-chip--low { background: #1C2740; color: #9DB4FF; }

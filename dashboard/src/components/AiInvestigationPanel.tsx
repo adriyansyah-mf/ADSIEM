@@ -331,7 +331,7 @@ export default function AiInvestigationPanel({ caseId }: { caseId: string }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
         <button onClick={() => start.mutate()} disabled={active || start.isPending}
-          style={{ ...btn, border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.08)', color: 'var(--accent-cyan)', opacity: active ? 0.5 : 1, cursor: active ? 'not-allowed' : 'pointer' }}>
+          style={{ ...btn, border: '1px solid var(--accent-cyan)', background: 'rgba(141, 176, 255,0.08)', color: 'var(--accent-cyan)', opacity: active ? 0.5 : 1, cursor: active ? 'not-allowed' : 'pointer' }}>
           <Terminal size={13} /> {active ? 'INVESTIGATING' : 'INVESTIGATE'}
         </button>
         {active && current && (
