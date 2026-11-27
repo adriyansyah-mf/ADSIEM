@@ -75,6 +75,12 @@ export default function LoginPage() {
           Detection, investigation and response for your fleet: alerts, cases, live response and
           AI-assisted investigations in one workspace.
         </p>
+        <ul className="login-brand__list">
+          <li><strong>Detect</strong><span>Sigma and native rules over endpoint, syslog and cloud telemetry</span></li>
+          <li><strong>Investigate</strong><span>Cases, relation graphs and AI investigation with analyst approval</span></li>
+          <li><strong>Respond</strong><span>Live response, playbooks and staged protection policies</span></li>
+        </ul>
+        <p className="login-brand__notice">This system is for authorized personnel. Activity is logged and monitored.</p>
       </section>
 
       <main className="login-main">
