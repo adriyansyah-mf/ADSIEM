@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ArrowLeft, Bot } from 'lucide-react'
 import { PageHeader, Panel, QueryState } from '@/components/Workspace'
@@ -19,6 +19,15 @@ import AlertDetailModal from '@/components/AlertDetailModal'
 import AiFeedbackWidget from '@/components/AiFeedbackWidget'
 import AiInvestigationPanel from '@/components/AiInvestigationPanel'
 import IncidentReportButton from '@/components/reports/IncidentReportButton'
+
+type CaseTab = 'overview' | 'ai' | 'evidence' | 'timeline' | 'notes'
+const CASE_TABS: readonly { readonly key: CaseTab; readonly label: string }[] = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'ai', label: 'AI investigation' },
+  { key: 'evidence', label: 'Evidence' },
+  { key: 'timeline', label: 'Timeline' },
+  { key: 'notes', label: 'Notes' },
+]
 
 function Box({ title, children, actions }: { title: string; children: React.ReactNode; actions?: React.ReactNode }) {
   return <Panel title={title} actions={actions}>{children}</Panel>
@@ -42,7 +51,7 @@ function AttackTimeline({ items }: { items: any[] }) {
     )
   }
   const sevColor = (s: string): string =>
-    ({ critical: '#ff2244', high: '#ff6b00', medium: '#ffd700', low: '#00ff88' } as Record<string, string>)[s] ?? '#00d4ff'
+    ({ critical: '#FF5D6C', high: '#FF9F43', medium: '#F2D45C', low: '#9DB4FF' } as Record<string, string>)[s] ?? '#8DB0FF'
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -56,7 +65,7 @@ function AttackTimeline({ items }: { items: any[] }) {
               border: '2px solid transparent',
             }} />
             {idx < items.length - 1 && (
-              <div style={{ width: 1, flex: 1, minHeight: 16, background: '#1e2028', margin: '2px 0' }} />
+              <div style={{ width: 1, flex: 1, minHeight: 16, background: 'var(--border-default)', margin: '2px 0' }} />
             )}
           </div>
           {/* Event content */}
@@ -76,7 +85,7 @@ function AttackTimeline({ items }: { items: any[] }) {
                 </span>
               )}
               {item.is_this_case && (
-                <span style={{ fontSize: 12, padding: '1px 5px', borderRadius: 2, background: 'rgba(0,212,255,0.15)', color: '#00d4ff', fontFamily: 'var(--font-mono)' }}>
+                <span style={{ fontSize: 12, padding: '1px 5px', borderRadius: 2, background: 'var(--bg-hover)', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
                   THIS CASE
                 </span>
               )}
@@ -115,6 +124,14 @@ export default function CaseDetailPage() {
   }
   const [timelineView, setTimelineView] = useState<'graph' | 'linear'>('graph')
   const [showLinkedAlert, setShowLinkedAlert] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const tab = (CASE_TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'overview') as CaseTab
+  const selectTab = (next: CaseTab) => setParams(current => {
+    const out = new URLSearchParams(current)
+    if (next === 'overview') out.delete('tab')
+    else out.set('tab', next)
+    return out
+  }, { replace: true })
 
   const { data: caseData, isLoading, isError, refetch } = useCase(id!)
   const update = useUpdateCase(id!)
@@ -177,7 +194,7 @@ export default function CaseDetailPage() {
 
   return (
     <div className="workspace case-page">
-      <PageHeader eyebrow="Investigations" title={caseData.title}
+      <PageHeader eyebrow="Triage / Cases" title={caseData.title}
         actions={<div className="control-cluster">
           <IncidentReportButton caseId={caseData.id} />
           <button className="ui-button" onClick={() => navigate('/cases')}><ArrowLeft size={14} /> Back to cases</button>
@@ -189,17 +206,27 @@ export default function CaseDetailPage() {
         <span className="text-muted-foreground text-xs">Created {format(new Date(caseData.created_at), 'dd MMM yyyy, HH:mm')} · {caseData.group_id}</span>
       </div>
       {caseData.description && <Panel title="Case summary"><p className="whitespace-pre-wrap mb-0">{caseData.description}</p></Panel>}
+      <nav className="page-tabs" role="tablist" aria-label="Case sections">
+        {CASE_TABS.map(t => (
+          <button key={t.key} role="tab" aria-selected={tab === t.key} className="page-tabs__tab" onClick={() => selectTab(t.key)}>
+            {t.label}
+            {t.key === 'notes' && notesTotal > 0 && <span className="page-tabs__count">{notesTotal}</span>}
+            {t.key === 'timeline' && (timeline?.items?.length ?? 0) > 0 && <span className="page-tabs__count">{timeline.items.length}</span>}
+          </button>
+        ))}
+      </nav>
       {/* 2-column layout */}
       <div className="case-layout">
         {/* Left column (wider) */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0 }} role="tabpanel" aria-label={CASE_TABS.find(t => t.key === tab)?.label}>
           {/* AI investigation: the AI works the case on the endpoints */}
-          {id && (
-            <Box title="AI Investigation">
+          {tab === 'ai' && id && (
+            <Box title="AI investigation">
               <AiInvestigationPanel caseId={id} />
             </Box>
           )}
 
+          {tab === 'overview' && <>
           {/* AI Analysis */}
           <Box title="AI Analysis">
             {caseData.ai_reasoning ? (
@@ -398,11 +425,12 @@ export default function CaseDetailPage() {
           {alertData && showLinkedAlert && (
             <AlertDetailModal alert={alertData} onClose={() => setShowLinkedAlert(false)} />
           )}
+          </>}
 
-          <CaseEvidencePanel caseId={caseData.id} status={caseData.status} />
+          {tab === 'evidence' && <CaseEvidencePanel caseId={caseData.id} status={caseData.status} />}
 
-          {/* Timeline / Notes */}
-          <Box title="Timeline / Notes">
+          {/* Notes */}
+          {tab === 'notes' && <Box title="Notes">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
               {sortedNotes.length === 0 ? (
                 <div style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>No notes yet</div>
@@ -456,51 +484,21 @@ export default function CaseDetailPage() {
                   outline: 'none',
                 }}
               />
-              <button
+              <button className="ui-button ui-button--primary"
                 onClick={handleAddNote}
-                disabled={addNote.isPending || !noteText.trim()}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: '4px',
-                  border: '1px solid var(--accent-cyan)',
-                  background: 'rgba(0,212,255,0.15)',
-                  color: 'var(--accent-cyan)',
-                  fontFamily: 'var(--font-ui)',
-                  fontWeight: 700,
-                  fontSize: '12px',
-                  letterSpacing: 'normal',
-                  cursor: addNote.isPending ? 'wait' : 'pointer',
-                  opacity: addNote.isPending || !noteText.trim() ? 0.6 : 1,
-                }}
-              >
-                {addNote.isPending ? '...' : 'ADD NOTE'}
+                disabled={addNote.isPending || !noteText.trim()}>
+                {addNote.isPending ? 'Adding…' : 'Add note'}
               </button>
             </div>
-          </Box>
+          </Box>}
 
-          <Box
-            title={`Attack Timeline (${timeline?.items?.length ?? 0} events)`}
+          {tab === 'timeline' && <Box
+            title={`Attack timeline (${timeline?.items?.length ?? 0} events)`}
             actions={
-              <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden' }}>
+              <div className="segmented" role="group" aria-label="Timeline view">
                 {(['graph', 'linear'] as const).map(v => (
-                  <button
-                    key={v}
-                    onClick={() => setTimelineView(v)}
-                    style={{
-                      appearance: 'none',
-                      border: 0,
-                      borderLeft: v === 'linear' ? '1px solid var(--border)' : 'none',
-                      background: timelineView === v ? 'rgba(0,212,255,0.12)' : 'transparent',
-                      color: timelineView === v ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-                      fontFamily: 'var(--font-ui)',
-                      fontWeight: 700,
-                      fontSize: '12px',
-                      letterSpacing: 'normal',
-                      padding: '5px 12px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {v.toUpperCase()}
+                  <button key={v} aria-pressed={timelineView === v} onClick={() => setTimelineView(v)}>
+                    {v === 'graph' ? 'Graph' : 'List'}
                   </button>
                 ))}
               </div>
@@ -509,7 +507,7 @@ export default function CaseDetailPage() {
             {timelineView === 'graph'
               ? <AttackGraph items={timeline?.items ?? []} />
               : <AttackTimeline items={timeline?.items ?? []} />}
-          </Box>
+          </Box>}
         </div>
 
         {/* Right column (narrower) */}
