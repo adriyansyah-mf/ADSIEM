@@ -18,6 +18,14 @@ export function useRetryEvidence(agentId: string) {
   })
 }
 
+export function useRetryAllEvidence(agentId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.post<{ retried: number }>(`/api/agents/${agentId}/evidence/retry-dead-letters`).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-evidence', agentId] }),
+  })
+}
+
 export function useAgents(page = 1, pageSize = 25, search = '', status = '') {
   return useQuery<PaginatedResponse<Agent>>({
     queryKey: ['agents', page, pageSize, search, status],

@@ -40,9 +40,18 @@ class FakeRedis:
     def __init__(self):
         self.stream: list[dict] = []
         self.down = False
+        self.lag: int | None = 0  # unread entries for the consumer group
 
     def pipeline(self, transaction=True):
         return FakePipeline(self)
+
+    async def xinfo_groups(self, key):
+        if self.down:
+            raise ConnectionError("redis unavailable")
+        return [{"name": ei.REDIS_CONSUMER_GROUP, "lag": self.lag}]
+
+    async def xlen(self, key):
+        return len(self.stream)
 
 
 class FakePipeline:
@@ -77,7 +86,7 @@ async def env(monkeypatch):
                 sync, tables=[EvidenceInbox.__table__, EvidenceGroupUsage.__table__]))
         redis = FakeRedis()
         calls: list[dict] = []
-        behaviour = {"fail": 0, "sleep": 0.0}
+        behaviour = {"fail": 0, "sleep": 0.0, "error": None}
 
         async def fake_process(data, dec, sig, predecoded=None, event_id=None):
             calls.append({**data, "event_id": event_id})
@@ -85,7 +94,7 @@ async def env(monkeypatch):
                 await asyncio.sleep(behaviour["sleep"])
             if behaviour["fail"]:
                 behaviour["fail"] -= 1
-                raise RuntimeError("elasticsearch unavailable")
+                raise behaviour["error"] or RuntimeError("elasticsearch unavailable")
 
         async def fake_get_redis():
             return redis
@@ -192,6 +201,50 @@ async def test_trimmed_reference_is_redispatched(env):
     assert await ei.dispatch_once(now() + timedelta(seconds=ei.REDISPATCH_SECONDS + 1)) == 1
     assert env.redis.stream[0]["receipt_id"] == str(row.receipt_id)
     assert (await get(env, row.receipt_id)).dispatch_count == 2
+
+
+async def test_redispatch_interval_doubles(env):
+    [row] = await seed(env)
+    when = now()
+    gaps = []
+    for _ in range(4):
+        assert await ei.dispatch_once(when) == 1
+        current = await get(env, row.receipt_id)
+        gaps.append(round((current.next_dispatch_at - when).total_seconds()))
+        when = current.next_dispatch_at + timedelta(seconds=1)
+    assert gaps == [60, 120, 240, 480]
+    assert ei.redispatch_delay(50).total_seconds() == ei.REDISPATCH_CAP_SECONDS
+
+
+async def test_no_dispatch_while_the_workers_are_behind(env, monkeypatch):
+    monkeypatch.setattr(ei, "DISPATCH_MAX_BACKLOG", 10)
+    rows = await seed(env, n=8)
+    env.redis.lag = 10
+    assert await ei.dispatch_once(now()) == 0
+    assert all([(await get(env, r.receipt_id)).dispatch_count == 0 for r in rows])  # still due
+    env.redis.lag = 5
+    assert await ei.dispatch_once(now()) == 5  # only up to the backlog limit
+    env.redis.lag = None  # Redis cannot tell: the stream length counts
+    assert len(env.redis.stream) == 5 and await ei.dispatch_once(now()) == 3
+    env.redis.down = True
+    assert await ei.dispatch_once(now()) == 0
+
+
+async def test_redis_full_defers_without_counting_a_failure(env):
+    from redis.exceptions import OutOfMemoryError
+
+    [row] = await seed(env)
+    env.behaviour["fail"] = 50
+    env.behaviour["error"] = OutOfMemoryError("command not allowed when used memory > 'maxmemory'.")
+    when = now()
+    for _ in range(ei.MAX_FAILURES + 5):
+        assert await ei.process_reference(row.receipt_id, env.state, now=when) == "deferred"
+        when = (await get(env, row.receipt_id)).next_attempt_at + timedelta(seconds=1)
+    waiting = await get(env, row.receipt_id)
+    assert waiting.status == "pending" and waiting.failure_count == 0
+    assert "OutOfMemoryError" in waiting.last_error
+    env.behaviour["fail"] = 0
+    assert await ei.process_reference(row.receipt_id, env.state, now=when) == "completed"
 
 
 async def test_failure_after_indexing_retries_with_the_same_identity(env):

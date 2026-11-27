@@ -4,7 +4,7 @@ import { RotateCcw } from 'lucide-react'
 import StatusBadge from '@/components/StatusBadge'
 import { QueryState } from '@/components/Workspace'
 import { WorkspaceDialog } from '@/components/WorkspaceDialog'
-import { useAgentEvidence, useRetryEvidence } from '@/hooks/useAgents'
+import { useAgentEvidence, useRetryAllEvidence, useRetryEvidence } from '@/hooks/useAgents'
 import type { Agent, AgentEvidenceSummary, EvidenceDeadLetter } from '@/types'
 
 // Upper end of the measured agent index cost (BenchmarkIndexMemory), for an estimate only.
@@ -64,6 +64,7 @@ export function EvidenceBadge({ summary }: { readonly summary?: AgentEvidenceSum
 export function EvidenceHealthPanel({ agent, canManage }: { readonly agent: Agent; readonly canManage: boolean }) {
   const query = useAgentEvidence(agent.id)
   const [retrying, setRetrying] = useState<EvidenceDeadLetter | null>(null)
+  const [retryingAll, setRetryingAll] = useState(false)
   if (query.isPending) return <QueryState kind="loading" title="Loading evidence delivery…" />
   if (query.isError) return <QueryState kind="error" title="Could not load evidence delivery" onRetry={() => { void query.refetch() }} />
   const e = query.data
@@ -102,8 +103,12 @@ export function EvidenceHealthPanel({ agent, canManage }: { readonly agent: Agen
     </div>}
     <div>
       <h4 className="text-xs font-medium text-muted-foreground">Server inbox</h4>
-      <p className="text-sm">{e.inbox.pending.toLocaleString()} processing · {e.inbox.dead_letter.toLocaleString()} failed
-        {e.inbox.oldest_pending_at && <> · oldest received {ago(e.inbox.oldest_pending_at)}</>}</p>
+      <div className="control-cluster">
+        <p className="text-sm">{e.inbox.pending.toLocaleString()} processing · {e.inbox.dead_letter.toLocaleString()} failed
+          {e.inbox.oldest_pending_at && <> · oldest received {ago(e.inbox.oldest_pending_at)}</>}</p>
+        {canManage && e.inbox.dead_letter > 1 && <button className="ui-button ui-button--quiet" onClick={() => setRetryingAll(true)}>
+          <RotateCcw size={14} /> Retry all {e.inbox.dead_letter.toLocaleString()}</button>}
+      </div>
       {e.inbox.dead_letters.length > 0 && <ul className="text-sm space-y-1">{e.inbox.dead_letters.map(d =>
         <li key={d.receipt_id} className="control-cluster">
           <span className="font-mono">{d.event_id.slice(0, 8)}</span>
@@ -112,7 +117,28 @@ export function EvidenceHealthPanel({ agent, canManage }: { readonly agent: Agen
         </li>)}</ul>}
     </div>
     {retrying && <RetryDialog agent={agent} deadLetter={retrying} onClose={() => setRetrying(null)} />}
+    {retryingAll && <RetryAllDialog agent={agent} count={e.inbox.dead_letter} onClose={() => setRetryingAll(false)} />}
   </section>
+}
+
+function RetryAllDialog({ agent, count, onClose }: {
+  readonly agent: Agent
+  readonly count: number
+  readonly onClose: () => void
+}) {
+  const mutation = useRetryAllEvidence(agent.id)
+  return <WorkspaceDialog title={`Retry ${count.toLocaleString()} failed events?`} description={agent.hostname} busy={mutation.isPending} onClose={onClose}>
+    <p>Every failed event of this agent that still has its payload goes back to processing with a fresh attempt count. Use this after the cause is fixed, for example once Redis has memory again.</p>
+    <p>Detection rules, alerts and automated responses may run again for events where an earlier attempt got that far. Stored events are not duplicated.</p>
+    {mutation.isError && <p role="alert" className="text-destructive">Could not retry these events. Check your permissions and try again.</p>}
+    <div className="control-cluster justify-end">
+      <button className="ui-button" disabled={mutation.isPending} onClick={onClose}>Cancel</button>
+      <button className="ui-button ui-button--primary" disabled={mutation.isPending}
+        onClick={() => mutation.mutate(undefined, { onSuccess: onClose })}>
+        {mutation.isPending ? 'Submitting…' : 'Retry all'}
+      </button>
+    </div>
+  </WorkspaceDialog>
 }
 
 function RetryDialog({ agent, deadLetter, onClose }: {

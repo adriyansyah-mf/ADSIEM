@@ -21,6 +21,45 @@ def test_safe_trim_id_keeps_unread_and_in_flight_entries():
     assert sm.safe_trim_id("0-0", None) is None  # nothing delivered yet: trim nothing
 
 
+class FullRedis:
+    """Redis at maxmemory with noeviction: XADD is refused, XACK and XTRIM work."""
+
+    def __init__(self, stuck):
+        self.stuck, self.acked, self.added, self.trimmed_at = stuck, [], [], None
+
+    async def xautoclaim(self, key, group, consumer, min_idle_time, start_id, count):
+        claimed, self.stuck = self.stuck, []
+        return ["0-0", claimed, []]
+
+    async def xadd(self, key, data, **_):
+        from redis.exceptions import OutOfMemoryError
+        raise OutOfMemoryError("command not allowed when used memory > 'maxmemory'.")
+
+    async def xack(self, key, group, *ids):
+        self.acked.extend(ids)
+
+    async def xinfo_consumers(self, key, group):
+        return []
+
+    async def xinfo_groups(self, key):
+        return [{"name": sm.REDIS_CONSUMER_GROUP, "last-delivered-id": "1700000000500-0"}]
+
+    async def xpending(self, key, group):
+        return {"pending": 0}
+
+    async def xtrim(self, key, minid, approximate):
+        self.trimmed_at = minid
+        return 1234
+
+
+def test_trim_still_runs_when_redis_refuses_writes():
+    redis = FullRedis([("1-0", {"kind": "evidence_v2", "receipt_id": "r1"}), ("2-0", {"log_type": "syslog"})])
+    stats = asyncio.run(sm.maintain_stream(redis))
+    # the evidence reference is only acked (the inbox resends it); the log line could not be re-queued
+    assert redis.acked == ["1-0"]
+    assert stats["trimmed"] == 1234 and redis.trimmed_at == "1700000000500-0"
+
+
 @pytest.mark.skipif(not os.environ.get("TEST_REDIS_URL"), reason="needs TEST_REDIS_URL")
 def test_maintenance_on_a_real_stream(monkeypatch):
     import redis.asyncio as aioredis
