@@ -1,9 +1,10 @@
 # server-api/app/api/routes/alerts.py
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -279,6 +280,49 @@ async def update_alert(
         response["fp_suppression_suggestion"] = suggestion
 
     return response
+
+
+BULK_MAX = 200
+BulkStatus = Literal["new", "acknowledged", "in_progress", "resolved", "false_positive", "closed"]
+
+
+class AlertBulkUpdate(BaseModel):
+    ids: list[UUID] = Field(min_length=1, max_length=BULK_MAX)
+    status: BulkStatus
+
+
+def _apply_status(alert: Alert, new_status: str, now: datetime) -> None:
+    """The same SLA bookkeeping update_alert does for a single alert."""
+    if alert.status == "new" and new_status != "new" and alert.acknowledged_at is None:
+        alert.acknowledged_at = now
+    if new_status in _RESOLVED_STATUSES and alert.resolved_at is None:
+        alert.resolved_at = now
+    alert.status = new_status
+
+
+@router.post("/bulk-update")
+async def bulk_update_alerts(
+    body: AlertBulkUpdate,
+    background: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_permission("alerts:update"))],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+):
+    """Change the status of up to BULK_MAX alerts in one transaction. Alerts
+    outside the caller's group are reported as not found, never touched."""
+    ids = list(dict.fromkeys(body.ids))
+    query = select(Alert).where(Alert.id.in_(ids))
+    if group_filter is not None:
+        query = query.where(Alert.group_id == group_filter)
+    alerts = (await db.execute(query)).scalars().all()
+    now = datetime.now(timezone.utc)
+    for alert in alerts:
+        _apply_status(alert, body.status, now)
+    await db.commit()
+    found = {alert.id for alert in alerts}
+    background.add_task(audit_log, db, current_user.id, "alert_bulk_updated", "alert", None,
+                        {"status": body.status, "count": len(found), "ids": [str(i) for i in found]})
+    return {"updated": len(found), "not_found": [str(i) for i in ids if i not in found]}
 
 
 @router.post("/{alert_id}/notes", response_model=AlertNoteOut, status_code=201)

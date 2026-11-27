@@ -188,15 +188,16 @@ export default function AlertsPage() {
     onError: () => emitToast('Could not export alerts. Please try again.', 'error'),
   })
   const bulkUpdate = useMutation({
-    mutationFn: async (nextStatus: Alert['status']) => {
-      const results = await Promise.allSettled([...checked].map(id => api.put(`/api/alerts/${id}`, { status: nextStatus })))
-      return { ok: results.filter(result => result.status === 'fulfilled').length, failed: results.filter(result => result.status === 'rejected').length }
-    },
-    onSuccess: ({ ok, failed }) => {
+    mutationFn: (nextStatus: Alert['status']) =>
+      api.post<{ updated: number; not_found: string[] }>('/api/alerts/bulk-update', { ids: [...checked], status: nextStatus })
+        .then(response => response.data),
+    onSuccess: ({ updated, not_found }) => {
       void queryClient.invalidateQueries({ queryKey: ['alerts'] })
       setChecked(new Set())
-      emitToast(failed ? `Updated ${ok} alerts, ${failed} failed` : `Updated ${ok} alerts`, failed ? 'error' : 'success')
+      emitToast(not_found.length ? `Updated ${updated} alerts, ${not_found.length} no longer available` : `Updated ${updated} alerts`,
+        not_found.length ? 'error' : 'success')
     },
+    onError: () => emitToast('Could not update the selected alerts', 'error'),
   })
 
   const toggle = (id: string) => setChecked(current => {
