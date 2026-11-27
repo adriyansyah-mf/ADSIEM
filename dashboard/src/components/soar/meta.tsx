@@ -16,7 +16,7 @@ export interface NodeMeta {
 
 export const NODE_META: Record<NodeType, NodeMeta> = {
   trigger: {
-    label: 'Trigger', color: '#00d4ff', icon: Zap, outputs: ['main'],
+    label: 'Trigger', color: '#8DB0FF', icon: Zap, outputs: ['main'],
     help: 'Start on a new alert, AI triage, a new case, an alert linked to an open case, or a manual run.',
     defaults: () => ({ event: 'alert.triaged', match: 'all', conditions: [] }),
   },
@@ -36,17 +36,17 @@ export const NODE_META: Record<NodeType, NodeMeta> = {
     defaults: () => ({ question: 'Is this activity malicious rather than an admin or scanner we know?', min_confidence: 0.7 }),
   },
   approval: {
-    label: 'Approval', color: '#ffd700', icon: Hand, outputs: ['approved', 'rejected'],
+    label: 'Approval', color: '#F2D45C', icon: Hand, outputs: ['approved', 'rejected'],
     help: 'Pause until an analyst approves or rejects. Times out as rejected.',
     defaults: () => ({ message: 'Approve containment for {{ trigger.hostname }}?', timeout_minutes: 60 }),
   },
   response: {
-    label: 'Response', color: '#ff2244', icon: ShieldAlert, outputs: ['main', 'error'],
+    label: 'Response', color: '#FF5D6C', icon: ShieldAlert, outputs: ['main', 'error'],
     help: 'Act on the agent: isolate, block an IP, kill a process, quarantine a file.',
     defaults: () => ({ operation: 'block_ip', ip: '{{ trigger.source_ip }}', duration_seconds: 3600 }),
   },
   case: {
-    label: 'Case & Alert', color: '#00ff88', icon: Briefcase, outputs: ['main', 'error'],
+    label: 'Case & Alert', color: '#4CC38A', icon: Briefcase, outputs: ['main', 'error'],
     help: 'Open a case, add a note, change the alert status, or suppress noise.',
     defaults: () => ({ operation: 'add_note', content: 'SOAR: {{ trigger.rule_title }}' }),
   },
@@ -56,12 +56,12 @@ export const NODE_META: Record<NodeType, NodeMeta> = {
     defaults: () => ({ case_id: '{{ trigger.case_id }}', scope: 'case' }),
   },
   case_block_ips: {
-    label: 'Block Case IPs', color: '#ff2244', icon: ShieldAlert, outputs: ['queued', 'error'],
+    label: 'Block Case IPs', color: '#FF5D6C', icon: ShieldAlert, outputs: ['queued', 'error'],
     help: 'Queue IP blocks on the hosts where each IP was observed. Requires an open case and online, approved agents. Active IP/host blocks are reused; queued does not mean enforced.',
     defaults: () => ({ case_id: '{{ trigger.case_id }}', scope: 'event_alert', duration_seconds: 3600, max_pairs: 100 }),
   },
   notify: {
-    label: 'Notify', color: '#ff6b00', icon: Megaphone, outputs: ['main', 'error'],
+    label: 'Notify', color: '#FF9F43', icon: Megaphone, outputs: ['main', 'error'],
     help: 'Send a message to a webhook, Discord or Slack.',
     defaults: () => ({ channel: 'discord', url: '', message: '[{{ trigger.severity }}] {{ trigger.rule_title }} on {{ trigger.hostname }}' }),
   },

@@ -71,7 +71,7 @@ export default function SopPage() {
             style={{
               display: 'inline-flex', alignItems: 'center', gap: '6px',
               padding: '8px 16px', borderRadius: '4px',
-              border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.12)',
+              border: '1px solid var(--accent-cyan)', background: 'rgba(141, 176, 255,0.12)',
               color: 'var(--accent-cyan)', fontFamily: 'Rajdhani, sans-serif',
               fontWeight: 700, fontSize: '12px', letterSpacing: '1px',
               cursor: uploading ? 'wait' : 'pointer', opacity: uploading ? 0.6 : 1,

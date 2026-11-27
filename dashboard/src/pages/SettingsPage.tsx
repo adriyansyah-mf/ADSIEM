@@ -213,7 +213,7 @@ function SettingRow({ setting }: { setting: Setting }) {
             padding: '7px 16px',
             borderRadius: '4px',
             border: '1px solid var(--accent-cyan)',
-            background: saved ? 'rgba(0,255,136,0.15)' : 'rgba(0,212,255,0.1)',
+            background: saved ? 'rgba(0,255,136,0.15)' : 'rgba(141, 176, 255,0.1)',
             color: saved ? 'var(--accent-green)' : 'var(--accent-cyan)',
             fontFamily: 'Rajdhani, sans-serif',
             fontWeight: 700,
@@ -321,7 +321,7 @@ function MfaSection() {
       </div>
 
       {phase === 'idle' && !isEnabled && (
-        <button onClick={startSetup} style={{ padding: '7px 18px', background: 'rgba(0,212,255,0.1)', border: '1px solid var(--accent-cyan)', color: 'var(--accent-cyan)', borderRadius: 4, cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>
+        <button onClick={startSetup} style={{ padding: '7px 18px', background: 'rgba(141, 176, 255,0.1)', border: '1px solid var(--accent-cyan)', color: 'var(--accent-cyan)', borderRadius: 4, cursor: 'pointer', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>
           ENABLE MFA
         </button>
       )}
@@ -379,7 +379,7 @@ function MfaSection() {
               CONFIRM DISABLE
             </button>
             <button onClick={() => { setPhase('idle'); setCode('') }}
-              style={{ padding: '7px 12px', background: 'none', border: '1px solid #1e2028', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+              style={{ padding: '7px 12px', background: 'none', border: '1px solid #262B36', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
               Cancel
             </button>
           </div>
@@ -389,7 +389,7 @@ function MfaSection() {
       {phase === 'error' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ color: 'var(--accent-red)', fontFamily: 'Share Tech Mono, monospace', fontSize: 12 }}>{msg}</div>
-          <button onClick={() => { setPhase(isEnabled ? 'disable' : 'setup'); setMsg('') }} style={{ alignSelf: 'flex-start', padding: '5px 12px', background: 'none', border: '1px solid #1e2028', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
+          <button onClick={() => { setPhase(isEnabled ? 'disable' : 'setup'); setMsg('') }} style={{ alignSelf: 'flex-start', padding: '5px 12px', background: 'none', border: '1px solid #262B36', color: 'var(--text-muted)', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}>
             Try again
           </button>
         </div>

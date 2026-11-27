@@ -1,19 +1,10 @@
-import type { CSSProperties } from 'react'
+const KNOWN = new Set(['critical', 'high', 'medium', 'low', 'info'])
 
-const COLORS: Readonly<Record<string, string>> = {
-  critical: 'var(--accent-red)',
-  high: 'var(--accent-orange)',
-  medium: 'var(--accent-yellow)',
-  low: 'var(--accent-green)',
-  info: 'var(--accent-cyan)',
-}
-
+// Filled chips so severity reads at a glance in dense tables (redesign palette).
 export default function SeverityBadge({ severity }: { readonly severity: string }) {
-  const color = COLORS[severity] ?? 'var(--text-muted)'
-  const style: CSSProperties & { '--badge-color': string } = { '--badge-color': color }
+  const key = KNOWN.has(severity) ? severity : 'unknown'
   return (
-    <span className="semantic-badge" style={style}>
-      <span className="semantic-badge__dot" aria-hidden="true" />
+    <span className={`severity-chip severity-chip--${key}`}>
       {severity.charAt(0).toUpperCase() + severity.slice(1)}
     </span>
   )

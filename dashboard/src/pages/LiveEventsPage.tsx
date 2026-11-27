@@ -54,7 +54,7 @@ export default function LiveEventsPage() {
                 padding: '4px 10px', fontSize: 11, borderRadius: 3, cursor: 'pointer',
                 fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, letterSpacing: '0.5px',
                 border: '1px solid var(--border)',
-                background: i === hourIdx ? 'rgba(0,212,255,0.12)' : 'transparent',
+                background: i === hourIdx ? 'rgba(141, 176, 255,0.12)' : 'transparent',
                 color: i === hourIdx ? 'var(--accent-cyan)' : 'var(--text-secondary)',
               }}
             >

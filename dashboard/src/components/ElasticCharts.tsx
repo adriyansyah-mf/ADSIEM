@@ -14,11 +14,11 @@ import {
 import type { VolumePoint, TopValue } from '@/hooks/useElastic'
 
 const C = {
-  cyan: '#00d4ff',
-  green: '#00ff88',
-  orange: '#ff6b00',
-  red: '#ff2244',
-  yellow: '#ffd700',
+  cyan: '#8DB0FF',
+  green: '#4CC38A',
+  orange: '#FF9F43',
+  red: '#FF5D6C',
+  yellow: '#F2D45C',
   border: '#1a2d45',
   text: '#6b8aad',
   muted: '#3a5070',
