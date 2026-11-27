@@ -15,7 +15,7 @@ export interface CanvasTab {
 
 function groupLabel(key: string | undefined): string | null {
   if (!key) return null
-  if (key === SETTINGS_SECTION.key) return 'Admin'
+  if (key === SETTINGS_SECTION.key) return null
   return NAVIGATION.find(group => group.items.some(item => item.key === key))?.label ?? null
 }
 

@@ -1,12 +1,14 @@
-import { useState } from 'react'
-import DataTable from '@/components/DataTable'
+import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/api/client'
+import { CanvasHeader, CanvasPage, Chip, Empty } from '@/components/canvas/Canvas'
 import YamlEditor from '@/components/YamlEditor'
-import SeverityBadge from '@/components/SeverityBadge'
 import {
   useRules, useRuleStats, useCreateRule, useUpdateRule, useDeleteRule, useTestRule, useBulkRules, type RuleFilters,
 } from '@/hooks/useRules'
 import SigmaHQImportModal from '@/components/SigmaHQImportModal'
-import { Plus, Pencil, Trash2, Download, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 import type { Rule, RuleTestResult } from '@/types'
 
 const DEFAULT_RULE = `title: New Rule
@@ -364,146 +366,187 @@ function logsourceLabel(r: Rule): string {
   return [ls.product, ls.service, ls.category].filter(Boolean).join(' / ') || '—'
 }
 
+interface QualityItem { rule_id: string; alerts: number; fp_rate: number | null; advice: string[]; last_alert_at: string | null }
+
+function healthOf(r: Rule, q: QualityItem | undefined): { text: string; warn: boolean } {
+  if (q?.advice.length) return { text: `Noisy · ${q.advice[0].split(':')[0]}`, warn: true }
+  if (r.collected === false) return { text: 'Log source not connected', warn: true }
+  if (r.is_enabled && !q) return { text: 'No alerts in 7 days', warn: false }
+  return { text: 'Healthy', warn: false }
+}
+
 export default function RulesPage() {
+  const [params, setParams] = useSearchParams()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
-  const [filters, setFilters] = useState<RuleFilters>({})
-  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState<RuleFilters>(() => ({ q: params.get('q') ?? undefined }))
+  const [search, setSearch] = useState(params.get('q') ?? '')
+  const [attention, setAttention] = useState(false)
   const { data, isLoading } = useRules(page, pageSize, filters)
   const { data: stats } = useRuleStats()
+  const quality = useQuery<{ items: QualityItem[] }>({
+    queryKey: ['rule-quality', 7],
+    queryFn: () => api.get('/api/rule-quality', { params: { days: 7, limit: 1000 } }).then(r => r.data),
+    retry: false,
+    staleTime: 60_000,
+  })
+  const decoders = useQuery<number>({
+    queryKey: ['decoders', 'count'],
+    queryFn: () => api.get('/api/decoders', { params: { page: 1, page_size: 1 } }).then(r => Number(r.data.total) || 0),
+    retry: false,
+    staleTime: 5 * 60_000,
+  })
   const createRule = useCreateRule()
   const updateRule = useUpdateRule()
   const deleteRule = useDeleteRule()
   const bulk = useBulkRules()
   const [editing, setEditing] = useState<Rule | null>(null)
   const [creating, setCreating] = useState(false)
-  const [importing, setImporting] = useState(false)
+  const [importing, setImporting] = useState(params.get('import') === '1')
   const [yamlContent, setYamlContent] = useState('')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // /rules?new=1&query=… comes from "Save as rule" on Search and "Promote to detection rule" on Hunts.
+  useEffect(() => {
+    if (params.get('new') !== '1') return
+    const query = params.get('query')
+    setYamlContent(query ? `# From search: ${query}\n${DEFAULT_RULE}` : DEFAULT_RULE)
+    setCreating(true)
+    setParams(current => { const next = new URLSearchParams(current); next.delete('new'); next.delete('query'); return next }, { replace: true })
+  }, [params, setParams])
 
   const setFilter = (patch: RuleFilters) => { setFilters(f => ({ ...f, ...patch })); setPage(1) }
   const closeEditor = () => { setEditing(null); setCreating(false) }
-
   const handleSave = () => {
     // keep the editor open on a rejected rule so the error can be fixed
-    if (editing) {
-      updateRule.mutate({ id: editing.id, data: { content: yamlContent } }, { onSuccess: closeEditor })
-    } else {
-      createRule.mutate({ content: yamlContent, title: 'New Rule' }, { onSuccess: closeEditor })
-    }
+    if (editing) updateRule.mutate({ id: editing.id, data: { content: yamlContent } }, { onSuccess: closeEditor })
+    else createRule.mutate({ content: yamlContent, title: 'New Rule' }, { onSuccess: closeEditor })
   }
-
   const hasFilter = Boolean(filters.q || filters.source || filters.level)
   const bulkSet = (is_enabled: boolean) => {
     const n = data?.total ?? 0
     if (!window.confirm(`${is_enabled ? 'Enable' : 'Disable'} all ${n} rule(s) matching the current filters?`)) return
     bulk.mutate({ is_enabled, q: filters.q, source: filters.source, level: filters.level })
   }
-
   const hasCorrelation = (r: Rule) => r.content.includes('\nthreshold:') || r.content.includes('\ncorrelation:')
 
-  const columns = [
-    { key: 'title', header: 'Title', render: (r: Rule) => (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-        {r.title}
-        {r.source === 'sigmahq' && <span style={badge('#a78bfa')} title={`SigmaHQ ${r.external_id ?? ''}`}>SIGMAHQ{r.sigma_status ? ` · ${r.sigma_status.toUpperCase()}` : ''}</span>}
-        {hasCorrelation(r) && <span style={badge('#8DB0FF')}>CORR</span>}
-        {r.modified_locally && <span style={badge('#fbbf24')} title="Edited here — SigmaHQ updates won't overwrite it">EDITED</span>}
-        {r.collected === false && <span style={badge('#94a3b8')} title="No log source on this platform feeds this rule's logsource">NOT COLLECTED</span>}
-      </div>
-    )},
-    { key: 'logsource', header: 'Log source', render: (r: Rule) => (
-      <span className="text-muted-foreground text-xs font-mono">{logsourceLabel(r)}</span>
-    )},
-    { key: 'level', header: 'Level', render: (r: Rule) => (
-      // alerts take the rule quality override when there is one
-      <div title={r.level_override ? 'Level overridden on Rule quality' : undefined}>
-        <SeverityBadge severity={r.level_override ?? r.level} />
-        {r.level_override && <div className="text-[11px] text-muted-foreground mt-0.5">rule says {r.level}</div>}
-      </div>
-    )},
-    { key: 'enabled', header: 'Enabled', render: (r: Rule) => (
-      <button onClick={(e) => { e.stopPropagation(); updateRule.mutate({ id: r.id, data: { is_enabled: !r.is_enabled } }) }}
-        title="Toggle" className={r.is_enabled ? 'text-green-400' : 'text-muted-foreground'}>
-        {r.is_enabled ? 'Yes' : 'No'}
-      </button>
-    )},
-    { key: 'version', header: 'Version', render: (r: Rule) => `v${r.version}` },
-    { key: 'actions', header: '', render: (r: Rule) => (
-      <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-        <button onClick={() => { setEditing(r); setYamlContent(r.content) }}
-          className="text-muted-foreground hover:text-foreground"><Pencil size={14} /></button>
-        <button onClick={() => deleteRule.mutate(r.id)} className="text-destructive hover:opacity-70">
-          <Trash2 size={14} /></button>
-      </div>
-    )},
-  ]
-
-  const sel = 'px-2 py-1 rounded border border-border bg-background text-sm'
+  const byRule = new Map((quality.data?.items ?? []).map(item => [item.rule_id, item]))
+  const items = (data?.items ?? []).filter(r => !attention || healthOf(r, byRule.get(r.id)).warn)
+  const noisy = (quality.data?.items ?? []).filter(item => item.advice.length).length
+  const selected = items.find(r => r.id === selectedId) ?? items[0] ?? null
   const sigma = stats?.sigmahq
   const custom = stats?.custom
+  const enabled = (sigma?.enabled ?? 0) + (custom?.enabled ?? 0)
+  const disabled = (sigma?.disabled ?? 0) + (custom?.disabled ?? 0)
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-xl font-bold">Rules</h1>
-          {stats && (
-            <div className="text-xs text-muted-foreground mt-1">
-              Custom {custom ? `${custom.enabled}/${custom.enabled + custom.disabled}` : '0'} enabled
-              {' · '}SigmaHQ {sigma ? `${sigma.enabled}/${sigma.enabled + sigma.disabled}` : 'not imported'}{sigma ? ' enabled' : ''}
+    <CanvasPage>
+      <CanvasHeader
+        title="Detection rules"
+        sub={stats ? `${enabled.toLocaleString('en-US')} enabled · ${disabled.toLocaleString('en-US')} disabled · custom ${custom ? custom.enabled + custom.disabled : 0}, SigmaHQ ${sigma ? sigma.enabled + sigma.disabled : 'not imported'}` : 'Sigma and native rules'}
+        counts={{ '/rule-quality': noisy || null, '/decoders': decoders.data ?? null }}
+        actions={<>
+          <button type="button" className="cv-btn" onClick={() => setImporting(true)}>Import from SigmaHQ</button>
+          <button type="button" className="cv-btn cv-btn--primary" onClick={() => { setCreating(true); setYamlContent(DEFAULT_RULE) }}>New rule</button>
+        </>}
+      />
+      <div className="cv-split">
+        <section className="cv-pane" aria-label="Rules">
+          <div className="cv-row">
+            <form className="cv-search" style={{ flex: '1 1 240px', maxWidth: 320 }} onSubmit={e => { e.preventDefault(); setFilter({ q: search.trim() || undefined }) }}>
+              <Search size={14} aria-hidden="true" />
+              <label htmlFor="rule-search" className="sr-only">Search rules</label>
+              <input id="rule-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Name, technique, id, content" />
+            </form>
+            <select className="cv-select" aria-label="Source" value={filters.source ?? ''} onChange={e => setFilter({ source: e.target.value || undefined })}>
+              <option value="">Source: all</option><option value="custom">Custom</option><option value="sigmahq">SigmaHQ</option>
+            </select>
+            <select className="cv-select" aria-label="Status" value={filters.enabled === undefined ? '' : String(filters.enabled)}
+              onChange={e => setFilter({ enabled: e.target.value === '' ? undefined : e.target.value === 'true' })}>
+              <option value="">Status: all</option><option value="true">Enabled</option><option value="false">Disabled</option>
+            </select>
+            <select className="cv-select" aria-label="Level" value={filters.level ?? ''} onChange={e => setFilter({ level: e.target.value || undefined })}>
+              <option value="">Level: all</option>
+              {['critical', 'high', 'medium', 'low', 'informational'].map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <button type="button" className="cv-btn" aria-pressed={attention} style={attention ? { background: '#262E45', color: '#E8ECF2' } : undefined}
+              onClick={() => setAttention(v => !v)}>Needs attention</button>
+            {hasFilter && <>
+              <button type="button" className="cv-btn cv-btn--sm" onClick={() => bulkSet(true)} disabled={bulk.isPending}>Enable all matching</button>
+              <button type="button" className="cv-btn cv-btn--sm" onClick={() => bulkSet(false)} disabled={bulk.isPending}>Disable all matching</button>
+            </>}
+          </div>
+          <div className="cv-tablewrap">
+            <table className="cv-table" style={{ minWidth: 720 }}>
+              <thead><tr><th>Rule</th><th>Status</th><th className="is-num">Alerts, 7d</th><th>False positive rate</th><th>Health</th></tr></thead>
+              <tbody>
+                {items.map(r => {
+                  const q = byRule.get(r.id)
+                  const health = healthOf(r, q)
+                  const fp = q?.fp_rate != null ? Math.round(q.fp_rate * 100) : null
+                  const level = r.level_override ?? r.level
+                  return (
+                    <tr key={r.id} className={selected?.id === r.id ? 'is-active' : undefined} style={{ cursor: 'pointer' }} onClick={() => setSelectedId(r.id)}>
+                      <td>
+                        <div className="cv-stack">
+                          <span className="cv-row" style={{ gap: 6 }}>
+                            <button type="button" className="cv-rowlink" onClick={() => setSelectedId(r.id)}>{r.title}</button>
+                            {r.source === 'sigmahq' && <Chip tone="info">SigmaHQ{r.sigma_status ? ` · ${r.sigma_status}` : ''}</Chip>}
+                            {hasCorrelation(r) && <Chip>Correlation</Chip>}
+                            {r.modified_locally && <Chip tone="warn">Edited</Chip>}
+                          </span>
+                          <span className="cv-muted cv-small">
+                            {[r.mitre_tags.map(t => t.replace(/^attack\./, '')).filter(t => /^t\d/i.test(t)).map(t => t.toUpperCase())[0], logsourceLabel(r), level].filter(Boolean).join(' · ')}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <button type="button" className="cv-rowlink" title={r.is_enabled ? 'Disable' : 'Enable'} onClick={e => { e.stopPropagation(); updateRule.mutate({ id: r.id, data: { is_enabled: !r.is_enabled } }) }}>
+                          <Chip tone={r.is_enabled ? (r.sigma_status === 'test' || r.sigma_status === 'experimental' ? 'info' : 'good') : 'muted'}>
+                            {r.is_enabled ? (r.sigma_status === 'test' || r.sigma_status === 'experimental' ? 'Testing' : 'Enabled') : 'Disabled'}
+                          </Chip>
+                        </button>
+                      </td>
+                      <td className="is-num">{q?.alerts ?? 0}</td>
+                      <td>{fp == null ? <span className="cv-muted">—</span> : <span className={fp >= 50 ? 'cv-t-bad' : fp >= 20 ? 'cv-t-warn' : 'cv-t-good'}>{fp}%</span>}</td>
+                      <td className={health.warn ? 'cv-t-warn' : 'cv-muted'}>{health.text}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            {isLoading && <Empty>Loading rules…</Empty>}
+            {!isLoading && items.length === 0 && <Empty>{attention ? 'No rule on this page needs attention.' : 'No rules match.'}</Empty>}
+          </div>
+          {(data?.total ?? 0) > pageSize && (
+            <div className="cv-row cv-small">
+              <button type="button" className="cv-btn cv-btn--sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</button>
+              <span className="cv-muted">Page {page} of {Math.ceil((data?.total ?? 0) / pageSize)} · {(data?.total ?? 0).toLocaleString('en-US')} rules</span>
+              <button type="button" className="cv-btn cv-btn--sm" disabled={page * pageSize >= (data?.total ?? 0)} onClick={() => setPage(p => p + 1)}>Next</button>
+              <select className="cv-select cv-btn--sm" aria-label="Rules per page" value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}>
+                {[25, 50, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
+              </select>
             </div>
           )}
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => setImporting(true)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded border border-border text-sm hover:bg-muted">
-            <Download size={14} /> Import SigmaHQ
-          </button>
-          <button onClick={() => { setCreating(true); setYamlContent(DEFAULT_RULE) }}
-            className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm">
-            <Plus size={14} /> New Rule
-          </button>
-        </div>
+        </section>
+
+        <aside className="cv-list" aria-label="Rule detail" style={{ flex: '1 1 380px', maxWidth: 460, borderRight: 0, borderLeft: '1px solid #222733', padding: 16, gap: 12 }}>
+          {selected ? <>
+            <span className="cv-eyebrow">{selected.source === 'sigmahq' ? 'SigmaHQ' : 'Custom'} · v{selected.version}</span>
+            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{selected.title}</h2>
+            {selected.description && <p className="cv-dim cv-small" style={{ margin: 0 }}>{selected.description}</p>}
+            <pre className="cv-pre" style={{ maxHeight: 360, overflow: 'auto' }}>{selected.content}</pre>
+            {byRule.get(selected.id)?.advice.map(a => <p key={a} className="cv-t-warn cv-small" style={{ margin: 0 }}>{a}</p>)}
+            <div className="cv-row">
+              <button type="button" className="cv-btn cv-btn--primary" onClick={() => { setEditing(selected); setYamlContent(selected.content) }}>Edit and test</button>
+              <button type="button" className="cv-btn" onClick={() => updateRule.mutate({ id: selected.id, data: { is_enabled: !selected.is_enabled } })}>{selected.is_enabled ? 'Disable' : 'Enable'}</button>
+              <Link className="cv-btn" to={`/alerts?view=all&q=${encodeURIComponent(selected.title)}`}>Alerts</Link>
+              <button type="button" className="cv-btn cv-btn--danger" onClick={() => { if (window.confirm(`Delete rule “${selected.title}”?`)) deleteRule.mutate(selected.id) }}>Delete</button>
+            </div>
+          </> : <Empty>Select a rule to see its definition.</Empty>}
+        </aside>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <form onSubmit={(e) => { e.preventDefault(); setFilter({ q: search.trim() || undefined }) }} className="flex items-center gap-1">
-          <div className="relative">
-            <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search title, id, content…"
-              className="pl-7 pr-2 py-1 rounded border border-border bg-background text-sm w-64" />
-          </div>
-        </form>
-        <select value={filters.source ?? ''} onChange={e => setFilter({ source: e.target.value || undefined })} className={sel}>
-          <option value="">All sources</option>
-          <option value="custom">Custom</option>
-          <option value="sigmahq">SigmaHQ</option>
-        </select>
-        <select value={filters.enabled === undefined ? '' : String(filters.enabled)}
-          onChange={e => setFilter({ enabled: e.target.value === '' ? undefined : e.target.value === 'true' })} className={sel}>
-          <option value="">Enabled & disabled</option>
-          <option value="true">Enabled</option>
-          <option value="false">Disabled</option>
-        </select>
-        <select value={filters.level ?? ''} onChange={e => setFilter({ level: e.target.value || undefined })} className={sel}>
-          <option value="">All levels</option>
-          {['critical', 'high', 'medium', 'low', 'informational'].map(l => <option key={l} value={l}>{l}</option>)}
-        </select>
-        {hasFilter && (
-          <div className="flex gap-1 ml-auto">
-            <button onClick={() => bulkSet(true)} disabled={bulk.isPending}
-              className="px-2 py-1 rounded border border-border text-xs hover:bg-muted">Enable all matching</button>
-            <button onClick={() => bulkSet(false)} disabled={bulk.isPending}
-              className="px-2 py-1 rounded border border-border text-xs hover:bg-muted">Disable all matching</button>
-          </div>
-        )}
-      </div>
-
-      {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
-        <DataTable columns={columns} data={data?.items ?? []} total={data?.total ?? 0}
-          page={page} pageSize={pageSize} onPageChange={setPage}
-          onPageSizeChange={(s) => { setPageSize(s); setPage(1) }} />
-      )}
       {(editing || creating) && (
         <YamlEditor
           title={editing ? `Edit: ${editing.title}` : 'New Rule'}
@@ -513,17 +556,13 @@ export default function RulesPage() {
           onClose={closeEditor}
           footer={
             <>
-              <CorrelationPanel
-                key={editing?.id ?? 'new'}
-                yamlContent={yamlContent}
-                onYamlChange={setYamlContent}
-              />
+              <CorrelationPanel key={editing?.id ?? 'new'} yamlContent={yamlContent} onYamlChange={setYamlContent} />
               <RuleTestPanel content={yamlContent} />
             </>
           }
         />
       )}
       {importing && <SigmaHQImportModal onClose={() => setImporting(false)} />}
-    </div>
+    </CanvasPage>
   )
 }
