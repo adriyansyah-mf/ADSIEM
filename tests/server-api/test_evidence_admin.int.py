@@ -14,11 +14,13 @@ def env_user(role, group, perms):
 
 
 async def dead_letter(env, group="blue", agent="blue", status="dead_letter", payload=True):
+    from sqlalchemy import null
     from app.models import models
     async with env.sessions() as db:
+        # a released payload is SQL NULL, as the worker's retention sets it (None would store JSON null)
         row = models.EvidenceInbox(
             agent_id=env.agents[agent], event_id=uuid4(), group_id=group, hostname=f"{agent}-host",
-            payload_digest="0" * 64, payload=json.dumps({"raw_message": "x"}) if payload else None,
+            payload_digest="0" * 64, payload=json.dumps({"raw_message": "x"}) if payload else null(),
             payload_bytes=20, collected_at=datetime.now(timezone.utc), status=status, failure_count=20,
             last_error="RuntimeError: elasticsearch unavailable")
         db.add(row)
