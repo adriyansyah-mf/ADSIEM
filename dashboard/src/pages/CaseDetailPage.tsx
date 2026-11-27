@@ -18,11 +18,13 @@ import AttackGraph from '@/components/AttackGraph'
 import AlertDetailModal from '@/components/AlertDetailModal'
 import AiFeedbackWidget from '@/components/AiFeedbackWidget'
 import AiInvestigationPanel from '@/components/AiInvestigationPanel'
+import CaseTasks from '@/components/CaseTasks'
 import IncidentReportButton from '@/components/reports/IncidentReportButton'
 
-type CaseTab = 'overview' | 'ai' | 'evidence' | 'timeline' | 'notes'
+type CaseTab = 'overview' | 'tasks' | 'ai' | 'evidence' | 'timeline' | 'notes'
 const CASE_TABS: readonly { readonly key: CaseTab; readonly label: string }[] = [
   { key: 'overview', label: 'Overview' },
+  { key: 'tasks', label: 'Tasks' },
   { key: 'ai', label: 'AI investigation' },
   { key: 'evidence', label: 'Evidence' },
   { key: 'timeline', label: 'Timeline' },
@@ -220,6 +222,8 @@ export default function CaseDetailPage() {
         {/* Left column (wider) */}
         <div style={{ flex: 1, minWidth: 0 }} role="tabpanel" aria-label={CASE_TABS.find(t => t.key === tab)?.label}>
           {/* AI investigation: the AI works the case on the endpoints */}
+          {tab === 'tasks' && id && <Box title="Tasks"><CaseTasks caseId={id} /></Box>}
+
           {tab === 'ai' && id && (
             <Box title="AI investigation">
               <AiInvestigationPanel caseId={id} />

@@ -554,3 +554,17 @@ a.metric-card:hover { background: var(--bg-hover); }
 .severity-chip--high { background: #3A2A18; color: #FFB46E; }
 .severity-chip--medium { background: #332E17; color: #F2D45C; }
 .severity-chip--low { background: #1C2740; color: #9DB4FF; }
+
+/* Case tasks */
+.case-tasks { display: grid; gap: var(--space-3); }
+.case-tasks__summary { margin: 0; }
+.case-tasks__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.case-task { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); }
+.case-task:hover { background: var(--bg-hover); }
+.case-task .alert-check { margin-top: 3px; flex-shrink: 0; }
+.case-task__body { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.case-task__title { overflow-wrap: anywhere; }
+.case-task--done .case-task__title { color: var(--text-muted); text-decoration: line-through; }
+.case-task__overdue { color: var(--accent-red); }
+.case-tasks__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border-default); }
+.case-tasks__title { flex: 1 1 260px; }
