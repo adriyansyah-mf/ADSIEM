@@ -312,7 +312,7 @@ export default function KnowledgeVault({ initialId = null }: { initialId?: strin
             {articles.map(a => (
               <button key={a.id} onClick={() => { setCreating(false); setSelected(a.id) }}
                 style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 10px', borderBottom: '1px solid var(--border)',
-                  background: selected === a.id ? 'rgba(0,212,255,0.06)' : 'transparent' }}>
+                  background: selected === a.id ? 'rgba(141, 176, 255,0.06)' : 'transparent' }}>
                 <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{a.title}</div>
                 <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '3px' }}>
                   <Tag text={a.status} color={STATUS_COLOR[a.status]} />

@@ -15,7 +15,7 @@ interface Graph { hours: number; truncated: boolean; nodes: GraphNode[]; edges: 
 type EdgeRow = GraphEdge & { readonly id: string }
 
 const PROTOCOL_COLOR: Record<string, string> = {
-  ssh: '#0ea5e9', rdp: '#a855f7', smb: '#f59e0b', winrm: '#10b981', rpc: '#64748b', logon: '#6366f1',
+  ssh: '#0ea5e9', rdp: '#a855f7', smb: '#f59e0b', winrm: '#10b981', rpc: '#8A94A6', logon: '#6366f1',
 }
 const NEW_COLOR = '#ef4444'
 const SIZE = 640

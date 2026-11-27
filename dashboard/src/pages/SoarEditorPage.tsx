@@ -370,12 +370,12 @@ function Editor({ playbook, catalog }: { playbook: Playbook; catalog: Catalog })
       </div>
 
       {legacy && (
-        <div style={{ padding: '8px 16px', fontSize: 12, background: '#ffd70014', color: 'var(--accent-yellow)', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ padding: '8px 16px', fontSize: 12, background: '#F2D45C14', color: 'var(--accent-yellow)', borderBottom: '1px solid var(--border)' }}>
           This playbook was made in the old editor and is shown as a converted workflow. Saving turns it into a workflow for good.
         </div>
       )}
       {errors.length > 0 && (
-        <div style={{ padding: '8px 16px', fontSize: 12, background: '#ff224414', color: '#ff8899', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ padding: '8px 16px', fontSize: 12, background: '#FF5D6C14', color: '#ff8899', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, marginBottom: 4 }}>
             <AlertTriangle size={13} /> {errors.length} problem{errors.length > 1 ? 's' : ''}
             <button style={{ ...S.ghost, border: 'none', marginLeft: 'auto' }} onClick={() => setErrors([])}><X size={12} /></button>

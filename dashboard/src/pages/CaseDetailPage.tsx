@@ -61,7 +61,7 @@ function AttackTimeline({ items }: { items: any[] }) {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
             <div style={{
               width: 10, height: 10, borderRadius: '50%', marginTop: 4, flexShrink: 0,
-              background: item.type === 'alert' ? sevColor(item.severity) : '#64748b',
+              background: item.type === 'alert' ? sevColor(item.severity) : '#8A94A6',
               border: '2px solid transparent',
             }} />
             {idx < items.length - 1 && (
@@ -80,7 +80,7 @@ function AttackTimeline({ items }: { items: any[] }) {
                 </span>
               )}
               {item.type === 'note' && (
-                <span style={{ fontSize: 12, padding: '1px 5px', borderRadius: 2, background: 'rgba(100,116,139,0.15)', color: '#64748b', fontFamily: 'var(--font-mono)' }}>
+                <span style={{ fontSize: 12, padding: '1px 5px', borderRadius: 2, background: 'rgba(100,116,139,0.15)', color: '#8A94A6', fontFamily: 'var(--font-mono)' }}>
                   NOTE
                 </span>
               )}

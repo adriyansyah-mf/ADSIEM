@@ -18,7 +18,7 @@ export interface TimelineItem {
 }
 
 const SEV_COLOR: Record<string, string> = {
-  critical: '#ff2244', high: '#ff6b00', medium: '#ffd700', low: '#00ff88', info: '#00d4ff',
+  critical: '#FF5D6C', high: '#FF9F43', medium: '#F2D45C', low: '#4CC38A', info: '#8DB0FF',
 }
 const NOTE_COLOR = '#6b8aad'
 
@@ -409,7 +409,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                         {selected.mitre_techniques.map(t => (
                           <span key={t} style={{
                             display: 'inline-block', fontFamily: 'Share Tech Mono, monospace', fontSize: 10, padding: '3px 8px',
-                            borderRadius: 3, background: 'rgba(0,212,255,.1)', border: '1px solid #00d4ff33', color: 'var(--accent-cyan)', margin: '0 6px 6px 0',
+                            borderRadius: 3, background: 'rgba(141, 176, 255,.1)', border: '1px solid #8DB0FF33', color: 'var(--accent-cyan)', margin: '0 6px 6px 0',
                           }}>{t}</span>
                         ))}
                       </div>
@@ -419,7 +419,7 @@ export default function AttackGraph({ items }: { items: TimelineItem[] }) {
                     onClick={() => setOpenAlertId(selected.id)}
                     style={{
                       marginTop: 'auto', display: 'block', width: '100%', textAlign: 'center', padding: 10, borderRadius: 5,
-                      border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,.08)', color: 'var(--accent-cyan)',
+                      border: '1px solid var(--accent-cyan)', background: 'rgba(141, 176, 255,.08)', color: 'var(--accent-cyan)',
                       fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: 12, letterSpacing: '1.5px', cursor: 'pointer', textTransform: 'uppercase',
                     }}
                   >

@@ -174,7 +174,7 @@ export default function AssistantWidget() {
               <div key={i} style={{
                 alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
                 maxWidth: '88%',
-                background: m.role === 'user' ? 'rgba(0,212,255,0.12)' : 'var(--bg-card)',
+                background: m.role === 'user' ? 'rgba(141, 176, 255,0.12)' : 'var(--bg-card)',
                 border: `1px solid ${m.role === 'user' ? 'var(--accent-cyan)' : 'var(--border)'}`,
                 borderRadius: 8, padding: '8px 11px',
                 fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap',
@@ -190,7 +190,7 @@ export default function AssistantWidget() {
                           display: 'flex', alignItems: 'center', gap: 4,
                           fontSize: 11, fontFamily: 'Rajdhani, sans-serif', fontWeight: 700,
                           letterSpacing: '0.4px', padding: '3px 9px', borderRadius: 4,
-                          border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.1)',
+                          border: '1px solid var(--accent-cyan)', background: 'rgba(141, 176, 255,0.1)',
                           color: 'var(--accent-cyan)', cursor: 'pointer', whiteSpace: 'nowrap',
                         }}
                       >
@@ -227,7 +227,7 @@ export default function AssistantWidget() {
               disabled={loading || !input.trim()}
               style={{
                 width: 36, borderRadius: 5, border: '1px solid var(--accent-cyan)',
-                background: 'rgba(0,212,255,0.1)', color: 'var(--accent-cyan)',
+                background: 'rgba(141, 176, 255,0.1)', color: 'var(--accent-cyan)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
                 opacity: loading || !input.trim() ? 0.5 : 1,

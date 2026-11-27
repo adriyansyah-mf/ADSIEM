@@ -119,7 +119,7 @@ function Bubble({ m }: { m: ChatMessage }) {
   }
   if (m.role === 'user') {
     return (
-      <div style={{ alignSelf: 'flex-end', maxWidth: '85%', border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.08)', borderRadius: '6px', padding: '6px 10px', fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      <div style={{ alignSelf: 'flex-end', maxWidth: '85%', border: '1px solid var(--accent-cyan)', background: 'rgba(141, 176, 255,0.08)', borderRadius: '6px', padding: '6px 10px', fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         {m.content}
       </div>
     )
@@ -187,7 +187,7 @@ export default function InvestigationChat({ invId }: { invId: string }) {
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
           style={{ ...mono, flex: 1, fontSize: '12px', padding: '6px 8px', resize: 'vertical', background: 'var(--bg-base)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px' }} />
         <button onClick={submit} disabled={sending || !text.trim()} aria-label="Send message"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--accent-cyan)', background: 'rgba(0,212,255,0.08)', color: 'var(--accent-cyan)', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px', cursor: sending ? 'not-allowed' : 'pointer', opacity: sending ? 0.5 : 1 }}>
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--accent-cyan)', background: 'rgba(141, 176, 255,0.08)', color: 'var(--accent-cyan)', fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '12px', letterSpacing: '1px', cursor: sending ? 'not-allowed' : 'pointer', opacity: sending ? 0.5 : 1 }}>
           <Send size={13} /> SEND
         </button>
       </div>

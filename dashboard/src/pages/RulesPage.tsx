@@ -132,7 +132,7 @@ function CorrelationPanel({
   return (
     <div style={{
       borderTop: '1px solid var(--border)',
-      background: enabled ? 'rgba(0,212,255,0.03)' : 'transparent',
+      background: enabled ? 'rgba(141, 176, 255,0.03)' : 'transparent',
       padding: '10px 16px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -149,7 +149,7 @@ function CorrelationPanel({
             padding: '2px 10px',
             borderRadius: '3px',
             border: `1px solid ${enabled ? 'var(--accent-cyan)' : 'var(--border)'}`,
-            background: enabled ? 'rgba(0,212,255,0.15)' : 'transparent',
+            background: enabled ? 'rgba(141, 176, 255,0.15)' : 'transparent',
             color: enabled ? 'var(--accent-cyan)' : 'var(--text-muted)',
             fontFamily: 'Rajdhani, sans-serif',
             fontWeight: 700,
@@ -406,7 +406,7 @@ export default function RulesPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
         {r.title}
         {r.source === 'sigmahq' && <span style={badge('#a78bfa')} title={`SigmaHQ ${r.external_id ?? ''}`}>SIGMAHQ{r.sigma_status ? ` · ${r.sigma_status.toUpperCase()}` : ''}</span>}
-        {hasCorrelation(r) && <span style={badge('#00d4ff')}>CORR</span>}
+        {hasCorrelation(r) && <span style={badge('#8DB0FF')}>CORR</span>}
         {r.modified_locally && <span style={badge('#fbbf24')} title="Edited here — SigmaHQ updates won't overwrite it">EDITED</span>}
         {r.collected === false && <span style={badge('#94a3b8')} title="No log source on this platform feeds this rule's logsource">NOT COLLECTED</span>}
       </div>
