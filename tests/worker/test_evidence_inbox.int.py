@@ -221,7 +221,7 @@ async def test_no_dispatch_while_the_workers_are_behind(env, monkeypatch):
     rows = await seed(env, n=8)
     env.redis.lag = 10
     assert await ei.dispatch_once(now()) == 0
-    assert all((await get(env, r.receipt_id)).dispatch_count == 0 for r in rows)  # still due
+    assert all([(await get(env, r.receipt_id)).dispatch_count == 0 for r in rows])  # still due
     env.redis.lag = 5
     assert await ei.dispatch_once(now()) == 5  # only up to the backlog limit
     env.redis.lag = None  # Redis cannot tell: the stream length counts
