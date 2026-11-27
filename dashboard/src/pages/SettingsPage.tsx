@@ -4,6 +4,8 @@ import { useSettings, useUpdateSetting } from '@/hooks/useSettings'
 import type { Setting } from '@/types'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import { PageHeader, QueryState } from '@/components/Workspace'
+import EvidenceUsagePanel from '@/components/EvidenceUsagePanel'
 
 const SETTING_LABELS: Record<string, string> = {
   org_name: 'Organization Name',
@@ -402,27 +404,16 @@ export default function SettingsPage() {
   const { data: settings, isLoading, error } = useSettings()
 
   return (
-    <div>
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontFamily: 'Rajdhani, sans-serif', fontWeight: 700, fontSize: '22px', color: 'var(--accent-cyan)', letterSpacing: '2px', textTransform: 'uppercase', margin: 0 }}>
-          Platform Settings
-        </h1>
-        <p style={{ fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-          Configure AI analyst, integrations, and platform behaviour. Changes take effect within 60 seconds.
-        </p>
-      </div>
+    <div className="workspace">
+      <PageHeader eyebrow="Administration" title="Settings"
+        description="Configure the AI analyst, integrations and platform behaviour. Changes take effect within 60 seconds." />
+
+      <EvidenceUsagePanel />
 
       <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
-        {isLoading && (
-          <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--text-muted)' }}>
-            LOADING SETTINGS…
-          </div>
-        )}
-        {error && (
-          <div style={{ padding: '20px', fontFamily: 'Share Tech Mono, monospace', fontSize: '12px', color: 'var(--accent-red)' }}>
-            Failed to load settings. You may not have permission (superadmin required).
-          </div>
-        )}
+        {isLoading && <QueryState kind="loading" title="Loading settings…" />}
+        {error && <QueryState kind="error" title="Could not load settings"
+          description="You may not have permission (superadmin required)." />}
         <MfaSection />
         {settings?.map(s => <SettingRow key={s.key} setting={s} />)}
       </div>
