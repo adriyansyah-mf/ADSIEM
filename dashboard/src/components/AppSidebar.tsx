@@ -15,14 +15,16 @@ interface NavigationItem {
 }
 
 export const NAVIGATION: readonly { readonly label: string; readonly items: readonly NavigationItem[] }[] = [
-  { label: 'Operations', items: [
+  { label: 'Home', items: [
     { to: '/', label: 'Overview', icon: LayoutDashboard },
     { to: '/command-center', label: 'Command center', icon: Radar },
-    { to: '/alerts', label: 'Alerts', icon: Bell },
-    { to: '/cases', label: 'Cases', icon: FolderOpen },
     { to: '/handover', label: 'Shift handover', icon: ClipboardList },
   ] },
-  { label: 'Investigation', items: [
+  { label: 'Triage', items: [
+    { to: '/alerts', label: 'Alerts', icon: Bell },
+    { to: '/cases', label: 'Cases', icon: FolderOpen },
+  ] },
+  { label: 'Investigate', items: [
     { to: '/logs', label: 'Log search', icon: FileText },
     { to: '/dashboards', label: 'Dashboards', icon: LayoutGrid },
     { to: '/events', label: 'Events', icon: Activity },
