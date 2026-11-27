@@ -28,8 +28,8 @@ export function AgentActions({ agent }: { readonly agent: Agent }) {
   </div>
 }
 
-function AgentResponseDialog({ agent, action, onClose }: {
-  readonly agent: Agent
+export function AgentResponseDialog({ agent, action, onClose }: {
+  readonly agent: Pick<Agent, 'id' | 'hostname' | 'name' | 'group_id'>
   readonly action: ResponseAction
   readonly onClose: () => void
 }) {
