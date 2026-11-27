@@ -562,6 +562,19 @@ a.metric-card:hover { background: var(--bg-hover); }
 .asset-tier-editor { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); }
 .asset-tier-editor .field { flex: 1 1 220px; }
 
+/* Evidence storage usage */
+.evidence-usage__intro { margin: 0 0 var(--space-3); }
+.evidence-usage { overflow-x: auto; }
+.evidence-usage table { width: 100%; min-width: 620px; border-collapse: collapse; }
+.evidence-usage th { text-align: left; font-size: 12px; font-weight: 500; color: var(--text-muted); padding: var(--space-2) var(--space-3); }
+.evidence-usage td { padding: var(--space-3); border-top: 1px solid var(--border-default); vertical-align: middle; }
+.evidence-usage__meter { display: flex; align-items: center; gap: var(--space-2); }
+.evidence-usage__track { width: 140px; height: 6px; flex-shrink: 0; border-radius: 3px; background: var(--bg-hover); overflow: hidden; }
+.evidence-usage__fill { display: block; height: 100%; border-radius: 3px; background: #4CC38A; }
+.evidence-usage__fill.is-high { background: #FF9F43; }
+.evidence-usage__fill.is-full { background: #FF5D6C; }
+.evidence-usage__full { color: var(--accent-red); }
+
 /* Case tasks */
 .case-tasks { display: grid; gap: var(--space-3); }
 .case-tasks__summary { margin: 0; }

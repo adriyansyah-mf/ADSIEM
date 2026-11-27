@@ -11,13 +11,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import fetch_scoped, get_current_user, get_scoped_group, require_permission
-from app.models.models import Agent, EvidenceInbox, User
+from app.core.config import settings
+from app.models.models import Agent, EvidenceGroupUsage, EvidenceInbox, User
 from app.services.audit import audit_log
 from app.services.evidence_status import evidence_status
 
 router = APIRouter(tags=["evidence"])
 
 DEAD_LETTER_LIMIT = 50
+
+
+TOP_HOSTS = 3
+
+
+@router.get("/api/evidence/usage")
+async def evidence_usage(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_filter: Annotated[str | None, Depends(get_scoped_group)],
+    _=Depends(get_current_user),
+):
+    """Evidence storage per group against the budget that turns new evidence
+    away with 429 evidence_group_capacity once it is full (evidence_inbox)."""
+    usage_q = select(EvidenceGroupUsage.group_id, EvidenceGroupUsage.payload_bytes)
+    hosts_q = (select(EvidenceInbox.group_id, EvidenceInbox.hostname, func.sum(EvidenceInbox.payload_bytes).label("bytes"))
+               .group_by(EvidenceInbox.group_id, EvidenceInbox.hostname))
+    if group_filter is not None:
+        usage_q = usage_q.where(EvidenceGroupUsage.group_id == group_filter)
+        hosts_q = hosts_q.where(EvidenceInbox.group_id == group_filter)
+    budget = settings.EVIDENCE_GROUP_BUDGET_BYTES
+    top: dict[str, list[dict]] = {}
+    for group_id, hostname, used in (await db.execute(hosts_q)).all():
+        top.setdefault(group_id, []).append({"hostname": hostname, "payload_bytes": int(used or 0)})
+    groups = []
+    for group_id, used in (await db.execute(usage_q.order_by(EvidenceGroupUsage.payload_bytes.desc()))).all():
+        hosts = sorted(top.get(group_id, []), key=lambda h: h["payload_bytes"], reverse=True)[:TOP_HOSTS]
+        groups.append({"group_id": group_id, "payload_bytes": int(used), "percent": round(min(used / budget, 1.0) * 100, 1),
+                       "full": used >= budget, "top_hosts": hosts})
+    return {"budget_bytes": budget, "groups": groups}
 
 
 def _in_scope(group_filter: str | None):
