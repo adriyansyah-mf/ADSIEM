@@ -261,3 +261,46 @@ func TestControllerOrdersResolverAndRouting(t *testing.T) {
 		t.Fatal("no resolver, no routing")
 	}
 }
+
+type persistentRouter struct{ *fakeRouter }
+
+func (persistentRouter) Persistent() bool { return true }
+
+// NRPT keeps its rule: the periodic refresh must not run PowerShell again
+// (each run was a Sigma encoded-command alert), on or off, unless the last
+// apply failed.
+func TestRefreshLeavesPersistentRoutingAlone(t *testing.T) {
+	fr := &fakeRouter{}
+	c := &Controller{Router: persistentRouter{fr}, Addr: "127.0.0.1:0"}
+	defer c.Apply(false, nil)
+
+	c.Refresh() // sinkhole off, nothing routed
+	if fr.removed != 0 || len(fr.applied) != 0 {
+		t.Fatalf("off refresh: removed=%d applied=%d", fr.removed, len(fr.applied))
+	}
+	c.Apply(true, []string{"evil.com"})
+	c.Refresh()
+	c.Refresh()
+	if len(fr.applied) != 1 {
+		t.Fatalf("on refresh re-applied: %d applies", len(fr.applied))
+	}
+
+	fr.err = errors.New("powershell failed")
+	c.Apply(true, []string{"evil.com", "phish.example.org"})
+	fr.err = nil
+	c.Refresh() // the failed apply is retried
+	if len(fr.applied) != 3 || strings.Join(fr.applied[2], ",") != "evil.com,phish.example.org" {
+		t.Fatalf("failed apply not retried: %v", fr.applied)
+	}
+	c.Refresh()
+	if len(fr.applied) != 3 {
+		t.Fatalf("retried apply re-applied again: %d", len(fr.applied))
+	}
+}
+
+func TestNRPTRouterIsPersistent(t *testing.T) {
+	var r Router = NRPTRouter{}
+	if p, ok := r.(persistent); !ok || !p.Persistent() {
+		t.Fatal("NRPT routing must not be rewritten by every refresh")
+	}
+}
