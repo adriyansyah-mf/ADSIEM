@@ -181,6 +181,9 @@ func (r NRPTRouter) Apply(domains []string) error {
 
 func (r NRPTRouter) Remove() error { return r.Apply(nil) }
 
+// Persistent: NRPT rules survive a DNS client restart and a reboot.
+func (NRPTRouter) Persistent() bool { return true }
+
 // Prepare: nothing to create; the resolver listens on the sink address.
 func (r NRPTRouter) Prepare() (string, error) {
 	if r.Run == nil {

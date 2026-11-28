@@ -43,11 +43,19 @@ func (c *Controller) Apply(on bool, domains []string) {
 	c.reconcile(false)
 }
 
+// persistent is a Router whose routing the OS keeps by itself (Windows NRPT
+// rules live in the registry), so the periodic refresh need not rewrite it.
+type persistent interface{ Persistent() bool }
+
 // Refresh applies the routing again (a restarted systemd-resolved lost it).
+// A persistent router is only re-applied when its last apply failed: on
+// Windows each apply runs powershell -EncodedCommand, and doing it every
+// reapplyEvery raised a Sigma encoded-command alert per host every 5 minutes.
 func (c *Controller) Refresh() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.reconcile(true)
+	p, ok := c.Router.(persistent)
+	c.reconcile(!(ok && p.Persistent()))
 }
 
 // Run refreshes the routing every reapplyEvery until ctx ends, then takes
