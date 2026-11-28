@@ -33,7 +33,7 @@ async def test_facets_shapes_aggregation(monkeypatch):
         }}
 
     monkeypatch.setattr(tf, "aggregate", fake_aggregate)
-    since = datetime.now(timezone.utc) - timedelta(hours=4)
+    since = datetime.now(timezone.utc) - timedelta(hours=3)  # 3h/48 < 5m; 4h sits on the 5m/10m edge
     out = await tf.facets([{"term": {"group_id": "g1"}}], ["log_type", "agent_id"], since, None)
 
     assert out["total"] == 7
