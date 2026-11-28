@@ -482,12 +482,6 @@ function AlertDetailBody({ alert, detail, variant, onClose }: {
         onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="border-b border-border p-4">
-          {isPage && (
-            <button onClick={() => navigate('/alerts')}
-              className="mb-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-              <ArrowLeft size={13} /> Alerts
-            </button>
-          )}
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
               <h2 className={`break-words font-bold leading-snug ${isPage ? 'text-xl' : 'text-base'}`}>{alert.title}</h2>

@@ -3,7 +3,8 @@ import { RefreshCw } from 'lucide-react'
 import { format } from 'date-fns'
 import DataTable, { type Column } from '@/components/DataTable'
 import StatusBadge from '@/components/StatusBadge'
-import { PageHeader, Panel, QueryState } from '@/components/Workspace'
+import { Panel, QueryState } from '@/components/Workspace'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { UebaRisk } from '@/components/UebaRisk'
 import { UebaEntityDetails } from '@/components/UebaEntityDetails'
 import { type UebaEntityType, useUebaEntities, useUebaStatus } from '@/hooks/useUeba'
@@ -44,9 +45,10 @@ export default function UEBAPage() {
     { key: 'last_seen_at', header: 'Last seen', render: row => row.last_seen_at ? <time className="whitespace-nowrap" dateTime={row.last_seen_at}>{format(new Date(row.last_seen_at), 'dd MMM, HH:mm')}</time> : 'Not recorded' },
     { key: 'group_id', header: 'Group', hiddenByDefault: true, render: row => row.group_id },
   ]
-  return <div className="workspace">
-    <PageHeader eyebrow="Behavior intelligence" title="Behavior analytics" description="Prioritize anomalous users, IP addresses, hosts and programs, then examine the evidence behind each risk score."
+  return <CanvasPage>
+    <CanvasHeader title="Behavior analytics" sub="Prioritize anomalous users, IP addresses, hosts and programs, then examine the evidence behind each risk score."
       actions={<button className="ui-button" disabled={query.isFetching} onClick={() => { void query.refetch() }}><RefreshCw size={14} /> Refresh entities</button>} />
+    <div className="cv-body cv-body--wide workspace">
     <ModelStatus />
     <section className="panel" aria-label="Entity filters"><div className="ueba-filters">
       <label className="field"><span>Entity type</span><select className="ui-input" value={entityType} onChange={event => {
@@ -60,5 +62,6 @@ export default function UEBAPage() {
         : <DataTable columns={columns} data={rows} total={rows.length} page={1} pageSize={50} onPageChange={() => {}} showPagination={false}
           onRowClick={setSelected} exportFilename={`ueba-${entityType}-entities.csv`} emptyTitle="No entities match this view" emptyDescription="Try a lower minimum risk, switch entity type, or wait for more endpoint observations." />}
     {selected && <UebaEntityDetails entityType={selected.entity_type} entityValue={selected.entity_value} onClose={() => setSelected(null)} />}
-  </div>
+    </div>
+  </CanvasPage>
 }

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
-import { ChevronDown, ChevronRight, History, Loader2, Play } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, Play } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { api } from '@/api/client'
 
 // Search the stored logs for an indicator, or run a rule over them
@@ -153,11 +154,9 @@ export default function RetroHuntPage() {
   const ready = kind === 'ioc' ? value.trim().length > 0 : ruleId !== ''
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-2">
-        <History size={18} />
-        <h1 className="text-xl font-bold">Retro-hunt</h1>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Retro-hunt" sub="Search stored logs for a new indicator, or run a rule over the past." />
+      <div className="cv-body space-y-5">
       <p className="text-xs text-muted-foreground max-w-3xl">
         Search the stored logs for an indicator learnt today, or run a rule over the past to see what it would have caught.
         Adding an IP to the IP blocklist, a domain to Web Protection or a hash to Malware hashes starts one automatically
@@ -240,6 +239,7 @@ export default function RetroHuntPage() {
             ))}
           </div>
         )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

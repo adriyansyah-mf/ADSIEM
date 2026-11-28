@@ -5,6 +5,7 @@ import { Loader2, Plus, Trash2 } from 'lucide-react'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { emitToast } from '@/hooks/useToast'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 
 interface IpBlock {
   id: string
@@ -78,13 +79,9 @@ export default function IpBlocklistPage() {
   })
 
   return (
-    <div className="p-6 space-y-4">
-      <div>
-        <h1 className="text-xl font-bold">IP Blocklist</h1>
-        <p className="text-sm text-muted-foreground">
-          IP indicators of compromise your endpoints drop or report in real time. SOAR playbooks add to it with the Block IOC node.
-        </p>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="IP blocklist" sub="IP indicators of compromise your endpoints drop or report in real time. SOAR playbooks add to it with the Block IOC node." />
+      <div className="cv-body space-y-4">
 
       {data && (
         <div className="rounded-lg border border-border p-3 text-sm flex flex-wrap items-center gap-2">
@@ -190,6 +187,7 @@ export default function IpBlocklistPage() {
           <button className={button} disabled={offset + PAGE >= data.total} onClick={() => setOffset(offset + PAGE)}>Next</button>
         </div>
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

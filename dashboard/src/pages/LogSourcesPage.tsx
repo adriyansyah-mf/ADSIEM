@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useAgent, useLogSources, useAddLogSource, useUpdateLogSource, useDeleteLogSource } from '@/hooks/useAgents'
 import { useDecoders } from '@/hooks/useDecoders'
 import StatusBadge from '@/components/StatusBadge'
 import { Trash2, Plus, ArrowLeft, ToggleLeft, ToggleRight } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import type { LogSource } from '@/types'
 
 export default function LogSourcesPage() {
@@ -50,23 +51,12 @@ export default function LogSourcesPage() {
   }
 
   return (
-    <div className="max-w-3xl">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate('/agents')}
-          className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground">
-          <ArrowLeft size={18} />
-        </button>
-        <div>
-          <h1 className="text-xl font-bold">Log Sources</h1>
-          {agent && (
-            <p className="text-sm text-muted-foreground">
-              {agent.name} &middot; <span className="font-mono">{agent.hostname}</span>
-              <span className="ml-2"><StatusBadge status={agent.status} /></span>
-            </p>
-          )}
-        </div>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Log sources" tabs={[]}
+        crumb={<><Link to="/agents">Agents</Link> / {agent?.hostname ?? 'agent'} / Log sources</>}
+        sub={agent ? <>{agent.name} · <span className="cv-mono">{agent.hostname}</span> <StatusBadge status={agent.status} /></> : undefined}
+        actions={<button type="button" onClick={() => navigate('/agents')} className="cv-btn"><ArrowLeft size={14} /> Back to agents</button>} />
+      <div className="cv-body" style={{ maxWidth: 900 }}>
 
       {/* Add form */}
       <div className="rounded-lg border border-border bg-card p-4 mb-6">
@@ -164,6 +154,7 @@ export default function LogSourcesPage() {
         Changes are picked up by the agent on the next heartbeat (default every 30 s).
         Glob patterns are supported, e.g. <span className="font-mono">/opt/device/*.log</span> for daily-rotating files.
       </p>
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

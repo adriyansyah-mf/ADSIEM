@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
 import { Shield, Plus, Trash2, Edit2, Play, CheckCircle, XCircle, Loader2, ToggleLeft, ToggleRight, Download } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { useYaraRules, useCreateYaraRule, useUpdateYaraRule, useToggleYaraRule, useDeleteYaraRule, useYaraScan, useYaraMemoryScan, useSeedBuiltinRules, useYaraScanTasks } from '@/hooks/useYara'
@@ -165,23 +166,13 @@ export default function YaraPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Shield size={18} />
-          <h1 className="text-xl font-bold">YARA Rules</h1>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={() => seedBuiltins.mutate()} disabled={seedBuiltins.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-border hover:border-primary text-sm disabled:opacity-50">
-            <Download size={13} /> Seed Built-ins
-          </button>
-          <button onClick={() => openForm()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm">
-            <Plus size={13} /> New Rule
-          </button>
-        </div>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="YARA rules" sub="Rules agents run on new and changed files in temp, download and web folders."
+        actions={<>
+          <button type="button" onClick={() => seedBuiltins.mutate()} disabled={seedBuiltins.isPending} className="cv-btn"><Download size={13} /> Seed built-ins</button>
+          <button type="button" onClick={() => openForm()} className="cv-btn cv-btn--primary"><Plus size={13} /> New rule</button>
+        </>} />
+      <div className="cv-body space-y-5">
 
       <p className="text-xs text-muted-foreground">
         Enabled rules also run on every agent as files are created or changed in temp, download and web
@@ -302,6 +293,7 @@ export default function YaraPage() {
           ))}
         </div>
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

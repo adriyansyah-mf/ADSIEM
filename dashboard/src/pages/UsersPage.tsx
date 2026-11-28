@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import DataTable from '@/components/DataTable'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import StatusBadge from '@/components/StatusBadge'
 import { useUsers, useCreateUser, useDeleteUser } from '@/hooks/useUsers'
 import { Plus, Trash2 } from 'lucide-react'
@@ -33,14 +34,10 @@ export default function UsersPage() {
   ]
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Users</h1>
-        <button onClick={() => setShowForm(true)}
-          className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm">
-          <Plus size={14} /> New User
-        </button>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Users" crumb="Users" sub="Console accounts, their role and the group they see."
+        actions={<button type="button" onClick={() => setShowForm(true)} className="cv-btn cv-btn--primary"><Plus size={14} /> New user</button>} />
+      <div className="cv-body">
       {showForm && (
         <div className="mb-4 p-4 rounded border border-border bg-card space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -74,6 +71,7 @@ export default function UsersPage() {
           page={page} pageSize={pageSize} onPageChange={setPage}
           onPageSizeChange={(s) => { setPageSize(s); setPage(1) }} />
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

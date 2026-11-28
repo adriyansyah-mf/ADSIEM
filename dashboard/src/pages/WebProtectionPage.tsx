@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { useAuthStore } from '@/stores/auth'
 import {
   BLOCK_PAGE, type BlockFilter, type WebPolicy, apiError, useAddAllowRule, useAgentWebHealth, useAllowlist, useBlockWeb,
@@ -427,21 +428,16 @@ export default function WebProtectionPage() {
   const [tab, setTab] = useState<Tab>('blocklist')
   const noGroup = <p className="text-sm text-muted-foreground">Enter a group to manage its policy and block page.</p>
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <div>
-          <h1 className="text-xl font-bold">Web Protection</h1>
-          <p className="text-sm text-muted-foreground">Block domains on your endpoints and choose the page users see.</p>
-        </div>
-        {superadmin && (
-          <form className="ml-auto text-xs space-y-1" onSubmit={e => { e.preventDefault(); applyGroup() }}>
-            <label className="block space-y-1">
-              <span className="block text-muted-foreground">Group</span>
-              <input value={draft} onChange={e => setDraft(e.target.value)} onBlur={applyGroup} className={`${input} w-40`} />
+    <CanvasPage>
+      <CanvasHeader title="Web protection" sub="Block domains on your endpoints and choose the page users see."
+        actions={superadmin && (
+          <form className="cv-row" onSubmit={e => { e.preventDefault(); applyGroup() }}>
+            <label className="cv-row" style={{ gap: 6, fontSize: 12, color: '#8A94A6' }}>
+              Group <input value={draft} onChange={e => setDraft(e.target.value)} onBlur={applyGroup} className="cv-input" style={{ width: 160 }} />
             </label>
           </form>
-        )}
-      </div>
+        )} />
+      <div className="cv-body space-y-4">
       <div className="flex flex-wrap gap-1 border-b border-border">
         {([['blocklist', 'Blocklist'], ['allowlist', 'Allowlist'], ['page', 'Block page'], ['feeds', 'Feeds'], ['agents', 'Agents']] as const).map(([key, label]) => (
           <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}
@@ -455,6 +451,7 @@ export default function WebProtectionPage() {
       {tab === 'feeds' && <FeedsTab />}
       {tab === 'agents' && <AgentsTab superadmin={superadmin} />}
       {tab === 'page' && (group ? <BlockPageEditor key={group} group={group} /> : noGroup)}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

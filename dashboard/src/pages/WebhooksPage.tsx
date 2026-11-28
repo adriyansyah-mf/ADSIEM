@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import DataTable from '@/components/DataTable'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import StatusBadge from '@/components/StatusBadge'
 import { useWebhooks, useCreateWebhook, useDeleteWebhook } from '@/hooks/useWebhooks'
 import { Plus, Trash2 } from 'lucide-react'
@@ -25,14 +26,10 @@ export default function WebhooksPage() {
   ]
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Webhooks</h1>
-        <button onClick={() => setShowForm(true)}
-          className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm">
-          <Plus size={14} /> New Webhook
-        </button>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Webhooks" crumb="Webhooks" sub="Endpoints that receive alerts as they are raised."
+        actions={<button type="button" onClick={() => setShowForm(true)} className="cv-btn cv-btn--primary"><Plus size={14} /> New webhook</button>} />
+      <div className="cv-body">
       {showForm && (
         <div className="mb-4 p-4 rounded border border-border bg-card space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -60,6 +57,7 @@ export default function WebhooksPage() {
           page={page} pageSize={pageSize} onPageChange={setPage}
           onPageSizeChange={(s) => { setPageSize(s); setPage(1) }} />
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

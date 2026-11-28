@@ -5,6 +5,7 @@ import {
   useCreateSyslogSource, useDeleteSyslogSource, useSyslogSources, useUnknownSyslogSenders, useUpdateSyslogSource,
 } from '@/hooks/useSyslogSources'
 import { useAuthStore } from '@/stores/auth'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 
 const EMPTY = { name: '', cidr: '', logType: '', customType: '' }
 
@@ -48,15 +49,13 @@ export default function SyslogSourcesPage() {
   }
 
   return (
-    <div className="max-w-5xl">
-      <div className="mb-6">
-        <h1 className="text-xl font-bold">Syslog devices</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Firewalls, switches and appliances that can't run an agent. Point them at this server on
-          port <span className="font-mono">514</span> (UDP or TCP; RFC 3164, RFC 5424 or CEF). Messages from
-          addresses that aren't registered here are dropped.
-        </p>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Syslog devices" sub={<>
+        Firewalls, switches and appliances that can't run an agent. Point them at this server on
+        port <span className="cv-mono">514</span> (UDP or TCP; RFC 3164, RFC 5424 or CEF). Messages from
+        addresses that aren't registered here are dropped.
+      </>} />
+      <div className="cv-body" style={{ maxWidth: 1100 }}>
 
       {canManage && (
         <div className="rounded-lg border border-border bg-card p-4 mb-6">
@@ -169,6 +168,7 @@ export default function SyslogSourcesPage() {
           </ul>
         </div>
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useAgent, useFirewallRules, useAddFirewallRule, useDeleteFirewallRule } from '@/hooks/useAgents'
-import { Trash2, Plus, ArrowLeft, Shield } from 'lucide-react'
+import { Trash2, Plus, ArrowLeft } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 
 const ACTIONS = ['block', 'allow']
 const PROTOS = ['any', 'tcp', 'udp', 'icmp']
@@ -54,22 +55,11 @@ export default function FirewallPage() {
   }
 
   return (
-    <div style={{ padding: '20px 24px', maxWidth: 1200, margin: '0 auto' }}>
-      <button
-        onClick={() => navigate(`/agents/${id}/sources`)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, background: 'none',
-          border: 'none', color: 'var(--text-muted)', cursor: 'pointer',
-          marginBottom: 16, fontSize: 13,
-        }}
-      >
-        <ArrowLeft size={14} /> back to {agent?.hostname ?? 'agent'}
-      </button>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-        <Shield size={20} color="var(--accent-cyan)" />
-        <h1 style={{ margin: 0, fontSize: 20, letterSpacing: '0.5px' }}>Firewall Gate</h1>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Firewall" tabs={[]}
+        crumb={<><Link to="/agents">Agents</Link> / {agent?.hostname ?? 'agent'} / Firewall</>}
+        actions={<button type="button" onClick={() => navigate(`/agents/${id}/sources`)} className="cv-btn"><ArrowLeft size={14} /> Back to {agent?.hostname ?? 'agent'}</button>} />
+      <div className="cv-body">
       <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 0, marginBottom: 20 }}>
         Rules are pushed on the next heartbeat. The agent refuses anything that would cover
         its own management path (the SIEM server, its subnet, the default gateway, or loopback).
@@ -165,7 +155,8 @@ export default function FirewallPage() {
           </tbody>
         </table>
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }
 

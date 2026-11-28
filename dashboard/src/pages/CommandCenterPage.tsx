@@ -3,7 +3,8 @@ import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Copy, Maximize2, Minimize2, Pause, Play, RefreshCw, Search, X } from 'lucide-react'
 import { format } from 'date-fns'
-import { PageHeader, Panel, QueryState } from '@/components/Workspace'
+import { Panel, QueryState } from '@/components/Workspace'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import SeverityBadge from '@/components/SeverityBadge'
 import StatusBadge from '@/components/StatusBadge'
 import type { MapFocus } from '@/components/AttackMap'
@@ -127,9 +128,9 @@ export default function CommandCenterPage() {
   const windowLabel = days === 1 ? 'last 24 hours' : `last ${days} days`
   const updatedAt = Math.max(geo.dataUpdatedAt, posture.dataUpdatedAt)
 
-  return <div ref={rootRef} className={`workspace command-center${wall ? ' is-wall' : ''}`}>
-    <PageHeader eyebrow="Security operations" title="SOC command center"
-      description="Where attacks come from, what they hit, and whether the team is keeping up, refreshed live."
+  return <CanvasPage>
+    <CanvasHeader title="SOC command center"
+      sub="Where attacks come from, what they hit, and whether the team is keeping up, refreshed live."
       actions={<>
         <select aria-label="Time window" className="ui-input w-auto" value={days} onChange={e => { setDays(Number(e.target.value)); setSelectedIp(null) }}>
           <option value={1}>Last 24 hours</option><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option>
@@ -145,6 +146,9 @@ export default function CommandCenterPage() {
           {wall ? <><Minimize2 size={14} /> Exit wall mode</> : <><Maximize2 size={14} /> Wall mode</>}
         </button>
       </>} />
+    <div ref={rootRef} className={`cv-body cv-body--wide workspace command-center${wall ? ' is-wall' : ''}`}>
+    {wall && <div className="cv-row cv-row--between"><strong>SOC command center · {windowLabel}</strong>
+      <button type="button" className="ui-button" onClick={toggleWall}><Minimize2 size={14} /> Exit wall mode</button></div>}
 
     <div className="state-banner cc-status" role="status">
       <span className={`cc-live-dot${live ? ' is-live' : ''}`} aria-hidden="true" />
@@ -326,7 +330,8 @@ export default function CommandCenterPage() {
           })}</ul>}
       </Panel>
     </div>
-  </div>
+    </div>
+  </CanvasPage>
 }
 
 function BacklogMatrix({ backlog }: { readonly backlog: SocPosture['backlog'] }) {
