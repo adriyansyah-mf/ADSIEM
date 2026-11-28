@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf16"
 )
 
@@ -25,28 +26,70 @@ func PowerShell() Runner {
 		return nil
 	}
 	return func(ctx context.Context, script string) (string, error) {
-		cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive",
-			"-ExecutionPolicy", "Bypass", "-EncodedCommand", encode(script))
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout, cmd.Stderr = &stdout, &stderr
-		err := cmd.Run()
-		out := strings.TrimSpace(stdout.String())
-		if err != nil {
-			if ctx.Err() != nil {
-				// killed: say so, and how far the script got
-				return out, fmt.Errorf("powershell: timed out (%v) after %s", ctx.Err(), lastStep(out))
-			}
-			why := psError(stderr.String())
-			if why == "" {
-				why = lastLine(cleanStderr(stderr.String()))
-			}
-			if why == "" {
-				why = lastLine(out)
-			}
-			return out, fmt.Errorf("powershell: %s: %w", why, err)
-		}
-		return out, nil
+		return runPowerShell(ctx, "-EncodedCommand", encode(script))
 	}
+}
+
+// ScriptFileRunner is the Runner that writes each script to a .ps1 file under
+// dir/scripts and runs it with -File. The agent's own App Control runs were
+// -EncodedCommand, which the detection rules flag as an encoded command from
+// SYSTEM, so each run raised alerts about the agent itself. A script file's
+// path is in the command line, so the worker recognises these runs and raises
+// nothing for them (worker/worker/agent_self.py).
+func ScriptFileRunner(dir string) Runner {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	var mu sync.Mutex // one script file: runs are serial
+	return func(ctx context.Context, script string) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		path, err := writeScript(dir, script)
+		if err != nil {
+			return "", err
+		}
+		return runPowerShell(ctx, "-File", path)
+	}
+}
+
+// writeScript saves the script as UTF-8 with a byte order mark (Windows
+// PowerShell reads a file without one as the ANSI code page) and returns its path.
+func writeScript(dir, script string) (string, error) {
+	sdir := filepath.Join(dir, "scripts")
+	if err := os.MkdirAll(sdir, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(sdir, "run.ps1")
+	data := append([]byte{0xEF, 0xBB, 0xBF}, []byte(script)...)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// runPowerShell runs powershell.exe with the given arguments and returns its stdout.
+func runPowerShell(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "powershell.exe", append([]string{"-NoProfile", "-NonInteractive",
+		"-ExecutionPolicy", "Bypass"}, args...)...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	out := strings.TrimSpace(stdout.String())
+	if err != nil {
+		if ctx.Err() != nil {
+			// killed: say so, and how far the script got
+			return out, fmt.Errorf("powershell: timed out (%v) after %s", ctx.Err(), lastStep(out))
+		}
+		why := psError(stderr.String())
+		if why == "" {
+			why = lastLine(cleanStderr(stderr.String()))
+		}
+		if why == "" {
+			why = lastLine(out)
+		}
+		return out, fmt.Errorf("powershell: %s: %w", why, err)
+	}
+	return out, nil
 }
 
 // lastStep is the last "step: ..." marker a script printed ("the start" when none).

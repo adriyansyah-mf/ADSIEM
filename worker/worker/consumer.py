@@ -22,6 +22,7 @@ from worker.alert_manager import create_alert
 from worker.ueba.scorer import score_event as ueba_score_event
 from worker.es_client import bulk_index_items, index_log, ping as es_ping
 from worker import evidence_inbox
+from worker.agent_self import is_agent_script_run
 from worker.policy_exclusions import excluded as excluded_by_policy
 from worker.malware_feed import learn_from_event
 from worker import behavior, lateral, phishing
@@ -205,6 +206,9 @@ async def _detect(decoded: dict, event_id: uuid.UUID, agent_id, group_id: str, h
     flat_event = {**decoded, "group_id": group_id, "hostname": hostname, "raw_message": raw_message,
                   "log_type": log_type}
     rule_matches = await sig_engine.evaluate(flat_event)
+    if rule_matches and is_agent_script_run(flat_event):
+        # the agent's own App Control script run: its activity, not a detection
+        rule_matches = []
     if rule_matches:
         # the group policy's alert exclusions (a known-good program, folder, hash or command line)
         skip = await excluded_by_policy(flat_event, group_id)
