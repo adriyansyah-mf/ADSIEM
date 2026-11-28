@@ -18,12 +18,14 @@ from app.services.audit import audit_log
 from app.core.config import settings
 from app.api.routes.case_evidence import router as evidence_router
 from app.api.routes.case_tasks import router as tasks_router
+from app.api.routes.case_graph import router as graph_router
 from worker.soar.case_outbox import CaseEvent, enqueue_case_event
 import redis.asyncio as aioredis
 
 router = APIRouter(tags=["cases"])
 router.include_router(evidence_router)
 router.include_router(tasks_router)
+router.include_router(graph_router)
 
 async def _push_rag_reindex(case_id: str) -> None:
     """Push case_id to Redis reindex queue so worker indexes it immediately."""

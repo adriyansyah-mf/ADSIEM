@@ -11,6 +11,7 @@ import { CaseEvidencePanel } from '@/components/CaseEvidencePanel'
 import { CaseRemediations } from '@/components/CaseRemediations'
 import { useAuthStore } from '@/stores/auth'
 import CaseRelationGraph from '@/components/CaseRelationGraph'
+import CaseEntityGraph from '@/components/CaseEntityGraph'
 import { api } from '@/api/client'
 import type { Alert, Case, CaseNote } from '@/types'
 import MarkdownNote from '@/components/MarkdownNote'
@@ -25,7 +26,7 @@ type CaseTab = 'timeline' | 'evidence' | 'context' | 'tasks' | 'ai' | 'response'
 const CASE_TABS: readonly { readonly key: CaseTab; readonly label: string }[] = [
   { key: 'timeline', label: 'Timeline' },
   { key: 'evidence', label: 'Evidence' },
-  { key: 'context', label: 'Relation graph & IoCs' },
+  { key: 'context', label: 'Relation graph' },
   { key: 'tasks', label: 'Tasks' },
   { key: 'ai', label: 'AI investigation' },
   { key: 'response', label: 'Response actions' },
@@ -318,8 +319,12 @@ export default function CaseDetailPage() {
             {campaign.mergedInto && (
               <div className="cw-card cw-warn">Merged into <button type="button" className="cw-link" onClick={() => navigate(`/cases/${campaign.mergedInto}`)}>case {campaign.mergedInto.slice(0, 8)}</button>. Same attacker; work continues there.</div>
             )}
-            <section className="cw-card">
+            <section className="cw-card cw-card--flush">
               <div className="cw-card__head"><h2>Relation graph</h2></div>
+              <CaseEntityGraph caseId={caseData.id} />
+            </section>
+            <section className="cw-card">
+              <div className="cw-card__head"><h2>Related cases</h2></div>
               {campaign.related.length > 0
                 ? <CaseRelationGraph center={caseData} relatedIds={campaign.related} onOpen={cid => navigate(`/cases/${cid}`)} />
                 : <p className="cw-muted">No related cases share indicators with this one.</p>}
