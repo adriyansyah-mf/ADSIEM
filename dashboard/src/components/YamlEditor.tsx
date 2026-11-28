@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { EditorState } from '@codemirror/state'
 import { EditorView, basicSetup } from 'codemirror'
 import { yaml } from '@codemirror/lang-yaml'
-import { oneDark } from '@codemirror/theme-one-dark'
+import { canvasCodeTheme } from '@/lib/codeTheme'
 import { X } from 'lucide-react'
 
 interface Props {
@@ -26,7 +26,7 @@ export default function YamlEditor({ title, value, onChange, onSave, onClose, ex
       extensions: [
         basicSetup,
         yaml(),
-        oneDark,
+        canvasCodeTheme,
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChange(u.state.doc.toString())
         }),
