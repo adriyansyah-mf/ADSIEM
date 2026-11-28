@@ -157,6 +157,19 @@
 .cv-querybar__input { flex: 1 1 420px; min-width: 0; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; background: #0A0C10; border: 1px solid #3A4766; border-radius: 4px; color: #8A94A6; }
 .cv-querybar__input:focus-within { border-color: #5C7BD6; }
 .cv-querybar__input input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: #E8ECF2; font-family: var(--font-mono); font-size: 13px; }
+/* syntax-coloured query input (QueryInput): transparent input over a coloured layer, same metrics */
+.cv-qinput { position: relative; flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; }
+.cv-qinput__layer, .cv-qinput .cv-qinput__field { margin: 0; padding: 0; font-family: var(--font-mono); font-size: 13px; line-height: 20px; letter-spacing: normal; white-space: pre; }
+.cv-qinput__layer { position: absolute; left: 0; right: 0; top: 50%; height: 20px; transform: translateY(-50%); overflow: hidden; pointer-events: none; color: #E8ECF2; }
+.cv-qinput .cv-qinput__field { position: relative; width: 100%; color: transparent; caret-color: #E8ECF2; }
+.cv-qinput .cv-qinput__field::placeholder { color: #6B7586; }
+.cv-qinput .cv-qinput__field::selection { background: rgba(92, 123, 214, 0.4); color: transparent; }
+.cv-q-field { color: #9DB4FF; }
+.cv-q-colon { color: #8A94A6; }
+.cv-q-value { color: #F2D45C; }
+.cv-q-op { color: #C792EA; }
+.cv-q-paren { color: #A9B2C1; }
+@media (forced-colors: active) { .cv-qinput__layer { display: none; } .cv-qinput .cv-qinput__field { color: CanvasText; } }
 .cv-querybar__range { height: 44px; }
 .cv-querybar__go { height: 44px; padding: 0 20px; }
 .cv-facets { flex: 1 1 220px; max-width: 260px; padding: 16px; gap: 16px; }

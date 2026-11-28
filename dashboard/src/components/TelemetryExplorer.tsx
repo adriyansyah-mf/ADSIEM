@@ -8,6 +8,7 @@ import { useCursorPagination } from '@/hooks/useCursorPagination'
 import { useTelemetryFacets, useTelemetryRecords, type TimeWindow } from '@/hooks/useTelemetryRecords'
 import { useAgents } from '@/hooks/useAgents'
 import SavedSearchBar from '@/components/SavedSearchBar'
+import QueryInput from '@/components/QueryInput'
 import AddToCaseDialog from '@/components/AddToCaseDialog'
 import { useAuthStore } from '@/stores/auth'
 import { CanvasHeader, CanvasPage, Empty, Meter } from '@/components/canvas/Canvas'
@@ -113,7 +114,7 @@ export default function TelemetryExplorer({ kind }: { readonly kind: Kind }) {
           <label htmlFor="telemetry-query" className="sr-only">Query</label>
           <div className="cv-querybar__input">
             <Search size={16} aria-hidden="true" />
-            <input id="telemetry-query" value={draft} onChange={event => setDraft(event.target.value)} spellCheck={false} autoComplete="off"
+            <QueryInput id="telemetry-query" value={draft} onChange={setDraft} spellCheck={false} autoComplete="off"
               placeholder={kind === 'logs' ? 'log_type:linux_auth AND raw_message:"Failed password"' : 'event_action:login_failed AND user_name:root'} />
           </div>
           <select className="cv-select cv-querybar__range" aria-label="Time range" value={from ? 'custom' : range.value}
