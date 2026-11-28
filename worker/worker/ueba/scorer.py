@@ -13,6 +13,7 @@ from worker import behavior
 from worker.alert_manager import create_alert
 from worker.database import AsyncSessionLocal
 from worker.models import UebaAnomaly, UebaEntityScore
+from worker.settings_cache import get_setting
 from worker.ueba.explain import assess, explain, mitre_for, next_risk, security_reasons
 from worker.ueba.features import (
     USER_FEATURE_KEYS, IP_FEATURE_KEYS, HOST_FEATURE_KEYS, PROCESS_FEATURE_KEYS,
@@ -147,7 +148,8 @@ async def _handle_score(
             alert_id = None
             cd_key = f"ueba:cd:{entity_type}:{entity_value}"
             # the cold-entity guard is for marginal anomalies; a glaring one alerts at once
-            if (anomaly_count >= MIN_ANOMALY_COUNT or strength >= STRONG_ANOMALY) and not await redis.exists(cd_key):
+            if ((anomaly_count >= MIN_ANOMALY_COUNT or strength >= STRONG_ANOMALY)
+                    and await alerts_enabled() and not await redis.exists(cd_key)):
                 alert_id = await _raise_alert(entity_type, entity_value, new_risk, score,
                                               reasons, mitre, feat, group_id, decoded)
                 await redis.setex(cd_key, COOLDOWN_TTL, "1")
@@ -188,6 +190,13 @@ async def _population(redis, entity_type: str, group_id: str, bundle: ModelBundl
         except ValueError:
             pass
     return bundle.baseline, "all entities"
+
+
+async def alerts_enabled() -> bool:
+    """ueba_alerts_enabled (default false): whether an anomaly raises an alert
+    (and through AI triage, a case). Off, anomalies are still recorded and
+    still raise the entity's risk score, which other alerts are enriched with."""
+    return (await get_setting("ueba_alerts_enabled", "false") or "").strip().lower() == "true"
 
 
 async def _raise_alert(entity_type, entity_value, risk, score, reasons, mitre, feat, group_id, decoded):
