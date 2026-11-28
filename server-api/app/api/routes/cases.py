@@ -18,12 +18,14 @@ from app.services.audit import audit_log
 from app.core.config import settings
 from app.api.routes.case_evidence import router as evidence_router
 from app.api.routes.case_tasks import router as tasks_router
+from app.api.routes.case_graph import router as graph_router
 from worker.soar.case_outbox import CaseEvent, enqueue_case_event
 import redis.asyncio as aioredis
 
 router = APIRouter(tags=["cases"])
 router.include_router(evidence_router)
 router.include_router(tasks_router)
+router.include_router(graph_router)
 
 async def _push_rag_reindex(case_id: str) -> None:
     """Push case_id to Redis reindex queue so worker indexes it immediately."""
@@ -158,22 +160,34 @@ async def create_case(
         # The alert must be visible to the caller; the case lives in the alert's
         # group so that group's analysts see it (matters for superadmins).
         alert = await fetch_scoped(db, Alert, body.alert_id, group_filter, detail="Alert not found")
-    case = Case(**body.model_dump(), group_id=alert.group_id if alert else current_user.group_id)
+    extra_ids = list(dict.fromkeys(i for i in body.alert_ids if i != body.alert_id))
+    if extra_ids and not alert:
+        raise HTTPException(status_code=422, detail="alert_ids needs alert_id")
+    # Every grouped alert must be visible and live in the primary alert's group.
+    extras = [await fetch_scoped(db, Alert, i, alert.group_id, detail="Alert not found") for i in extra_ids]
+    case = Case(**body.model_dump(exclude={"alert_ids"}), group_id=alert.group_id if alert else current_user.group_id)
     if alert:
-        ioc = {"source_ip": alert.source_ip, "mitre_techniques": list(alert.mitre_techniques or [])}
+        grouped = [alert, *extras]
+        ioc = {"source_ip": alert.source_ip,
+               "mitre_techniques": sorted({t for a in grouped for t in (a.mitre_techniques or [])})}
         if alert.hostname:
             ioc["hostname"] = alert.hostname
-            ioc["affected_hosts"] = [alert.hostname]
+        ioc["affected_hosts"] = sorted({a.hostname for a in grouped if a.hostname})
         case.ioc_data = {k: v for k, v in ioc.items() if v}
     db.add(case)
     await db.flush()
+    for extra in extras:
+        db.add(CaseAlert(case_id=case.id, alert_id=extra.id, status="linked", method="analyst",
+                         reason=f"Analyst {current_user.username} opened this case from a grouped attack.",
+                         indicators=[f"ip:{extra.source_ip}"] if extra.source_ip else [], accounts=[]))
     await enqueue_case_event(db, CaseEvent(case.id, case.group_id, "case.created", case.alert_id))
     if alert:
         db.add(CaseNote(
             case_id=case.id, author_id=current_user.id, is_ai_generated=False,
             content=(f"Case created manually by **{current_user.username}** from alert "
                      f"[{alert.title}](/alerts/{alert.id}) ({alert.severity}"
-                     + (f", host {alert.hostname}" if alert.hostname else "") + ")."),
+                     + (f", host {alert.hostname}" if alert.hostname else "") + ")."
+                     + (f" {len(extras)} more alerts from the same attack are linked." if extras else "")),
         ))
     await db.commit()
     case = await fetch_scoped(db, Case, case.id, None, detail="Case not found")

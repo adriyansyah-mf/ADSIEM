@@ -132,3 +132,28 @@ async def test_viewer_cannot_queue_remediation(case_env):
         "request_id": str(uuid4()), "agent_ids": [str(env.agents[0].id)], "ips": ["8.8.8.1"],
     })
     assert response.status_code == 403
+
+
+async def test_case_from_grouped_attack_links_every_alert(case_env, monkeypatch):
+    from app.api.routes import cases as cases_route
+    monkeypatch.setattr(cases_route, "audit_log", lambda *a, **k: None)
+    env = case_env
+    response = await env.client.post("/api/cases", json={
+        "title": "Attack on host0", "severity": "high",
+        "alert_id": str(env.alerts[0].id), "alert_ids": [str(env.alerts[0].id), str(env.alerts[1].id)],
+    })
+    assert response.status_code == 201
+    assert sorted(response.json()["ioc_data"]["affected_hosts"]) == ["host0", "host1"]
+    async with env.sessions() as db:
+        links = (await db.execute(select(CaseAlert).where(CaseAlert.case_id == response.json()["id"]))).scalars().all()
+    assert [(link.alert_id, link.method, link.status) for link in links] == [(env.alerts[1].id, "analyst", "linked")]
+
+
+async def test_case_from_grouped_attack_rejects_alerts_of_another_group(case_env):
+    env = case_env
+    response = await env.client.post("/api/cases", json={
+        "title": "Attack", "severity": "high", "alert_id": str(env.alerts[0].id), "alert_ids": [str(env.alerts[2].id)],
+    })
+    assert response.status_code == 404
+    response = await env.client.post("/api/cases", json={"title": "Attack", "alert_ids": [str(env.alerts[1].id)]})
+    assert response.status_code == 422

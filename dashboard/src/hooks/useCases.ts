@@ -37,6 +37,8 @@ export interface CaseCreateBody {
   description?: string
   severity: Case['severity']
   alert_id?: string
+  /** Further alerts of the same attack; linked to the case with alert_id as the primary. */
+  alert_ids?: string[]
 }
 
 export function useCreateCase() {
