@@ -49,6 +49,20 @@ const VIEWS: readonly ViewDef[] = [
   { key: 'suppressed', label: 'Suppressed', params: () => ({ status: 'below_threshold' }) },
 ]
 
+// "+ Save view": the current filters under a name, kept in this browser only.
+interface SavedView { readonly name: string; readonly query: string }
+const VIEWS_KEY = 'adsiem.alerts.savedViews'
+const SAVED_PARAMS = ['view', 'group', 'window', 'q', 'severity', 'status', 'hostname', 'source_ip', 'search']
+function loadViews(): SavedView[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(VIEWS_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((v): v is SavedView => typeof v?.name === 'string' && typeof v?.query === 'string').slice(0, 20) : []
+  } catch { return [] }
+}
+function storeViews(views: readonly SavedView[]) {
+  try { localStorage.setItem(VIEWS_KEY, JSON.stringify(views)) } catch { /* private mode: the views last for this visit */ }
+}
+
 const age = (iso: string) => formatDistanceToNowStrict(new Date(iso)).replace(/ (\w)\w*$/, '$1').replace(' ', '')
 const shortId = (id: string) => `ALR-${id.replace(/-/g, '').slice(0, 6).toUpperCase()}`
 
@@ -97,6 +111,12 @@ class PanelBoundary extends Component<{ readonly children: ReactNode }, { readon
   state = { failed: false }
   static getDerivedStateFromError() { return { failed: true } }
   render() { return this.state.failed ? <p className="aq-muted">This panel could not be shown. Open the full detail instead.</p> : this.props.children }
+}
+
+/** Search params for the events around an alert: its host or address, 30 minutes either side. */
+function aroundAlert(createdAt: string, query: string) {
+  const at = Date.parse(createdAt)
+  return new URLSearchParams({ q: query, from: new Date(at - 1_800_000).toISOString(), to: new Date(at + 1_800_000).toISOString() }).toString()
 }
 
 function field(detail: AlertDetail | undefined, ...names: string[]): string | undefined {
@@ -237,7 +257,10 @@ function AlertPane({ alert, canTriage }: { readonly alert: Alert; readonly canTr
               </table>
             </div>
           )}
-          {hostQuery && <Link className="aq-link" to={`/logs?q=${encodeURIComponent(hostQuery)}`}>Open in Search with this {current.hostname ? 'host' : 'address'}</Link>}
+          {hostQuery && <div className="aq-links">
+            <Link className="aq-link" to={`/events?${aroundAlert(current.created_at, hostQuery)}`}>Related activity on this {current.hostname ? 'host' : 'address'}, ±30 min</Link>
+            <Link className="aq-link" to={`/logs?q=${encodeURIComponent(hostQuery)}`}>All logs for this {current.hostname ? 'host' : 'address'}</Link>
+          </div>}
         </div>
       </div>
       {isolating && detail?.agent && <AgentResponseDialog action="isolate" onClose={() => setIsolating(false)}
@@ -273,6 +296,18 @@ export default function AlertsPage() {
   const [page, setPage] = useState(1)
   const pageSize = 50
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set())
+  const [savedViews, setSavedViews] = useState<SavedView[]>(loadViews)
+  const [naming, setNaming] = useState<string | null>(null)
+  const currentQuery = () => {
+    const next = new URLSearchParams()
+    for (const key of SAVED_PARAMS) { const value = params.get(key); if (value) next.set(key, value) }
+    return next.toString()
+  }
+  const saveView = (name: string) => {
+    const next = [...savedViews.filter(v => v.name !== name), { name, query: currentQuery() }]
+    setSavedViews(next); storeViews(next); setNaming(null)
+  }
+  const removeView = (name: string) => { const next = savedViews.filter(v => v.name !== name); setSavedViews(next); storeViews(next) }
 
   // Explicit filters from links elsewhere (status/severity/hostname/source_ip/search/start_time) win over the saved view.
   const legacy = ['status', 'severity', 'hostname', 'source_ip', 'search', 'start_time', 'end_time'].some(key => params.get(key))
@@ -465,6 +500,22 @@ export default function AlertsPage() {
               </button>
             )
           })}
+          {savedViews.map(saved => (
+            <span key={saved.name} className="aq-views__mine">
+              <button type="button" aria-current={currentQuery() === saved.query ? 'true' : undefined}
+                onClick={() => setParams(new URLSearchParams(saved.query), { replace: true })}>{saved.name}</button>
+              <button type="button" aria-label={`Remove saved view ${saved.name}`} title="Remove" onClick={() => removeView(saved.name)}>×</button>
+            </span>
+          ))}
+          {naming === null
+            ? <button type="button" onClick={() => setNaming('')} title="Saves the current filters in this browser">+ Save view</button>
+            : <form className="aq-views__save" onSubmit={event => { event.preventDefault(); if (naming.trim()) saveView(naming.trim().slice(0, 40)) }}>
+              <label className="sr-only" htmlFor="aq-view-name">View name</label>
+              <input id="aq-view-name" autoFocus value={naming} placeholder="Name this view" onChange={event => setNaming(event.target.value)}
+                onKeyDown={event => { if (event.key === 'Escape') setNaming(null) }} />
+              <button type="submit" disabled={!naming.trim()}>Save</button>
+              <button type="button" onClick={() => setNaming(null)}>Cancel</button>
+            </form>}
         </nav>
       </header>
 

@@ -8,6 +8,8 @@ import { useCursorPagination } from '@/hooks/useCursorPagination'
 import { useTelemetryFacets, useTelemetryRecords, type TimeWindow } from '@/hooks/useTelemetryRecords'
 import { useAgents } from '@/hooks/useAgents'
 import SavedSearchBar from '@/components/SavedSearchBar'
+import AddToCaseDialog from '@/components/AddToCaseDialog'
+import { useAuthStore } from '@/stores/auth'
 import { CanvasHeader, CanvasPage, Empty, Meter } from '@/components/canvas/Canvas'
 
 type Kind = 'logs' | 'events'
@@ -206,6 +208,21 @@ function summary(row: TelemetryRecord): string {
   return (preferred.length ? preferred : fields).slice(0, 3).map(([key, value]) => `${key.split('.').pop()}=${value}`).join(' · ')
 }
 
+/** A case note that pins one log line or event: when, where, the key fields and its id. */
+function caseNote(row: TelemetryRecord, kind: Kind, agentName: (id: string | null | undefined) => string) {
+  const at = 'raw_message' in row ? row.received_at : row.created_at
+  const lines = [`**${kind === 'logs' ? 'Log' : 'Event'} from Search** · ${format(new Date(at), 'dd MMM yyyy HH:mm:ss xxx')} · host \`${agentName(row.agent_id)}\``]
+  if ('raw_message' in row) {
+    lines.push('', '```', (row.raw_message ?? '').slice(0, 2000), '```')
+  } else {
+    const fields: [string, unknown][] = [['action', row.event_action], ['category', row.event_category], ['user', row.user_name], ['source_ip', row.source_ip],
+      ...flatten(row.decoded_fields).slice(0, 15)]
+    lines.push('', ...fields.filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => `- ${k}: \`${String(v).replace(/`/g, "'").slice(0, 300)}\``))
+  }
+  lines.push('', `id \`${row.id}\``)
+  return lines.join('\n')
+}
+
 /** A new query remounts this boundary so old search_after cursors cannot leak. */
 function TelemetryResults({ kind, search, filterTree, timeWindow, agentName, onFilter, initialPageSize, onPageSizeChange }: {
   readonly kind: Kind; readonly search: string; readonly filterTree?: string; readonly timeWindow: TimeWindow
@@ -218,6 +235,8 @@ function TelemetryResults({ kind, search, filterTree, timeWindow, agentName, onF
   const [selected, setSelected] = useState<TelemetryRecord | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   const [rawOpen, setRawOpen] = useState(false)
+  const [addingToCase, setAddingToCase] = useState<TelemetryRecord | null>(null)
+  const canAddToCase = useAuthStore(state => state.hasRole('analyst'))
   const query = useTelemetryRecords<TelemetryRecord>(kind, pageSize, after, search || undefined, filterTree, timeWindow)
   useEffect(() => { if (!query.isPlaceholderData) onPageData(query.data?.next_after) }, [query.data?.next_after, query.isPlaceholderData, onPageData])
   const loading = query.isPending || query.isPlaceholderData
@@ -275,6 +294,7 @@ function TelemetryResults({ kind, search, filterTree, timeWindow, agentName, onF
                         {'user_name' in row && row.user_name && <button type="button" className="cv-btn cv-btn--link" onClick={() => onFilter('user_name', row.user_name!)}>Filter on this user</button>}
                         {!('raw_message' in row) && <button type="button" className="cv-btn cv-btn--link" onClick={() => setRawOpen(value => !value)}>{rawOpen ? 'Hide raw JSON' : 'View raw JSON'}</button>}
                         <button type="button" className="cv-btn cv-btn--link" onClick={() => setSelected(row)}>Open evidence view</button>
+                        {canAddToCase && <button type="button" className="cv-btn cv-btn--link" onClick={() => setAddingToCase(row)}>Add to case</button>}
                       </div>
                     </td>
                   </tr>
@@ -311,5 +331,7 @@ function TelemetryResults({ kind, search, filterTree, timeWindow, agentName, onF
       </div>
     </div>
     {selected && <TelemetryDetails record={selected} onClose={() => setSelected(null)} />}
+    {addingToCase && <AddToCaseDialog subject={`${kind === 'logs' ? 'Log' : 'Event'} at ${format(new Date('raw_message' in addingToCase ? addingToCase.received_at : addingToCase.created_at), 'dd MMM HH:mm:ss')} on ${agentName(addingToCase.agent_id)}`}
+      note={caseNote(addingToCase, kind, agentName)} onClose={() => setAddingToCase(null)} />}
   </>
 }
