@@ -419,6 +419,8 @@ const SECTION_INFO: Record<SectionKey, { label: string; title: string; sub: stri
 function sectionOf(key: string): SectionKey {
   if (/^(org_|organization|company|timezone|language)/.test(key)) return 'general'
   if (/^(ai_|ninerouter_|investigation_|searxng)/.test(key)) return 'ai'
+  // case_ settings first: case_ioc_exclusions / case_ioc_window_days would match the intel regex (ioc_)
+  if (/^case_/.test(key)) return 'detection'
   if (/(virustotal|malwarebazaar|abuseipdb|otx|urlhaus|phishtank|feed|threat|ioc_|ti_|web_block|malware_hash)/.test(key)) return 'intel'
   if (/^(retention_|es_disk|evidence_|storage)/.test(key)) return 'data'
   if (/^(case_|bruteforce|agent_|retro_hunt|alert_|rule_|ueba|sigma)/.test(key)) return 'detection'
