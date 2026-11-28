@@ -270,3 +270,25 @@ async def test_ai_created_case_emits_creation_event(case_env, monkeypatch):
     async with env.sessions() as db:
         run = (await db.execute(select(SoarRun))).scalar_one()
     assert run.context["trigger"]["case_id"] == cid and run.context["trigger"]["created_by_ai"]
+
+
+async def test_cases_opened_since_only_counts_cases_that_could_be_candidates(case_env, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from worker import case_correlation as correlation
+    env = case_env
+    monkeypatch.setattr(correlation, "AsyncSessionLocal", env.sessions)
+    before = datetime.now(timezone.utc) - timedelta(minutes=1)
+
+    def incoming(**kw):
+        return correlation.CorrelationInput(alert_id=env.alerts[0].id, group_id=kw.pop("group_id", "blue"),
+                                            title="Brute force", **kw)
+
+    # the fixture case: same host, shared IOC key, or an account linked to it
+    assert await correlation.cases_opened_since(incoming(hostname="host1"), before)
+    assert await correlation.cases_opened_since(incoming(hostname="elsewhere", keys=["ip:8.8.8.2"]), before)
+    assert await correlation.cases_opened_since(incoming(hostname="elsewhere", accounts=["admin"]), before)
+    # unrelated evidence, another group, or a case older than the decision
+    assert not await correlation.cases_opened_since(incoming(hostname="elsewhere", keys=["ip:1.1.1.1"]), before)
+    assert not await correlation.cases_opened_since(incoming(group_id="red", hostname="host1"), before)
+    later = datetime.now(timezone.utc) + timedelta(minutes=1)
+    assert not await correlation.cases_opened_since(incoming(hostname="host1"), later)

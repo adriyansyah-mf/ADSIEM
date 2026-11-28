@@ -13,8 +13,10 @@ replicas from creating the same case twice.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import NotRequired, TypedDict
 
 import structlog
@@ -399,12 +401,16 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
     async def finalize_node(state: TriageState):
         if state.get("deferred") or state.get("annotate_only"):
             return {}  # no status change, no case: pending, or already with L2
-        if "grouping_lock" in deps:
+        # AI routing (choose_case) takes the group lock itself, only around case
+        # creation: holding it across the LLM call serialized every replica.
+        # Legacy routing keeps the whole selection under the lock.
+        if ("grouping_lock" in deps and "choose_case" not in deps
+                and state.get("verdict", "monitor") not in ("false_positive", "monitor")):
             async with deps["grouping_lock"](state.get("group_id", "default")):
-                return await finalize_locked(state)
-        return await finalize_locked(state)
+                return await finalize(state)
+        return await finalize(state)
 
-    async def finalize_locked(state: TriageState):
+    async def finalize(state: TriageState):
         verdict = state.get("verdict", "monitor")
         alert_id = state["alert_id"]
         group_id = state.get("group_id", "default")
@@ -465,15 +471,54 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                                     hostname=hostname, keys=keys, indicators=evidence_keys, accounts=accounts,
                                     triage_notes=state.get("triage_notes", "")[:3000])
         decision = Decision()
-        if "choose_case" in deps:
-            decision = await deps["choose_case"](incoming)
-            existing, merge = None, []
+
+        async def route(decision: Decision) -> str | None:
             if decision.action in ("join", "suggest"):
                 recorded = await deps["record_link"](incoming, decision, emit_event=False)
                 if recorded and decision.action == "join":
-                    existing = str(decision.case_id)
+                    return str(decision.case_id)
+            return None
+
+        ai_routing = "choose_case" in deps
+        if ai_routing:
+            # Margin covers clock skew between replicas stamping Case.created_at.
+            decided_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+            decision = await deps["choose_case"](incoming)  # LLM call: outside the group lock
+            existing, merge = await route(decision), []
         else:
             existing, merge = await deps["find_campaign_case"](keys, hostname, group_id)
+
+        case_id = None
+        lock = deps.get("grouping_lock") if ai_routing and not existing else None
+        async with (lock(group_id) if lock else contextlib.nullcontext()):
+            # A replica may have opened a case for this campaign while the LLM
+            # was deciding: decide again, now serialized, instead of duplicating it.
+            if lock and "cases_opened_since" in deps and await deps["cases_opened_since"](incoming, decided_at):
+                decision = await deps["choose_case"](incoming)
+                existing = await route(decision)
+            if not existing:
+                # a new campaign: other campaigns on the same host get linked to it
+                related = (await deps["related_open_cases"](source_ip, hostname, group_id)
+                           if "related_open_cases" in deps else [])
+                case_id = await deps["create_case_from_verdict"](
+                    alert_id=alert_id,
+                    title=state["title"],
+                    severity=state.get("effective_severity", state["severity"]),
+                    verdict=verdict,
+                    analysis=state.get("analysis") or {},
+                    enrichment=state.get("enrichment"),
+                    group_id=group_id,
+                    family=family,
+                    hostname=hostname,
+                    related=related,
+                    keys=keys,
+                )
+                if case_id and "record_link" in deps:
+                    await deps["record_link"](incoming, Decision(
+                        action="join", case_id=case_id, confidence=decision.confidence,
+                        reason=decision.reason, method=decision.method,
+                    ))
+
         if existing:
             joined = await deps["join_campaign_case"](
                 case_id=existing, alert_id=alert_id, title=state["title"],
@@ -499,29 +544,8 @@ def build_triage_graph(*, base_url: str, api_key: str, model: str, deps: dict):
                 asyncio.ensure_future(deps["run_searches"](alert_id, existing, queries, **search_kwargs))
             return {"case_id": existing}
 
-        # a new campaign: other campaigns on the same host get linked to it
-        related = (await deps["related_open_cases"](source_ip, hostname, group_id)
-                   if "related_open_cases" in deps else [])
-        case_id = await deps["create_case_from_verdict"](
-            alert_id=alert_id,
-            title=state["title"],
-            severity=state.get("effective_severity", state["severity"]),
-            verdict=verdict,
-            analysis=state.get("analysis") or {},
-            enrichment=state.get("enrichment"),
-            group_id=group_id,
-            family=family,
-            hostname=hostname,
-            related=related,
-            keys=keys,
-        )
         if not case_id:
             return {}
-        if "record_link" in deps:
-            await deps["record_link"](incoming, Decision(
-                action="join", case_id=case_id, confidence=decision.confidence,
-                reason=decision.reason, method=decision.method,
-            ))
 
         asyncio.ensure_future(deps["analyze_campaign"](
             trigger_alert_id=alert_id, source_ip=source_ip, hostname=hostname,
