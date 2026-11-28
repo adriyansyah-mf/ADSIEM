@@ -8,12 +8,15 @@ detection:
     url.path|re: '(?i)<\s*script[^>]*>'
   event_handler:
     url.path|re: '(?i)(?:onerror|onload|onclick|onmouseover)\s*='
+  # "><h1>... : a quote closes the attribute, then a tag is injected (scanner HTML injection probes)
+  attr_breakout:
+    url.path|re: '(?i)["''][\s/]*>\s*<\s*/?[a-z][a-z0-9]*[\s>/]'
   js_proto:
     url.path|contains:
       - "javascript:"
       - "vbscript:"
       - "data:text/html"
-  condition: script_tag or event_handler or js_proto
+  condition: script_tag or event_handler or attr_breakout or js_proto
 level: medium
 tags:
   - attack.initial_access
