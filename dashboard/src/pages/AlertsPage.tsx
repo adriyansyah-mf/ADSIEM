@@ -11,6 +11,7 @@ import { AlertSuppressions } from '@/components/AlertSuppressions'
 import { AgentResponseDialog } from '@/components/AgentActions'
 import { QueryState } from '@/components/Workspace'
 import { AssetTierChip } from '@/components/AssetTier'
+import AttackQueue from '@/components/AttackQueue'
 import { useUpdateAlert } from '@/hooks/useAlerts'
 import { useAlertCases, useCreateCase } from '@/hooks/useCases'
 import { useStartHunt } from '@/hooks/useHunts'
@@ -36,7 +37,7 @@ const WINDOWS: readonly { readonly value: string; readonly label: string; readon
 ]
 
 type View = 'mine' | 'unassigned' | 'critical' | 'open' | 'all' | 'suppressed'
-type GroupBy = 'none' | 'title' | 'hostname'
+type GroupBy = 'none' | 'attack' | 'title' | 'hostname'
 
 interface ViewDef { readonly key: View; readonly label: string; readonly params: (userId?: string) => Record<string, string | boolean | undefined> }
 const VIEWS: readonly ViewDef[] = [
@@ -247,7 +248,7 @@ function AlertPane({ alert, canTriage }: { readonly alert: Alert; readonly canTr
 
 interface AlertGroup { readonly key: string; readonly items: readonly Alert[]; readonly top: Alert['severity']; readonly hosts: number; readonly latest: string }
 
-function groupAlerts(items: readonly Alert[], by: Exclude<GroupBy, 'none'>): readonly AlertGroup[] {
+function groupAlerts(items: readonly Alert[], by: 'title' | 'hostname'): readonly AlertGroup[] {
   const map = new Map<string, Alert[]>()
   for (const alert of items) {
     const key = (by === 'title' ? alert.title : alert.hostname) || '(none)'
@@ -276,7 +277,7 @@ export default function AlertsPage() {
   // Explicit filters from links elsewhere (status/severity/hostname/source_ip/search/start_time) win over the saved view.
   const legacy = ['status', 'severity', 'hostname', 'source_ip', 'search', 'start_time', 'end_time'].some(key => params.get(key))
   const view = (VIEWS.some(v => v.key === params.get('view')) ? params.get('view') : legacy ? 'all' : 'open') as View
-  const groupBy = (['title', 'hostname'].includes(params.get('group') ?? '') ? params.get('group') : 'none') as GroupBy
+  const groupBy = (['attack', 'title', 'hostname'].includes(params.get('group') ?? '') ? params.get('group') : 'none') as GroupBy
   const window_ = params.get('window') ?? ''
   const q = params.get('q') ?? ''
   const [qInput, setQInput] = useState(q)
@@ -318,7 +319,7 @@ export default function AlertsPage() {
     return base
   }, [viewDef, user?.id, params, severityFilter, q, since])
 
-  const alerts = useAlertQueue(page, pageSize, queryParams)
+  const alerts = useAlertQueue(page, pageSize, queryParams, groupBy !== 'attack')
   const items = useMemo(() => alerts.data?.items ?? [], [alerts.data])
   const selected = items.find(alert => alert.id === selectedId) ?? (wide && groupBy === 'none' ? items[0] : undefined)
   useEffect(() => { setChecked(new Set()) }, [page, queryParams])
@@ -380,7 +381,7 @@ export default function AlertsPage() {
   }) // eslint-disable-line react-hooks/exhaustive-deps
 
   const chips = (['status', 'hostname', 'source_ip', 'search', 'start_time'] as const).filter(key => params.get(key))
-  const groups = groupBy === 'none' ? [] : groupAlerts(items, groupBy)
+  const groups = groupBy === 'title' || groupBy === 'hostname' ? groupAlerts(items, groupBy) : []
   const total = alerts.data?.total ?? 0
   const from = total ? (page - 1) * pageSize + 1 : 0
   const to = Math.min(total, page * pageSize)
@@ -440,6 +441,7 @@ export default function AlertsPage() {
             <span className="aq-muted">Group by</span>
             <div role="group" aria-label="Group by" className="aq-seg">
               <button type="button" aria-pressed={groupBy === 'none'} onClick={() => set({ group: '' })}>Alert</button>
+              <button type="button" aria-pressed={groupBy === 'attack'} onClick={() => set({ group: 'attack' })}>Attack</button>
               <button type="button" aria-pressed={groupBy === 'title'} onClick={() => set({ group: 'title' })}>Detection</button>
               <button type="button" aria-pressed={groupBy === 'hostname'} onClick={() => set({ group: 'hostname' })}>Host</button>
             </div>
@@ -506,8 +508,10 @@ export default function AlertsPage() {
               </>}
             </div>
           )}
-          <div className="aq-list__scroll">{list}</div>
-          {total > pageSize && (
+          <div className="aq-list__scroll">{groupBy === 'attack'
+            ? <AttackQueue params={queryParams} canTriage={canTriage} onShowUngrouped={() => set({ group: '' })} />
+            : list}</div>
+          {groupBy !== 'attack' && total > pageSize && (
             <div className="aq-pager">
               <span>{from}–{to} of {total.toLocaleString()}</span>
               <button type="button" className="aq-btn aq-btn--icon" aria-label="Previous page" disabled={page === 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={14} /></button>

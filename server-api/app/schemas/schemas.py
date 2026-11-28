@@ -840,6 +840,8 @@ class CaseCreate(BaseModel):
     description: str | None = None
     severity: str = "medium"
     alert_id: UUID | None = None
+    # More alerts of the same attack, linked as analyst-made associations (needs alert_id).
+    alert_ids: list[UUID] = Field(default_factory=list, max_length=200)
 
 class CaseUpdate(BaseModel):
     title: str | None = None
