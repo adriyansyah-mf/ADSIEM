@@ -12,6 +12,7 @@ import { CaseRemediations } from '@/components/CaseRemediations'
 import { useAuthStore } from '@/stores/auth'
 import CaseRelationGraph from '@/components/CaseRelationGraph'
 import CaseEntityGraph from '@/components/CaseEntityGraph'
+import RunPlaybookButton from '@/components/RunPlaybookButton'
 import { api } from '@/api/client'
 import type { Alert, Case, CaseNote } from '@/types'
 import MarkdownNote from '@/components/MarkdownNote'
@@ -234,6 +235,7 @@ export default function CaseDetailPage() {
           </div>
           <div className="cw-head__actions">
             <IncidentReportButton caseId={caseData.id} />
+            {canManage && !['resolved', 'closed'].includes(caseData.status) && <RunPlaybookButton caseId={caseData.id} className="cw-btn" />}
             {canManage && user?.id && caseData.assignee_id !== user.id && (
               <button type="button" className="cw-btn" disabled={update.isPending} onClick={() => update.mutate({ assignee_id: user.id })}>Assign to me</button>
             )}

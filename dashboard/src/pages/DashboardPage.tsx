@@ -8,6 +8,7 @@ import { QueryState } from '@/components/Workspace'
 import { AnalystWorkload, RecentActivity, ThreatLookup } from '@/components/DashboardWidgets'
 import { SeverityBars, TopSourcesChart, MttrTrendChart } from '@/components/MetricsCharts'
 import SeverityBadge from '@/components/SeverityBadge'
+import NewCaseDialog from '@/components/NewCaseDialog'
 import { useAlerts, useUpdateAlert } from '@/hooks/useAlerts'
 import { useAgents } from '@/hooks/useAgents'
 import { useSocMetrics, useSocTimeseries, useTopSources, useMttrTrend } from '@/hooks/useMetrics'
@@ -79,6 +80,8 @@ function initials(name?: string | null) {
 export default function DashboardPage() {
   const { user, hasRole } = useAuthStore()
   const [days, setDays] = useState(1)
+  const [creatingCase, setCreatingCase] = useState(false)
+  const canCreateCase = hasRole('analyst')
   const since = useMemo(() => new Date(Date.now() - days * 86_400_000).toISOString(), [days])
   const metrics = useSocMetrics(days)
   const timeseries = useSocTimeseries(days)
@@ -169,9 +172,16 @@ export default function DashboardPage() {
         </div>
         <button type="button" className="ov-btn ov-btn--icon" onClick={refresh} aria-label="Refresh overview" title="Refresh overview" disabled={metrics.isFetching}><RefreshCw size={15} /></button>
         <Link to="/reports" className="ov-btn">Schedule report</Link>
+        {canCreateCase && <button type="button" className="ov-btn" onClick={() => setCreatingCase(true)}>New case</button>}
         <Link to={reviewUrl} className="ov-btn ov-btn--primary">Review new alerts</Link>
       </div>
     </div>
+    <nav aria-label="Home sections" className="ov-sections">
+      <Link to="/" aria-current="page">Overview</Link>
+      <Link to="/command-center">Threat map</Link>
+      <Link to="/reports">Reports</Link>
+    </nav>
+    {creatingCase && <NewCaseDialog onClose={() => setCreatingCase(false)} />}
 
     {metrics.isError && <section className="panel"><QueryState kind="error" title="Overview metrics are unavailable"
       description="Totals will appear after a successful refresh." onRetry={() => { void metrics.refetch() }} /></section>}
