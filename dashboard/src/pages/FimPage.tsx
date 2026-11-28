@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { format } from 'date-fns'
-import { ShieldAlert, FilePlus, FilePen, FileX, RefreshCw, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { FilePlus, FilePen, FileX, RefreshCw, Plus, Trash2, ToggleLeft, ToggleRight } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { useFimEvents, useFimPaths, useAddFimPath, useToggleFimPath, useDeleteFimPath } from '@/hooks/useFim'
 import type { FimEvent, FimWatchPath } from '@/types'
 
@@ -97,21 +98,12 @@ export default function FimPage() {
   }, {})
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold flex items-center gap-2">
-          <ShieldAlert size={20} />
-          File Integrity Monitoring
-        </h1>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-muted hover:bg-muted/80 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} />
-          Refresh
-        </button>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="File integrity" sub="Files and folders the agents watch, and every create, change and delete under them."
+        actions={<button type="button" onClick={() => refetch()} disabled={isFetching} className="cv-btn">
+          <RefreshCw size={13} className={isFetching ? 'animate-spin' : ''} /> Refresh
+        </button>} />
+      <div className="cv-body space-y-5">
 
       <WatchPathsPanel />
 
@@ -177,7 +169,8 @@ export default function FimPage() {
       <p className="text-xs text-muted-foreground">
         Showing {filtered.length} events · Refreshes every 15s
       </p>
-    </div>
+      </div>
+    </CanvasPage>
   )
 }
 

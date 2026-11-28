@@ -6,6 +6,7 @@ import { format, formatDistanceToNow } from 'date-fns'
 import { CheckCircle2, CircleDashed, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
+import { CanvasHeader, CanvasPage, Seg } from '@/components/canvas/Canvas'
 
 interface Scope { ips: string[]; hosts: string[]; users: string[]; rules: string[] }
 interface Note {
@@ -333,27 +334,16 @@ export default function KnowledgePage() {
   const [tab, setTab] = useState<(typeof TABS)[number][0]>('vault')
   const [draft, setDraft] = useState<Draft | null>(null)
   return (
-    <div>
-      <div className="mb-4">
-        <h1 className="text-xl font-bold">Knowledge</h1>
-        <p className="text-sm text-muted-foreground">
-          What the AI knows about this environment and about attacks. It is given the relevant parts when it
-          triages alerts and investigates cases, to cut false positives.
-        </p>
-      </div>
-      <div className="flex gap-1 mb-4" style={{ borderBottom: '1px solid var(--border)' }}>
-        {TABS.map(([id, name]) => (
-          <button key={id} onClick={() => setTab(id)} style={{
-            ...label, padding: '8px 12px', color: tab === id ? 'var(--accent-cyan)' : 'var(--text-muted)',
-            borderBottom: tab === id ? '2px solid var(--accent-cyan)' : '2px solid transparent',
-          }}>{name}</button>
-        ))}
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Knowledge base" sub="What the AI knows about this environment and about attacks. It is given the relevant parts when it triages alerts and investigates cases, to cut false positives."
+        actions={<Seg label="Knowledge sections" value={tab} onChange={setTab} options={TABS.map(([id, name]) => ({ value: id, label: name }))} />} />
+      <div className="cv-body">
       {tab === 'vault' && <KnowledgeVault initialId={article} />}
       {tab === 'notes' && <NotesTab draft={draft} setDraft={setDraft} />}
       {tab === 'reference' && <ReferenceTab />}
       {tab === 'learned' && <LearnedTab makeNote={d => { setDraft(d); setTab('notes') }} />}
       {tab === 'test' && <TestTab />}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

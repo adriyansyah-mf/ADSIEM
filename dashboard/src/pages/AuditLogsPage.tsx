@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, ClipboardList, Download, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { ChevronDown, ChevronRight, Download, Loader2, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { format, subDays, subHours } from 'date-fns'
 import { api } from '@/api/client'
 
@@ -117,14 +118,11 @@ export default function AuditLogsPage() {
   }
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <ClipboardList size={20} aria-hidden="true" />
-        <h1 className="text-xl font-bold">Audit Log</h1>
-        <div className="flex-1" />
-        <button type="button" className="ui-button" onClick={() => void exportCsv()} disabled={exporting}>
-          {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Export CSV</button>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Audit log" crumb="Audit log" sub="Append-only and hash-chained: who did what, from where, and whether it worked."
+        actions={<button type="button" className="cv-btn" onClick={() => void exportCsv()} disabled={exporting}>
+          {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Export CSV</button>} />
+      <div className="cv-body space-y-4">
       <p className="text-xs text-muted-foreground max-w-3xl">
         Every entry records who acted, from which address and browser, and whether it worked. Entries cannot be
         edited or deleted: the database refuses it, and each entry carries a hash of the one before, so a change
@@ -204,6 +202,7 @@ export default function AuditLogsPage() {
         <button type="button" className="ui-button" onClick={() => void logs.fetchNextPage()} disabled={logs.isFetchingNextPage}>
           {logs.isFetchingNextPage ? 'Loading…' : 'Load more'}</button>
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

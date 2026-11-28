@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bot, RefreshCw } from 'lucide-react'
+import { Bot, Plus, RefreshCw } from 'lucide-react'
+import NewCaseDialog from '@/components/NewCaseDialog'
 import { format } from 'date-fns'
 import DataTable from '@/components/DataTable'
 import type { Column } from '@/components/DataTable'
 import SeverityBadge from '@/components/SeverityBadge'
 import StatusBadge from '@/components/StatusBadge'
-import { PageHeader, QueryState } from '@/components/Workspace'
+import { QueryState } from '@/components/Workspace'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { TimeRangeFilter } from '@/components/TimeRangeSelect'
 import { useCases } from '@/hooks/useCases'
 import { useWorkspaceFilters } from '@/hooks/useWorkspaceFilters'
@@ -17,6 +19,7 @@ import type { CaseSummary } from '@/types'
 export default function CasesPage() {
   const navigate = useNavigate()
   const [page, setPage] = useState(1)
+  const [creating, setCreating] = useState(false)
   const filters = useWorkspaceFilters()
   const { params, update } = filters
   const canManage = useAuthStore(state => state.hasRole('analyst'))
@@ -43,9 +46,14 @@ export default function CasesPage() {
     { key: 'alert_id', header: 'Alert ID', hiddenByDefault: true, render: row => row.alert_id ?? '—' },
   ]
   const active = ['search', 'hostname', 'status', 'severity', 'start_time', 'end_time'].some(key => value(key))
-  return <div className="workspace">
-    <PageHeader eyebrow="Investigations" title="Cases" description="Manage investigations, ownership, and response decisions."
-      actions={<button className="ui-button" disabled={query.isFetching} onClick={() => { void query.refetch() }}><RefreshCw size={14} /> Refresh</button>} />
+  return <CanvasPage>
+    <CanvasHeader title="Cases" sub="Manage investigations, ownership, and response decisions."
+      actions={<>
+        <button type="button" className="cv-btn" disabled={query.isFetching} onClick={() => { void query.refetch() }}><RefreshCw size={14} /> Refresh</button>
+        {canManage && <button type="button" className="cv-btn cv-btn--primary" onClick={() => setCreating(true)}><Plus size={14} /> New case</button>}
+      </>} />
+    {creating && <NewCaseDialog onClose={() => setCreating(false)} />}
+    <div className="cv-body cv-body--wide workspace">
     <section className="panel" aria-label="Case filters">
       <div className="filter-bar">
         <label className="field"><span>Search cases</span><input className="ui-input" value={filters.searchInput} placeholder="Search title or description…" onChange={event => filters.setSearchInput(event.target.value)} /></label>
@@ -67,5 +75,6 @@ export default function CasesPage() {
       : <DataTable columns={columns} data={query.data.items} total={query.data.total} page={page} pageSize={25} onPageChange={setPage}
         onRowClick={row => navigate(`/cases/${row.id}`)} expandable={canManage} renderExpanded={row => <CaseQuickActions caseData={row} />}
         exportFilename="cases-page.csv" emptyTitle="No cases match this view" emptyDescription={active ? 'Widen the filters or clear them to see more investigations.' : 'Open an alert and create a case to start an investigation.'} />}
-  </div>
+    </div>
+  </CanvasPage>
 }

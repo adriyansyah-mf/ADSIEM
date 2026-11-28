@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Plus, RotateCcw, Save, ShieldCheck, Trash2 } from 'lucide-react'
+import { Loader2, Plus, RotateCcw, Save, Trash2 } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { api } from '@/api/client'
 import { emitToast } from '@/hooks/useToast'
 import MlFalsePositives from '@/components/MlFalsePositives'
@@ -405,11 +406,9 @@ export default function PoliciesPage() {
   const [newGroup, setNewGroup] = useState('')
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-center gap-2">
-        <ShieldCheck size={18} className="text-primary" />
-        <h1 className="text-xl font-bold">Policies</h1>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Policies" sub="One policy per agent group: which protections run and what they leave out." />
+      <div className="cv-body space-y-5">
       <p className="text-xs text-muted-foreground max-w-3xl">
         One policy per agent group, for Linux and Windows agents alike: which protections run and what they leave out.
         A group without its own policy follows the <span className="font-semibold">default</span> group's. Agents apply a
@@ -450,6 +449,7 @@ export default function PoliciesPage() {
           <MlFalsePositives />
         </>
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

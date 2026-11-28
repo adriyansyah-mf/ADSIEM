@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Edit2, Loader2, Plus, Sparkles, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
+import { Copy, Edit2, Loader2, Plus, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { api } from '@/api/client'
 import MarkdownNote from '@/components/MarkdownNote'
 import { useAuthStore } from '@/stores/auth'
@@ -75,19 +76,10 @@ export default function AiSkillsPage() {
   const enabled = skills.filter(s => s.is_enabled).length
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Sparkles size={18} />
-          <h1 className="text-xl font-bold">AI skills</h1>
-        </div>
-        {canManage && (
-          <button onClick={() => setForm({ name: '', description: '', content: TEMPLATE })}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm font-medium">
-            <Plus size={13} /> New skill
-          </button>
-        )}
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="AI skills" sub="Procedures the AI investigator loads when a case matches them."
+        actions={canManage && <button type="button" onClick={() => setForm({ name: '', description: '', content: TEMPLATE })} className="cv-btn cv-btn--primary"><Plus size={13} /> New skill</button>} />
+      <div className="cv-body space-y-5">
       <p className="text-xs text-muted-foreground max-w-3xl">
         Procedures for kinds of attack. In <b>Investigate with AI</b> the investigator is shown every enabled skill's
         name and description, loads the ones that fit the case (shown as "Loaded skill" in the run's Activity), and
@@ -182,6 +174,7 @@ export default function AiSkillsPage() {
       {(toggle.isError || remove.isError) && (
         <p className="text-xs text-destructive">{apiError(toggle.error ?? remove.error, 'Could not change the skill.')}</p>
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

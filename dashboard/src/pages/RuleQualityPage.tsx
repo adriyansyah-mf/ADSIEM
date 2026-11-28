@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Gauge, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import SeverityBadge from '@/components/SeverityBadge'
@@ -81,19 +82,17 @@ export default function RuleQualityPage() {
   const fpShare = quality.data && quality.data.alerts ? Math.round(quality.data.false_positives / quality.data.alerts * 100) : 0
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <Gauge size={18} />
-        <h1 className="text-xl font-bold">Rule quality</h1>
-        <div className="flex-1" />
-        <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-          <input type="checkbox" checked={onlyAdvice} onChange={e => setOnlyAdvice(e.target.checked)} /> Needs tuning only
-        </label>
-        <select aria-label="Period" value={days} onChange={e => setDays(Number(e.target.value))}
-          className="bg-muted border border-border rounded px-3 py-1.5 text-sm">
-          {[7, 30, 90].map(d => <option key={d} value={d}>Last {d} days</option>)}
-        </select>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Rule quality" sub="Which rules make noise, which ones analysts keep closing as false positives, and how much suppressions hide."
+        actions={<>
+          <label className="cv-row" style={{ gap: 6, fontSize: 13, color: '#C9D0DB', cursor: 'pointer' }}>
+            <input type="checkbox" checked={onlyAdvice} onChange={e => setOnlyAdvice(e.target.checked)} /> Needs tuning only
+          </label>
+          <select aria-label="Period" value={days} onChange={e => setDays(Number(e.target.value))} className="cv-select">
+            {[7, 30, 90].map(d => <option key={d} value={d}>Last {d} days</option>)}
+          </select>
+        </>} />
+      <div className="cv-body space-y-5">
       <p className="text-xs text-muted-foreground max-w-3xl">
         False-positive rate is alerts closed as false positive out of all triaged alerts. A level override changes the
         severity of new alerts from the rule (the worker picks it up on its next rule reload) without editing the rule,
@@ -152,6 +151,7 @@ export default function RuleQualityPage() {
             </div>
           )}
         </>}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

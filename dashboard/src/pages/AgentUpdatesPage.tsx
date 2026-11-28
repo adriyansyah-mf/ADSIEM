@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpCircle, Pause, Play, RotateCcw, Trash2, ChevronsRight, PackageCheck } from 'lucide-react'
+import { Pause, Play, RotateCcw, Trash2, ChevronsRight, PackageCheck } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { api } from '@/api/client'
 import { WorkspaceDialog } from '@/components/WorkspaceDialog'
 import { useAuthStore } from '@/stores/auth'
@@ -97,11 +98,9 @@ export default function AgentUpdatesPage() {
   })
 
   return (
-    <div style={{ padding: '20px 24px', maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-        <ArrowUpCircle size={20} color="var(--accent-cyan)" />
-        <h1 style={{ margin: 0, fontSize: 20, letterSpacing: '0.5px' }}>Agent updates</h1>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Agent updates" sub="One target version per group, offered ring by ring; agents install only signed releases." />
+      <div className="cv-body">
       <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 0, marginBottom: 20 }}>
         Each group runs one target version, offered ring by ring. Agents install only packages signed by a
         key they trust and check the download against the signature, so this page chooses which signed
@@ -281,7 +280,8 @@ export default function AgentUpdatesPage() {
           </tbody>
         </table>
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }
 

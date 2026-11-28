@@ -4,7 +4,8 @@ import { RefreshCw } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { api } from '@/api/client'
 import DataTable, { type Column } from '@/components/DataTable'
-import { PageHeader, Panel, QueryState } from '@/components/Workspace'
+import { Panel, QueryState } from '@/components/Workspace'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 
 interface GraphNode { id: string; agent: boolean; status: string | null; out: number; in: number }
 interface GraphEdge {
@@ -87,10 +88,11 @@ export default function LateralMovementPage() {
     { key: 'last_seen', header: 'Last seen', render: r => <span className="text-xs whitespace-nowrap">{formatDistanceToNow(new Date(r.last_seen), { addSuffix: true })}</span> },
     { key: 'group_id', header: 'Group', hiddenByDefault: true, render: r => r.group_id },
   ]
-  return <div className="workspace">
-    <PageHeader eyebrow="Behavior intelligence" title="Lateral movement"
-      description="Which host reaches which, how and as whom: remote logins (SSH, Windows network logon, RDP) and connections to remote-administration ports. Paths first seen in the window are red."
+  return <CanvasPage>
+    <CanvasHeader title="Lateral movement"
+      sub="Which host reaches which, how and as whom: remote logins (SSH, Windows network logon, RDP) and connections to remote-administration ports. Paths first seen in the window are red."
       actions={<button className="ui-button" disabled={query.isFetching} onClick={() => { void query.refetch() }}><RefreshCw size={14} /> Refresh</button>} />
+    <div className="cv-body cv-body--wide workspace">
     <section className="panel" aria-label="Filters"><div className="ueba-filters">
       <label className="field"><span>Window</span><select className="ui-input" value={hours} onChange={e => setHours(Number(e.target.value))}>
         <option value={1}>Last hour</option><option value={24}>Last 24 hours</option><option value={168}>Last 7 days</option><option value={720}>Last 30 days</option></select></label>
@@ -109,5 +111,6 @@ export default function LateralMovementPage() {
           <DataTable columns={columns} data={rows} total={rows.length} page={1} pageSize={rows.length || 1} onPageChange={() => {}}
             showPagination={false} exportFilename="lateral-paths.csv" emptyTitle="No paths" emptyDescription="Remote logins and remote-administration connections between hosts appear here." />
         </>}
-  </div>
+    </div>
+  </CanvasPage>
 }

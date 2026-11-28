@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, ShieldAlert } from 'lucide-react'
+import { ChevronDown, ChevronRight, Loader2, RefreshCw } from 'lucide-react'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { api } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
@@ -106,18 +107,12 @@ export default function VulnerabilitiesPage() {
   const s = list.data?.summary
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <ShieldAlert size={18} />
-        <h1 className="text-xl font-bold">Vulnerabilities</h1>
-        <div className="flex-1" />
-        {canSync && (
-          <button onClick={() => sync.mutate()} disabled={sync.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-border text-sm disabled:opacity-50">
-            <RefreshCw size={14} className={sync.isPending ? 'animate-spin' : ''} /> Refresh data and rescan
-          </button>
-        )}
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Vulnerabilities" sub="Fleet CVEs ranked by known exploitation (CISA KEV), EPSS and CVSS."
+        actions={canSync && <button type="button" onClick={() => sync.mutate()} disabled={sync.isPending} className="cv-btn">
+          <RefreshCw size={14} className={sync.isPending ? 'animate-spin' : ''} /> Refresh data and rescan
+        </button>} />
+      <div className="cv-body space-y-5">
       <p className="text-xs text-muted-foreground max-w-3xl">
         Linux packages are matched against OSV.dev for the host's own distro release; Windows hosts by build and update
         revision against Microsoft's monthly security releases, with the KB that fixes them. Ranked by what attackers
@@ -192,6 +187,7 @@ export default function VulnerabilitiesPage() {
             ))}
           </div>
         )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }

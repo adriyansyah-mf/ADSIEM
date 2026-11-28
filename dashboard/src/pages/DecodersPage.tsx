@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import DataTable from '@/components/DataTable'
 import YamlEditor from '@/components/YamlEditor'
+import { CanvasHeader, CanvasPage } from '@/components/canvas/Canvas'
 import { useDecoders, useCreateDecoder, useUpdateDecoder, useDeleteDecoder, useTestDecoder } from '@/hooks/useDecoders'
 import { Plus, Pencil, Trash2 } from 'lucide-react'
 import type { Decoder } from '@/types'
@@ -112,14 +113,10 @@ export default function DecodersPage() {
   ]
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold">Decoders</h1>
-        <button onClick={() => { setCreating(true); setYamlContent(DEFAULT_DECODER) }}
-          className="flex items-center gap-1 px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm">
-          <Plus size={14} /> New Decoder
-        </button>
-      </div>
+    <CanvasPage>
+      <CanvasHeader title="Decoders" sub="Parsers that turn raw log lines into fields rules can match."
+        actions={<button type="button" onClick={() => { setCreating(true); setYamlContent(DEFAULT_DECODER) }} className="cv-btn cv-btn--primary"><Plus size={14} /> New decoder</button>} />
+      <div className="cv-body">
       {isLoading ? <div className="text-muted-foreground">Loading...</div> : (
         <DataTable
           columns={columns}
@@ -147,6 +144,7 @@ export default function DecodersPage() {
           }
         />
       )}
-    </div>
+      </div>
+    </CanvasPage>
   )
 }
