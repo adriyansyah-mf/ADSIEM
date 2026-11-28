@@ -2,7 +2,7 @@ title: WordPress Admin Login Probing
 id: rule-wordpress-admin-probe
 description: Repeated requests to WordPress admin login page
 logsource:
-  product: nginx
+  product: webserver
 detection:
   selection:
     url.path|contains:

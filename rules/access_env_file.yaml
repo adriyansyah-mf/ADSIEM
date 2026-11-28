@@ -2,7 +2,7 @@ title: Access to .env File
 id: rule-access-env-file
 description: HTTP request targeting .env configuration file
 logsource:
-  product: nginx
+  product: webserver
 detection:
   selection:
     url.path|contains: ".env"

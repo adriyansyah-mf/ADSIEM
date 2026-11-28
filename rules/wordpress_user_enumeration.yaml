@@ -2,7 +2,7 @@ title: WordPress User Enumeration Attempt
 id: rule-wordpress-user-enumeration
 description: Request attempts to enumerate WordPress usernames via the author parameter, pretty-permalink author archive URL, or the REST API users endpoint
 logsource:
-  product: nginx
+  product: webserver
 detection:
   author_param:
     url.path|re: '(?i)[?&]author=\d+'

@@ -2,7 +2,7 @@ title: Nginx Suspicious Path Access
 id: rule-nginx-suspicious-path
 description: HTTP request to commonly exploited path
 logsource:
-  product: nginx
+  product: webserver
 detection:
   selection:
     url.path|contains:

@@ -2,7 +2,7 @@ title: Access to /etc/passwd
 id: rule-access-etc-passwd
 description: HTTP request targeting /etc/passwd (path traversal attempt)
 logsource:
-  product: nginx
+  product: webserver
 detection:
   selection:
     url.path|contains: "etc/passwd"
