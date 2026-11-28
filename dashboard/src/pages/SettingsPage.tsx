@@ -52,6 +52,7 @@ const SETTING_LABELS: Record<string, string> = {
   smtp_password: 'SMTP Password',
   smtp_min_severity: 'Minimum Alert Severity for Email',
   ueba_enabled: 'UEBA Engine',
+  ueba_alerts_enabled: 'UEBA Alerts',
   ueba_anomaly_threshold: 'UEBA Anomaly Threshold',
 }
 
@@ -98,6 +99,7 @@ const SETTING_HINTS: Record<string, string> = {
   smtp_password: 'SMTP login password',
   smtp_min_severity: 'Only send email for alerts at this severity or above (low / medium / high / critical)',
   ueba_enabled: 'Enable User & Entity Behavior Analytics engine (true / false)',
+  ueba_alerts_enabled: 'true / false (default off). Raise an alert, and through AI triage a case, for UEBA anomalies. Off: anomalies and entity risk are still recorded on the UEBA page.',
   ueba_anomaly_threshold: 'Risk score threshold above which UEBA flags an anomaly (0–100, default 60)',
 }
 
