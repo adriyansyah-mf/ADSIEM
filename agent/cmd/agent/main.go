@@ -442,9 +442,10 @@ func run(configPath string, stop <-chan struct{}) {
 	// Windows App Control (WDAC): the group policy's app_control turns the
 	// block rules into a policy Windows enforces before a program runs; files
 	// a hash rule stopped after they started are learned and denied too.
+	appCtlDir := filepath.Join(task.StateDir(cfg), "appcontrol")
 	appCtl := &appcontrol.Controller{
-		Dir:       filepath.Join(task.StateDir(cfg), "appcontrol"),
-		Run:       appcontrol.PowerShell(),
+		Dir:       appCtlDir,
+		Run:       appcontrol.ScriptFileRunner(appCtlDir),
 		Supported: appcontrol.Supported,
 		Push:      func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
 		In:        appcontrol.Inputs{Mode: func() string { return polStore.Current().Settings.AppControl }},
