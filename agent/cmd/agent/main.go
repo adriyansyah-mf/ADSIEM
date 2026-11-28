@@ -443,10 +443,11 @@ func run(configPath string, stop <-chan struct{}) {
 	// block rules into a policy Windows enforces before a program runs; files
 	// a hash rule stopped after they started are learned and denied too.
 	appCtl := &appcontrol.Controller{
-		Dir:  filepath.Join(task.StateDir(cfg), "appcontrol"),
-		Run:  appcontrol.PowerShell(),
-		Push: func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
-		In:   appcontrol.Inputs{Mode: func() string { return polStore.Current().Settings.AppControl }},
+		Dir:       filepath.Join(task.StateDir(cfg), "appcontrol"),
+		Run:       appcontrol.PowerShell(),
+		Supported: appcontrol.Supported,
+		Push:      func(logType, line string) { buf.Push(tailer.Encode(logType, line)) },
+		In:        appcontrol.Inputs{Mode: func() string { return polStore.Current().Settings.AppControl }},
 	}
 	if (runtime.GOOS == "linux" || runtime.GOOS == "windows") && !cfg.Prevention.Disabled {
 		if pm, err := prevent.Start(prevent.Options{

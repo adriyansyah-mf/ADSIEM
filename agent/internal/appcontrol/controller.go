@@ -55,6 +55,11 @@ type Controller struct {
 	Push func(logType, line string)
 	In   Inputs
 
+	// Supported reports why this Windows cannot build a policy (Home has no
+	// ConfigCI module); nil func: assumed supported. Checked before any
+	// script, so an unsupported host never runs PowerShell for it.
+	Supported func() error
+
 	mu      sync.Mutex
 	st      state
 	health  Health
@@ -62,6 +67,7 @@ type Controller struct {
 	loaded  bool
 	lastTry string // the plan key last attempted, so a failing plan is not retried every minute
 	triedAt time.Time
+	fails   int // consecutive failures of lastTry: each one doubles the wait
 	// fragTried: when a publisher fragment was last attempted (a failed
 	// build is retried after retryFailed)
 	fragTried map[string]time.Time
@@ -130,8 +136,20 @@ func (c *Controller) fragments(ctx context.Context, rules [][2]string) map[strin
 const (
 	reconcileEvery = time.Minute
 	retryFailed    = 30 * time.Minute
+	retryMax       = 24 * time.Hour
 	scriptTimeout  = 5 * time.Minute
 )
+
+// retryAfter is the wait before a plan that failed n times in a row is tried
+// again: 30 min, 1 h, 2 h ... up to a day. Each try runs PowerShell, and a
+// host where it keeps failing must not raise an alert every half hour.
+func retryAfter(n int) time.Duration {
+	d := retryFailed
+	for i := 1; i < n && d < retryMax; i++ {
+		d *= 2
+	}
+	return min(d, retryMax)
+}
 
 func (c *Controller) statePath() string { return filepath.Join(c.Dir, "appcontrol.json") }
 
@@ -277,6 +295,16 @@ func (c *Controller) Reconcile(ctx context.Context) {
 		}
 		return
 	}
+	if mode != ModeOff && c.Supported != nil {
+		if err := c.Supported(); err != nil {
+			if msg := err.Error(); c.health.Error != msg || c.health.Mode != mode {
+				c.health = Health{Mode: mode, Error: msg}
+				slog.Warn("appcontrol: not available on this host", "mode", mode, "err", err)
+				c.emit("app_control_failed", c.health) // once per mode, not every minute
+			}
+			return
+		}
+	}
 	var rules [][2]string
 	if c.In.Rules != nil {
 		rules = c.In.Rules()
@@ -293,8 +321,11 @@ func (c *Controller) Reconcile(ctx context.Context) {
 	if key == c.st.Applied {
 		return
 	}
-	if key == c.lastTry && time.Since(c.triedAt) < retryFailed {
+	if key == c.lastTry && c.fails > 0 && time.Since(c.triedAt) < retryAfter(c.fails) {
 		return
+	}
+	if key != c.lastTry {
+		c.fails = 0 // a new plan is tried at once
 	}
 	c.lastTry, c.triedAt = key, time.Now()
 
@@ -310,11 +341,13 @@ func (c *Controller) Reconcile(ctx context.Context) {
 	method := lastLine(out)
 	now := time.Now().UTC().Format(time.RFC3339)
 	if err != nil {
+		c.fails++
 		c.health = Health{Mode: mode, Rules: plan.Rules(), Error: truncate(err.Error(), 300)}
 		slog.Warn("appcontrol: policy not applied", "mode", mode, "err", err)
 		c.emit("app_control_failed", c.health)
 		return
 	}
+	c.fails = 0
 	c.st.Applied = key
 	c.save()
 	c.health = Health{Mode: mode, Rules: plan.Rules(), Method: method, AppliedAt: now}
