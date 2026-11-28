@@ -57,5 +57,7 @@ SYSLOG_QUEUE_SIZE: int = int(os.environ.get("SYSLOG_QUEUE_SIZE", "50000"))
 SYSLOG_METRICS_PORT: int = int(os.environ.get("SYSLOG_METRICS_PORT", "8002"))
 REDIS_STREAM_MAXLEN: int = int(os.environ.get("REDIS_STREAM_MAXLEN", "2000000"))
 # Evidence references are sent only while fewer unread log stream entries than
-# this are queued; the rest wait in the database (evidence_inbox).
-DISPATCH_MAX_BACKLOG: int = int(os.environ.get("EVIDENCE_DISPATCH_MAX_BACKLOG", "20000"))
+# this are queued; the rest wait in the database (evidence_inbox). Detection
+# latency is roughly backlog / worker throughput, so keep this small (2000 is
+# about 1-2 minutes at 20-40 entries/s; 20000 meant ~14 minutes).
+DISPATCH_MAX_BACKLOG: int = int(os.environ.get("EVIDENCE_DISPATCH_MAX_BACKLOG", "2000"))
